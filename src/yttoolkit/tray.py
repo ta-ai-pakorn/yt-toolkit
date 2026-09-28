@@ -27,7 +27,7 @@ def make_icon_image(size: int = 64) -> Image.Image:
 
 def _make_icon_image_small(size: int) -> Image.Image:
     """Small variant on 16-unit grid for crisp rendering at small sizes."""
-    # Render at 4x size for anti-aliasing, then downscale
+    # Render at 4x size for pixel-perfect color preservation, then downscale
     large_size = size * 4
     large_image = Image.new("RGBA", (large_size, large_size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(large_image)
@@ -50,41 +50,43 @@ def _make_icon_image_small(size: int) -> Image.Image:
     ]
     draw.polygon(triangle, fill=ACCENT)
 
-    # Downscale to requested size with anti-aliasing
-    return large_image.resize((size, size), Image.LANCZOS)
+    # Downscale with BOX filter to preserve exact colors in pixel-aligned regions
+    return large_image.resize((size, size), Image.BOX)
 
 
 def _make_icon_image_full(size: int) -> Image.Image:
     """Full A2 logo variant with sprocket holes (for size > 32)."""
-    # Render at 4x size for anti-aliasing, then downscale
-    scale = 4
-    large_size = size * scale
+    # Render at 4x size for pixel-perfect color preservation, then downscale
+    large_size = size * 4
     large_image = Image.new("RGBA", (large_size, large_size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(large_image)
 
-    # Amber rounded square background (rx 14 → scaled to 56)
-    draw.rounded_rectangle((0, 0, large_size - 1, large_size - 1), radius=14 * scale, fill=ACCENT)
+    # Scale factor from 64-unit grid to pixel coordinates
+    k = (size * 4) / 64
 
-    # Dark film window (8..56, 14..50, rx 4 → scaled)
-    window_bbox = (8 * scale, 14 * scale, 56 * scale, 50 * scale)
-    draw.rounded_rectangle(window_bbox, radius=4 * scale, fill=WINDOW)
+    # Amber rounded square background (rx 14 units)
+    draw.rounded_rectangle((0, 0, large_size - 1, large_size - 1), radius=int(14 * k), fill=ACCENT)
+
+    # Dark film window (8..56, 14..50 units, rx 4)
+    window_bbox = (int(8 * k), int(14 * k), int(56 * k), int(50 * k))
+    draw.rounded_rectangle(window_bbox, radius=int(4 * k), fill=WINDOW)
 
     # 6 amber sprocket holes: 5x6 rx 1.5 at x ∈ {11, 48}, y ∈ {18, 29, 40}
     hole_positions = [(11, 18), (11, 29), (11, 40), (48, 18), (48, 29), (48, 40)]
     for x, y in hole_positions:
-        bbox = (x * scale, y * scale, (x + 5) * scale, (y + 6) * scale)
-        draw.rounded_rectangle(bbox, radius=int(1.5 * scale), fill=ACCENT)
+        bbox = (int(x * k), int(y * k), int((x + 5) * k), int((y + 6) * k))
+        draw.rounded_rectangle(bbox, radius=int(1.5 * k), fill=ACCENT)
 
-    # Amber play triangle: points (27, 22.5), (27, 41.5), (43, 32)
+    # Amber play triangle: points (27, 22.5), (27, 41.5), (43, 32) units
     triangle = [
-        (27 * scale, int(22.5 * scale)),
-        (27 * scale, int(41.5 * scale)),
-        (43 * scale, 32 * scale),
+        (int(27 * k), int(22.5 * k)),
+        (int(27 * k), int(41.5 * k)),
+        (int(43 * k), int(32 * k)),
     ]
     draw.polygon(triangle, fill=ACCENT)
 
-    # Downscale to requested size with anti-aliasing
-    return large_image.resize((size, size), Image.LANCZOS)
+    # Downscale with BOX filter to preserve exact colors in pixel-aligned regions
+    return large_image.resize((size, size), Image.BOX)
 
 
 def build_menu(
