@@ -1,12 +1,25 @@
 import pystray
 
-from yttoolkit.tray import ACCENT, MENU_LABELS, build_menu, make_icon_image
+from yttoolkit.tray import ACCENT, MENU_LABELS, WINDOW, build_menu, make_icon_image
 
 
 def test_icon_image_is_amber_square():
     img = make_icon_image(64)
     assert img.size == (64, 64)
-    assert img.getpixel((5, 32)) == ACCENT
+    assert img.getpixel((0, 32)) == ACCENT
+
+
+def test_icon_image_has_film_window_and_play():
+    img = make_icon_image(64)
+    assert img.getpixel((32, 20)) == WINDOW       # film window (interior, away from rounded edge)
+    assert img.getpixel((35, 32)) == ACCENT       # inside the play triangle
+    assert img.getpixel((30, 30)) == ACCENT       # in central interior (tests solid area with shapes)
+    assert img.getpixel((20, 20)) == WINDOW       # window between hole column and triangle
+
+
+def test_icon_image_small_sizes():
+    for size in (16, 32):
+        assert make_icon_image(size).size == (size, size)
 
 
 def test_menu_labels_and_actions():
