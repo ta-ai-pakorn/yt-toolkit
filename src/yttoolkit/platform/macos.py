@@ -34,5 +34,5 @@ class MacPlatform:
     def kill(self, pid: int) -> None:
         try:
             os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
