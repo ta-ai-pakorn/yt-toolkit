@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from yttoolkit.config import Paths
+
 
 @dataclass
 class FakePlatform:
@@ -39,3 +41,10 @@ class FakePlatform:
 @pytest.fixture
 def fake_platform(tmp_path: Path) -> FakePlatform:
     return FakePlatform(downloads=tmp_path / "Downloads")
+
+
+@pytest.fixture
+def paths(tmp_path: Path) -> Paths:
+    p = Paths(data_root=tmp_path)
+    p.ensure()
+    return p
