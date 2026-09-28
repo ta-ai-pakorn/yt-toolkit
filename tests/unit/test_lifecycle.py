@@ -1,0 +1,149 @@
+import os
+
+import httpx
+
+from yttoolkit import lifecycle, runstate
+from yttoolkit.core import tools
+from yttoolkit.runstate import RunInfo
+
+
+class FakeResponse:
+    def __init__(self, status_code: int, body: dict | None = None):
+        self.status_code = status_code
+        self._body = body or {}
+
+    def json(self) -> dict:
+        return self._body
+
+
+def _running(paths, fake_platform, pid=4242, port=8787) -> RunInfo:
+    info = RunInfo(port=port, pid=pid, token="tok", started_at="x")
+    runstate.write(paths.app_json, info)
+    fake_platform.alive.add(pid)
+    return info
+
+
+def test_base_url():
+    assert lifecycle.base_url(8787) == "http://127.0.0.1:8787"
+
+
+def test_is_alive_handles_errors():
+    def boom(url, timeout):
+        raise httpx.ConnectError("refused")
+
+    assert lifecycle.is_alive(8787, get=boom) is False
+    assert lifecycle.is_alive(8787, get=lambda url, timeout: FakeResponse(200)) is True
+
+
+def test_find_running_ignores_stale_file(paths, fake_platform):
+    runstate.write(paths.app_json, RunInfo(8787, 999, "t", "x"))
+    assert lifecycle.find_running(paths, fake_platform, alive=lambda port: True) is None
+
+
+def test_find_running_detects_live_instance(paths, fake_platform):
+    info = _running(paths, fake_platform)
+    assert lifecycle.find_running(paths, fake_platform, alive=lambda port: True) == info
+    assert lifecycle.find_running(paths, fake_platform, alive=lambda port: False) is None
+
+
+def test_default_output_dir(fake_platform):
+    assert lifecycle.default_output_dir(fake_platform) == fake_platform.downloads / "YT-Toolkit"
+
+
+def test_prepare_environment_puts_scripts_first(monkeypatch):
+    monkeypatch.setenv("PATH", "somewhere")
+    lifecycle.prepare_environment()
+    assert os.environ["PATH"].split(os.pathsep)[0] == str(tools.scripts_dir())
+
+
+def test_server_binds_localhost_only(paths, fake_platform):  # AC-SEC-01
+    from yttoolkit.app import AppContext
+
+    ctx = AppContext(paths, fake_platform, 8787, "t", "0.1.0", None, paths.data_root, lambda: None)
+    assert lifecycle.Server(ctx).config.host == "127.0.0.1"
+
+
+def test_stop_when_not_running(paths, fake_platform):
+    out = []
+    assert lifecycle.stop(paths, fake_platform, out=out.append) == 0
+    assert out == ["YT Toolkit ไม่ได้เปิดอยู่"]
+
+
+def test_stop_graceful(paths, fake_platform):
+    info = _running(paths, fake_platform)
+    posts = []
+
+    def post(url, json, headers, timeout):
+        posts.append((url, json, headers))
+        fake_platform.alive.discard(info.pid)  # แอพปิดตัวเอง
+        return FakeResponse(200, {"ok": True})
+
+    out = []
+    assert lifecycle.stop(paths, fake_platform, post=post, sleep=lambda s: None, out=out.append) == 0
+    url, body, headers = posts[0]
+    assert url == "http://127.0.0.1:8787/api/shutdown"
+    assert body == {"force": False}
+    assert headers == {"X-Toolkit-Token": "tok", "Origin": "http://127.0.0.1:8787"}
+    assert fake_platform.killed == []
+    assert not paths.app_json.exists()
+    assert out == ["ปิดโปรแกรมแล้ว"]
+
+
+def test_stop_pending_user_declines(paths, fake_platform):
+    _running(paths, fake_platform)
+    result = lifecycle.stop(
+        paths,
+        fake_platform,
+        post=lambda url, json, headers, timeout: FakeResponse(409, {"pendingJobs": 2}),
+        ask=lambda prompt: "n",
+        sleep=lambda s: None,
+        out=lambda msg: None,
+    )
+    assert result == 1
+    assert fake_platform.killed == []
+    assert paths.app_json.exists()
+
+
+def test_stop_pending_user_confirms_forces(paths, fake_platform):
+    info = _running(paths, fake_platform)
+    bodies = []
+
+    def post(url, json, headers, timeout):
+        bodies.append(json)
+        if json["force"]:
+            fake_platform.alive.discard(info.pid)
+            return FakeResponse(200, {"ok": True})
+        return FakeResponse(409, {"pendingJobs": 1})
+
+    prompts = []
+
+    def ask(prompt):
+        prompts.append(prompt)
+        return "Y"
+
+    assert lifecycle.stop(paths, fake_platform, post=post, ask=ask, sleep=lambda s: None, out=lambda m: None) == 0
+    assert bodies == [{"force": False}, {"force": True}]
+    assert prompts == ["มีงานค้าง 1 งาน ปิดเลยไหม (Y/N) "]
+
+
+def test_stop_kills_when_app_does_not_exit(paths, fake_platform):
+    info = _running(paths, fake_platform)
+    result = lifecycle.stop(
+        paths,
+        fake_platform,
+        post=lambda url, json, headers, timeout: FakeResponse(200, {"ok": True}),
+        sleep=lambda s: None,
+        out=lambda m: None,
+    )
+    assert result == 0
+    assert fake_platform.killed == [info.pid]
+
+
+def test_stop_kills_when_api_unreachable(paths, fake_platform):
+    info = _running(paths, fake_platform)
+
+    def refused(url, json, headers, timeout):
+        raise httpx.ConnectError("refused")
+
+    lifecycle.stop(paths, fake_platform, post=refused, sleep=lambda s: None, out=lambda m: None)
+    assert fake_platform.killed == [info.pid]
