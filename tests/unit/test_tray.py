@@ -1,3 +1,5 @@
+import pystray
+
 from yttoolkit.tray import ACCENT, MENU_LABELS, build_menu, make_icon_image
 
 
@@ -10,7 +12,7 @@ def test_icon_image_is_amber_square():
 def test_menu_labels_and_actions():
     calls = []
     menu = build_menu(lambda: calls.append("open"), lambda: calls.append("folder"), lambda: calls.append("quit"))
-    items = [item for item in menu.items if item.text]
+    items = [item for item in menu.items if item is not pystray.Menu.SEPARATOR]
     assert tuple(item.text for item in items) == MENU_LABELS
     assert items[0].default is True
     for item in items:

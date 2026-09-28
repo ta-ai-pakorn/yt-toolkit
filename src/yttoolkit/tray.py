@@ -29,7 +29,7 @@ def build_menu(
     return pystray.Menu(
         pystray.MenuItem(MENU_LABELS[0], lambda icon, item: open_app(), default=True),
         pystray.MenuItem(MENU_LABELS[1], lambda icon, item: open_output()),
-        pystray.MenuItem("", lambda icon, item: None),  # Visual separator with no text
+        pystray.Menu.SEPARATOR,
         pystray.MenuItem(MENU_LABELS[2], lambda icon, item: quit_app()),
     )
 
