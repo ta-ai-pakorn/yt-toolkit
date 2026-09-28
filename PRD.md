@@ -345,6 +345,7 @@ queued ──► running ──► done
 | POST | `/jobs/{id}/outputs/{n}/reveal` | — | `{ok:true}` เปิด Explorer/Finder |
 | GET | `/cache/{videoId}/{file}` | — | ไฟล์ภาพใน cache (ภาพเฟรม, ปก) |
 | GET | `/history` | `?q=&limit=&offset=` | `{items:[{videoId, title, thumbnailUrl, outputs:[kind], lastAt}], total}` |
+| GET | `/diagnostics` | `?jobId=` (ไม่บังคับ) | `{text}` รายงานแจ้งปัญหาแบบ Markdown ตามข้อ 7.1 |
 | GET | `/settings` | — | `Settings` |
 | PATCH | `/settings` | บางส่วนของ `Settings` | `Settings` |
 | POST | `/update` | — | `{updated, restarting}` |
@@ -470,6 +471,38 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 
 `errors.py` ต้องแปลงข้อความของ yt-dlp เป็นรหัสเหล่านี้ด้วยชุดทดสอบจากข้อความ error จริงที่เก็บไว้ใน `tests/fixtures/errors/`
 
+### 7.1 error สองชั้นและรายงานแจ้งปัญหา (FR-SET-5)
+
+| ชั้น | ใครอ่าน | มีอะไร |
+|---|---|---|
+| **หน้าเว็บ** | พนักงาน | `message` ภาษาไทยจากตารางข้างบน + ส่วน "รายละเอียด" ที่พับไว้ (รหัส error + `detail` ข้อความเทคนิคดิบ) |
+| **log** | ผู้ดูแล / AI | `run/logs/app.log` ทุก error มีเวลา, รหัส error, job id และ traceback · หมุนไฟล์ที่ 5 MB เก็บ 3 ไฟล์ |
+
+**ปุ่ม "คัดลอกข้อมูลแจ้งปัญหา"** อยู่ในส่วน "รายละเอียด" ของ error ทุกจุด และในหน้าตรวจสุขภาพระบบ เรียก `GET /api/diagnostics` แล้วคัดลอกข้อความนี้ลงคลิปบอร์ด:
+
+```markdown
+## รายงานปัญหา YT Toolkit
+- เวลา: 2026-10-05 14:32 (+07:00)
+- แอพ: 0.1.0 (commit abc1234) · ระบบ: Windows 11 (10.0.26200)
+- yt-dlp: 2026.09.20 · ffmpeg: 8.1 · JS runtime: deno 2.9.7
+### error
+- รหัส: E_BOT_CHECK · งาน: video (videoId dQw4w9WgXcQ)
+- รายละเอียด: <detail>
+### log ล่าสุด (50 บรรทัด)
+```text
+<บรรทัด log>
+```
+```
+
+- path ที่มีชื่อผู้ใช้ในรายงานต้องแทนด้วย `~` (เช่น `C:\Users\somchai\Downloads` → `~\Downloads`) เพื่อไม่ให้ข้อมูลส่วนตัวหลุด
+- ไม่ใส่ token ของแอพในรายงาน
+
+| AC | เงื่อนไข → ผลที่ต้องได้ | เทส |
+|---|---|---|
+| AC-SET-03 | error ที่เกิดจากงานใด ๆ → มีบรรทัดใน `app.log` ที่มีรหัส error และ job id | A |
+| AC-SET-04 | `/api/diagnostics?jobId=` → มีครบทุกหัวข้อตามตัวอย่าง ไม่มีชื่อผู้ใช้ใน path และไม่มี token | A |
+| AC-SET-05 | กด "คัดลอกข้อมูลแจ้งปัญหา" → คลิปบอร์ดได้ข้อความรายงาน และมี toast "คัดลอกแล้ว" | E |
+
 ---
 
 ## 8. ข้อกำหนดที่ไม่ใช่ฟังก์ชัน (สรุปเป็นตัวเลข)
@@ -512,7 +545,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | **M3 ซับ** | fixture, subtitles, srt_builder (Python + TS), W2 ส่วนซับและทรานสคริปต์ | AC-SUB-* (ยกเว้น 10) |
 | **M4 โหลดและคิว** | video, audio, คิว, SSE, W3, W4, W5, W7 | AC-VID-*, AC-AUD-*, AC-Q-*, AC-OUT-*, AC-SEC-05 |
 | **M5 ขั้นสูง** | ช่วงเวลา, chapter, SponsorBlock, โหมดคม | AC-ADV-*, AC-SUB-10, AC-FRAME-03, 04 |
-| **M6 → v1.0** | error ครบตามข้อ 7, a11y, README Windows, GitHub Actions | ทุก AC บน Windows + ตัวเลขในข้อ 8 |
+| **M6 → v1.0** | error ครบตามข้อ 7 รวม error สองชั้นและรายงานแจ้งปัญหา (ข้อ 7.1), a11y, README Windows, GitHub Actions | ทุก AC บน Windows + ตัวเลขในข้อ 8 |
 | **M7 → v1.1** | `platform/macos.py`, `.command`, ffmpeg สำหรับ Mac, README macOS | ทุก AC บน macOS + ข้อ 12 |
 
 **นิยามคำว่า "เสร็จ" ของทุกงาน**
