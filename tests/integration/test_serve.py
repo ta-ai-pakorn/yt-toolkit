@@ -22,10 +22,13 @@ def test_serve_then_stop(tmp_path):
             time.sleep(0.2)
         assert info is not None, "serve ไม่ขึ้นภายใน 30 วินาที"
         assert info.port == port
-        assert info.pid == proc.pid
+        # info.pid != proc.pid on this venv: uv's Scripts/python.exe is a launcher that
+        # spawns the real interpreter as a child, so we check the recorded pid is alive instead.
+        assert plat.pid_alive(info.pid)
         assert lifecycle.stop(paths, plat, out=lambda m: None) == 0
         assert proc.wait(timeout=15) == 0
         assert not paths.app_json.exists()
+        assert not plat.pid_alive(info.pid)
     finally:
         if proc.poll() is None:
             proc.kill()
