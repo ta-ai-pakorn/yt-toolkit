@@ -67,6 +67,8 @@ def test_install_rejects_incomplete_zip(paths):
     partial = _zip_bytes({"x/bin/ffmpeg.exe": b"FFMPEG"})
     with pytest.raises(tools.ToolInstallError):
         tools.install_ffmpeg_windows(paths, download=_fake_download(partial))
+    assert not (paths.bin / "ffmpeg.exe").exists()
+    assert list(paths.work.iterdir()) == []
 
 
 def test_install_wraps_network_errors(paths):
