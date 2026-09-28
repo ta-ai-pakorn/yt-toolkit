@@ -1,0 +1,34 @@
+[project]
+name = "yttoolkit"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "พิธ", email = "ta.ai@pakorn.in.th" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "deno",
+    "fastapi",
+    "httpx",
+    "pillow",
+    "pystray",
+    "uvicorn[standard]",
+    "yt-dlp[default]",
+]
+
+[project.scripts]
+yttoolkit = "yttoolkit.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["network: ต้องต่อเน็ตจริง (รันเอง ไม่รันใน CI)"]
+addopts = "-m 'not network'"
+
+[build-system]
+requires = ["uv_build>=0.11.1,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
