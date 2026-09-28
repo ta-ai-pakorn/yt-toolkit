@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-import sys
 import sysconfig
 import urllib.error
 import urllib.request
@@ -82,10 +81,12 @@ def ffmpeg_status(paths: Paths, plat: Platform) -> ToolStatus:
 
 
 def find_js_runtime() -> ToolStatus:
-    suffix = ".exe" if sys.platform == "win32" else ""
-    bundled = scripts_dir() / f"deno{suffix}"
+    scripts = scripts_dir()
+    # Try bundled deno with both .exe and no extension (works cross-platform)
+    bundled_paths = [scripts / "deno.exe", scripts / "deno"]
+    bundled = next((p for p in bundled_paths if p.is_file()), None)
     candidates = [
-        ("deno", str(bundled) if bundled.is_file() else shutil.which("deno")),
+        ("deno", str(bundled) if bundled else shutil.which("deno")),
         ("node", shutil.which("node")),
     ]
     for name, exe in candidates:
