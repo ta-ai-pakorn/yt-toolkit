@@ -14,7 +14,48 @@ MENU_LABELS = ("เปิดแอพ", "เปิดโฟลเดอร์ผ
 
 
 def make_icon_image(size: int = 64) -> Image.Image:
-    """Draw A2 logo: amber rounded square with dark film window, sprocket holes, and play triangle."""
+    """Draw A2 logo: amber rounded square with dark film window and play triangle.
+
+    For size <= 32, uses simplified variant without sprocket holes for crispness.
+    For size > 32, draws full A2 logo with sprocket holes.
+    """
+    if size <= 32:
+        return _make_icon_image_small(size)
+    else:
+        return _make_icon_image_full(size)
+
+
+def _make_icon_image_small(size: int) -> Image.Image:
+    """Small variant on 16-unit grid for crisp rendering at small sizes."""
+    # Render at 4x size for anti-aliasing, then downscale
+    large_size = size * 4
+    large_image = Image.new("RGBA", (large_size, large_size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(large_image)
+
+    # Scale factor from 16-unit grid to pixel coordinates
+    k = (size * 4) / 16
+
+    # Amber rounded square background (radius 3.5 units)
+    draw.rounded_rectangle((0, 0, large_size - 1, large_size - 1), radius=int(3.5 * k), fill=ACCENT)
+
+    # Dark film window (x 2..14, y 4..12 units, radius 1 unit)
+    window_bbox = (int(2 * k), int(4 * k), int(14 * k - 1), int(12 * k - 1))
+    draw.rounded_rectangle(window_bbox, radius=int(1 * k), fill=WINDOW)
+
+    # Amber play triangle: points (6.5, 5.5), (6.5, 10.5), (10.5, 8) units
+    triangle = [
+        (int(6.5 * k), int(5.5 * k)),
+        (int(6.5 * k), int(10.5 * k)),
+        (int(10.5 * k), int(8 * k)),
+    ]
+    draw.polygon(triangle, fill=ACCENT)
+
+    # Downscale to requested size with anti-aliasing
+    return large_image.resize((size, size), Image.LANCZOS)
+
+
+def _make_icon_image_full(size: int) -> Image.Image:
+    """Full A2 logo variant with sprocket holes (for size > 32)."""
     # Render at 4x size for anti-aliasing, then downscale
     scale = 4
     large_size = size * scale
@@ -61,5 +102,5 @@ def build_tray(
     open_app: Callable[[], None], open_output: Callable[[], None], quit_app: Callable[[], None]
 ) -> pystray.Icon:
     return pystray.Icon(
-        "yt-toolkit", make_icon_image(), "YT Toolkit", menu=build_menu(open_app, open_output, quit_app)
+        "yt-toolkit", make_icon_image(32), "YT Toolkit", menu=build_menu(open_app, open_output, quit_app)
     )

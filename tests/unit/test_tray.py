@@ -22,6 +22,26 @@ def test_icon_image_small_sizes():
         assert make_icon_image(size).size == (size, size)
 
 
+def test_icon_image_small_variant():
+    """Test small variant (size <= 32) has window but no sprocket holes."""
+    # 16px small variant
+    img16 = make_icon_image(16)
+    assert img16.size == (16, 16)
+    # Check outer frame is ACCENT
+    assert img16.getpixel((7, 0)) == ACCENT       # outer frame top
+
+    # 32px small variant
+    img32 = make_icon_image(32)
+    assert img32.size == (32, 32)
+    assert img32.getpixel((8, 11)) == WINDOW      # film window interior
+    assert img32.getpixel((8, 0)) == ACCENT       # outer frame
+
+    # Verify full 64px variant still works (has sprocket holes)
+    img64 = make_icon_image(64)
+    assert img64.getpixel((32, 20)) == WINDOW     # window still there
+    assert img64.getpixel((35, 32)) == ACCENT     # triangle still there
+
+
 def test_menu_labels_and_actions():
     calls = []
     menu = build_menu(lambda: calls.append("open"), lambda: calls.append("folder"), lambda: calls.append("quit"))
