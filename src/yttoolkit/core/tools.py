@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 import subprocess
 import sysconfig
 import urllib.error
 import urllib.request
+import zipfile
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
@@ -173,3 +175,69 @@ def collect_health(
         "output": asdict(output_status(output_dir)),
         "network": asdict(network()),
     }
+
+
+FFMPEG_RELEASE = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest"
+FFMPEG_WIN_ZIP = "ffmpeg-master-latest-win64-gpl.zip"
+_FFMPEG_WIN_FILES = frozenset({"ffmpeg.exe", "ffprobe.exe"})
+
+Downloader = Callable[[str, Path], None]
+
+
+def _download(url: str, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(url, timeout=60) as response, dest.open("wb") as out:
+        shutil.copyfileobj(response, out, 1024 * 1024)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def parse_checksums(text: str, filename: str) -> str | None:
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1].lstrip("*") == filename:
+            return parts[0].lower()
+    return None
+
+
+def install_ffmpeg_windows(paths: Paths, download: Downloader = _download) -> Path:
+    zip_path = paths.work / FFMPEG_WIN_ZIP
+    sums_path = paths.work / "ffmpeg-checksums.sha256"
+    try:
+        download(f"{FFMPEG_RELEASE}/checksums.sha256", sums_path)
+        expected = parse_checksums(sums_path.read_text(encoding="utf-8"), FFMPEG_WIN_ZIP)
+        if expected is None:
+            raise ToolInstallError("ไม่พบ checksum ของ ffmpeg ในรีลีส")
+        download(f"{FFMPEG_RELEASE}/{FFMPEG_WIN_ZIP}", zip_path)
+        if sha256_file(zip_path) != expected:
+            raise ToolInstallError("checksum ของ ffmpeg ไม่ตรง")
+        paths.bin.mkdir(parents=True, exist_ok=True)
+        found: set[str] = set()
+        with zipfile.ZipFile(zip_path) as archive:
+            for member in archive.namelist():
+                base = member.rsplit("/", 1)[-1]
+                if base in _FFMPEG_WIN_FILES and "/bin/" in member:
+                    (paths.bin / base).write_bytes(archive.read(member))
+                    found.add(base)
+        if found != _FFMPEG_WIN_FILES:
+            for name in found:
+                (paths.bin / name).unlink(missing_ok=True)
+            raise ToolInstallError("ไฟล์ ffmpeg ใน zip ไม่ครบ")
+    except (OSError, zipfile.BadZipFile) as error:
+        raise ToolInstallError(f"โหลด ffmpeg ไม่สำเร็จ: {error}") from error
+    finally:
+        zip_path.unlink(missing_ok=True)
+        sums_path.unlink(missing_ok=True)
+    return paths.bin / "ffmpeg.exe"
+
+
+def install_ffmpeg(paths: Paths, plat: Platform, download: Downloader = _download) -> Path:
+    if plat.name == "windows":
+        return install_ffmpeg_windows(paths, download)
+    raise ToolInstallError("ยังไม่รองรับการโหลด ffmpeg อัตโนมัติบนระบบนี้")
