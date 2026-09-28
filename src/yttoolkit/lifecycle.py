@@ -196,24 +196,47 @@ def run_app(
     return 0
 
 
-def start(paths: Paths | None = None, plat: Platform | None = None) -> int:
+def start(
+    paths: Paths | None = None,
+    plat: Platform | None = None,
+    *,
+    wait_timeout: float = 20.0,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
     paths = paths or default_paths()
     plat = plat or current()
     paths.ensure()
     setup_file_logging(paths)
     prepare_environment()
-    running = find_running(paths, plat)
-    if running:
-        webbrowser.open(base_url(running.port))
-        return 0
-    return run_app(
-        paths=paths,
-        plat=plat,
-        port=runstate.pick_port(),
-        with_tray=env_flag("YT_TOOLKIT_TRAY", True),
-        open_browser=env_flag("YT_TOOLKIT_OPEN_BROWSER", True),
-        auto_ffmpeg=True,
-    )
+    lock = plat.try_lock(paths.run / "app.lock")
+    if lock is None:
+        # อีกโปรเซสถือ lock อยู่ (กำลังเปิดหรือรันอยู่แล้ว) รอให้มันเขียน run/app.json แล้วค่อยเปิดเบราว์เซอร์
+        # แทนที่จะแข่งกันเลือก port เอง (FR-LIFE-2)
+        deadline = time.monotonic() + wait_timeout
+        info = find_running(paths, plat)
+        while info is None and time.monotonic() < deadline:
+            sleep(0.5)
+            info = find_running(paths, plat)
+        if info is not None:
+            webbrowser.open(base_url(info.port))
+            return 0
+        log.error("เปิดโปรแกรมไม่สำเร็จ: มีโปรเซสอื่นกำลังเปิดอยู่ แต่ตรวจไม่พบเซิร์ฟเวอร์ที่ทำงานภายใน %s วินาที", wait_timeout)
+        return 1
+    try:
+        running = find_running(paths, plat)
+        if running:
+            webbrowser.open(base_url(running.port))
+            return 0
+        return run_app(
+            paths=paths,
+            plat=plat,
+            port=runstate.pick_port(),
+            with_tray=env_flag("YT_TOOLKIT_TRAY", True),
+            open_browser=env_flag("YT_TOOLKIT_OPEN_BROWSER", True),
+            auto_ffmpeg=True,
+        )
+    finally:
+        plat.release_lock(lock)
 
 
 def serve(port: int | None = None, dev: bool = False) -> int:
@@ -223,15 +246,22 @@ def serve(port: int | None = None, dev: bool = False) -> int:
     paths.ensure()
     logging.basicConfig(level=logging.INFO)
     prepare_environment()
-    return run_app(
-        paths=paths,
-        plat=plat,
-        port=port or runstate.pick_port(),
-        with_tray=False,
-        open_browser=False,
-        auto_ffmpeg=False,
-        extra_origins=DEV_ORIGINS if dev else (),
-    )
+    lock = plat.try_lock(paths.run / "app.lock")
+    if lock is None:
+        log.error("เปิดเซิร์ฟเวอร์ไม่สำเร็จ: มีโปรเซสอื่นถือ lock ของ YT Toolkit อยู่แล้ว")
+        return 1
+    try:
+        return run_app(
+            paths=paths,
+            plat=plat,
+            port=port or runstate.pick_port(),
+            with_tray=False,
+            open_browser=False,
+            auto_ffmpeg=False,
+            extra_origins=DEV_ORIGINS if dev else (),
+        )
+    finally:
+        plat.release_lock(lock)
 
 
 def stop(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import os
 import signal
 import subprocess
@@ -36,3 +37,21 @@ class MacPlatform:
             os.kill(pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             pass
+
+    def try_lock(self, path: Path) -> object | None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(path, "a+b")  # noqa: SIM115 (ตัวจัดการเก็บไว้ให้ release_lock ปิดเอง)
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            handle.close()
+            return None
+        return handle
+
+    def release_lock(self, handle: object) -> None:
+        f = handle
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        f.close()

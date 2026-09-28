@@ -63,6 +63,44 @@ def test_server_binds_localhost_only(paths, fake_platform):  # AC-SEC-01
     assert lifecycle.Server(ctx).config.host == "127.0.0.1"
 
 
+def test_start_waits_for_other_starter_and_opens_browser(paths, fake_platform, monkeypatch):  # FR-LIFE-2
+    fake_platform.locked.add(paths.run / "app.lock")  # อีกโปรเซสถือ lock อยู่ก่อนแล้ว
+    info = RunInfo(port=8787, pid=123, token="t", started_at="x")
+    responses = iter([None, None, info])
+
+    def fake_find_running(p, pl):
+        return next(responses)
+
+    monkeypatch.setattr(lifecycle, "find_running", fake_find_running)
+    opened = []
+    monkeypatch.setattr(lifecycle.webbrowser, "open", opened.append)
+
+    def run_app_must_not_be_called(**kwargs):
+        raise AssertionError("run_app ไม่ควรถูกเรียกตอนรอโปรเซสอื่นเปิดอยู่")
+
+    monkeypatch.setattr(lifecycle, "run_app", run_app_must_not_be_called)
+
+    result = lifecycle.start(paths, fake_platform, wait_timeout=1.0, sleep=lambda s: None)
+    assert result == 0
+    assert opened == ["http://127.0.0.1:8787"]
+
+
+def test_start_gives_up_when_other_starter_never_finishes(paths, fake_platform, monkeypatch):  # FR-LIFE-2
+    fake_platform.locked.add(paths.run / "app.lock")  # อีกโปรเซสถือ lock อยู่ก่อนแล้ว
+    monkeypatch.setattr(lifecycle, "find_running", lambda p, pl: None)
+    opened = []
+    monkeypatch.setattr(lifecycle.webbrowser, "open", opened.append)
+
+    def run_app_must_not_be_called(**kwargs):
+        raise AssertionError("run_app ไม่ควรถูกเรียกตอนหาโปรเซสอื่นไม่เจอ")
+
+    monkeypatch.setattr(lifecycle, "run_app", run_app_must_not_be_called)
+
+    result = lifecycle.start(paths, fake_platform, wait_timeout=0.05, sleep=lambda s: None)
+    assert result == 1
+    assert opened == []
+
+
 def test_stop_when_not_running(paths, fake_platform):
     out = []
     assert lifecycle.stop(paths, fake_platform, out=out.append) == 0

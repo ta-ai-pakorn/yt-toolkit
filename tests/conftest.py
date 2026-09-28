@@ -20,6 +20,7 @@ class FakePlatform:
     killed: list[int] = field(default_factory=list)
     opened: list[Path] = field(default_factory=list)
     revealed: list[Path] = field(default_factory=list)
+    locked: set[Path] = field(default_factory=set)
 
     def downloads_dir(self) -> Path:
         return self.downloads
@@ -36,6 +37,15 @@ class FakePlatform:
     def kill(self, pid: int) -> None:
         self.killed.append(pid)
         self.alive.discard(pid)
+
+    def try_lock(self, path: Path) -> object | None:
+        if path in self.locked:
+            return None
+        self.locked.add(path)
+        return path
+
+    def release_lock(self, handle: object) -> None:
+        self.locked.discard(handle)
 
 
 @pytest.fixture

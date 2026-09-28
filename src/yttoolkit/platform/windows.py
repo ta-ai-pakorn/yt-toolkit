@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import msvcrt
 import os
 import subprocess
 import uuid
@@ -86,3 +87,23 @@ class WindowsPlatform:
             check=False,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
+
+    def try_lock(self, path: Path) -> object | None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(path, "a+b")  # noqa: SIM115 (ตัวจัดการเก็บไว้ให้ release_lock ปิดเอง)
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            handle.close()
+            return None
+        return handle
+
+    def release_lock(self, handle: object) -> None:
+        f = handle
+        try:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        f.close()
