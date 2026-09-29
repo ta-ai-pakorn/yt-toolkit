@@ -1,5 +1,7 @@
 import hashlib
 import io
+import threading
+import time
 import zipfile
 from pathlib import Path
 
@@ -79,8 +81,117 @@ def test_install_wraps_network_errors(paths):
         tools.install_ffmpeg_windows(paths, download=offline)
 
 
-def test_install_ffmpeg_dispatch(paths, fake_platform):
+def test_install_ffmpeg_dispatch(paths, fake_platform, no_path_ffmpeg):
     assert tools.install_ffmpeg(paths, fake_platform, download=_fake_download(GOOD_ZIP)).name == "ffmpeg.exe"
     fake_platform.name = "macos"
     with pytest.raises(tools.ToolInstallError):
         tools.install_ffmpeg(paths, fake_platform, download=_fake_download(GOOD_ZIP))
+
+
+def _stored_zip(members: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as z:
+        for name, data in members.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+@pytest.fixture
+def no_path_ffmpeg(monkeypatch):
+    # ไม่ให้ ffmpeg ที่อาจมีใน PATH ของเครื่องที่รันเทสมาปนผล
+    monkeypatch.setenv("YT_TOOLKIT_FFMPEG_PATH_LOOKUP", "0")
+
+
+def test_install_rejects_file_that_is_not_a_zip(paths):
+    with pytest.raises(tools.ToolInstallError):
+        tools.install_ffmpeg_windows(paths, download=_fake_download(b"<html>not a zip</html>"))
+    assert list(paths.bin.iterdir()) == []
+    assert list(paths.work.iterdir()) == []
+
+
+def test_partial_extract_failure_leaves_no_ffmpeg(paths):
+    good = _stored_zip(
+        {
+            "x/bin/ffmpeg.exe": b"FFMPEG",
+            "x/bin/ffprobe.exe": b"FFPROBE",
+        }
+    )
+    corrupt = good.replace(b"FFPROBE", b"FFPROBX", 1)  # CRC ของ ffprobe ไม่ตรง อ่านได้แค่ ffmpeg
+    assert corrupt != good
+    with pytest.raises(tools.ToolInstallError):
+        tools.install_ffmpeg_windows(paths, download=_fake_download(corrupt))
+    assert not (paths.bin / "ffmpeg.exe").exists()
+    assert list(paths.bin.iterdir()) == []  # ไม่มีไฟล์ชั่วคราวค้าง
+    assert list(paths.work.iterdir()) == []
+
+
+def test_cleanup_failure_does_not_mask_success(paths, monkeypatch):
+    real_unlink = Path.unlink
+
+    def locked_unlink(self, missing_ok=False):
+        if self.parent == paths.work:
+            raise PermissionError("file is in use")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", locked_unlink)
+    exe = tools.install_ffmpeg_windows(paths, download=_fake_download(GOOD_ZIP))
+    assert exe.read_bytes() == b"FFMPEG"
+
+
+def test_concurrent_installs_download_once(paths, fake_platform, monkeypatch, no_path_ffmpeg):
+    monkeypatch.setattr(
+        tools,
+        "_run_version",
+        lambda exe, arg="--version": "ffmpeg version 8.1 Copyright" if Path(exe).is_file() else None,
+    )
+    inner = _fake_download(GOOD_ZIP)
+    zip_downloads = []
+    release = threading.Event()
+
+    def slow_download(url, dest):
+        if url.endswith(tools.FFMPEG_WIN_ZIP):
+            zip_downloads.append(url)
+        release.wait(5)
+        inner(url, dest)
+
+    results, errors = [], []
+
+    def worker():
+        try:
+            results.append(tools.install_ffmpeg(paths, fake_platform, download=slow_download))
+        except Exception as error:  # noqa: BLE001
+            errors.append(error)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    time.sleep(0.3)  # ให้ thread ที่สองมาถึงจุดโหลดก่อน ถ้าไม่มี lock
+    release.set()
+    for t in threads:
+        t.join(10)
+    assert errors == []
+    assert len(zip_downloads) == 1
+    assert results == [paths.bin / "ffmpeg.exe"] * 2
+
+
+def test_status_is_warn_while_installing(paths, fake_platform, no_path_ffmpeg):
+    seen = []
+    inner = _fake_download(GOOD_ZIP)
+
+    def download(url, dest):
+        seen.append(tools.ffmpeg_status(paths, fake_platform))
+        inner(url, dest)
+
+    tools.install_ffmpeg(paths, fake_platform, download=download)
+    assert seen[0] == tools.ToolStatus("warn", name="ffmpeg", message="กำลังโหลด ffmpeg อาจใช้เวลา 1-3 นาที")
+    assert tools.ffmpeg_status(paths, fake_platform).message != "กำลังโหลด ffmpeg อาจใช้เวลา 1-3 นาที"
+
+
+def test_install_skips_download_when_ffmpeg_already_ok(paths, fake_platform, monkeypatch, no_path_ffmpeg):
+    (paths.bin / "ffmpeg.exe").write_bytes(b"x")
+    monkeypatch.setattr(tools, "_run_version", lambda exe, arg="--version": "ffmpeg version 8.1 Copyright")
+
+    def must_not_download(url, dest):
+        raise AssertionError("ไม่ควรโหลดซ้ำเมื่อ ffmpeg ใช้งานได้แล้ว")
+
+    assert tools.install_ffmpeg(paths, fake_platform, download=must_not_download) == paths.bin / "ffmpeg.exe"

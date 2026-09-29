@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
 import subprocess
 import sysconfig
+import threading
 import urllib.error
 import urllib.request
 import zipfile
@@ -22,6 +24,7 @@ from ..platform import Platform
 Status = Literal["ok", "warn", "error"]
 
 YTDLP_MAX_AGE_DAYS = 30
+FFMPEG_INSTALLING_MESSAGE = "กำลังโหลด ffmpeg อาจใช้เวลา 1-3 นาที"
 MIN_FREE_BYTES = 2 * 1024**3
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -73,6 +76,8 @@ def parse_ffmpeg_version(line: str | None) -> str | None:
 
 
 def ffmpeg_status(paths: Paths, plat: Platform) -> ToolStatus:
+    if _ffmpeg_installing.is_set():
+        return ToolStatus("warn", name="ffmpeg", message=FFMPEG_INSTALLING_MESSAGE)
     exe = find_ffmpeg(paths, plat)
     if exe is None:
         return ToolStatus("error", name="ffmpeg", message="ยังไม่มีโปรแกรมแปลงไฟล์ (ffmpeg)")
@@ -118,7 +123,7 @@ def ytdlp_status(version: str | None = None, today: date | None = None) -> ToolS
     age = (today - released).days
     if age > YTDLP_MAX_AGE_DAYS:
         return ToolStatus(
-            "warn", name="yt-dlp", version=version, message=f"อัปเดตล่าสุด {age} วันก่อน ลองกดตรวจหาอัปเดต"
+            "warn", name="yt-dlp", version=version, message=f"อัปเดตล่าสุด {age} วันก่อน ถ้าโหลดคลิปไม่ได้ ให้ปิดแล้วเปิดใหม่ด้วย start.bat เพื่อรับเวอร์ชันล่าสุด",
         )
     return ToolStatus("ok", name="yt-dlp", version=version, message=f"อัปเดตล่าสุด {age} วันก่อน")
 
@@ -183,6 +188,10 @@ _FFMPEG_WIN_FILES = frozenset({"ffmpeg.exe", "ffprobe.exe"})
 
 Downloader = Callable[[str, Path], None]
 
+# ปุ่มในหน้าเว็บกับการติดตั้งอัตโนมัติตอนเปิดแอพอาจเรียกพร้อมกัน ให้โหลดได้ทีละงานเท่านั้น
+_ffmpeg_install_lock = threading.Lock()
+_ffmpeg_installing = threading.Event()
+
 
 def _download(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -206,9 +215,18 @@ def parse_checksums(text: str, filename: str) -> str | None:
     return None
 
 
+def _unlink_quietly(path: Path) -> None:
+    """ลบไฟล์ชั่วคราว ถ้าลบไม่ได้ (เช่นไฟล์ถูกล็อกบน Windows) ก็ปล่อยไว้ ไม่ให้บังผลจริง"""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def install_ffmpeg_windows(paths: Paths, download: Downloader = _download) -> Path:
     zip_path = paths.work / FFMPEG_WIN_ZIP
     sums_path = paths.work / "ffmpeg-checksums.sha256"
+    temps: dict[str, Path] = {}
     try:
         download(f"{FFMPEG_RELEASE}/checksums.sha256", sums_path)
         expected = parse_checksums(sums_path.read_text(encoding="utf-8"), FFMPEG_WIN_ZIP)
@@ -218,26 +236,37 @@ def install_ffmpeg_windows(paths: Paths, download: Downloader = _download) -> Pa
         if sha256_file(zip_path) != expected:
             raise ToolInstallError("checksum ของ ffmpeg ไม่ตรง")
         paths.bin.mkdir(parents=True, exist_ok=True)
-        found: set[str] = set()
+        # แตกไฟล์ลงชื่อชั่วคราวก่อน ครบแล้วค่อย os.replace เข้าที่ ไฟล์ที่เขียนค้างครึ่งเดียวจะไม่ถูกใช้
         with zipfile.ZipFile(zip_path) as archive:
             for member in archive.namelist():
                 base = member.rsplit("/", 1)[-1]
                 if base in _FFMPEG_WIN_FILES and "/bin/" in member:
-                    (paths.bin / base).write_bytes(archive.read(member))
-                    found.add(base)
-        if found != _FFMPEG_WIN_FILES:
-            for name in found:
-                (paths.bin / name).unlink(missing_ok=True)
+                    temp = paths.bin / f"{base}.part"
+                    temps[base] = temp
+                    temp.write_bytes(archive.read(member))
+        if set(temps) != _FFMPEG_WIN_FILES:
             raise ToolInstallError("ไฟล์ ffmpeg ใน zip ไม่ครบ")
+        for base, temp in temps.items():
+            os.replace(temp, paths.bin / base)
     except (OSError, zipfile.BadZipFile) as error:
         raise ToolInstallError(f"โหลด ffmpeg ไม่สำเร็จ: {error}") from error
     finally:
-        zip_path.unlink(missing_ok=True)
-        sums_path.unlink(missing_ok=True)
+        for temp in temps.values():
+            _unlink_quietly(temp)
+        _unlink_quietly(zip_path)
+        _unlink_quietly(sums_path)
     return paths.bin / "ffmpeg.exe"
 
 
 def install_ffmpeg(paths: Paths, plat: Platform, download: Downloader = _download) -> Path:
-    if plat.name == "windows":
-        return install_ffmpeg_windows(paths, download)
-    raise ToolInstallError("ยังไม่รองรับการโหลด ffmpeg อัตโนมัติบนระบบนี้")
+    with _ffmpeg_install_lock:
+        current = ffmpeg_status(paths, plat)
+        if current.status == "ok" and current.path:
+            return Path(current.path)  # อีกงานเพิ่งติดตั้งเสร็จระหว่างที่รอ lock
+        if plat.name != "windows":
+            raise ToolInstallError("ยังไม่รองรับการโหลด ffmpeg อัตโนมัติบนระบบนี้")
+        _ffmpeg_installing.set()
+        try:
+            return install_ffmpeg_windows(paths, download)
+        finally:
+            _ffmpeg_installing.clear()

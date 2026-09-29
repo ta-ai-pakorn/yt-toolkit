@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import asdict
 from typing import TYPE_CHECKING
@@ -13,6 +14,8 @@ from .errors import error_response
 
 if TYPE_CHECKING:
     from ..app import AppContext
+
+log = logging.getLogger("yttoolkit")
 
 
 class ShutdownBody(BaseModel):
@@ -39,9 +42,13 @@ def build_router(ctx: AppContext) -> APIRouter:
     def install_ffmpeg():
         try:
             tools.install_ffmpeg(ctx.paths, ctx.plat)
-        except tools.ToolInstallError as error:
+        except Exception as error:  # noqa: BLE001 (ทุกความผิดพลาดต้องกลับไปเป็น error envelope ไม่ใช่ 500 ดิบ)
+            log.exception("โหลด ffmpeg จากปุ่มในหน้าเว็บไม่สำเร็จ")
             return error_response(
-                502, "E_TOOL_INSTALL_FAILED", "โหลดโปรแกรมที่ต้องใช้ไม่สำเร็จ ตรวจเน็ตแล้วกดลองใหม่", str(error)
+                502,
+                "E_TOOL_INSTALL_FAILED",
+                'โหลดโปรแกรมที่ต้องใช้ไม่สำเร็จ ตรวจเน็ตแล้วกด "โหลด ffmpeg ใหม่" อีกครั้ง',
+                str(error),
             )
         return asdict(tools.ffmpeg_status(ctx.paths, ctx.plat))
 

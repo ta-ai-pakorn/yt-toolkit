@@ -70,6 +70,17 @@ def test_install_ffmpeg_failure(make_client, monkeypatch):
     assert resp.status_code == 502
     assert resp.json()["error"] == {
         "code": "E_TOOL_INSTALL_FAILED",
-        "message": "โหลดโปรแกรมที่ต้องใช้ไม่สำเร็จ ตรวจเน็ตแล้วกดลองใหม่",
+        "message": 'โหลดโปรแกรมที่ต้องใช้ไม่สำเร็จ ตรวจเน็ตแล้วกด "โหลด ffmpeg ใหม่" อีกครั้ง',
         "detail": "checksum mismatch",
     }
+
+
+def test_install_ffmpeg_unexpected_error_uses_envelope(make_client, monkeypatch):
+    def boom(paths, plat):
+        raise PermissionError("file is in use")
+
+    monkeypatch.setattr(tools, "install_ffmpeg", boom)
+    resp = make_client().post("/api/tools/ffmpeg/install", headers=AUTH)
+    assert resp.status_code == 502
+    assert resp.json()["error"]["code"] == "E_TOOL_INSTALL_FAILED"
+    assert resp.json()["error"]["detail"] == "file is in use"

@@ -72,6 +72,7 @@ def test_ytdlp_status_age():
     assert "8 วัน" in (fresh.message or "")
     old = tools.ytdlp_status(version="2026.08.01", today=date(2026, 9, 28))
     assert old.status == "warn"
+    assert old.message == "อัปเดตล่าสุด 58 วันก่อน ถ้าโหลดคลิปไม่ได้ ให้ปิดแล้วเปิดใหม่ด้วย start.bat เพื่อรับเวอร์ชันล่าสุด"
 
 
 def test_ytdlp_status_real_version_is_ok_shape():
