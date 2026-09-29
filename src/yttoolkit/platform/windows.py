@@ -61,9 +61,8 @@ def _shell_libs() -> tuple[ctypes.WinDLL, ctypes.WinDLL]:
 
 class WindowsPlatform:
     name = "windows"
-    ffmpeg_exe = "ffmpeg.exe"
-    ffprobe_exe = "ffprobe.exe"
     popen_flags = subprocess.CREATE_NO_WINDOW
+    ffmpeg_auto_install = True
 
     def exe_name(self, name: str) -> str:
         return f"{name}.exe"

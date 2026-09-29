@@ -13,9 +13,8 @@ class FakePlatform:
     """แทน yttoolkit.platform ในเทส บันทึกทุกการเรียกไว้ให้ตรวจ"""
 
     name: str = "windows"
-    ffmpeg_exe: str = "ffmpeg.exe"
-    ffprobe_exe: str = "ffprobe.exe"
     popen_flags: int = 0
+    ffmpeg_auto_install: bool = True
     downloads: Path = Path("Downloads")
     alive: set[int] = field(default_factory=set)
     killed: list[int] = field(default_factory=list)

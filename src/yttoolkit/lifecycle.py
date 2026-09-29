@@ -121,7 +121,7 @@ class Server:
 
 
 def ensure_ffmpeg(paths: Paths, plat: Platform) -> None:
-    if tools.find_ffmpeg(paths, plat) is not None or plat.name != "windows":
+    if tools.find_ffmpeg(paths, plat) is not None or not plat.ffmpeg_auto_install:
         return
     try:
         tools.install_ffmpeg(paths, plat)

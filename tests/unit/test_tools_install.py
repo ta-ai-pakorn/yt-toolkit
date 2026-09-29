@@ -83,9 +83,15 @@ def test_install_wraps_network_errors(paths):
 
 def test_install_ffmpeg_dispatch(paths, fake_platform, no_path_ffmpeg):
     assert tools.install_ffmpeg(paths, fake_platform, download=_fake_download(GOOD_ZIP)).name == "ffmpeg.exe"
-    fake_platform.name = "macos"
+    fake_platform.ffmpeg_auto_install = False
     with pytest.raises(tools.ToolInstallError):
         tools.install_ffmpeg(paths, fake_platform, download=_fake_download(GOOD_ZIP))
+
+
+def test_install_ffmpeg_ignores_platform_name(paths, fake_platform, no_path_ffmpeg):
+    # ตัดสินจากความสามารถของแพลตฟอร์ม ไม่ใช่ชื่อระบบ
+    fake_platform.name = "macos"
+    assert tools.install_ffmpeg(paths, fake_platform, download=_fake_download(GOOD_ZIP)).name == "ffmpeg.exe"
 
 
 def _stored_zip(members: dict[str, bytes]) -> bytes:

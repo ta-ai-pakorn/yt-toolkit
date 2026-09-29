@@ -1,6 +1,7 @@
 import os
 
 import httpx
+import pytest
 
 from yttoolkit import lifecycle, runstate
 from yttoolkit.core import tools
@@ -559,3 +560,22 @@ def test_git_commit_passes_platform_popen_flags(monkeypatch, tmp_path, fake_plat
     fake_platform.popen_flags = 0x1234
     assert lifecycle.git_commit(tmp_path, fake_platform) == "abc1234"
     assert captured["creationflags"] == 0x1234
+
+
+def test_ensure_ffmpeg_installs_only_when_platform_supports_it(paths, fake_platform, monkeypatch):
+    monkeypatch.setenv("YT_TOOLKIT_FFMPEG_PATH_LOOKUP", "0")
+    calls: list = []
+    monkeypatch.setattr(tools, "install_ffmpeg", lambda p, plat: calls.append(plat))
+    fake_platform.name = "macos"  # ชื่อไม่เกี่ยว ดูแค่ความสามารถ
+    lifecycle.ensure_ffmpeg(paths, fake_platform)
+    assert calls == [fake_platform]
+    calls.clear()
+    fake_platform.ffmpeg_auto_install = False
+    lifecycle.ensure_ffmpeg(paths, fake_platform)
+    assert calls == []
+
+
+def test_ensure_ffmpeg_skips_when_already_present(paths, fake_platform, monkeypatch):
+    (paths.bin / fake_platform.exe_name("ffmpeg")).write_bytes(b"x")
+    monkeypatch.setattr(tools, "install_ffmpeg", lambda p, plat: pytest.fail("must not install"))
+    lifecycle.ensure_ffmpeg(paths, fake_platform)

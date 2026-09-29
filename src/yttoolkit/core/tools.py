@@ -257,7 +257,7 @@ def install_ffmpeg(paths: Paths, plat: Platform, download: Downloader = _downloa
         current = ffmpeg_status(paths, plat)
         if current.status == "ok" and current.path:
             return Path(current.path)  # อีกงานเพิ่งติดตั้งเสร็จระหว่างที่รอ lock
-        if plat.name != "windows":
+        if not plat.ffmpeg_auto_install:
             raise ToolInstallError("ยังไม่รองรับการโหลด ffmpeg อัตโนมัติบนระบบนี้")
         _ffmpeg_installing.set()
         try:

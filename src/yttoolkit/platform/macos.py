@@ -11,9 +11,8 @@ from .base import report_lock_open_failure
 
 class MacPlatform:
     name = "macos"
-    ffmpeg_exe = "ffmpeg"
-    ffprobe_exe = "ffprobe"
     popen_flags = 0
+    ffmpeg_auto_install = False
 
     def exe_name(self, name: str) -> str:
         return name

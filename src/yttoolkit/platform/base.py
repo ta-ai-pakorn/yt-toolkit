@@ -20,9 +20,8 @@ def report_lock_open_failure(path: Path) -> None:
 
 class Platform(Protocol):
     name: str
-    ffmpeg_exe: str
-    ffprobe_exe: str
     popen_flags: int  # creationflags สำหรับ subprocess (Windows: ไม่เด้งหน้าต่างดำ)
+    ffmpeg_auto_install: bool  # แอพโหลด ffmpeg ให้เองได้บนระบบนี้หรือไม่
 
     def exe_name(self, name: str) -> str: ...
 
