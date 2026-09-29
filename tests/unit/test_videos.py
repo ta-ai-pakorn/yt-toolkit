@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import json
 import re
+import threading
+import time
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -134,7 +136,8 @@ def test_output_has_exactly_the_prd_keys() -> None:
         "compat",
         "sizeBytes",
     }
-    assert set(info["audio"][0]) == {
+    assert {"formatId", "isOriginal", "acodec"} <= set(info["audio"][0])
+    assert set(info["audio"][0]) <= {
         "formatId",
         "language",
         "isOriginal",
@@ -263,16 +266,35 @@ def test_audio_drops_drc_variants() -> None:
     assert {"139", "140", "249", "250", "251"} <= ids
 
 
-def test_audio_language_stays_none_when_unknown() -> None:
-    assert all(a["language"] is None for a in to_video_info(load(BBB))["audio"])
+def test_audio_optional_keys_are_omitted_when_unknown() -> None:
+    audio = to_video_info(load(BBB))["audio"]
+    assert audio
+    assert all("language" not in a for a in audio)  # ไม่มีภาษา = ไม่มีคีย์ ไม่ใช่ null
+    raw = _audio_raw(
+        {"format_id": "a", "language": "th", "abr": 0},
+        {"format_id": "b", "abr": None},
+    )
+    by_id = {a["formatId"]: a for a in to_video_info(raw)["audio"]}
+    assert by_id["a"]["language"] == "th"
+    assert "abrKbps" not in by_id["a"] and "abrKbps" not in by_id["b"]
+    assert "language" not in by_id["b"]
+    assert not any(v is None for a in audio for v in a.values())
 
 
 def test_audio_abr_is_rounded_and_acodec_present() -> None:
     by_id = {a["formatId"]: a for a in to_video_info(load(BBB))["audio"]}
     assert by_id["140"]["acodec"] == "mp4a.40.2"
     assert by_id["140"]["abrKbps"] == 129
-    assert by_id["233"]["acodec"] == "unknown"  # ไม่มี acodec ในข้อมูลดิบ
-    assert by_id["233"]["abrKbps"] is None
+
+
+def test_audio_without_acodec_is_skipped_so_it_cannot_win_is_original() -> None:
+    audio = to_video_info(load(BBB))["audio"]
+    ids = {a["formatId"] for a in audio}
+    assert not ids & {"233", "234"}  # "Default, low/high" ที่ไม่มี acodec/abr
+    assert all(a["acodec"] != "unknown" for a in audio)
+    assert ids == {"139", "140", "249", "250", "251"}
+    # จากรูปแบบที่เล่นได้จริง: ไม่มีคำว่า original/default และ language_preference เท่ากันหมด
+    assert all(a["isOriginal"] is False for a in audio)
 
 
 def _audio_raw(*fmts: dict) -> dict:
@@ -469,6 +491,26 @@ def test_future_probed_at_is_treated_as_stale(
     assert ext.count["probe"] == 2
 
 
+def test_probed_at_slightly_in_the_future_is_fresh(
+    svc: VideoService, ext: CountingExtractor, clock: Clock
+) -> None:
+    clock.current = T0 + timedelta(minutes=4, seconds=59)
+    svc.get(BBB)
+    clock.current = T0  # นาฬิกาถอยไม่ถึง 5 นาที
+    svc.get(BBB)
+    assert ext.count["probe"] == 1
+
+
+def test_probed_at_more_than_5_minutes_in_the_future_is_stale(
+    svc: VideoService, ext: CountingExtractor, clock: Clock
+) -> None:
+    clock.current = T0 + timedelta(minutes=5, seconds=1)
+    svc.get(BBB)
+    clock.current = T0
+    svc.get(BBB)
+    assert ext.count["probe"] == 2
+
+
 def test_opened_at_updates_on_cache_hit_but_probed_at_does_not(
     svc: VideoService, clock: Clock, db: Database
 ) -> None:
@@ -574,6 +616,87 @@ def test_corrupt_cached_probe_json_is_reprobed(
     db.execute("UPDATE videos SET probe_json = 'not json'")
     assert svc.get(BBB)["videoId"] == BBB
     assert ext.count["probe"] == 2
+
+
+# ---------- single-flight ----------
+
+
+class SlowExtractor(CountingExtractor):
+    """probe ช้าพอให้เธรดอื่นเข้ามาซ้ำระหว่างรอ"""
+
+    def __init__(self, delay: float = 0.3) -> None:
+        super().__init__()
+        self.delay = delay
+        self.lock = threading.Lock()
+
+    def probe(self, video_id: str) -> dict:
+        with self.lock:
+            self.count["probe"] += 1
+        time.sleep(self.delay)
+        return self.inner.probe(video_id)
+
+
+def _run_threads(targets: list) -> list:
+    results: list = [None] * len(targets)
+    errors: list = []
+    barrier = threading.Barrier(len(targets))
+
+    def work(i: int) -> None:
+        try:
+            barrier.wait()
+            results[i] = targets[i]()
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=work, args=(i,)) for i in range(len(targets))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert not errors
+    return results
+
+
+def test_concurrent_get_for_same_id_probes_once(db: Database, clock: Clock) -> None:
+    slow = SlowExtractor()
+    service = VideoService(db, slow, now=clock)
+    results = _run_threads([lambda: service.get(BBB)] * 6)
+    assert slow.count["probe"] == 1
+    assert all(r == results[0] for r in results)
+    assert len(db.execute("SELECT 1 FROM videos")) == 1
+
+
+def test_concurrent_get_for_different_ids_is_not_serialised(
+    db: Database, clock: Clock
+) -> None:
+    slow = SlowExtractor(delay=0.4)
+    service = VideoService(db, slow, now=clock)
+    started = time.monotonic()
+    _run_threads([lambda: service.get(BBB), lambda: service.get(ZOO)])
+    assert slow.count["probe"] == 2
+    assert time.monotonic() - started < 0.75  # ไม่ได้รอกันแบบต่อคิว
+
+
+def test_concurrent_refresh_probes_once_more_not_once_per_caller(
+    db: Database, clock: Clock
+) -> None:
+    slow = SlowExtractor()
+    service = VideoService(db, slow, now=clock)
+    service.get(BBB)
+    _run_threads([lambda: service.get(BBB, refresh=True)] * 4)
+    assert slow.count["probe"] == 2
+
+
+def test_failed_probe_releases_the_id_and_next_call_retries(
+    db: Database, clock: Clock
+) -> None:
+    slow = SlowExtractor(delay=0.05)
+    service = VideoService(db, slow, now=clock)
+    for _ in range(2):
+        with pytest.raises(YtError):
+            service.get("UPCOMINGLV1")
+    assert slow.count["probe"] == 2
+    assert service.get(BBB)["videoId"] == BBB
 
 
 # ---------- probe_json / raw ----------
@@ -738,6 +861,7 @@ def test_playlist_truncated_at_200_of_250(
         "durationS",
         "thumbnailUrl",
     }
+    assert all("durationS" in e for e in result["entries"])
     assert result["entries"][0]["durationS"] == 61
     assert (
         result["entries"][0]["thumbnailUrl"]
@@ -771,7 +895,7 @@ def test_playlist_total_falls_back_to_returned_count(db: Database) -> None:
     result = VideoService(db, stub).playlist("PLabcdefghij")
     assert result["total"] == 2
     assert result["truncated"] is False
-    assert result["entries"][0]["durationS"] == 0
+    assert "durationS" not in result["entries"][0]  # ไม่รู้ความยาว = ไม่มีคีย์
     assert (
         result["entries"][0]["thumbnailUrl"]
         == "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg"
@@ -817,3 +941,66 @@ def test_videos_module_respects_core_boundaries() -> None:
     text = (SRC / "core" / "videos.py").read_text(encoding="utf-8")
     assert not re.search(r"^\s*(from|import)\s+yt_dlp", text, re.MULTILINE)
     assert not re.search(r"yttoolkit\.(api|platform)|from\s+\.\.(api|platform)", text)
+
+
+def test_playlist_thumbnail_prefers_last_of_list_then_single_field_then_default(
+    db: Database,
+) -> None:
+    stub = StubPlaylist(
+        {
+            "title": "p",
+            "entries": [
+                {
+                    "id": "aaaaaaaaaaa",
+                    "thumbnails": [
+                        {"url": "https://x/small.jpg"},
+                        {"url": "https://x/big.jpg"},
+                    ],
+                    "thumbnail": "https://x/single.jpg",
+                },
+                {"id": "bbbbbbbbbbb", "thumbnail": "https://x/single.jpg"},
+                {"id": "ccccccccccc", "thumbnails": [], "thumbnail": None},
+            ],
+        }
+    )
+    entries = VideoService(db, stub).playlist("PLabcdefghij")["entries"]
+    assert [e["thumbnailUrl"] for e in entries] == [
+        "https://x/big.jpg",
+        "https://x/single.jpg",
+        "https://i.ytimg.com/vi/ccccccccccc/mqdefault.jpg",
+    ]
+
+
+def _add_titles(db: Database, titles: list[str]) -> None:
+    for index, title in enumerate(titles):
+        opened = stamp(T0 + timedelta(minutes=index))
+        db.execute(
+            "INSERT INTO videos (video_id, title, probe_json, probed_at, opened_at)"
+            " VALUES (?, ?, '{}', ?, ?)",
+            (f"vid{index:08d}", title, opened, opened),
+        )
+
+
+def test_recent_search_with_paging_reports_filtered_total_and_page(
+    svc: VideoService, db: Database
+) -> None:
+    _add_titles(db, ["cat 1", "dog 1", "cat 2", "cat 3", "dog 2"])
+    items, total = svc.recent(2, offset=0, q="cat")
+    assert total == 3  # จำนวนที่ตรงคำค้นทั้งหมด ไม่ใช่ขนาดหน้า
+    assert [i["title"] for i in items] == ["cat 3", "cat 2"]
+    items, total = svc.recent(2, offset=2, q="cat")
+    assert total == 3
+    assert [i["title"] for i in items] == ["cat 1"]
+    assert svc.recent(2, offset=4, q="cat") == ([], 3)
+
+
+def test_recent_search_with_backslash_is_literal(
+    svc: VideoService, db: Database
+) -> None:
+    _add_titles(db, ["plain title", "path C:\\temp", "50% off", "a_b"])
+    items, total = svc.recent(10, q="\\")
+    assert (total, [i["title"] for i in items]) == (1, ["path C:\\temp"])
+    assert svc.recent(10, q="\\t")[1] == 1
+    assert svc.recent(10, q="\\%")[1] == 0
+    assert svc.recent(10, q="%")[1] == 1  # "50% off" เท่านั้น
+    assert svc.recent(10, q="a_b")[1] == 1

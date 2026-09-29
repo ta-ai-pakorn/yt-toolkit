@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,6 +19,8 @@ from .inputs import PLAYLIST_ID, VIDEO_ID
 from .yterrors import YtError
 
 CACHE_TTL = timedelta(hours=24)
+# นาฬิกาเครื่องเลื่อนถอยได้ไม่เกินนี้ยังถือว่า probe ล่าสุดยังใหม่
+CLOCK_SKEW = timedelta(minutes=5)
 PLAYLIST_LIMIT = 200
 
 _DRC_NOTE = re.compile(r"\bdrc\b", re.IGNORECASE)
@@ -175,9 +178,9 @@ def _audio_candidates(formats: list[dict]) -> list[dict]:
         if (
             _is_storyboard(fmt)
             or fmt.get("vcodec") != "none"
-            or fmt.get("acodec") == "none"
+            or fmt.get("acodec") in (None, "none", "")
         ):
-            continue
+            continue  # ไม่มี acodec = เล่นไม่ได้/ข้อมูลไม่ครบ ห้ามมาเป็นเสียงต้นฉบับ
         if not fmt.get("format_id"):
             continue
         if str(fmt["format_id"]).endswith("-drc") or _DRC_NOTE.search(
@@ -211,16 +214,15 @@ def _audio_formats(formats: list[dict]) -> list[dict]:
             by_note = [_preference(f) == top for f in candidates]
     result = []
     for fmt, original in zip(candidates, by_note, strict=True):
+        entry: dict[str, Any] = {"formatId": str(fmt["format_id"])}
+        if fmt.get("language"):
+            entry["language"] = str(fmt["language"])
+        entry["isOriginal"] = original
+        entry["acodec"] = str(fmt["acodec"])
         abr = fmt.get("abr")
-        result.append(
-            {
-                "formatId": str(fmt["format_id"]),
-                "language": fmt.get("language") or None,
-                "isOriginal": original,
-                "acodec": str(fmt.get("acodec") or "unknown"),
-                "abrKbps": round(abr) if isinstance(abr, int | float) and abr else None,
-            }
-        )
+        if isinstance(abr, int | float) and not isinstance(abr, bool) and abr > 0:
+            entry["abrKbps"] = round(abr)
+        result.append(entry)
     return result
 
 
@@ -312,6 +314,12 @@ class VideoService:
         self._db = db
         self._extractor = extractor
         self._now = now
+        self._guard = threading.Lock()
+        self._id_locks: dict[str, threading.Lock] = {}
+
+    def _id_lock(self, video_id: str) -> threading.Lock:
+        with self._guard:
+            return self._id_locks.setdefault(video_id, threading.Lock())
 
     def _stamp(self) -> tuple[datetime, str]:
         moment = self._now().astimezone(UTC)
@@ -323,18 +331,43 @@ class VideoService:
             raise YtError("E_INVALID_INPUT", f"video id ไม่ถูกรูปแบบ: {video_id!r}")
 
     def get(self, video_id: str, refresh: bool = False) -> dict:
+        """คืน VideoInfo ของคลิป (probe ใหม่ถ้าไม่มี cache, cache เก่ากว่า 24 ชม. หรือ refresh)
+
+        เรียกซ้อนกันด้วย id เดียวกัน (เช่น กดเปิดคลิปเดิมสองแท็บ) จะ probe ครั้งเดียว:
+        คนที่มาทีหลังรอคิว แล้วอ่าน cache ที่คนแรกเพิ่งเขียนแทนการ probe ซ้ำ
+        """
         self._check_video_id(video_id)
-        moment, stamp = self._stamp()
         if not refresh:
-            info = self._cached_info(video_id, moment)
+            info = self._cached_hit(video_id)
             if info is not None:
-                self._db.execute(
-                    "UPDATE videos SET opened_at = ? WHERE video_id = ?",
-                    (stamp, video_id),
-                )
                 return info
+        lock = self._id_lock(video_id)
+        contended = not lock.acquire(blocking=False)
+        if contended:
+            lock.acquire()
+        try:
+            if contended or not refresh:
+                # มีคนกำลัง probe ให้อยู่ (หรือเพิ่งเสร็จ) ใช้ผลของเขา แม้จะเป็นการ refresh
+                info = self._cached_hit(video_id)
+                if info is not None:
+                    return info
+            return self._probe_and_store(video_id)
+        finally:
+            lock.release()
+
+    def _cached_hit(self, video_id: str) -> dict | None:
+        moment, stamp = self._stamp()
+        info = self._cached_info(video_id, moment)
+        if info is not None:
+            self._db.execute(
+                "UPDATE videos SET opened_at = ? WHERE video_id = ?", (stamp, video_id)
+            )
+        return info
+
+    def _probe_and_store(self, video_id: str) -> dict:
         trimmed = trim_probe(self._extractor.probe(video_id))
         info = to_video_info(trimmed)
+        _, stamp = self._stamp()
         chapters = [
             {"start_s": c["startS"], "end_s": c["endS"], "title": c["title"]}
             for c in info["chapters"]
@@ -371,14 +404,20 @@ class VideoService:
             if probed.tzinfo is None:
                 probed = probed.replace(tzinfo=UTC)
             age = moment - probed
-            if not timedelta(0) <= age < CACHE_TTL:  # ติดลบ = นาฬิกาถอยหลัง ถือว่าเก่า
+            # อายุติดลบเกิน CLOCK_SKEW = นาฬิกาถอยหลังมาก ถือว่าเก่า
+            if not -CLOCK_SKEW <= age < CACHE_TTL:
                 return None
             return to_video_info(json.loads(rows[0]["probe_json"]))
         except (ValueError, TypeError, AttributeError, KeyError):
             return None  # แถวเสีย: probe ใหม่แล้วเขียนทับ
 
     def raw(self, video_id: str) -> dict:
-        """ข้อมูลดิบที่ตัดแล้ว (ใช้ทำ storyboard) ถ้ายังไม่มีในเครื่องจะ probe ให้ก่อน"""
+        """ข้อมูลดิบที่ตัดแล้ว (ใช้ทำ storyboard) ถ้ายังไม่มีในเครื่องจะ probe ให้ก่อน
+
+        ข้อมูลที่คืนอาจเก่ากว่า 24 ชม. (ไม่ตรวจอายุ) URL ของ storyboard เป็นลิงก์ที่ยูทูป
+        เซ็นชื่อไว้และหมดอายุได้ ผู้เรียกที่โหลดภาพจากลิงก์เหล่านี้แล้วโหลดพลาด ให้เรียก
+        `get(video_id, refresh=True)` เพื่อ probe ใหม่ แล้วอ่าน `raw()` ซ้ำและลองอีกครั้งเดียว
+        """
         self._check_video_id(video_id)
         for _ in range(2):
             rows = self._db.execute(
@@ -433,14 +472,15 @@ class VideoService:
             video_id = str(entry.get("id") or "")
             if not VIDEO_ID.fullmatch(video_id):
                 continue  # คลิปที่ถูกลบ/ไม่มี id เปิดต่อไม่ได้
-            entries.append(
-                {
-                    "videoId": video_id,
-                    "title": entry.get("title") or "",
-                    "durationS": _seconds(entry.get("duration")),
-                    "thumbnailUrl": _playlist_thumbnail(entry, video_id),
-                }
-            )
+            item: dict[str, Any] = {
+                "videoId": video_id,
+                "title": entry.get("title") or "",
+            }
+            duration = entry.get("duration")
+            if isinstance(duration, int | float) and not isinstance(duration, bool):
+                item["durationS"] = round(duration)
+            item["thumbnailUrl"] = _playlist_thumbnail(entry, video_id)
+            entries.append(item)
         count = info.get("playlist_count")
         return {
             "title": info.get("title") or "",
