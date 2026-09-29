@@ -374,6 +374,26 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     expect(peekUrls.every((url) => url.endsWith("?peek=1"))).toBe(true)
   })
 
+  test("กด 'เปิดดู' ตอนที่ peek ยังไม่เสร็จ → หน้าคลิปยังยิงคำขอปกติ (ไม่ใช่ peek) เพื่อให้คลิปเข้า 'ล่าสุด'", async ({
+    page,
+  }) => {
+    const requests: string[] = []
+    page.on("request", (request) => {
+      if (request.url().includes(`/api/videos/${BBB}`)) requests.push(request.url())
+    })
+    await page.route(`**/api/videos/${BBB}?peek=1`, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      await route.continue()
+    })
+    await page.goto("/")
+    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await page.getByRole("link", { name: /เปิดดู/ }).click()
+    await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    expect(requests.some((url) => !url.includes("peek"))).toBe(true)
+  })
+
   test("คลิปที่ดึงแค่ชื่อในรายการผล ไม่ขึ้นใน 'ล่าสุด' จนกว่าจะกดเปิดดู", async ({ page }) => {
     // ตัวตรวจอยู่ที่ pytest (peek ไม่แตะ opened_at) ที่นี่ดูว่าหน้าเว็บส่ง peek จริง และตอนเปิดหน้าคลิปไม่ส่ง
     const requests: string[] = []
@@ -447,8 +467,10 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, "ไม่ใช่ลิงก์"].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     const row = page.locator(RESULT_ROWS).first()
-    await expect(row.getByText("กำลังโหลดชื่อคลิป")).toBeAttached()
+    await expect(row).toHaveAttribute("aria-busy", "true")
     await expect(row.locator("[data-slot=skeleton]")).toBeVisible()
+    // โครงรอต้องไม่ถูกประกาศทีละแถว
+    await expect(row.getByRole("status")).toHaveCount(0)
     await expect(row).toContainText("Me at the zoo")
   })
 
@@ -537,6 +559,35 @@ test.describe("W1 การวาง การเข้าถึง และข
     await expect(alert).toContainText("วิเคราะห์ลิงก์ไม่สำเร็จ")
     await expect(alert).toContainText("เชื่อมต่อโปรแกรมไม่ได้")
   })
+})
+
+test.describe("โหลดไฟล์โค้ดของหน้าไม่ได้ (แท็บเก่าหลังอัปเดตโปรแกรม)", () => {
+  for (const [name, url, chunk] of [
+    ["หน้าคลิป", `/v/${BBB}`, "video"],
+    ["หน้าตั้งค่า", "/settings/health", "settings"],
+  ] as const) {
+    test(`${name}: โหลดใหม่ให้เองหนึ่งครั้ง แล้วแจ้งภาษาไทยพร้อมปุ่มโหลดหน้าใหม่ ไม่ใช่หน้า error ของ router`, async ({
+      page,
+    }) => {
+      let aborted = 0
+      await page.route(`**/assets/${chunk}-*.js`, (route) => {
+        aborted += 1
+        return route.abort()
+      })
+      await page.goto(url)
+      await expect(page.getByText("โปรแกรมเพิ่งอัปเดต โหลดหน้านี้ใหม่อีกครั้ง")).toBeVisible()
+      await expect(page.getByRole("link", { name: "หน้าแรก" })).toBeVisible()
+      // ครั้งแรก + โหลดใหม่อัตโนมัติหนึ่งครั้ง เท่านั้น ไม่วน
+      expect(aborted).toBe(2)
+      await page.waitForTimeout(500)
+      expect(aborted).toBe(2)
+      // ไฟล์กลับมาแล้ว กดปุ่มแล้วหน้าเปิดได้
+      await page.unroute(`**/assets/${chunk}-*.js`)
+      await page.getByRole("button", { name: "โหลดหน้าใหม่" }).click()
+      await expect(page.getByText("โปรแกรมเพิ่งอัปเดต โหลดหน้านี้ใหม่อีกครั้ง")).toHaveCount(0)
+      await expect(page.getByRole("main")).toBeVisible()
+    })
+  }
 })
 
 const readColorScheme = "document.documentElement.style.colorScheme"

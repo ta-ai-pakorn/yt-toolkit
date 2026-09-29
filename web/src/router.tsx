@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query"
 import { Navigate, createBrowserRouter } from "react-router"
 
 import { Layout } from "@/components/layout"
+import { RouteError } from "@/components/route-error"
 import { HomePage } from "@/pages/home"
 import { LazySettingsPage, LazyVideoPage } from "@/pages/lazy"
 
@@ -12,6 +13,7 @@ export const queryClient = new QueryClient({
 export const router = createBrowserRouter([
   {
     element: <Layout />,
+    errorElement: <RouteError />,
     children: [
       { path: "/", element: <HomePage /> },
       { path: "/v/:videoId", element: <LazyVideoPage /> },

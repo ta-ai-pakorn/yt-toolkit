@@ -1,6 +1,6 @@
 export const th = {
   app: { name: "YT Toolkit" },
-  common: { loading: "กำลังโหลด", close: "ปิด", retry: "ลองใหม่", backHome: "กลับหน้าแรก" },
+  common: { loading: "กำลังโหลด", close: "ปิด", reload: "โหลดหน้าใหม่", retry: "ลองใหม่", backHome: "กลับหน้าแรก" },
   time: {
     justNow: "เมื่อสักครู่",
     minutesAgo: "{n} นาทีก่อน",
@@ -34,7 +34,6 @@ export const th = {
       none: "ไม่พบลิงก์ในข้อความที่วาง",
       count: "ผลการวิเคราะห์ {n} รายการ",
       showTitle: "แสดงชื่อ",
-      titleLoading: "กำลังโหลดชื่อคลิป",
       titleError: "ดึงชื่อคลิปไม่สำเร็จ",
     },
     dialog: {
@@ -112,6 +111,9 @@ export const th = {
     downloadFailed: "โหลดไฟล์ไม่สำเร็จ ลองอีกครั้ง",
     unknown: "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล",
     offline: "เชื่อมต่อโปรแกรมไม่ได้ ถ้าปิดโปรแกรมไปแล้ว เปิดใหม่ด้วย start.bat",
+    pageTitle: "เปิดหน้านี้ไม่สำเร็จ",
+    chunk: "โปรแกรมเพิ่งอัปเดต โหลดหน้านี้ใหม่อีกครั้ง",
+    crash: "หน้านี้ทำงานผิดพลาด โหลดหน้าใหม่แล้วลองอีกครั้ง",
   },
 } as const
 

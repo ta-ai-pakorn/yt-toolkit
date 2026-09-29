@@ -15,6 +15,10 @@ describe("looksLikeYoutube", () => {
     "  https://youtu.be/aqz-KE-bpKQ  ",
     "<https://youtu.be/aqz-KE-bpKQ>",
     "aqz-KE-bpKQ",
+    "jNQXAC9IVRw",
+    "dQw4w9WgXcQ",
+    "abcdefghij_",
+    "abcdefghij-",
     "  aqz-KE-bpKQ\n",
   ])("รับ %j", (text) => {
     expect(looksLikeYoutube(text)).toBe(true)
@@ -37,7 +41,9 @@ describe("looksLikeYoutube", () => {
     "https://youtube.com.evil.example/watch",
     "https://youtu.be",
     "hello world",
-    "helloworld12",
+    "helloworld12x",
+    "development",
+    "information",
     "abc def ghij",
   ])("ไม่รับ %j", (text) => {
     expect(looksLikeYoutube(text)).toBe(false)

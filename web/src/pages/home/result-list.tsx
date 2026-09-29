@@ -56,14 +56,8 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
       </ItemDescription>
     )
   } else if (wantsTitle) {
-    name = (
-      <>
-        <span className="sr-only" role="status">
-          {t.titleLoading}
-        </span>
-        <Skeleton className="h-4 w-56 max-w-full" />
-      </>
-    )
+    // aria-busy ที่แถวบอกสถานะโหลดแล้ว จึงซ่อนโครงรอจากโปรแกรมอ่านหน้าจอ (ไม่ประกาศซ้ำทีละแถว)
+    name = <Skeleton aria-hidden="true" className="h-4 w-56 max-w-full" />
     hint = <ItemDescription className="font-mono text-xs">{id}</ItemDescription>
   } else {
     name = <ItemTitle className="font-mono">{id}</ItemTitle>

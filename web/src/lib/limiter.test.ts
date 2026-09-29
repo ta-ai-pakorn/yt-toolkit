@@ -58,4 +58,29 @@ describe("createLimiter", () => {
     await expect(first).rejects.toThrow("พังทันที")
     await expect(second).resolves.toBe(2)
   })
+
+  it("ส่งช่องต่อให้คนที่รอโดยตรง: คำขอใหม่ที่เข้ามาช่วงรอยต่อต้องไม่แซงคิวหรือทำให้รันเกินกำหนด", async () => {
+    const limit = createLimiter(1)
+    const gate = deferred()
+    const order: string[] = []
+    let running = 0
+    let peak = 0
+    const track = (name: string, wait?: Promise<void>) => async () => {
+      order.push(name)
+      running += 1
+      peak = Math.max(peak, running)
+      await wait
+      running -= 1
+    }
+    const a = limit(track("A", gate.promise))
+    const b = limit(track("B"))
+    // ลำดับ microtask: หลัง A จบ (release) และก่อนที่ B จะตื่น มีคำขอ C เข้ามา
+    let c: Promise<void> = Promise.resolve()
+    void gate.promise.then(() => queueMicrotask(() => (c = limit(track("C")))))
+    gate.resolve()
+    await Promise.all([a, b])
+    await c
+    expect(peak).toBe(1)
+    expect(order).toEqual(["A", "B", "C"])
+  })
 })

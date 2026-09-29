@@ -18,14 +18,20 @@ function guarded<T>(signal: AbortSignal, task: () => Promise<T>): () => Promise<
 }
 
 /**
- * ชื่อคลิปสำหรับแถวในรายการผล W1: key เดียวกับหน้า W2 เพื่อให้เปิดต่อได้ทันทีจาก cache
- * `peek=1` = ขอแค่ข้อมูล ไม่นับว่าเปิดคลิป จึงไม่ดันคลิปเข้า "ล่าสุด"
+ * ชื่อคลิปสำหรับแถวในรายการผล W1 (`peek=1` = ขอแค่ข้อมูล ไม่นับว่าเปิดคลิป จึงไม่ดันคลิปเข้า "ล่าสุด")
+ *
+ * ใช้ key แยกของตัวเอง เพราะถ้าใช้ key เดียวกับหน้า W2 แล้วผู้ใช้กด "เปิดดู" ตอน peek ยังไม่เสร็จ
+ * TanStack จะรวมคำขอ ทำให้ไม่มีคำขอปกติออกไปเลย และคลิปไม่เข้า "ล่าสุด"
+ * สำเร็จแล้วเติมผลลง key ของ W2 (เฉพาะที่ยังว่าง) ให้ W2 มีข้อมูลโชว์ทันที แล้ว W2 ยิงคำขอปกติของตัวเองอีกครั้ง
  */
 export function videoTitleQuery(videoId: string) {
   return queryOptions({
-    queryKey: ["video", videoId],
-    queryFn: ({ signal }) =>
-      titleLimit(guarded(signal, () => api<VideoInfo>(`/videos/${videoId}?peek=1`, { signal }))),
+    queryKey: ["video", videoId, "peek"],
+    queryFn: async ({ client, signal }) => {
+      const info = await titleLimit(guarded(signal, () => api<VideoInfo>(`/videos/${videoId}?peek=1`, { signal })))
+      client.setQueryData<VideoInfo>(["video", videoId], (existing) => existing ?? info)
+      return info
+    },
     retry: false,
     staleTime: 60_000,
   })

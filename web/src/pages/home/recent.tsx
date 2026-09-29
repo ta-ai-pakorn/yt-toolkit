@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { Link } from "react-router"
 
+import { useElapsed } from "@/components/use-elapsed"
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Skeleton } from "@/components/ui/skeleton"
 import { th } from "@/i18n/th"
@@ -22,11 +23,7 @@ export function RecentSection() {
   })
 
   // โหลดเร็ว (ปกติคือเสี้ยววินาที) ไม่ต้องขึ้นโครงรอให้หน้ากระตุก: ขึ้นเมื่อช้าเกิน 300 ms เท่านั้น
-  const [slow, setSlow] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setSlow(true), SKELETON_DELAY_MS)
-    return () => clearTimeout(timer)
-  }, [])
+  const slow = useElapsed(SKELETON_DELAY_MS)
 
   useEffect(() => {
     if (history.isError) console.warn("[recent] failed to load history", history.error)
