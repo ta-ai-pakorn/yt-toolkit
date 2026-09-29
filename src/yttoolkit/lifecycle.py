@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
 import subprocess
 import sys
@@ -72,7 +73,9 @@ def git_commit(root: Path) -> str | None:
 
 def setup_file_logging(paths: Paths) -> None:
     paths.logs.mkdir(parents=True, exist_ok=True)
-    handler = logging.FileHandler(paths.logs / "app.log", encoding="utf-8")
+    handler = logging.handlers.RotatingFileHandler(
+        paths.logs / "app.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+    )
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     root = logging.getLogger()
     root.setLevel(logging.INFO)
@@ -157,6 +160,9 @@ def run_app(
     server.start()
     if not server.wait_until_ready():
         log.error("เปิดเซิร์ฟเวอร์ไม่สำเร็จที่ port %s", port)
+        server.stop()
+        server.join(timeout=5)
+        runstate.clear(paths.app_json)  # lock ปล่อยโดยผู้เรียก (start/serve) ใน finally
         return 1
     runstate.write(
         paths.app_json, runstate.RunInfo(port=port, pid=os.getpid(), token=token, started_at=runstate.now_iso())
@@ -212,21 +218,28 @@ def start(
     if lock is None:
         # อีกโปรเซสถือ lock อยู่ (กำลังเปิดหรือรันอยู่แล้ว) รอให้มันเขียน run/app.json แล้วค่อยเปิดเบราว์เซอร์
         # แทนที่จะแข่งกันเลือก port เอง (FR-LIFE-2)
+        # ถ้าระหว่างรอ lock ว่างลง (โปรเซสนั้นตายไปก่อนเขียน app.json) ให้รับช่วงเป็นเจ้าของเอง
         deadline = time.monotonic() + wait_timeout
-        info = find_running(paths, plat)
-        while info is None and time.monotonic() < deadline:
-            sleep(0.5)
+        while True:
             info = find_running(paths, plat)
-        if info is not None:
-            webbrowser.open(base_url(info.port))
-            return 0
-        log.error("เปิดโปรแกรมไม่สำเร็จ: มีโปรเซสอื่นกำลังเปิดอยู่ แต่ตรวจไม่พบเซิร์ฟเวอร์ที่ทำงานภายใน %s วินาที", wait_timeout)
-        return 1
+            if info is not None:
+                webbrowser.open(base_url(info.port))
+                return 0
+            if time.monotonic() >= deadline:
+                break
+            sleep(0.5)
+            lock = plat.try_lock(paths.run / "app.lock")
+            if lock is not None:
+                break
+        if lock is None:
+            log.error(
+                "เปิดโปรแกรมไม่สำเร็จ: มีโปรเซสอื่นกำลังเปิดอยู่ แต่ตรวจไม่พบเซิร์ฟเวอร์ที่ทำงานภายใน %s วินาที",
+                wait_timeout,
+            )
+            return 1
     try:
-        running = find_running(paths, plat)
-        if running:
-            webbrowser.open(base_url(running.port))
-            return 0
+        # ถือ lock อยู่ แปลว่าไม่มีอินสแตนซ์อื่นรัน app.json ที่เหลืออยู่จึงเป็นของเก่า
+        runstate.clear(paths.app_json)
         return run_app(
             paths=paths,
             plat=plat,
@@ -251,6 +264,7 @@ def serve(port: int | None = None, dev: bool = False) -> int:
         log.error("เปิดเซิร์ฟเวอร์ไม่สำเร็จ: มีโปรเซสอื่นถือ lock ของ YT Toolkit อยู่แล้ว")
         return 1
     try:
+        runstate.clear(paths.app_json)  # ถือ lock อยู่ แปลว่า app.json ที่เหลืออยู่เป็นของเก่า
         return run_app(
             paths=paths,
             plat=plat,
@@ -271,6 +285,12 @@ def _app_holds_lock(paths: Paths, plat: Platform) -> bool:
         return True
     plat.release_lock(lock)
     return False
+
+
+def _still_named_by_app_json(paths: Paths, info: runstate.RunInfo) -> bool:
+    """True ถ้า run/app.json ยังระบุอินสแตนซ์เดิม (pid และ started_at ตรงกับที่อ่านไว้ตอนเริ่ม stop)"""
+    current_info = runstate.read(paths.app_json)
+    return current_info is not None and (current_info.pid, current_info.started_at) == (info.pid, info.started_at)
 
 
 def stop(
@@ -309,8 +329,37 @@ def stop(
             break
         sleep(0.1)
     else:
+        # อ่าน app.json ซ้ำก่อน kill ถ้าไฟล์หายหรือเป็นของอินสแตนซ์อื่นแล้ว pid นี้ไม่ใช่แอพที่เราจะปิดอีกต่อไป
+        if not _still_named_by_app_json(paths, info):
+            out("YT Toolkit ไม่ได้เปิดอยู่")
+            return 0
         if _app_holds_lock(paths, plat):  # lock ว่างแล้วแปลว่าแอพปิดตัวไปแล้ว ห้าม kill
             plat.kill(info.pid)
-    runstate.clear(paths.app_json)
+    if _still_named_by_app_json(paths, info):  # ห้ามลบ app.json ของอินสแตนซ์ใหม่
+        runstate.clear(paths.app_json)
     out("ปิดโปรแกรมแล้ว")
     return 0
+
+
+def wait(
+    paths: Paths | None = None,
+    plat: Platform | None = None,
+    *,
+    timeout: float = 25.0,
+    sleep: Callable[[float], None] = time.sleep,
+    out: Callable[[str], None] = print,
+) -> int:
+    """รอจนแอพตอบกลับ ใช้ตอน start แบบไม่มีหน้าต่าง (ไฟล์ .bat) เพื่อบอกผลให้ผู้ใช้ทราบ"""
+    paths = paths or default_paths()
+    plat = plat or current()
+    deadline = time.monotonic() + timeout
+    while True:
+        info = find_running(paths, plat)
+        if info is not None:
+            out(f"เปิด YT Toolkit แล้ว ที่ {base_url(info.port)}")
+            return 0
+        if time.monotonic() >= deadline:
+            break
+        sleep(0.5)
+    out(f"เปิดโปรแกรมไม่สำเร็จ ดูรายละเอียดได้ที่ {(paths.logs / 'app.log').absolute()}")
+    return 1

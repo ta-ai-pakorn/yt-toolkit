@@ -56,3 +56,30 @@ def test_try_lock_is_exclusive_until_released(tmp_path):
     other = plat.try_lock(lock_path)
     assert other is not None  # ปล่อยแล้ว เปิดใหม่ได้
     plat.release_lock(other)
+
+
+def test_try_lock_returns_none_when_lock_file_cannot_be_opened(tmp_path, caplog):  # M1 follow-up item 5
+    plat = current()
+    lock_path = tmp_path / "app.lock"
+    lock_path.mkdir()  # โฟลเดอร์ชื่อเดียวกับไฟล์ lock เปิดเป็นไฟล์ไม่ได้
+    with caplog.at_level("WARNING", logger="yttoolkit"):
+        assert plat.try_lock(lock_path) is None
+    assert any(r.levelname == "WARNING" for r in caplog.records)
+
+
+def test_macos_try_lock_returns_none_when_lock_file_cannot_be_opened(tmp_path, monkeypatch, caplog):
+    import importlib
+    import types
+
+    # macos.py import fcntl ซึ่งไม่มีบน Windows จึงสร้างตัวแทนขึ้นมาแค่พอให้ import ได้
+    monkeypatch.setitem(sys.modules, "fcntl", types.SimpleNamespace(LOCK_EX=2, LOCK_NB=4, LOCK_UN=8, flock=None))
+    monkeypatch.delitem(sys.modules, "yttoolkit.platform.macos", raising=False)
+    macos = importlib.import_module("yttoolkit.platform.macos")
+
+    def deny(*args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr("builtins.open", deny)
+    with caplog.at_level("WARNING", logger="yttoolkit"):
+        assert macos.MacPlatform().try_lock(tmp_path / "app.lock") is None
+    assert any(r.levelname == "WARNING" for r in caplog.records)

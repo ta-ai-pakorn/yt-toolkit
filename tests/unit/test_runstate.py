@@ -64,3 +64,14 @@ def test_pick_port_raises_when_none_free():
             runstate.pick_port([busy.getsockname()[1]])
     finally:
         busy.close()
+
+
+def test_now_iso_is_utc_iso8601_with_timezone():  # M1 follow-up item 8
+    from datetime import datetime, timedelta
+
+    value = runstate.now_iso()
+    parsed = datetime.fromisoformat(value)
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset() == timedelta(0)
+    assert value.endswith("+00:00")
+    assert "T" in value

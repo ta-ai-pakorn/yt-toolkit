@@ -226,3 +226,269 @@ def test_stop_does_not_kill_when_lock_frees_during_wait(paths, fake_platform):
     assert info.pid in fake_platform.alive
     assert not paths.app_json.exists()
     assert fake_platform.locked == set()
+
+
+# ---- M1 follow-ups: Task 1 ----------------------------------------------------------------------------------------
+
+
+class FakeServer:
+    """แทน lifecycle.Server ในเทสที่ไม่ต้องการ uvicorn จริง"""
+
+    def __init__(self, ready: bool = True):
+        self.ready = ready
+        self.started = False
+        self.stopped = False
+        self.joined: list[float | None] = []
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def join(self, timeout: float | None = None) -> None:
+        self.joined.append(timeout)
+
+    def wait_until_ready(self, timeout: float = 15.0) -> bool:
+        return self.ready
+
+
+def test_start_clears_stale_app_json_before_run_app(paths, fake_platform, monkeypatch):  # item 1
+    runstate.write(paths.app_json, RunInfo(port=8787, pid=999, token="old", started_at="old"))
+    seen = {}
+
+    def fake_run_app(**kwargs):
+        seen["app_json_exists"] = paths.app_json.exists()
+        seen["locked"] = (paths.run / "app.lock") in fake_platform.locked
+        return 0
+
+    monkeypatch.setattr(lifecycle, "run_app", fake_run_app)
+    assert lifecycle.start(paths, fake_platform, sleep=lambda s: None) == 0
+    assert seen == {"app_json_exists": False, "locked": True}
+    assert fake_platform.locked == set()
+
+
+def test_serve_clears_stale_app_json_before_run_app(paths, fake_platform, monkeypatch):  # item 1
+    runstate.write(paths.app_json, RunInfo(port=8787, pid=999, token="old", started_at="old"))
+    seen = {}
+
+    def fake_run_app(**kwargs):
+        seen["app_json_exists"] = paths.app_json.exists()
+        return 0
+
+    monkeypatch.setattr(lifecycle, "default_paths", lambda: paths)
+    monkeypatch.setattr(lifecycle, "current", lambda: fake_platform)
+    monkeypatch.setattr(lifecycle, "run_app", fake_run_app)
+    assert lifecycle.serve(port=9000) == 0
+    assert seen == {"app_json_exists": False}
+    assert fake_platform.locked == set()
+
+
+def test_start_takes_over_when_lock_frees_during_wait(paths, fake_platform, monkeypatch):  # item 2
+    lock = paths.run / "app.lock"
+    fake_platform.locked.add(lock)  # อีกโปรเซสถือ lock อยู่ แล้วตายไประหว่างรอ โดยไม่เคยเขียน app.json
+    runstate.write(paths.app_json, RunInfo(port=8787, pid=999, token="old", started_at="old"))
+    monkeypatch.setattr(lifecycle, "find_running", lambda p, pl: None)
+    opened = []
+    monkeypatch.setattr(lifecycle.webbrowser, "open", opened.append)
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 2:
+            fake_platform.locked.discard(lock)  # lock ว่างระหว่างรอ
+
+    calls = {}
+
+    def fake_run_app(**kwargs):
+        calls["app_json_exists"] = paths.app_json.exists()
+        calls["locked"] = lock in fake_platform.locked
+        return 0
+
+    monkeypatch.setattr(lifecycle, "run_app", fake_run_app)
+    assert lifecycle.start(paths, fake_platform, wait_timeout=100.0, sleep=sleep) == 0
+    assert len(sleeps) == 2
+    assert calls == {"app_json_exists": False, "locked": True}
+    assert opened == []
+    assert fake_platform.locked == set()  # เจ้าของใหม่ปล่อย lock ตอนจบ
+
+
+def test_stop_does_not_kill_when_app_json_was_replaced(paths, fake_platform):  # item 3
+    info = _running(paths, fake_platform, holds_lock=True)
+    newer = RunInfo(port=8788, pid=7777, token="new", started_at="newer")
+
+    def sleep(seconds):
+        runstate.write(paths.app_json, newer)  # แอพเดิมปิด แล้วมีอินสแตนซ์ใหม่เขียน app.json ทับ
+
+    out = []
+    result = lifecycle.stop(
+        paths,
+        fake_platform,
+        post=lambda url, json, headers, timeout: FakeResponse(200, {"ok": True}),
+        sleep=sleep,
+        out=out.append,
+    )
+    assert result == 0
+    assert fake_platform.killed == []
+    assert info.pid in fake_platform.alive
+    assert runstate.read(paths.app_json) == newer  # ห้ามลบ app.json ของอินสแตนซ์ใหม่
+    assert out == ["YT Toolkit ไม่ได้เปิดอยู่"]
+
+
+def test_stop_does_not_kill_when_same_pid_but_different_started_at(paths, fake_platform):  # item 3
+    info = _running(paths, fake_platform, holds_lock=True)
+    reused = RunInfo(port=info.port, pid=info.pid, token="new", started_at="later")
+
+    def sleep(seconds):
+        runstate.write(paths.app_json, reused)
+
+    out = []
+    lifecycle.stop(
+        paths,
+        fake_platform,
+        post=lambda url, json, headers, timeout: FakeResponse(200, {"ok": True}),
+        sleep=sleep,
+        out=out.append,
+    )
+    assert fake_platform.killed == []
+    assert runstate.read(paths.app_json) == reused
+    assert out == ["YT Toolkit ไม่ได้เปิดอยู่"]
+
+
+def test_stop_does_not_kill_when_app_json_vanished(paths, fake_platform):  # item 3
+    _running(paths, fake_platform, holds_lock=True)
+
+    def sleep(seconds):
+        runstate.clear(paths.app_json)
+
+    out = []
+    lifecycle.stop(
+        paths,
+        fake_platform,
+        post=lambda url, json, headers, timeout: FakeResponse(200, {"ok": True}),
+        sleep=sleep,
+        out=out.append,
+    )
+    assert fake_platform.killed == []
+    assert out == ["YT Toolkit ไม่ได้เปิดอยู่"]
+
+
+def test_stop_does_not_clear_newer_app_json_after_graceful_exit(paths, fake_platform):  # item 3
+    info = _running(paths, fake_platform)
+    newer = RunInfo(port=8788, pid=7777, token="new", started_at="newer")
+
+    def post(url, json, headers, timeout):
+        fake_platform.alive.discard(info.pid)  # แอพเดิมปิดตัวเอง
+        runstate.write(paths.app_json, newer)  # และอินสแตนซ์ใหม่เขียนทับทันที
+        return FakeResponse(200, {"ok": True})
+
+    lifecycle.stop(paths, fake_platform, post=post, sleep=lambda s: None, out=lambda m: None)
+    assert runstate.read(paths.app_json) == newer
+
+
+def _run_app_kwargs(paths, fake_platform):
+    return {
+        "paths": paths,
+        "plat": fake_platform,
+        "port": 8787,
+        "with_tray": False,
+        "open_browser": False,
+        "auto_ffmpeg": False,
+    }
+
+
+def test_run_app_cleans_up_after_startup_timeout(paths, fake_platform, monkeypatch, caplog):  # item 4
+    server = FakeServer(ready=False)
+    monkeypatch.setattr(lifecycle, "Server", lambda ctx: server)
+    runstate.write(paths.app_json, RunInfo(port=1, pid=1, token="t", started_at="x"))
+    with caplog.at_level("ERROR", logger="yttoolkit"):
+        assert lifecycle.run_app(**_run_app_kwargs(paths, fake_platform)) == 1
+    assert server.started and server.stopped
+    assert len(server.joined) == 1 and server.joined[0] is not None  # join แบบมี timeout สั้น ๆ
+    assert not paths.app_json.exists()
+    assert "เปิดเซิร์ฟเวอร์ไม่สำเร็จ" in caplog.text
+
+
+def test_start_releases_lock_after_startup_timeout(paths, fake_platform, monkeypatch):  # item 4
+    server = FakeServer(ready=False)
+    monkeypatch.setattr(lifecycle, "Server", lambda ctx: server)
+    monkeypatch.setenv("YT_TOOLKIT_TRAY", "0")
+    monkeypatch.setenv("YT_TOOLKIT_OPEN_BROWSER", "0")
+    assert lifecycle.start(paths, fake_platform, sleep=lambda s: None) != 0
+    assert server.stopped
+    assert not paths.app_json.exists()
+    assert fake_platform.locked == set()  # ปล่อย lock คืน เปิดใหม่ได้ทันที
+
+
+def test_setup_file_logging_uses_rotating_handler(paths):  # item 6
+    import logging
+    import logging.handlers
+
+    root = logging.getLogger()
+    before = list(root.handlers)
+    level = root.level
+    try:
+        lifecycle.setup_file_logging(paths)
+        added = [h for h in root.handlers if h not in before]
+        assert len(added) == 1
+        handler = added[0]
+        assert isinstance(handler, logging.handlers.RotatingFileHandler)
+        assert handler.maxBytes == 1_000_000
+        assert handler.backupCount == 3
+        assert handler.encoding == "utf-8"
+        assert handler.baseFilename == str((paths.logs / "app.log").resolve())
+    finally:
+        for h in list(root.handlers):
+            if h not in before:
+                root.removeHandler(h)
+                h.close()
+        root.setLevel(level)
+
+
+def test_wait_succeeds_when_instance_answers(paths, fake_platform, monkeypatch):  # item 7
+    info = RunInfo(port=8790, pid=1, token="t", started_at="x")
+    responses = iter([None, None, info])
+    monkeypatch.setattr(lifecycle, "find_running", lambda p, pl: next(responses))
+    sleeps = []
+    out = []
+    assert lifecycle.wait(paths, fake_platform, timeout=25, sleep=sleeps.append, out=out.append) == 0
+    assert sleeps == [0.5, 0.5]
+    assert out == ["เปิด YT Toolkit แล้ว ที่ http://127.0.0.1:8790"]
+
+
+def test_wait_times_out_with_log_path(paths, fake_platform, monkeypatch):  # item 7
+    monkeypatch.setattr(lifecycle, "find_running", lambda p, pl: None)
+    out = []
+    assert lifecycle.wait(paths, fake_platform, timeout=0.05, sleep=lambda s: None, out=out.append) == 1
+    expected = str((paths.logs / "app.log").absolute())
+    assert out == [f"เปิดโปรแกรมไม่สำเร็จ ดูรายละเอียดได้ที่ {expected}"]
+
+
+def test_wait_timeout_zero_checks_exactly_once(paths, fake_platform, monkeypatch):  # item 7
+    calls = []
+
+    def find(p, pl):
+        calls.append(1)
+
+    monkeypatch.setattr(lifecycle, "find_running", find)
+    sleeps = []
+    out = []
+    assert lifecycle.wait(paths, fake_platform, timeout=0, sleep=sleeps.append, out=out.append) == 1
+    assert len(calls) == 1
+    assert sleeps == []
+    assert out[0].startswith("เปิดโปรแกรมไม่สำเร็จ")
+
+    info = RunInfo(port=8787, pid=1, token="t", started_at="x")
+    monkeypatch.setattr(lifecycle, "find_running", lambda p, pl: info)
+    assert lifecycle.wait(paths, fake_platform, timeout=0, sleep=sleeps.append, out=out.append) == 0
+
+
+def test_cli_wait_passes_timeout(monkeypatch):  # item 7
+    from yttoolkit import __main__ as cli
+
+    seen = []
+    monkeypatch.setattr(lifecycle, "wait", lambda **kw: seen.append(kw) or 0)
+    assert cli.main(["wait"]) == 0
+    assert cli.main(["wait", "--timeout", "0"]) == 0
+    assert cli.main(["wait", "--timeout", "3.5"]) == 0
+    assert [kw["timeout"] for kw in seen] == [25.0, 0.0, 3.5]

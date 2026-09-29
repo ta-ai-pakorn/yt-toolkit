@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import fcntl
+import logging
 import os
 import signal
 import subprocess
 from pathlib import Path
+
+log = logging.getLogger("yttoolkit")
 
 
 class MacPlatform:
@@ -39,8 +42,12 @@ class MacPlatform:
             pass
 
     def try_lock(self, path: Path) -> object | None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(path, "a+b")  # noqa: SIM115 (ตัวจัดการเก็บไว้ให้ release_lock ปิดเอง)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(path, "a+b")  # noqa: SIM115 (ตัวจัดการเก็บไว้ให้ release_lock ปิดเอง)
+        except OSError:
+            log.warning("เปิดไฟล์ lock ไม่ได้: %s", path, exc_info=True)
+            return None
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
