@@ -2,6 +2,7 @@
 
 เป็นฟังก์ชันล้วน (pure) ใช้แค่ไลบรารีมาตรฐาน: ไม่เรียกเครือข่าย ไม่รันคำสั่งใด ๆ
 (AC-SEC-05) — อะไรที่ไม่ตรงรูปแบบเป๊ะ ๆ จะได้ชนิด "invalid" เท่านั้น
+ตัวคั่นที่ถูก URL-encode (เช่น watch%3Fv%3D...) ไม่ถูกถอดรหัส จึงเป็น invalid
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ Kind = Literal["video", "playlist", "ambiguous", "invalid"]
 _VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 _PLAYLIST_ID = re.compile(r"[A-Za-z0-9_-]{10,64}")
 _HAS_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+_MARKDOWN_LINK = re.compile(r"\[[^\[\]]*\]\(([^()]*)\)")
+_WRAPPERS = {"<": ">", '"': '"', "'": "'", "(": ")"}
 _WHITESPACE = re.compile(r"\s")
 # อักขระที่ไม่เคยอยู่ในลิงก์ยูทูปจริง แต่เป็นของเชลล์ (AC-SEC-05) — เจอแล้วปฏิเสธทั้งบรรทัด
 # (& ไม่อยู่ในรายการนี้เพราะเป็นตัวคั่นพารามิเตอร์ของ URL; โดเมน/ID ถูกตรวจแบบเข้มอยู่แล้ว)
@@ -40,16 +43,31 @@ def _invalid(text: str) -> InputItem:
     return InputItem(input=text, kind="invalid")
 
 
+def _is_mix(list_id: str) -> bool:
+    # mix (radio) ของยูทูปขึ้นต้นด้วย "RD" ตัวพิมพ์ใหญ่เท่านั้น: ID ของยูทูปแยกตัวพิมพ์
+    # ใหญ่/เล็ก จึงไม่ปรับเป็นตัวใหญ่ก่อนเทียบ ("rd..." เป็นเพลย์ลิสต์ปกติ)
+    return list_id.startswith("RD")
+
+
+def _playlist_item(text: str, list_id: str | None) -> InputItem:
+    """เพลย์ลิสต์ล้วน — mix (RD) เป็นลิสต์ไม่รู้จบ ดึงรายการไม่ได้ จึงไม่รับ"""
+    if list_id is None or _is_mix(list_id):
+        return _invalid(text)
+    return InputItem(input=text, kind="playlist", playlist_id=list_id)
+
+
 def _video_item(text: str, video_id: str, list_id: str | None) -> InputItem:
     """คลิปเดียว — ถ้ามี list ที่ใช้ได้ด้วย ต้องให้ผู้ใช้เลือก (RD = mix ถือเป็นคลิปเดียว)"""
-    if list_id is None or list_id.startswith("RD"):
+    if list_id is None or _is_mix(list_id):
         return InputItem(input=text, kind="video", video_id=video_id)
     return InputItem(
         input=text, kind="ambiguous", video_id=video_id, playlist_id=list_id
     )
 
 
-def _first_param(query: dict[str, list[str]], key: str, pattern: re.Pattern[str]):
+def _first_param(
+    query: dict[str, list[str]], key: str, pattern: re.Pattern[str]
+) -> str | None:
     values = query.get(key)
     if not values:
         return None
@@ -114,14 +132,12 @@ def _parse_line_body(text: str) -> InputItem:
         video_id = _first_param(query, "v", _VIDEO_ID)
         if video_id:
             return _video_item(text, video_id, list_id)
-        return _invalid(text)
+        return _playlist_item(text, list_id)
 
     if _single_segment(path) == "playlist":
-        if list_id:
-            return InputItem(input=text, kind="playlist", playlist_id=list_id)
-        return _invalid(text)
+        return _playlist_item(text, list_id)
 
-    for prefix in ("shorts", "live"):
+    for prefix in ("shorts", "live", "v", "e"):
         video_id = _prefixed_segment(path, prefix)
         if video_id and _VIDEO_ID.fullmatch(video_id):
             return _video_item(text, video_id, list_id)
@@ -131,17 +147,51 @@ def _parse_line_body(text: str) -> InputItem:
 
 def _parse_embed(text: str, path: str, list_id: str | None) -> InputItem:
     segment = _prefixed_segment(path, "embed")
-    if segment == "videoseries" and list_id:
-        return InputItem(input=text, kind="playlist", playlist_id=list_id)
+    if segment == "videoseries":
+        return _playlist_item(text, list_id)
     if segment and _VIDEO_ID.fullmatch(segment):
         return _video_item(text, segment, list_id)
     return _invalid(text)
 
 
+def _strip_one_punct(text: str) -> str:
+    return text[:-1] if text.endswith((".", ",")) else text
+
+
+def _unwrap(text: str) -> str:
+    """ถอดเครื่องหมายห่อ "ชั้นเดียว": [ข้อความ](url), <..>, "..", '..', (..)"""
+    md = _MARKDOWN_LINK.fullmatch(text)
+    if md:
+        return md.group(1)
+    if len(text) >= 2 and _WRAPPERS.get(text[0]) == text[-1]:
+        return text[1:-1]
+    return text
+
+
+def _clean(text: str) -> str:
+    """ลอกสิ่งที่แอปแชต/ประโยคใส่มารอบลิงก์ (ห่อชั้นเดียว + จุด/จุลภาคท้ายตัวเดียว)"""
+    bare = _strip_one_punct(text)
+    if bare != text:
+        # ห่อแล้วปิดประโยคด้วยจุดข้างนอก เช่น (https://youtu.be/ID).
+        unwrapped = _unwrap(bare)
+        if unwrapped != bare:
+            return unwrapped
+    return _strip_one_punct(_unwrap(text))
+
+
 def parse_line(line: str) -> InputItem:
-    """แยกหนึ่งบรรทัดเป็นหนึ่งรายการ — ไม่เคย raise; ไม่รู้จัก = invalid"""
+    """แยกหนึ่งบรรทัดเป็นหนึ่งรายการ — ไม่เคย raise; ไม่รู้จัก = invalid
+
+    item.input คือบรรทัดเดิม (ตัดช่องว่างหัวท้าย) ส่วนเนื้อที่ถูกถอดห่อแล้วต้องผ่านการตรวจเดิมทุกข้อ
+    """
     text = line.strip()
-    return _parse_line_body(text)
+    result = _parse_line_body(_clean(text))
+    return InputItem(
+        input=text,
+        kind=result.kind,
+        video_id=result.video_id,
+        playlist_id=result.playlist_id,
+    )
 
 
 def _dedupe_key(item: InputItem) -> tuple[str, str | None, str | None]:

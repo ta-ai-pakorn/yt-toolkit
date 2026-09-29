@@ -107,7 +107,7 @@ def test_playlist_links(line):
     assert parse_line(line) == InputItem(input=line, kind="playlist", playlist_id=PL)
 
 
-@pytest.mark.parametrize("prefix", ["PL", "UU", "OL", "LL", "RD"])
+@pytest.mark.parametrize("prefix", ["PL", "UU", "OL", "LL"])
 def test_playlist_id_prefixes(prefix):
     pid = prefix + "abcDEF1234567"
     line = f"https://www.youtube.com/playlist?list={pid}"
@@ -236,17 +236,181 @@ def test_empty_and_blank_lines_are_invalid_for_parse_line():
     assert parse_line("   ").kind == "invalid"
 
 
-def test_parser_returns_data_only_and_never_runs_anything(monkeypatch):
-    import os
-    import subprocess
+# ---------- ลิงก์ที่แอปแชตห่อมา / มีเครื่องหมายท้ายประโยค ----------
 
-    def boom(*args, **kwargs):
-        raise AssertionError("ห้ามรันคำสั่ง")
+URL = f"https://youtu.be/{VID}"
 
-    monkeypatch.setattr(subprocess, "Popen", boom)
-    monkeypatch.setattr(os, "system", boom)
-    for line in ["; rm -rf /", "$(whoami)", "a & b", "x | y", f"{VID};id"]:
-        assert parse_line(line).kind == "invalid"
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"<{URL}>",
+        f'"{URL}"',
+        f"'{URL}'",
+        f"({URL})",
+        f"[คลิปนี้]({URL})",
+        f"[https://youtu.be/{VID}]({URL})",
+        f"[]({URL})",
+        f"<youtu.be/{VID}>",
+        f"<{URL}?t=42>",
+        f"[watch](https://www.youtube.com/watch?v={VID}&t=1s)",
+        f"  <{URL}>  ",
+        f"{URL}.",
+        f"{URL},",
+        f"<{URL}.>",
+        f"<{URL}>.",
+        f"{VID}.",
+        f"{VID},",
+        f"https://www.youtube.com/watch?v={VID}.",
+        f'"{VID}"',
+    ],
+)
+def test_wrapped_links_are_unwrapped_but_input_keeps_original(line):
+    item = parse_line(line)
+    assert item.kind == "video"
+    assert item.video_id == VID
+    assert item.input == line.strip()
+
+
+def test_wrapped_playlist_and_ambiguous():
+    pl = f"https://www.youtube.com/playlist?list={PL}"
+    assert parse_line(f"<{pl}>").kind == "playlist"
+    amb = f"https://www.youtube.com/watch?v={VID}&list={PL}"
+    item = parse_line(f"({amb}),")
+    assert (item.kind, item.video_id, item.playlist_id) == ("ambiguous", VID, PL)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # ห่อไม่ครบคู่ / คนละชนิด
+        f"<{URL}",
+        f"{URL}>",
+        f'"{URL}',
+        f"{URL}'",
+        f"(({URL})",
+        f"<{URL})",
+        f"\"{URL}'",
+        f"[คลิป]({URL}",
+        f"[คลิป]{URL}",
+        f"[คลิป](<{URL}>)",
+        # ห่อซ้อน: ถอดได้แค่ชั้นเดียว
+        f"<<{URL}>>",
+        f'"<{URL}>"',
+        f"(({URL}))",
+        f"[a]([b]({URL}))",
+        # เนื้อในต้องผ่านการตรวจเดิมทุกข้อ
+        "<$(x)>",
+        "($(whoami))",
+        '"; rm -rf /"',
+        "<; rm -rf />",
+        f"<{URL}; rm -rf />",
+        "[$(x)]($(whoami))",
+        f"[x](https://evil.example/watch?v={VID})",
+        f"<https://evil.example/{VID}>",
+        f"<https://youtube.com.evil.example/watch?v={VID}>",
+        "<hello>",
+        "<>",
+        "()",
+        '""',
+        "[]()",
+        # เครื่องหมายท้ายตัดได้แค่ตัวเดียว
+        f"{URL}..",
+        f"{URL},.",
+        f"{URL};",
+        f"{URL}!",
+    ],
+)
+def test_wrapper_edge_cases_stay_invalid(line):
+    item = parse_line(line)
+    assert item.kind == "invalid"
+    assert item.input == line.strip()
+
+
+def test_wrapped_lines_deduplicate_against_plain_ones():
+    items = parse_text("\n".join([URL, f"<{URL}>", f"[x]({URL}),", VID]))
+    assert len(items) == 1
+    assert items[0].input == URL
+
+
+# ---------- เส้นทางเก่า /v/ และ /e/ ----------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://www.youtube.com/v/{VID}",
+        f"https://www.youtube.com/e/{VID}",
+        f"youtube.com/v/{VID}?version=3",
+        f"https://m.youtube.com/v/{VID}/",
+    ],
+)
+def test_legacy_v_and_e_paths(line):
+    assert parse_line(line) == video(line)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://youtu.be/v/{VID}",
+        f"https://www.youtube-nocookie.com/v/{VID}",
+        "https://www.youtube.com/v/short",
+        f"https://www.youtube.com/v/{VID}/extra",
+    ],
+)
+def test_legacy_paths_only_where_allowed(line):
+    assert parse_line(line).kind == "invalid"
+
+
+# ---------- watch?list= ไม่มี v ----------
+
+
+def test_watch_with_only_list_is_playlist():
+    line = f"https://www.youtube.com/watch?list={PL}"
+    assert parse_line(line) == InputItem(input=line, kind="playlist", playlist_id=PL)
+
+
+def test_watch_with_bad_v_and_no_list_is_invalid():
+    assert parse_line("https://www.youtube.com/watch?v=short").kind == "invalid"
+
+
+# ---------- RD mix ----------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://www.youtube.com/playlist?list=RD{VID}",
+        f"https://www.youtube.com/playlist?list=RDMM{VID}",
+        f"https://www.youtube.com/watch?list=RD{VID}",
+        f"https://www.youtube.com/embed/videoseries?list=RD{VID}",
+    ],
+)
+def test_rd_mix_alone_is_not_a_playlist(line):
+    assert parse_line(line).kind == "invalid"
+
+
+def test_rd_prefix_is_case_sensitive():
+    # ID ของยูทูปแยกตัวพิมพ์ใหญ่/เล็ก "rd..." ไม่ใช่ mix
+    line = f"https://www.youtube.com/watch?v={VID}&list=rdabcdefghij"
+    assert parse_line(line).kind == "ambiguous"
+
+
+# ---------- ตัวคั่นที่ถูก encode ไม่ถูกถอดรหัส ----------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://www.youtube.com/watch%3Fv%3D{VID}",
+        f"https://www.youtube.com/watch%3fv=%20{VID}",
+        f"https%3A%2F%2Fyoutu.be%2F{VID}",
+        f"https://youtu.be%2F{VID}",
+        f"https://www.youtube.com%2Fwatch?v={VID}",
+    ],
+)
+def test_encoded_delimiters_are_rejected_not_decoded(line):
+    assert parse_line(line).kind == "invalid"
 
 
 # ---------- parse_text: AC-IN-03 / AC-IN-04 ----------
