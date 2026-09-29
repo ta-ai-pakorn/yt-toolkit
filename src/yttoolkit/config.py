@@ -24,6 +24,14 @@ class Paths:
         return self.data_root / "data"
 
     @property
+    def db(self) -> Path:
+        return self.data / "app.db"
+
+    @property
+    def cache(self) -> Path:
+        return self.data / "cache"
+
+    @property
     def work(self) -> Path:
         return self.data_root / "work"
 
@@ -48,7 +56,7 @@ class Paths:
         return self.code_root / "web" / "dist"
 
     def ensure(self) -> None:
-        for d in (self.data, self.work, self.run, self.logs, self.bin):
+        for d in (self.data, self.cache, self.work, self.run, self.logs, self.bin):
             d.mkdir(parents=True, exist_ok=True)
 
 

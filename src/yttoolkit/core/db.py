@@ -1,0 +1,118 @@
+"""ฐานข้อมูล SQLite (data/app.db) และการล้าง cache ของคลิปที่ไม่ได้เปิดนาน"""
+
+from __future__ import annotations
+
+import shutil
+import sqlite3
+import threading
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Sequence
+
+SCHEMA_VERSION = 1
+
+_SCHEMA = """
+CREATE TABLE schema_version (version INTEGER NOT NULL);
+
+CREATE TABLE videos (
+  video_id      TEXT PRIMARY KEY,
+  title         TEXT NOT NULL,
+  channel       TEXT,
+  duration_s    INTEGER,
+  thumbnail_url TEXT,
+  chapters_json TEXT,
+  probe_json    TEXT NOT NULL,
+  probed_at     TEXT NOT NULL,
+  opened_at     TEXT NOT NULL
+);
+
+CREATE TABLE jobs (
+  id            TEXT PRIMARY KEY,
+  video_id      TEXT NOT NULL REFERENCES videos(video_id),
+  kind          TEXT NOT NULL,
+  params_json   TEXT NOT NULL,
+  status        TEXT NOT NULL,
+  stage         TEXT,
+  progress      REAL,
+  speed_bps     INTEGER,
+  eta_s         INTEGER,
+  position      INTEGER NOT NULL,
+  error_code    TEXT,
+  error_detail  TEXT,
+  outputs_json  TEXT,
+  created_at    TEXT NOT NULL,
+  started_at    TEXT,
+  finished_at   TEXT
+);
+CREATE INDEX jobs_status_position ON jobs(status, position);
+
+CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
+"""
+
+
+class Database:
+    """SQLite connection เดียว ใช้ร่วมกันได้ทุก thread โดยทุกการเข้าถึงผ่าน lock"""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._lock = threading.Lock()
+        # isolation_level=None = autocommit: แต่ละคำสั่งจบในตัว ไม่มี transaction ค้าง
+        self._conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+
+    def migrate(self) -> None:
+        with self._lock:
+            has_table = self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
+            ).fetchone()
+            if has_table is None:
+                # executescript ทำงานทั้งก้อนใน transaction เดียว ถ้าพังกลางทางจะไม่เหลือตารางครึ่งๆ
+                self._conn.executescript(
+                    f"BEGIN;{_SCHEMA}INSERT INTO schema_version (version) VALUES ({SCHEMA_VERSION});COMMIT;"
+                )
+                return
+            row = self._conn.execute("SELECT max(version) FROM schema_version").fetchone()
+            found = row[0] if row and row[0] is not None else 0
+            if found > SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"ฐานข้อมูลเป็นเวอร์ชัน {found} ใหม่กว่าโปรแกรมนี้ ({SCHEMA_VERSION}) "
+                    "กรุณาอัปเดตโปรแกรมก่อนเปิดใช้"
+                )
+
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        with self._lock:
+            return self._conn.execute(sql, params).fetchall()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def purge_stale_cache(db: Database, cache_root: Path, now: datetime, days: int = 30) -> int:
+    """ลบคลิปที่ไม่ได้เปิดเกิน `days` วัน พร้อมโฟลเดอร์ cache คลิปที่ยังมีงานอ้างอิงอยู่จะไม่ถูกลบ"""
+    cutoff = now - timedelta(days=days)
+    rows = db.execute(
+        "SELECT video_id, opened_at FROM videos "
+        "WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.video_id = videos.video_id)"
+    )
+    removed = 0
+    for row in rows:
+        try:
+            opened = _parse_time(row["opened_at"])
+        except ValueError:
+            continue  # เวลาอ่านไม่ออก ไม่เสี่ยงลบ
+        if opened >= cutoff:
+            continue
+        video_id = row["video_id"]
+        db.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
+        if video_id and Path(video_id).name == video_id:
+            shutil.rmtree(cache_root / video_id, ignore_errors=True)
+        removed += 1
+    return removed
