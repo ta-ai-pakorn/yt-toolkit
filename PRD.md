@@ -1,7 +1,7 @@
 # PRD: YT Toolkit v1
 
 > เอกสารความต้องการของผลิตภัณฑ์ (Product Requirements Document)
-> เวอร์ชัน 1.0 · 2026-09-28 · เจ้าของ: ธรรมชาติ เฉลิมวงศ์ (พิธ) · สถานะ: รออนุมัติ
+> เวอร์ชัน 1.1 · 2026-09-29 · เจ้าของ: ธรรมชาติ เฉลิมวงศ์ (พิธ) · สถานะ: รออนุมัติ
 > เอกสารคู่กัน: [BRD.md](BRD.md) (เหตุผลทางธุรกิจ, ความต้องการ FR-*, ระบบดีไซน์, บันทึกการตัดสินใจ)
 
 ---
@@ -60,6 +60,8 @@ v2 (ชุดเครื่องมือสื่อครบวงจร + �
 | US-09 | รู้ทันทีว่าไฟล์อยู่ที่ไหน | เอาไฟล์ไปใช้ต่อได้เลย | FR-OUT-3 |
 | US-10 | เข้าใจว่าเกิดอะไรขึ้นเวลามีปัญหา | แก้เองได้ หรือส่งข้อมูลให้ผู้ดูแล | FR-SET-4, BRD ข้อ 13 |
 | US-11 | เปิดและปิดโปรแกรมได้ง่ายเหมือนโปรแกรมทั่วไป | ไม่ต้องใช้คำสั่ง | FR-LIFE |
+| US-12 | ได้เครดิตแหล่งที่มาพร้อมใช้ | ใส่ในสไลด์หรือโพสต์ได้ทันทีและใช้เนื้อหาอย่างรับผิดชอบ | FR-OUT-6, FR-OUT-7 |
+| US-13 | โหลดคลิปจำกัดอายุหรือคลิปที่บัญชีของฉันดูได้ | ใช้คลิปที่ต้องล็อกอินยูทูปถึงจะดูได้ | FR-CK |
 
 ---
 
@@ -83,7 +85,7 @@ W7 กล่องยืนยัน / toast / error: ซ้อนบนทุ�
 | `/v/:videoId` | W2 |
 | `/batch?src=<resolveId>` | W3 |
 | `/history` | W5 |
-| `/settings` และ `/settings/health` | W6 |
+| `/settings`, `/settings/advanced`, `/settings/stats`, `/settings/health` | W6 |
 
 ---
 
@@ -96,6 +98,7 @@ W7 กล่องยืนยัน / toast / error: ซ้อนบนทุ�
 |---|---|---|
 | แถบบน | Button (ghost) | ลิงก์ไป W5, W6 |
 | ช่องวางลิงก์ | Input Group + Textarea (สูงขึ้นเองได้ถึง 8 บรรทัด) | placeholder `https://youtube.com/watch?v=...` · ปุ่ม **วิเคราะห์** เป็นปุ่มหลักปุ่มเดียวของหน้า |
+| ปุ่มวาง (M6) | Button รอง "วาง" (ไอคอน Clipboard) ใน Input Group | กดแล้วเรียก `navigator.clipboard.readText()` → เติมข้อความลงช่อง ถ้าเป็นลิงก์ยูทูปให้วิเคราะห์ทันที (FR-IN-7) · เบราว์เซอร์ไม่อนุญาตหรือไม่รองรับ → ข้อความใต้ช่อง "เบราว์เซอร์ไม่อนุญาตให้อ่านคลิปบอร์ด คลิกในช่องแล้วกด Ctrl+V แทน" (macOS แสดง ⌘V) และโฟกัสช่องให้ |
 | คำแนะนำ | Kbd | "กด Ctrl+V ที่ไหนก็ได้" (macOS แสดง ⌘V) |
 | ผลการวิเคราะห์ | รายการใต้ช่องวางลิงก์ | ดูหัวข้อ "ผลการวิเคราะห์" ด้านล่าง · ยังไม่ได้กดวิเคราะห์ → ซ่อนส่วนนี้ |
 | ล่าสุด | Item × 5 | ปก, ชื่อ, ความยาว · คลิกไป W2 · ไม่มีประวัติ → ซ่อนส่วนนี้ |
@@ -120,17 +123,19 @@ W7 กล่องยืนยัน / toast / error: ซ้อนบนทุ�
 | ส่วน | คอมโพเนนต์ | สถานะพิเศษ |
 |---|---|---|
 | หัวคลิป: ปก, ชื่อ, ช่อง, ความยาว, จำนวน chapter, แทร็กซับที่เลือก | Badge | กำลังโหลด: Skeleton รูปร่างเดียวกัน |
+| ปุ่มคัดลอกที่หัวคลิป | Button Group (ปุ่มโปร่ง): "คัดลอกเครดิต" (M4, FR-OUT-7), "คัดลอก chapter" (M3, FR-PROBE-4), "คัดลอกคำอธิบาย" (M3, FR-PROBE-5) | กดแล้ว toast "คัดลอกแล้ว" · ไม่มี chapter หรือไม่มีคำอธิบาย → ซ่อนปุ่มนั้น |
 | **ภาพเฟรม** | Card, Aspect Ratio (16:9), Hover Card (ขยาย 1.5 เท่า + timecode), Context Menu, Button Group | กำลังโหลด: Skeleton 6 ช่อง · ไม่มี storyboard: Empty + ปุ่ม "ขอภาพคม" |
 | แถวภาพเฟรม | grid 6 คอลัมน์ (จอแคบ 3 คอลัมน์) แสดง 2 แถวแรก ที่เหลือกด "ดูทั้งหมด" | |
-| **วิดีโอ** | Select (คุณภาพ), Switch ("ความละเอียดสูงสุด"), Button หลัก "โหลด mp4" | Switch เปิด → Select แสดงตัวเลือก VP9/AV1 พร้อมป้ายเตือน |
-| **เสียง** | Toggle Group (m4a แนะนำ / mp3), Select bitrate (แสดงเฉพาะ mp3), Button รอง "โหลดเสียง" | |
+| **วิดีโอ** | Select (คุณภาพ), Switch ("ความละเอียดสูงสุด"), Button หลัก "โหลด mp4" · (M4) Select "ภาษาเสียง" (FR-VID-7), Switch "ไม่เอาเสียง" (FR-VID-8), Select "ฝังซับ (เปิด/ปิดได้)" ค่าเริ่มต้น "ไม่ฝัง" (FR-VID-9) | Switch เปิด → Select แสดงตัวเลือก VP9/AV1 พร้อมป้ายเตือน · คลิปมีเสียงภาษาเดียว → ซ่อน "ภาษาเสียง" · "ไม่เอาเสียง" เปิด → ปิดใช้ "ภาษาเสียง" · คลิปไม่มีซับหรือเปิด "แยกไฟล์ตาม chapter" → ปิดใช้ "ฝังซับ" พร้อม Tooltip บอกเหตุผล |
+| **เสียง** | Toggle Group (m4a แนะนำ / mp3 / wav), Select bitrate (แสดงเฉพาะ mp3), Select "ภาษาเสียง" (ค่าเดียวกับส่วนวิดีโอ เปลี่ยนที่หนึ่งอีกที่เปลี่ยนตาม), Button รอง "โหลดเสียง" | เลือก wav → ข้อความเล็ก "ไฟล์ไม่บีบอัด ขนาดประมาณ <X> MB" (≈ 10 MB ต่อนาที) |
 | **ซับ** | Select แทร็ก (3 กลุ่มตาม FR-SUB-2), Toggle Group (สั้น/กลาง/ยาว), Collapsible "ปรับเอง" (Slider + Field), กล่อง preview 5 ซับแรก + ตัวนับ, Button Group (.srt .txt .md คัดลอก) | ไม่มีซับ: ซ่อนทั้งส่วน แสดงข้อความ "คลิปนี้ไม่มีซับ" |
-| **ตัวเลือกขั้นสูง** (พับไว้) | Collapsible · ช่องเวลาเริ่ม/จบ · Switch "แยกไฟล์ตาม chapter" (ซ่อนถ้าไม่มี chapter) · Switch "ตัดโฆษณา" + รายการหมวด | ค่าในส่วนนี้มีผลกับปุ่มโหลดวิดีโอ เสียง และซับทั้งหมด · เมื่อเปิดใช้ ให้แสดง Badge "ใช้ตัวเลือกขั้นสูงอยู่" ที่หัวส่วนวิดีโอ |
+| **ตัวเลือกขั้นสูง** (พับไว้) | Collapsible · ช่องเวลาเริ่ม/จบ · Switch "แยกไฟล์ตาม chapter" (ซ่อนถ้าไม่มี chapter) · Switch "ตัดโฆษณา" + รายการหมวด · (M5) Checkbox "ใช้คุกกี้กับคลิปนี้" (แสดงเฉพาะเมื่อเปิดคุกกี้ไว้ FR-CK-7) | ค่าในส่วนนี้มีผลกับปุ่มโหลดวิดีโอ เสียง และซับทั้งหมด · เมื่อเปิดใช้ ให้แสดง Badge "ใช้ตัวเลือกขั้นสูงอยู่" ที่หัวส่วนวิดีโอ |
 | **ทรานสคริปต์** | Input Group (ค้นหา), Scroll Area (สูงสูงสุด 360px) | คลิกบรรทัด → ไฮไลต์เฟรมที่ใกล้ที่สุดและเลื่อนแถวภาพเฟรมไปหา |
 
-**เมนูคลิกขวาที่ภาพเฟรม (M2):** มี 2 รายการ
+**เมนูคลิกขวาที่ภาพเฟรม (M2):** มี 3 รายการ
 - **โหลดภาพนี้** → โหลดไฟล์ภาพเฟรมนั้นชื่อ `frame_HH-MM-SS.jpg` (`/cache/...?download=1`)
 - **คัดลอกเวลา** → คัดลอก timecode รูปแบบ `HH:MM:SS` แล้วขึ้น toast "คัดลอกแล้ว"
+- **คัดลอกลิงก์ช่วงนี้** → คัดลอก `https://youtu.be/<videoId>?t=<วินาที>` (วินาที = `floor(tMs / 1000)`) แล้วขึ้น toast "คัดลอกแล้ว" (FR-FRAME-4)
 - "ตั้งจุดเริ่ม/จบ" มาใน M5 และ "ดูซับช่วงนี้" มาใน M3
 - เปิดเมนูด้วยคีย์บอร์ดได้ (Shift+F10 หรือปุ่ม Menu) ทุกภาพเฟรมกด Tab ไปถึงได้
 
@@ -164,9 +169,13 @@ W7 กล่องยืนยัน / toast / error: ซ้อนบนทุ�
 @reui/data-grid · คอลัมน์: ปก, ชื่อคลิป, ไฟล์ที่ได้ (Badge ต่อชนิด), เวลา (แบบ "5 นาทีก่อน") · เรียงล่าสุดก่อน · ค้นหาจากชื่อ · คลิกแถวเปิด W2 จาก cache · ว่าง → Empty "ยังไม่มีประวัติ" + ปุ่มกลับหน้าแรก
 
 ### W6 ตั้งค่า + ตรวจสุขภาพระบบ
-Tabs 3 แท็บ
-- **ทั่วไป** (Field): ค่าทั้งหมดในข้อ 6.4 · บันทึกทันทีเมื่อเปลี่ยน (ไม่มีปุ่มบันทึก) แล้วแสดง toast "บันทึกแล้ว"
-- **ตรวจสุขภาพระบบ** (Item + Badge): ffmpeg, yt-dlp (เวอร์ชัน + อายุ), JS runtime, เน็ต, สิทธิ์เขียนโฟลเดอร์, พื้นที่ดิสก์ · แต่ละแถวมีสถานะ พร้อม / เตือน / ใช้ไม่ได้ และปุ่ม "วิธีแก้" · ปุ่ม "ตรวจหาอัปเดต", "ปิดโปรแกรม"
+Tabs 5 แท็บ
+- **ทั่วไป** (Field): ค่าทั้งหมดในข้อ 6.4 ยกเว้นคุกกี้ · บันทึกทันทีเมื่อเปลี่ยน (ไม่มีปุ่มบันทึก) แล้วแสดง toast "บันทึกแล้ว"
+  - (M6) "รูปแบบชื่อไฟล์": Select 3 แบบ + บรรทัด "ตัวอย่าง: <ชื่อไฟล์>.mp4" (Plex Mono) ที่เปลี่ยนตามทันที ใช้ชื่อคลิปล่าสุดที่เปิด ถ้าไม่มีใช้ชื่อตัวอย่างภาษาไทย (FR-OUT-8)
+  - (M6) ส่วน "ข้อมูลในเครื่อง": ปุ่มรอง "ล้างข้อมูลชั่วคราว (<ขนาด>)" → Alert Dialog ยืนยัน → toast "ล้างแล้ว ได้พื้นที่คืน <ขนาด>" (FR-SET-6) · ปุ่มรอง "สำรองค่าตั้ง" และ "นำเข้าค่าตั้ง" (เลือกไฟล์ `.json`) (FR-SET-7)
+- **ขั้นสูง** (M5): คุกกี้ยูทูป (FR-CK) · Switch "ใช้คุกกี้ยูทูป" (ปิดไว้เป็นค่าเริ่มต้น) · เปิดครั้งแรก → Alert Dialog คำเตือน (W7) · เลือกแหล่ง: Toggle Group "ไฟล์ cookies.txt" / "Firefox" · ปุ่ม "นำเข้า cookies.txt" · ข้อความเล็ก "Chrome บน Windows อ่านคุกกี้ไม่ได้ตั้งแต่ Chrome 127 ใช้ Firefox หรือส่งออก cookies.txt แทน" · สถานะปัจจุบัน (นำเข้าเมื่อ <วันที่>) · ปุ่มรอง "ลบคุกกี้"
+- **สถิติของฉัน** (M6): ตัวเลข 4 ช่อง (คลิป, ไฟล์, ขนาดรวม GB, ชนิดที่ใช้บ่อยที่สุด) + ตารางรายเดือน 12 เดือนล่าสุด (เดือน, คลิป, ไฟล์, ขนาด) · ข้อความเล็ก "คำนวณในเครื่องนี้เท่านั้น ไม่ส่งไปที่ไหน" · ปุ่มโปร่ง "ล้างสถิติ" · นับใหม่แล้วแสดง "นับตั้งแต่ <วันที่>" · ว่าง → Empty "ยังไม่มีสถิติ" (FR-STAT)
+- **ตรวจสุขภาพระบบ** (Item + Badge): ffmpeg, yt-dlp (เวอร์ชัน + อายุ), JS runtime, เน็ต, สิทธิ์เขียนโฟลเดอร์, พื้นที่ดิสก์, คุกกี้ (M5, FR-CK-8) · แต่ละแถวมีสถานะ พร้อม / เตือน / ใช้ไม่ได้ และปุ่ม "วิธีแก้" · ปุ่ม "ตรวจหาอัปเดต", "ปิดโปรแกรม"
 - **เกี่ยวกับ**: เวอร์ชันแอพ, git commit, ลิงก์ README, ข้อความการใช้งานอย่างถูกต้อง
 
 ### W7 กล่องยืนยันและการแจ้งเตือน
@@ -178,6 +187,9 @@ Tabs 3 แท็บ
 | งานเสร็จ | Toast | "โหลดเสร็จแล้ว · <ชื่อ>" | เปิดโฟลเดอร์ |
 | งานผิดพลาด | Toast (ไม่หายเอง) + รายละเอียดในแถวคิว | ข้อความจากข้อ 7 | รายละเอียด |
 | เปิด SponsorBlock พร้อมโหลดซับ | ข้อความเตือนใต้ Switch | "เวลาซับจะไม่ตรงกับวิดีโอที่ตัดโฆษณาแล้ว" | — |
+| เปิดคุกกี้ครั้งแรก (M5) | Alert Dialog | "ใช้คุกกี้ยูทูป? บัญชี Google ที่ใช้อาจถูกจำกัดหรือถูกล็อก และกระทบ Gmail กับ Drive ของบัญชีนั้นได้ ใช้บัญชีสำรองที่ไม่ใช่บัญชีงานหลัก และอย่าส่งไฟล์คุกกี้ให้ใคร" | ยกเลิก / เปิดใช้คุกกี้ |
+| ล้างข้อมูลชั่วคราว (M6) | Alert Dialog | "ล้างข้อมูลชั่วคราว <ขนาด>? ไฟล์ที่โหลดไว้ ประวัติ และค่าตั้งยังอยู่ครบ แต่เปิดคลิปเก่าต้องดึงภาพใหม่" | ยกเลิก / ล้างเลย |
+| ล้างสถิติ (M6) | Alert Dialog | "เริ่มนับสถิติใหม่? ประวัติและไฟล์ที่โหลดไว้ยังอยู่ครบ" | ยกเลิก / ล้างสถิติ |
 
 ---
 
@@ -195,18 +207,23 @@ Tabs 3 แท็บ
 | AC-IN-05 | ลิงก์ที่มีทั้ง `v=` และ `list=` → ได้ชนิด `ambiguous` และหน้าเว็บแสดง Dialog ตาม W7 | U, E |
 | AC-IN-06 | กด Ctrl+V ขณะไม่ได้โฟกัสช่องกรอกใด ๆ และคลิปบอร์ดเป็นลิงก์ยูทูป → เริ่มวิเคราะห์ · ถ้าไม่ใช่ลิงก์ยูทูป → ไม่ทำอะไร | E |
 | AC-IN-07 | เพลย์ลิสต์ 250 คลิป → แสดง 200 คลิปแรกพร้อมข้อความว่าจำกัดที่ 200 | A |
+| AC-IN-08 | กดปุ่ม "วาง" ขณะคลิปบอร์ดเป็นลิงก์ยูทูปและเบราว์เซอร์อนุญาต → ช่องมีลิงก์นั้นและเริ่มวิเคราะห์ทันที · คลิปบอร์ดเป็นข้อความอื่น → เติมลงช่องแต่ไม่วิเคราะห์ · ไม่มีการเรียก `readText()` จนกว่าจะกดปุ่ม | E |
+| AC-IN-09 | `readText()` ถูกปฏิเสธหรือไม่มีในเบราว์เซอร์ → แสดงคำแนะนำภาษาไทยให้กด Ctrl+V (macOS ⌘V) และโฟกัสช่องวางลิงก์ ไม่มี error สีแดง ไม่มี toast ผิดพลาด | E |
 
 ### 5.2 ข้อมูลคลิปและภาพเฟรม
 | AC | เงื่อนไข → ผลที่ต้องได้ | เทส |
 |---|---|---|
 | AC-PROBE-01 | วิเคราะห์คลิปเดิมซ้ำภายใน 24 ชม. → ใช้ cache ไม่เรียกยูทูป | A |
 | AC-PROBE-02 | คลิปไลฟ์ที่ยังออกอากาศ → `E_LIVE_NOT_READY` | A |
+| AC-PROBE-03 | คลิปที่มี 3 chapter กด "คัดลอก chapter" → คลิปบอร์ดได้ 3 บรรทัด `HH:MM:SS ชื่อ` (เช่น `00:00:00 บทนำ`) เรียงตามเวลา ใช้ `HH:MM:SS` ทุกบรรทัดแม้คลิปสั้นกว่า 1 ชม. · คลิปไม่มี chapter → ไม่มีปุ่ม | U, E |
+| AC-PROBE-04 | กด "คัดลอกคำอธิบาย" → คลิปบอร์ดได้คำอธิบายตรงกับ `description` จาก probe ทุกตัวอักษร (รวมการขึ้นบรรทัด) · คลิปไม่มีคำอธิบาย → ไม่มีปุ่ม | E |
 | AC-FRAME-01 | คลิปยาว ≤ 1 ชม. บนเน็ต ≥ 50 Mbps → เฟรมโหมดเร็วแสดงครบภายใน 5 วินาทีนับจากกดวิเคราะห์ | N, M |
 | AC-FRAME-02 | ตัด grid ของ storyboard ได้เฟรมตามจำนวนจริง ไม่รวมช่องว่างท้าย grid ที่เกินความยาวคลิป · timecode ของเฟรมที่ i = i × ช่วงห่าง | U |
 | AC-FRAME-03 | โหมดคมให้ timecode ชุดเดียวกับโหมดเร็ว ภาพ ≥ 1280 px กว้าง และลบไฟล์วิดีโอชั่วคราวหลังเสร็จ | A |
 | AC-FRAME-04 | โหมดคมตั้งช่วงห่างได้ ถ้าช่วงห่างทำให้เกิน 200 เฟรม ระบบปรับช่วงห่างขึ้นให้พอดี 200 และแจ้งผู้ใช้ | U |
 | AC-FRAME-05 | contact sheet มี 5 คอลัมน์, timecode ทุกช่อง, หัวภาพมีชื่อคลิปภาษาไทยแสดงถูกต้อง (ไม่เป็นกล่องสี่เหลี่ยม) | U, M |
 | AC-FRAME-06 | zip มีไฟล์ชื่อ `frame_HH-MM-SS.jpg` ครบตามจำนวนเฟรม | U |
+| AC-FRAME-07 | คลิกขวาที่เฟรมเวลา 00:01:30.500 → "คัดลอกลิงก์ช่วงนี้" → คลิปบอร์ดได้ `https://youtu.be/<videoId>?t=90` และมี toast "คัดลอกแล้ว" · เปิดเมนูด้วยคีย์บอร์ดแล้วเลือกได้เหมือนกัน | E |
 
 ### 5.3 วิดีโอและเสียง
 | AC | เงื่อนไข → ผลที่ต้องได้ | เทส |
@@ -215,8 +232,16 @@ Tabs 3 แท็บ
 | AC-VID-02 | เปิด "ความละเอียดสูงสุด" + เลือก 2160p ในคลิปที่มี 4K → ไฟล์ mp4 ความสูง 2160 | N |
 | AC-VID-03 | คลิปที่มีเสียงหลายภาษา → แทร็กเสียงในไฟล์คือแทร็ก original (เทียบ language กับข้อมูลจาก probe) | N |
 | AC-VID-04 | ไฟล์ mp4 มีปกและ metadata ชื่อคลิป ช่อง และลิงก์ต้นทาง | N |
+| AC-VID-05 | คลิปภาษาอังกฤษที่มีเสียงพากย์ไทย เลือก "ภาษาเสียง" = ไทย → แทร็กเสียงในไฟล์ mp4 และ m4a มี language เป็น `th` และไม่ใช่แทร็ก original | N |
+| AC-VID-06 | `audioLanguage` = `th` แต่คลิปไม่มีแทร็กไทย → ใช้แทร็ก original และงานมีหมายเหตุ "คลิปนี้ไม่มีเสียงภาษาที่เลือก ใช้เสียงต้นฉบับแทน" · `audioLanguage` = `original` ในคลิปที่มีเสียงพากย์ → ได้ original เหมือน AC-VID-03 | U |
+| AC-VID-07 | คลิปมีเสียงภาษาเดียว → ไม่แสดง Select "ภาษาเสียง" · คลิปมีหลายแทร็ก → ค่าแรกคือ "ต้นฉบับ (<ภาษา>)" และมีเฉพาะภาษาที่คลิปมีจริง | E |
+| AC-VID-08 | เปิด "ไม่เอาเสียง" → ไฟล์ mp4 ไม่มี audio stream (ffprobe) ชื่อไฟล์ลงท้าย ` (ไม่มีเสียง).mp4` · format selector ไม่มีส่วน `+ba` จึงไม่โหลดแทร็กเสียงเลย | N, U |
+| AC-VID-09 | เลือก "ฝังซับ" แทร็ก `th-orig` → mp4 มี subtitle stream 1 แทร็ก codec `mov_text` language `tha` · video stream ไม่ถูกเข้ารหัสใหม่ (codec และ bitrate เท่ากับกรณีไม่ฝังซับ) · ข้อความซับตรงกับ `.srt` ที่สร้างด้วย preset เดียวกัน | N |
+| AC-VID-10 | ฝังซับพร้อมเลือกช่วง 01:30-05:00 → ซับที่ฝังนับเวลาใหม่จาก 00:00 ตาม AC-SUB-10 · ส่ง `embedSubs` พร้อม `splitChapters: true` → 422 `E_BAD_REQUEST` | U, A |
 | AC-AUD-01 | m4a → ไม่มีการเข้ารหัสใหม่ (codec เป็น AAC ตรงกับต้นฉบับ) | N |
 | AC-AUD-02 | mp3 192 → bitrate 192 kbps ± 5% | N |
+| AC-AUD-03 | wav → codec `pcm_s16le`, sample rate เท่าแทร็กต้นฉบับ, ความยาวเท่าต้นฉบับ ± 0.1 วิ, มี metadata ชื่อคลิปและช่อง | N |
+| AC-AUD-04 | เลือก wav ใน W2 → แสดงขนาดโดยประมาณ (ความยาว × sample rate × จำนวนช่องเสียง × 2 ไบต์) คลาดไม่เกิน 5% จากไฟล์จริง | U, E |
 
 ### 5.4 ซับ
 | AC | เงื่อนไข → ผลที่ต้องได้ | เทส |
@@ -261,6 +286,11 @@ Tabs 3 แท็บ
 | AC-OUT-03 | โหลดไฟล์ชื่อซ้ำ → ต่อท้าย ` (2)`, ` (3)` ไม่เขียนทับ | U |
 | AC-OUT-04 | กด "เปิดโฟลเดอร์" → Explorer/Finder เปิดพร้อมเลือกไฟล์นั้น | M |
 | AC-OUT-05 | เปิด W2 ของคลิปจากประวัติขณะไม่มีเน็ต → ข้อมูลคลิปและภาพเฟรมโหมดเร็วยังแสดงจาก cache | E |
+| AC-OUT-06 | งานใด ๆ เสร็จ → โฟลเดอร์ผลลัพธ์มี `แหล่งที่มา.txt` (UTF-8 ไม่มี BOM, CRLF) ที่มีบรรทัด ชื่อคลิป, ช่อง, ลิงก์ `https://www.youtube.com/watch?v=<id>`, วันที่เผยแพร่, วันที่โหลด, สัญญาอนุญาต และบรรทัดเครดิต · โหลดงานที่สองในโฟลเดอร์เดิม → ยังมีไฟล์เดียว วันที่โหลดเป็นของงานล่าสุด | U |
+| AC-OUT-07 | probe มี `license` = `Creative Commons Attribution license (reuse allowed)` → บรรทัดสัญญาอนุญาตแสดงค่านั้น · ไม่มี `license` → แสดง "ไม่ระบุ" | U |
+| AC-OUT-08 | กด "คัดลอกเครดิต" → คลิปบอร์ดได้ `ที่มา: <ชื่อคลิป> — <ช่อง> (YouTube) https://youtu.be/<videoId>` บรรทัดเดียว และมี toast "คัดลอกแล้ว" | E |
+| AC-OUT-09 | รูปแบบชื่อไฟล์ทั้ง 3 แบบกับชื่อคลิปใน AC-OUT-01 และ AC-OUT-02 → ได้ชื่อตามแบบ (`<ชื่อ>`, `<ชื่อ> - <ช่อง>`, `<ชื่อ> (1080p)` / `<ชื่อ> (mp3 192k)`) ไม่มีอักขระต้องห้าม path ≤ 240 ตัวอักษร และส่วนคุณภาพกับนามสกุลไม่ถูกตัด | U |
+| AC-OUT-10 | เปลี่ยนรูปแบบชื่อไฟล์ใน W6 → บรรทัดตัวอย่างเปลี่ยนตามทันทีโดยไม่เรียก API และงานที่เริ่มหลังจากนั้นใช้ชื่อแบบใหม่ | E |
 
 ### 5.8 เปิด ปิด ตั้งค่า
 | AC | เงื่อนไข → ผลที่ต้องได้ | เทส |
@@ -273,6 +303,10 @@ Tabs 3 แท็บ
 | AC-LIFE-06 | port 8787 ถูกใช้ → แอพเปิดที่ 8788 และไฟล์ปิดโปรแกรมยังปิดได้ | A |
 | AC-SET-01 | เปลี่ยนค่าตั้งค่า → มีผลทันทีโดยไม่ต้องรีสตาร์ท และคงอยู่หลังรีสตาร์ท | A, E |
 | AC-SET-02 | ลบ `bin/ffmpeg*` และปิดการหา ffmpeg ใน PATH (`YT_TOOLKIT_FFMPEG_PATH_LOOKUP=0`) แล้วเปิดแอพ → หน้าตรวจสุขภาพแสดงว่า ffmpeg ใช้ไม่ได้ พร้อมปุ่มโหลดใหม่ ปุ่มที่ต้องใช้ ffmpeg กดแล้วบอกเหตุผล | E |
+| AC-SET-07 | cache 3 คลิปรวม 50 MB → `GET /storage` บอกขนาดตรง ± 1% · `POST /storage/clear` → `data/cache/` ว่าง, `freedBytes` ตรงกับที่แสดง, ไฟล์ผลลัพธ์ ประวัติ ค่าตั้ง และ `data/cookies.txt` ยังอยู่ครบ | A |
+| AC-SET-08 | ล้างข้อมูลชั่วคราวขณะมีงาน `running` → ไฟล์ใน `work/` ของงานนั้นไม่ถูกลบ และงานเสร็จตามปกติ | A |
+| AC-SET-09 | สำรองค่าตั้ง แล้วนำเข้าบน `data/` ใหม่ → `GET /settings` ได้ค่าเดียวกันทุก key ที่ส่งออก · ไฟล์ที่ส่งออกไม่มี key `cookies` และ `statsResetAt` · โฟลเดอร์ผลลัพธ์ในไฟล์เขียนไม่ได้ → คงโฟลเดอร์เดิมและคำตอบมี `warnings: ["outputDir"]` | A |
+| AC-SET-10 | นำเข้าไฟล์ที่ไม่ใช่ JSON, JSON ที่ `app` ไม่ใช่ `yt-toolkit` หรือค่าผิดชนิด → 422 `E_SETTINGS_INVALID` และค่าตั้งไม่เปลี่ยนเลยแม้แต่ key เดียว | A |
 
 ### 5.9 ความปลอดภัย
 | AC | เงื่อนไข → ผลที่ต้องได้ | เทส |
@@ -282,6 +316,29 @@ Tabs 3 แท็บ
 | AC-SEC-03 | POST/PUT/PATCH/DELETE ที่ไม่มี token หรือ `Origin` ไม่ตรง → 403 | A |
 | AC-SEC-04 | ขอไฟล์ด้วย path ที่มี `..` หรือ path นอกโฟลเดอร์ที่อนุญาต → 404 | A |
 | AC-SEC-05 | ลิงก์หรือชื่อคลิปที่มี `; & | $()` ไม่ทำให้เกิดการรันคำสั่งใด ๆ | U |
+
+### 5.10 คุกกี้ยูทูป (ทางเลือก)
+| AC | เงื่อนไข → ผลที่ต้องได้ | เทส |
+|---|---|---|
+| AC-CK-01 | ติดตั้งใหม่ → `cookies.enabled` = false และทุกการเรียก yt-dlp ไม่มี `cookiefile` หรือ `cookiesfrombrowser` | U, A |
+| AC-CK-02 | เปิด Switch คุกกี้ครั้งแรก → Alert Dialog ตาม W7 · กดยกเลิก → ยังปิดอยู่และไม่มีไฟล์ใน `data/` · ต้องกด "เปิดใช้คุกกี้" จึงเปิดได้ | E |
+| AC-CK-03 | นำเข้า `cookies.txt` ที่มีคุกกี้ของ `youtube.com`, `google.com` และ `example.com` → เก็บที่ `data/cookies.txt` เท่านั้น เหลือแค่ 2 โดเมนแรก · ไม่มีสำเนาใน `work/`, `run/` หรือโฟลเดอร์ผลลัพธ์ · `GET /settings` ไม่มีค่าคุกกี้ | A |
+| AC-CK-04 | ไฟล์ที่ไม่ใช่รูปแบบ Netscape หรือไม่มีคุกกี้ของยูทูป → 422 `E_COOKIES_INVALID` และสถานะเดิมไม่เปลี่ยน | A |
+| AC-CK-05 | กด "ลบคุกกี้" → `data/cookies.txt` หายไป, `cookies.enabled` = false และงานถัดไปไม่มีตัวเลือกคุกกี้ | A |
+| AC-CK-06 | เปิดคุกกี้ไว้: คลิปสาธารณะ → เรียกครั้งแรกโดยไม่ใช้คุกกี้ · ได้ `E_AGE_RESTRICTED` หรือ `E_VIDEO_PRIVATE` → ลองใหม่ด้วยคุกกี้ 1 ครั้ง (ทั้ง probe และงานโหลด) · ได้ `E_BOT_CHECK`, `E_NETWORK` หรือรหัสอื่น → ไม่ใช้คุกกี้ · ติ๊ก "ใช้คุกกี้กับคลิปนี้" → ใช้คุกกี้ตั้งแต่ครั้งแรก | U |
+| AC-CK-07 | แถว "คุกกี้" ใน `/health`: ปิด → `ok` "ปิดอยู่" · เปิดด้วยไฟล์ → `ok` พร้อมวันที่นำเข้า · เปิดด้วย Firefox แต่หาโปรไฟล์ Firefox ไม่เจอ → `error` พร้อมวิธีแก้ | A |
+| AC-CK-08 | แท็บขั้นสูงไม่มีตัวเลือก Chrome และมีข้อความเรื่อง Chrome 127 ตาม W6 | E |
+| AC-CK-09 | คลิปจำกัดอายุในชุด network test + คุกกี้ของบัญชีสำรอง → โหลดได้ · ไม่มีคุกกี้ → `E_AGE_RESTRICTED` พร้อมข้อความตามข้อ 7 | N |
+
+AC ที่ว่าค่าคุกกี้ต้องไม่อยู่ใน log และรายงานแจ้งปัญหาคือ AC-SET-06 (ข้อ 7.1)
+
+### 5.11 สถิติของฉัน
+| AC | เงื่อนไข → ผลที่ต้องได้ | เทส |
+|---|---|---|
+| AC-STAT-01 | ตาราง `jobs` ตัวอย่าง (done 5 งานจาก 3 คลิป ใน 2 เดือน, failed 2, cancelled 1) → `GET /stats` ได้ 3 คลิป 5 ไฟล์ ขนาดรวมเท่าผลรวม `size_bytes` · `byMonth` แบ่งตามเดือนของ `finished_at` เวลาไทย (+07:00) · `byKind` เรียงจากมากไปน้อย | U, A |
+| AC-STAT-02 | เปิดแท็บ "สถิติของฉัน" → ทุกคำขอของหน้าเว็บไปที่ `127.0.0.1:<port>` เท่านั้น (ตรวจจาก network log ของ Playwright) และ `/stats` ตอบได้ตอนตัดเน็ต | E, A |
+| AC-STAT-03 | กด "ล้างสถิติ" แล้วยืนยัน → `/stats` เป็น 0 ทุกค่าและมี `since` · `/history`, งานในคิว และไฟล์ผลลัพธ์ไม่เปลี่ยน · งานที่เสร็จหลังจากนั้นถูกนับ | A |
+| AC-STAT-04 | ยังไม่มีงานที่เสร็จ → แท็บแสดง Empty "ยังไม่มีสถิติ" | E |
 
 ---
 
@@ -348,7 +405,7 @@ queued ──► running ──► done
 | Method | Path | Body / Query | ตอบกลับ |
 |---|---|---|---|
 | GET | `/ping` | — | `{ok:true, pid}` ตอบทันที ใช้เช็คว่าแอพยังทำงานอยู่ (ไฟล์เปิด/ปิดโปรแกรมและ dev server ใช้ตัวนี้) |
-| GET | `/health` | — | `{version, commit, tools:{ffmpeg, ytdlp, jsRuntime}, disk, output, network}` ทุกตัวเป็น `ToolStatus = {status: ok\|warn\|error, name, version, message, path}` (ใช้เวลาได้ถึง 5 วิเพราะเช็คเน็ต) |
+| GET | `/health` | — | `{version, commit, tools:{ffmpeg, ytdlp, jsRuntime}, disk, output, network, cookies}` (`cookies` มาใน M5 บอกแค่สถานะและแหล่ง ไม่มีค่าคุกกี้) ทุกตัวเป็น `ToolStatus = {status: ok\|warn\|error, name, version, message, path}` (ใช้เวลาได้ถึง 5 วิเพราะเช็คเน็ต) |
 | POST | `/resolve` | `{text}` (ไม่เกิน 20,000 ตัวอักษร) | `{resolveId, items:[{input, kind: video\|playlist\|ambiguous\|invalid, videoId?, playlistId?, error?}]}` เรียงตามลำดับที่วาง · `error` มีเฉพาะแถว invalid = `{code:"E_INVALID_INPUT", message}` · `resolveId` ยังไม่เก็บลงฐานข้อมูล (W3 ใช้ใน M4) |
 | GET | `/videos/{id}` | `?refresh=1` · `?peek=1` | `VideoInfo` (ข้อ 6.2.1) · probe ใหม่ถ้าไม่มี cache หรือขอ refresh · `peek=1` = ขอแค่ข้อมูล (ชื่อในรายการผล W1) ใช้ probe และ cache 24 ชม. เดียวกัน แต่ไม่นับว่าเปิดคลิป: ไม่อัปเดต `opened_at` จึงไม่ขึ้น `/history` · id ผิดรูปแบบ → 422 `E_INVALID_INPUT` |
 | GET | `/videos/{id}/storyboard` | — | `{intervalMs, frames:[{index, tMs, url}]}` · `url` = `/api/cache/{id}/storyboard/f_NNNN.jpg?v=<เวลาที่สร้างชุดภาพ>` (ภาพชุดใหม่ได้ URL ใหม่) |
@@ -371,23 +428,33 @@ queued ──► running ──► done
 | GET | `/diagnostics` | `?jobId=` (ไม่บังคับ) | `{text}` รายงานแจ้งปัญหาแบบ Markdown ตามข้อ 7.1 |
 | GET | `/settings` | — | `Settings` |
 | PATCH | `/settings` | บางส่วนของ `Settings` | `Settings` |
+| GET | `/settings/export` | — | (M6) ไฟล์ JSON (Content-Disposition: attachment) ชื่อ `yt-toolkit-settings-YYYY-MM-DD.json` = `{app:"yt-toolkit", schema:1, exportedAt, settings}` · `settings` ไม่มี `cookies` และ `statsResetAt` |
+| POST | `/settings/import` | เนื้อไฟล์ที่ได้จาก export | (M6) `{settings: Settings, warnings: string[]}` · ไฟล์ผิดรูปแบบ → 422 `E_SETTINGS_INVALID` ไม่เปลี่ยนค่าใด ๆ · key ที่ไม่รู้จักถูกข้าม · `outputDir` เขียนไม่ได้ → คงค่าเดิมและใส่ `"outputDir"` ใน `warnings` |
+| GET | `/storage` | — | (M6) `{cacheBytes, workBytes, reclaimableBytes}` · `reclaimableBytes` ไม่นับไฟล์ใน `work/` ของงานที่ยังทำอยู่ |
+| POST | `/storage/clear` | — | (M6) `{freedBytes}` ลบ `data/cache/` และ `work/` ที่ไม่มีงานใช้ (FR-SET-6) |
+| POST | `/cookies/import` | `{text}` เนื้อไฟล์ `cookies.txt` (ไม่เกิน 1 MB) | (M5) `{enabled:true, source:"file", importedAt, kept}` (`kept` = จำนวนคุกกี้ที่เก็บหลังกรองโดเมน) · ต้องยอมรับคำเตือนแล้ว ไม่งั้น 409 · ไฟล์ใช้ไม่ได้ → 422 `E_COOKIES_INVALID` |
+| DELETE | `/cookies` | — | (M5) `{ok:true}` ลบ `data/cookies.txt` และตั้ง `cookies.enabled=false` (FR-CK-6) |
+| GET | `/stats` | — | (M6) `{since?, clips, files, totalBytes, byKind:[{kind, files, bytes}], byMonth:[{month:"YYYY-MM", clips, files, bytes}]}` คำนวณจาก `jobs` ในเครื่อง ไม่มีการเรียกเครือข่าย (FR-STAT) |
+| POST | `/stats/reset` | — | (M6) `{since}` บันทึก `statsResetAt` ไม่ลบข้อมูลในตาราง `jobs` |
 | POST | `/update` | — | `{updated, restarting}` |
 | POST | `/shutdown` | `{force?: bool}` | 200 `{ok}` หรือ 409 `{pendingJobs}` ถ้ามีงานค้างและไม่ force |
 | GET | `/events` | — | SSE (ข้อ 6.2.2) |
 
 - **contact sheet และ zip ใน M2** ทำตอนขอแล้วส่งให้เบราว์เซอร์โหลดทันที · M4 ย้ายเข้าคิวเป็นงานชนิด `contact_sheet` / `frames_zip` และบันทึกลงโฟลเดอร์ผลลัพธ์
-- **HTTP status ของ error จากยูทูป:** `E_INVALID_INPUT` 422 · `E_VIDEO_UNAVAILABLE`, `E_VIDEO_PRIVATE`, `E_NO_STORYBOARD` 404 · `E_LIVE_NOT_READY`, `E_AGE_RESTRICTED`, `E_GEO_BLOCKED` 409 · `E_BOT_CHECK` 429 · `E_NETWORK` 502 · รหัสอื่น (`E_UNKNOWN`) 500
+- **HTTP status ของ error จากยูทูป:** `E_INVALID_INPUT`, `E_SETTINGS_INVALID`, `E_COOKIES_INVALID` 422 · `E_VIDEO_UNAVAILABLE`, `E_VIDEO_PRIVATE`, `E_NO_STORYBOARD` 404 · `E_LIVE_NOT_READY`, `E_AGE_RESTRICTED`, `E_GEO_BLOCKED`, `E_COOKIES_UNAVAILABLE` 409 · `E_BOT_CHECK` 429 · `E_NETWORK` 502 · รหัสอื่น (`E_UNKNOWN`) 500
 
 #### 6.2.1 ชนิดข้อมูลหลัก
 ```ts
 type VideoInfo = {
   videoId: string; title: string; channel: string; durationS: number;
   publishedAt?: string; thumbnailUrl: string;
+  description?: string;                                   // M3: ปุ่มคัดลอกคำอธิบาย
+  license?: string;                                       // M4: ค่า license จาก yt-dlp ใช้ใน แหล่งที่มา.txt
   chapters: { startS: number; endS: number; title: string }[];
   video: { formatId: string; height: number; fps: number; vcodec: string;
            compat: boolean; sizeBytes?: number }[];      // compat = H.264 เปิดได้ทุกที่
   audio: { formatId: string; language?: string; isOriginal: boolean;
-           acodec: string; abrKbps?: number }[];
+           acodec: string; abrKbps?: number }[];         // แทร็กที่ isOriginal=false คือเสียงพากย์ (FR-VID-7)
   hasStoryboard: boolean; isLive: boolean;
 };
 
@@ -415,12 +482,15 @@ type Job = {
 
 | kind | params | วิธีทำงาน |
 |---|---|---|
-| `video` | `{formatId?, maxQuality: bool, range?: {startS, endS}, splitChapters: bool, sponsorblock?: string[]}` | ดูข้อ 6.3.1 |
-| `audio` | `{format: m4a\|mp3, mp3Kbps?: 128\|192\|320, range?, splitChapters, sponsorblock?}` | m4a: ดึงแทร็ก AAC ต้นฉบับไม่เข้ารหัสใหม่ · mp3: เข้ารหัสด้วย ffmpeg ตาม bitrate |
+| `video` | `{formatId?, maxQuality: bool, range?: {startS, endS}, splitChapters: bool, sponsorblock?: string[], audioLanguage?: "original" \| <lang>, noAudio: bool, embedSubs?: trackId, subOptions?: SubOptions}` | ดูข้อ 6.3.1 · `noAudio` = โหลดเฉพาะภาพ (FR-VID-8) · `embedSubs` + `subOptions` = ฝังซับ `mov_text` (FR-VID-9) ใช้คู่กับ `splitChapters: true` ไม่ได้ (422) |
+| `audio` | `{format: m4a\|mp3\|wav, mp3Kbps?: 128\|192\|320, range?, splitChapters, sponsorblock?, audioLanguage?: "original" \| <lang>}` | m4a: ดึงแทร็ก AAC ต้นฉบับไม่เข้ารหัสใหม่ · mp3: เข้ารหัสด้วย ffmpeg ตาม bitrate · wav: ffmpeg แปลงเป็น `pcm_s16le` sample rate เดิม (FR-AUD-5) |
 | `subtitle` | `{trackId, format: srt\|txt\|md, options: SubOptions, range?}` | ใช้ `srt_builder` (BRD ข้อ 12) แล้วเขียนไฟล์ลงโฟลเดอร์ผลลัพธ์ |
 | `frames_sharp` | `{intervalS?}` | โหลดภาพอย่างเดียว ≤ 720p ลง `work/` → ffmpeg ดึงเฟรม JPG → ลบวิดีโอ |
 | `contact_sheet` | `{source: fast\|sharp, columns: 5}` | Pillow ประกอบภาพ + ฟอนต์ IBM Plex Sans Thai (ฝังในแอพ) |
 | `frames_zip` | `{source: fast\|sharp}` | zip ภาพเฟรม |
+
+- ทุก kind ที่ต้องต่อยูทูป (`video`, `audio`, `subtitle`, `frames_sharp`) รับ `useCookies?: bool` เพิ่ม (M5) = ผู้ใช้ติ๊ก "ใช้คุกกี้กับคลิปนี้" (FR-CK-7) · ไม่ส่งมา = ลองแบบไม่ใช้คุกกี้ก่อน
+- ทุกงานที่เสร็จ เขียนหรืออัปเดต `แหล่งที่มา.txt` ในโฟลเดอร์ผลลัพธ์ของคลิปนั้น (FR-OUT-6) · ชื่อไฟล์ผลลัพธ์ตาม `filenameStyle` (FR-OUT-8)
 
 ```ts
 type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number;
@@ -429,9 +499,13 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 
 #### 6.3.1 การเลือก format (จุดเริ่มต้น ต้องยืนยันด้วย network test ใน M4)
 - **เปิดได้ทุกที่ (ค่าเริ่มต้น):** `bv*[vcodec^=avc1][height<=1080]+ba[acodec^=mp4a]/b[ext=mp4]` ใส่ใน mp4
+- **ไม่เอาเสียง (`noAudio`):** ใช้เฉพาะส่วนภาพของ selector เช่น `bv*[vcodec^=avc1][height<=1080]` ไม่มี `+ba` แล้ว remux ใส่ mp4 ที่ไม่มีแทร็กเสียง
 - **ความละเอียดสูงสุด:** `bv*+ba/b` ใส่ใน mp4 (`merge_output_format=mp4`)
 - **เลือกคุณภาพเอง:** ใช้ `formatId` ที่ผู้ใช้เลือก + เสียงตามกฎด้านล่าง
-- **เสียงต้นฉบับ:** เลือกแทร็กที่ `isOriginal` ก่อนเสมอ (คำนวณจาก probe: format_note มีคำว่า original หรือ default, หรือ language_preference สูงสุด) · ถ้า probe ระบุไม่ได้ ใช้ลำดับค่าเริ่มต้นของ yt-dlp
+- **เสียงต้นฉบับ (ค่าเริ่มต้น):** `audioLanguage` ไม่ส่งมาหรือเป็น `original` → เลือกแทร็กที่ `isOriginal` (คำนวณจาก probe: format_note มีคำว่า original หรือ default, หรือ language_preference สูงสุด) · ถ้า probe ระบุไม่ได้ ใช้ลำดับค่าเริ่มต้นของ yt-dlp
+- **เสียงพากย์:** `audioLanguage` = `<lang>` (เช่น `th`) และมีแทร็กที่ `language` ขึ้นต้นด้วยค่านั้น → ใช้แทร็กนั้น (`ba[language^=<lang>]`) · ไม่มี → ใช้กฎเสียงต้นฉบับ และใส่หมายเหตุในงาน (AC-VID-06)
+- **ฝังซับ (`embedSubs`):** สร้าง `.srt` ด้วย `srt_builder` ตาม `subOptions` และ `range` ใน `work/` แล้ว ffmpeg `-c:v copy -c:a copy -c:s mov_text` พร้อม `language` ของแทร็ก ตั้งเป็นแทร็กซับเริ่มต้น ผู้ชมปิดได้จากโปรแกรมเล่น
+- **คุกกี้ (M5):** ใส่ `cookiefile=data/cookies.txt` หรือ `cookiesfrombrowser=("firefox",)` เฉพาะครั้งที่ FR-CK-7 อนุญาต · ห้ามใช้ `verbose` หรือ `print_traffic` ตอนใช้คุกกี้ และทุกข้อความจาก yt-dlp ผ่านตัวปิดบังค่าคุกกี้ก่อนลง log
 - **โหลดเฉพาะช่วง:** `download_ranges` + `force_keyframes_at_cuts=True` เพื่อให้ตัดแม่นยำ (ช้ากว่าเพราะต้องเข้ารหัสใหม่ แต่ช่วงสั้นจึงรับได้)
 - **แยก chapter:** postprocessor `FFmpegSplitChapters` + `force_keyframes`
 - **SponsorBlock:** `sponsorblock_remove=<หมวด>` ผ่าน postprocessor ModifyChapters
@@ -441,13 +515,17 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 |---|---|---|
 | `outputDir` | string | `<Downloads>/YT-Toolkit` |
 | `videoDefault` | `compat-1080` \| `compat-720` \| `max` | `compat-1080` |
-| `audioDefault` | `m4a` \| `mp3` | `m4a` |
+| `audioDefault` | `m4a` \| `mp3` \| `wav` | `m4a` |
+| `audioLanguage` | `"original"` \| `<lang>` (เช่น `"th"`) | `"original"` (FR-VID-7) |
 | `mp3Kbps` | 128 \| 192 \| 320 | 192 |
 | `subPreset` | `short` \| `medium` \| `long` \| `custom` | `medium` |
 | `subCustom` | SubOptions | ค่าของ medium |
 | `concurrency` | 1 \| 2 \| 3 | 2 |
 | `sponsorblockDefault` | string[] | `["sponsor","selfpromo","interaction"]` |
 | `theme` | `system` \| `dark` \| `light` | `system` |
+| `filenameStyle` | `title` \| `title-channel` \| `title-quality` | `title` (FR-OUT-8) |
+| `cookies` | `{enabled: bool, source: "file" \| "firefox" \| null, warningAccepted: bool, importedAt?: string}` | `{enabled:false, source:null, warningAccepted:false}` · เก็บแค่สถานะ ค่าคุกกี้อยู่ใน `data/cookies.txt` เท่านั้น · ไม่ถูกส่งออกใน `/settings/export` (FR-CK) |
+| `statsResetAt` | string (ISO 8601) \| null | `null` · ตั้งโดย `POST /stats/reset` (FR-STAT-4) |
 | `lastUsed` | object | ค่าที่เลือกล่าสุดใน W2 (แพทเทิร์น UX ข้อ 6 ของ BRD ข้อ 10.8) |
 
 ### 6.5 Frontend
@@ -478,10 +556,10 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 |---|---|---|
 | `E_INVALID_INPUT` | ลิงก์นี้ไม่ใช่ลิงก์ยูทูป ลองคัดลอกจากแถบที่อยู่ของเบราว์เซอร์อีกครั้ง | ทำรายการอื่นต่อ |
 | `E_BOT_CHECK` | ยูทูปขอให้ยืนยันว่าไม่ใช่บอท พักคิวไว้ 10 นาทีก่อนนะ | เบรกฉุกเฉิน |
-| `E_VIDEO_PRIVATE` | คลิปนี้เป็นส่วนตัว เจ้าของต้องเปิดเป็นสาธารณะก่อน | งานล้มเหลว |
+| `E_VIDEO_PRIVATE` | คลิปนี้เป็นส่วนตัวหรือเฉพาะสมาชิก ถ้าบัญชี YouTube ของคุณมีสิทธิ์ดู เปิดใช้คุกกี้ได้ที่ ตั้งค่า > ขั้นสูง | ถ้าเปิดคุกกี้ไว้ ลองใหม่ด้วยคุกกี้ 1 ครั้ง (FR-CK-7) ไม่ได้ → งานล้มเหลว |
 | `E_VIDEO_UNAVAILABLE` | คลิปนี้ถูกลบหรือไม่มีแล้ว | งานล้มเหลว |
 | `E_GEO_BLOCKED` | คลิปนี้ดูในประเทศไทยไม่ได้ | งานล้มเหลว |
-| `E_AGE_RESTRICTED` | คลิปนี้จำกัดอายุ ต้องล็อกอินถึงจะโหลดได้ ซึ่งเวอร์ชันนี้ยังไม่รองรับ | งานล้มเหลว |
+| `E_AGE_RESTRICTED` | คลิปนี้จำกัดอายุ ต้องใช้บัญชี YouTube ถึงจะโหลดได้ เปิดใช้ได้ที่ ตั้งค่า > ขั้นสูง | ถ้าเปิดคุกกี้ไว้ ลองใหม่ด้วยคุกกี้ 1 ครั้ง (FR-CK-7) ไม่ได้ → งานล้มเหลว |
 | `E_LIVE_NOT_READY` | คลิปนี้ยังถ่ายทอดสดอยู่หรือยังไม่เผยแพร่ ลองใหม่หลังจบไลฟ์ | งานล้มเหลว |
 | `E_NO_SUBTITLES` | คลิปนี้ไม่มีซับ | ไม่นับเป็น error ในหน้าจอ |
 | `E_NO_STORYBOARD` | คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว กด "ขอภาพคม" แทนได้ | แสดงปุ่มโหมดคม |
@@ -491,12 +569,17 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | `E_NETWORK` | เน็ตหลุด กำลังลองใหม่ (ครั้งที่ n/3) | ลองใหม่อัตโนมัติ 3 ครั้ง (รอ 2, 5, 10 วิ) |
 | `E_OUTPUT_NOT_WRITABLE` | บันทึกลงโฟลเดอร์นี้ไม่ได้ ลองเปลี่ยนโฟลเดอร์ในหน้าตั้งค่า | งานล้มเหลว |
 | `E_INTERRUPTED` | งานหยุดกลางคันเพราะปิดโปรแกรม | รอผู้ใช้กดลองใหม่ |
+| `E_COOKIES_INVALID` | ไฟล์นี้ไม่ใช่ cookies.txt หรือไม่มีคุกกี้ของยูทูป ลองส่งออกใหม่จากเบราว์เซอร์ที่ล็อกอินยูทูปไว้ | คงสถานะคุกกี้เดิม (M5) |
+| `E_COOKIES_UNAVAILABLE` | อ่านคุกกี้จาก Firefox ไม่ได้ ตรวจว่าลง Firefox และล็อกอินยูทูปไว้แล้ว หรือเปลี่ยนไปใช้ไฟล์ cookies.txt | งานนั้นทำต่อแบบไม่ใช้คุกกี้ แถว "คุกกี้" ในหน้าตรวจสุขภาพเป็น `error` (M5) |
+| `E_SETTINGS_INVALID` | ไฟล์นี้ไม่ใช่ไฟล์ค่าตั้งของ YT Toolkit หรือไฟล์เสียหาย ลองเลือกไฟล์ที่ได้จากปุ่ม "สำรองค่าตั้ง" | ไม่เปลี่ยนค่าตั้ง (M6) |
 | `E_TOOL_INSTALL_FAILED` | โหลดโปรแกรมที่ต้องใช้ไม่สำเร็จ ตรวจเน็ตแล้วกด "โหลด ffmpeg ใหม่" อีกครั้ง | คงสถานะเดิม |
 | `E_FORBIDDEN` | คำขอนี้ไม่ได้รับอนุญาต ลองรีเฟรชหน้าเว็บ | ตอบ 403 (NFR-SEC-3) |
 | `E_OFFLINE` | เชื่อมต่อโปรแกรมไม่ได้ ถ้าปิดโปรแกรมไปแล้ว เปิดใหม่ด้วย start.bat | ฝั่งหน้าเว็บ: เชื่อมต่อ backend ไม่ได้ |
 | `E_UNKNOWN` | มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล | งานล้มเหลว · M6 เปลี่ยนเป็นปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" |
 | `E_NOT_FOUND` | ไม่พบสิ่งที่ขอ | ตอบ 404 (path ที่ไม่มีใน API) |
 | `E_BAD_REQUEST` | ข้อมูลที่ส่งมาไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ | ตอบ 422 (ข้อมูลไม่ผ่านการตรวจ) · HTTP error อื่นใช้ข้อความเดียวกันกับรหัส `E_HTTP_<status>` |
+
+หมายเหตุ `E_AGE_RESTRICTED` / `E_VIDEO_PRIVATE`: ถ้าลองด้วยคุกกี้แล้วยังได้รหัสเดิม ใช้ข้อความ "ลองด้วยคุกกี้แล้วยังโหลดไม่ได้ คุกกี้อาจหมดอายุหรือบัญชีนี้ไม่มีสิทธิ์ดู ลองนำเข้าคุกกี้ใหม่" แทน
 
 หมายเหตุ `E_NETWORK`: จุดที่ไม่ได้ลองใหม่อัตโนมัติ (เช่นหน้าผลลัพธ์ใน M2) ใช้ข้อความ "เน็ตหลุด ลองใหม่อีกครั้ง" แทน ข้อความที่มีตัวนับ (ครั้งที่ n/3) ใช้เมื่อคิวงานใน M4 เป็นผู้ลองใหม่
 
@@ -516,6 +599,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 - เวลา: 2026-10-05 14:32 (+07:00)
 - แอพ: 0.1.0 (commit abc1234) · ระบบ: Windows 11 (10.0.26200)
 - yt-dlp: 2026.09.20 · ffmpeg: 8.1 · JS runtime: deno 2.9.7
+- คุกกี้: ปิดอยู่
 ### error
 - รหัส: E_BOT_CHECK · งาน: video (videoId dQw4w9WgXcQ)
 - รายละเอียด: <detail>
@@ -527,12 +611,14 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 
 - path ที่มีชื่อผู้ใช้ในรายงานต้องแทนด้วย `~` (เช่น `C:\Users\somchai\Downloads` → `~\Downloads`) เพื่อไม่ให้ข้อมูลส่วนตัวหลุด
 - ไม่ใส่ token ของแอพในรายงาน
+- ไม่ใส่ค่าคุกกี้ในรายงานและใน log เลย บอกได้แค่สถานะ (ปิดอยู่ / เปิด ใช้ไฟล์ / เปิด ใช้ Firefox) (FR-CK-5)
 
 | AC | เงื่อนไข → ผลที่ต้องได้ | เทส |
 |---|---|---|
 | AC-SET-03 | error ที่เกิดจากงานใด ๆ → มีบรรทัดใน `app.log` ที่มีรหัส error และ job id | A |
 | AC-SET-04 | `/api/diagnostics?jobId=` → มีครบทุกหัวข้อตามตัวอย่าง ไม่มีชื่อผู้ใช้ใน path และไม่มี token | A |
 | AC-SET-05 | กด "คัดลอกข้อมูลแจ้งปัญหา" → คลิปบอร์ดได้ข้อความรายงาน และมี toast "คัดลอกแล้ว" | E |
+| AC-SET-06 | นำเข้า `cookies.txt` ที่มีค่าคุกกี้ปลอมที่จำง่าย (canary) แล้วทำให้เกิด error ทั้งตอน probe และตอนโหลดด้วยคุกกี้ → ค่า canary ไม่อยู่ใน `run/logs/*`, `/api/diagnostics`, `detail` ของ error และคำตอบของ API ใด ๆ · รายงานมีแค่บรรทัดสถานะคุกกี้ | A |
 
 ---
 
@@ -561,7 +647,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | Network | pytest `-m network` | รันเองก่อนปิดแต่ละ milestone | AC ที่ติด N |
 | ตรวจมือ | checklist ใน `docs/acceptance.md` | ก่อนส่งมอบ v1.0 / v1.1 | AC ที่ติด M |
 
-**ชุดคลิปสำหรับ network test** (เก็บเป็นรายการ ID ใน `tests/network_videos.toml`): คลิปไทยสั้นมี `th-orig`, คลิปมีเสียงพากย์หลายภาษา, คลิปมี chapter ≥ 3, คลิปมีข้อมูล SponsorBlock, คลิปไม่มีซับ, คลิปมี 4K, เพลย์ลิสต์ ≤ 10 คลิป
+**ชุดคลิปสำหรับ network test** (เก็บเป็นรายการ ID ใน `tests/network_videos.toml`): คลิปไทยสั้นมี `th-orig`, คลิปมีเสียงพากย์หลายภาษา, คลิปมี chapter ≥ 3, คลิปมีข้อมูล SponsorBlock, คลิปไม่มีซับ, คลิปมี 4K, คลิปมีเสียงพากย์ไทย, คลิป Creative Commons (มี `license`), เพลย์ลิสต์ ≤ 10 คลิป · คลิปจำกัดอายุ (AC-CK-09) รันด้วยคุกกี้ของบัญชีสำรองบนเครื่องผู้พัฒนาเท่านั้น ห้าม commit คุกกี้
 
 **Fixture ที่ต้องเก็บก่อนเริ่ม M3:** json3 ไทย (มี `aAppend`), json3 อังกฤษ, vtt อัตโนมัติ, ซับของเจ้าของคลิป (ไม่มีเวลาระดับคำ), storyboard 1 ชุด, ข้อความ error จริงของ yt-dlp อย่างน้อยรหัสละ 1 ตัว
 
@@ -572,11 +658,11 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | Milestone | ส่งมอบ | AC ที่ต้องผ่าน |
 |---|---|---|
 | **M1 โครงพื้นฐาน** | repo private, `pyproject`, ไฟล์เปิด/ปิด Windows, `platform/` (มีโครง macOS), เปิดได้ตัวเดียว, tray, middleware ความปลอดภัย, ffmpeg + JS runtime, `/health`, W6 แท็บตรวจสุขภาพ, shadcn init + preset Studio Dark, W1 เปล่า, CI Windows + macOS | AC-LIFE-01..06, AC-SEC-01..04, AC-SET-02 |
-| **M2 ดูก่อนโหลด** | `/resolve`, `/videos`, `/storyboard`, W1 เต็ม, W2 ส่วนหัวและภาพเฟรม, contact sheet, zip | AC-IN-*, AC-PROBE-*, AC-FRAME-01, 02, 05, 06 |
-| **M3 ซับ** | fixture, subtitles, srt_builder (Python + TS), W2 ส่วนซับและทรานสคริปต์ | AC-SUB-* (ยกเว้น 10) |
-| **M4 โหลดและคิว** | video, audio, คิว, SSE, W3, W4, W5, W7 | AC-VID-*, AC-AUD-*, AC-Q-*, AC-OUT-*, AC-SEC-05 |
-| **M5 ขั้นสูง** | ช่วงเวลา, chapter, SponsorBlock, โหมดคม | AC-ADV-*, AC-SUB-10, AC-FRAME-03, 04 |
-| **M6 → v1.0** | error ครบตามข้อ 7 รวม error สองชั้นและรายงานแจ้งปัญหา (ข้อ 7.1), a11y, README Windows, GitHub Actions | ทุก AC บน Windows + ตัวเลขในข้อ 8 |
+| **M2 ดูก่อนโหลด** | `/resolve`, `/videos`, `/storyboard`, W1 เต็ม, W2 ส่วนหัวและภาพเฟรม, เมนูคลิกขวาที่ภาพเฟรม (โหลดภาพนี้ / คัดลอกเวลา / คัดลอกลิงก์ช่วงนี้), contact sheet, zip | AC-IN-01..07, AC-PROBE-01..02, AC-FRAME-01, 02, 05, 06, 07 |
+| **M3 ซับ** | fixture, subtitles, srt_builder (Python + TS), W2 ส่วนซับและทรานสคริปต์, ปุ่มคัดลอก chapter และคัดลอกคำอธิบาย | AC-SUB-* (ยกเว้น 10), AC-PROBE-03..04 |
+| **M4 โหลดและคิว** | video, audio (รวม wav), เลือกภาษาเสียง/เสียงพากย์, ไม่เอาเสียง, ฝังซับแบบเปิด/ปิดได้, `แหล่งที่มา.txt` + ปุ่มคัดลอกเครดิต, คิว, SSE, W3, W4, W5, W7 | AC-VID-*, AC-AUD-*, AC-Q-*, AC-OUT-01..08, AC-SEC-05 |
+| **M5 ขั้นสูง** | ช่วงเวลา, chapter, SponsorBlock, โหมดคม, คุกกี้ยูทูปแบบเลือกเปิด (W6 แท็บขั้นสูง, `/cookies*`, แถวคุกกี้ใน `/health`) | AC-ADV-*, AC-SUB-10, AC-FRAME-03, 04, AC-CK-*, AC-SET-06 |
+| **M6 → v1.0** | error ครบตามข้อ 7 รวม error สองชั้นและรายงานแจ้งปัญหา (ข้อ 7.1), a11y, README Windows (รวมวิธีใช้คุกกี้ผ่าน Firefox / cookies.txt), GitHub Actions, ปุ่ม "วาง" ใน W1, รูปแบบชื่อไฟล์ + ตัวอย่าง, ล้างข้อมูลชั่วคราว, สำรอง/นำเข้าค่าตั้ง, W6 แท็บสถิติของฉัน | AC-IN-08..09, AC-OUT-09..10, AC-SET-07..10, AC-STAT-* · ทุก AC บน Windows + ตัวเลขในข้อ 8 |
 | **M7 → v1.1** | `platform/macos.py`, `.command`, ffmpeg สำหรับ Mac, README macOS | ทุก AC บน macOS + ข้อ 12 |
 
 **นิยามคำว่า "เสร็จ" ของทุกงาน**
@@ -592,16 +678,21 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 
 | FR (BRD) | หน้าจอ | API | AC |
 |---|---|---|---|
-| FR-IN-1..6 | W1, W3, W7 | `/resolve`, `/playlists/{id}` | AC-IN-01..07 |
-| FR-PROBE-1..3 | W2 | `/videos/{id}` | AC-PROBE-01..02 |
-| FR-FRAME-1..6 | W2 | `/storyboard`, `/jobs` (frames_*, contact_sheet) | AC-FRAME-01..06 |
-| FR-VID-1..6 | W2, W3 | `/jobs` (video) | AC-VID-01..04 |
-| FR-AUD-1..4 | W2, W3 | `/jobs` (audio) | AC-AUD-01..02 |
+| FR-IN-1..7 | W1, W3, W7 | `/resolve`, `/playlists/{id}` | AC-IN-01..09 |
+| FR-PROBE-1..5 | W2 | `/videos/{id}` | AC-PROBE-01..04 |
+| FR-FRAME-1..6 | W2 | `/storyboard`, `/jobs` (frames_*, contact_sheet) | AC-FRAME-01..07 |
+| FR-VID-1..9 | W2, W3 | `/jobs` (video) | AC-VID-01..10 |
+| FR-AUD-1..5 | W2, W3 | `/jobs` (audio) | AC-AUD-01..04 |
 | FR-SUB-1..10 | W2 | `/subtitles`, `/tokens`, `/jobs` (subtitle) | AC-SUB-01..11 |
 | FR-ADV-1..4 | W2, W7 | `/jobs` (params) | AC-ADV-01..04, AC-SUB-10 |
 | FR-Q-1..8 | W4, W7 | `/jobs*`, `/queue/resume`, `/events` | AC-Q-01..08 |
 | FR-OUT-1..5 | W2, W4, W5 | `/outputs`, `/reveal`, `/history` | AC-OUT-01..05 |
+| FR-OUT-6..8 | W2, W6 | `/jobs` (ทุก kind), `/settings` | AC-OUT-06..10 |
 | FR-SET-1..4 | W6 | `/settings`, `/health`, `/update` | AC-SET-01..02 |
+| FR-SET-5 | W6, W7 | `/diagnostics` | AC-SET-03..06 |
+| FR-SET-6..7 | W6, W7 | `/storage*`, `/settings/export`, `/settings/import` | AC-SET-07..10 |
+| FR-CK-1..8 | W2, W6, W7 | `/settings`, `/cookies*`, `/health`, `/jobs` (`useCookies`) | AC-CK-01..09, AC-SET-06 |
+| FR-STAT-1..4 | W6, W7 | `/stats`, `/stats/reset` | AC-STAT-01..04 |
 | FR-LIFE-1..7 | W6, W7 | `/shutdown` | AC-LIFE-01..06 |
 | NFR-SEC-1..6 | — | middleware | AC-SEC-01..05 |
 
