@@ -18,6 +18,7 @@ export default defineConfig({
     url: `http://127.0.0.1:${PORT}/api/ping`,
     reuseExistingServer: false,
     timeout: 60_000,
-    env: { YT_TOOLKIT_DATA_ROOT: dataRoot, YT_TOOLKIT_FFMPEG_PATH_LOOKUP: "0" },
+    // FAKE=1: ข้อมูลคลิปมาจาก tests/fixtures ไม่ต่อยูทูปจริง (health ไม่ใช้ตัวดึงข้อมูล จึงไม่กระทบ)
+    env: { YT_TOOLKIT_DATA_ROOT: dataRoot, YT_TOOLKIT_FFMPEG_PATH_LOOKUP: "0", YT_TOOLKIT_FAKE: "1" },
   },
 })
