@@ -59,6 +59,15 @@ def _shell_libs() -> tuple[ctypes.WinDLL, ctypes.WinDLL]:
     return shell32, ole32
 
 
+@functools.cache
+def _short_path_name():
+    """โหลด GetShortPathNameW ครั้งเดียวตอนใช้ครั้งแรก (ไม่โหลดตอน import เพื่อให้ import บน macOS ได้)"""
+    fn = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+    fn.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    fn.restype = wintypes.DWORD
+    return fn
+
+
 class WindowsPlatform:
     name = "windows"
     popen_flags = subprocess.CREATE_NO_WINDOW
@@ -133,3 +142,20 @@ class WindowsPlatform:
         except OSError:
             pass
         f.close()
+
+    def path_aliases(self, path: Path) -> list[str]:
+        """ชื่อสั้นแบบ 8.3 (เช่น C:/Users/SOMCHA~1) ถ้าต่างจากชื่อเต็ม หาไม่ได้คืนลิสต์ว่าง"""
+        full = str(path)
+        try:
+            get_short = _short_path_name()
+            size = get_short(full, None, 0)
+            if not size:
+                return []
+            buffer = ctypes.create_unicode_buffer(size)
+            written = get_short(full, buffer, size)
+        except (OSError, AttributeError):
+            return []
+        if not written or written >= size:
+            return []
+        short = buffer.value
+        return [short] if short.casefold() != full.casefold() else []

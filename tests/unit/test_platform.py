@@ -253,3 +253,48 @@ def test_module_fixtures_restore_sys_modules():
     assert sys.modules.get("yttoolkit.platform.macos") is None or sys.platform == "darwin"
     assert sys.platform != "win32" or "fcntl" not in sys.modules
     assert sys.platform == "win32" or "msvcrt" not in sys.modules
+
+
+# ---- final fix item 9: ชื่อสั้นแบบ 8.3 ---------------------------------------------------------------------------------
+
+
+def test_macos_path_aliases_is_empty(macos_module):
+    assert macos_module.MacPlatform().path_aliases(Path("/Users/somchai")) == []
+
+
+def test_windows_path_aliases_is_empty_when_lookup_fails(windows_module, monkeypatch):
+    def unavailable():
+        raise OSError("no kernel32")
+
+    monkeypatch.setattr(windows_module, "_short_path_name", unavailable)
+    assert windows_module.WindowsPlatform().path_aliases(Path("C:/Users/Somchai Jaidee")) == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ใช้ GetShortPathNameW จริง")
+def test_windows_path_aliases_returns_short_name(tmp_path):
+    folder = tmp_path / "a rather long folder name"
+    folder.mkdir()
+    aliases = current().path_aliases(folder)
+    if not aliases:
+        pytest.skip("ไดรฟ์นี้ปิดการสร้างชื่อสั้นแบบ 8.3")
+    assert len(aliases) == 1
+    assert aliases[0] != str(folder)
+    assert "~" in aliases[0]
+    assert os.path.samefile(aliases[0], folder)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ใช้ GetShortPathNameW จริง")
+def test_windows_path_aliases_empty_when_missing_or_same(tmp_path):
+    plat = current()
+    assert plat.path_aliases(tmp_path / "does-not-exist") == []
+    assert plat.path_aliases(Path(os.environ["SystemRoot"])) == []  # C:\Windows ชื่อสั้นอยู่แล้ว
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ใช้ kernel32 จริง")
+def test_windows_short_path_name_is_typed_and_loaded_once():
+    from yttoolkit.platform import windows
+
+    fn = windows._short_path_name()
+    assert windows._short_path_name() is fn
+    assert fn.argtypes == (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    assert fn.restype is wintypes.DWORD

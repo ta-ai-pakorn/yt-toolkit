@@ -122,3 +122,21 @@ def test_http_exception_304_has_no_body():
     resp = TestClient(app, base_url=BASE).get("/cached")
     assert resp.status_code == 304
     assert resp.content == b""
+
+
+def test_error_body_redacts_home_short_name_alias(monkeypatch, fake_platform):  # final fix item 9
+    monkeypatch.setattr(errors.Path, "home", lambda: PureWindowsPath("C:/Users/Somchai Jaidee"))
+    fake_platform.aliases = [r"C:\Users\SOMCHA~1"]
+    calls = []
+    real = fake_platform.path_aliases
+    fake_platform.path_aliases = lambda path: calls.append(path) or real(path)
+    monkeypatch.setattr("yttoolkit.platform.current", lambda: fake_platform)
+    errors._home_aliases.cache_clear()
+    try:
+        detail = r"a C:\Users\SOMCHA~1\AppData\x b c:/users/somcha~1/y c 'C:\Users\SOMCHA~1\z' d C:\Users\Somchai Jaidee\w"
+        expected = r"a ~\AppData\x b ~/y c '~\z' d ~\w"
+        assert error_body("E_X", "m", detail)["error"]["detail"] == expected
+        assert error_body("E_X", "m", detail)["error"]["detail"] == expected
+        assert len(calls) == 1  # หาชื่อสั้นครั้งเดียวแล้วจำไว้
+    finally:
+        errors._home_aliases.cache_clear()

@@ -23,6 +23,7 @@ class FakePlatform:
     revealed: list[Path] = field(default_factory=list)
     locked: set[Path] = field(default_factory=set)
     unopenable: set[Path] = field(default_factory=set)  # ไฟล์ lock ที่เปิดไม่ได้ (เช่นมีโฟลเดอร์ชื่อเดียวกัน)
+    aliases: list[str] = field(default_factory=list)  # ชื่ออื่นของ path (Windows: ชื่อสั้นแบบ 8.3)
 
     def exe_name(self, name: str) -> str:
         return f"{name}.exe" if self.name == "windows" else name
@@ -53,6 +54,9 @@ class FakePlatform:
 
     def release_lock(self, handle: object) -> None:
         self.locked.discard(handle)
+
+    def path_aliases(self, path: Path) -> list[str]:
+        return list(self.aliases)
 
 
 @pytest.fixture

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from pathlib import Path
@@ -16,13 +17,28 @@ BAD_REQUEST_MESSAGE = "ข้อมูลที่ส่งมาไม่ถู
 UNKNOWN_MESSAGE = "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล"
 
 
+@functools.cache
+def _home_aliases(home: str) -> tuple[str, ...]:
+    """ชื่ออื่นของโฟลเดอร์ผู้ใช้ (Windows: ชื่อสั้นแบบ 8.3 เช่น SOMCHA~1) หาครั้งเดียวแล้วจำไว้"""
+    from ..platform import current
+
+    try:
+        return tuple(current().path_aliases(Path(home)))
+    except (OSError, RuntimeError):
+        return ()
+
+
 def _redact_home(text: str) -> str:
     """แทนโฟลเดอร์ผู้ใช้ด้วย ~ เพื่อไม่ให้ชื่อผู้ใช้หลุดไปกับภาพหน้าจอที่ส่งต่อ"""
     home = str(Path.home())
     if not home.strip("/\\"):
         return text
-    # แบบปกติ, แบบ / และแบบ backslash สองตัว (มาจาก repr เช่น str(OSError) บน Windows)
-    variants = {home, home.replace("\\", "/"), home.replace("\\", "\\\\")}
+    # แบบปกติ, แบบ / และแบบ backslash สองตัว (มาจาก repr เช่น str(OSError) บน Windows) ทั้งชื่อเต็มและชื่อสั้น
+    variants = {
+        form
+        for name in (home, *_home_aliases(home))
+        for form in (name, name.replace("\\", "/"), name.replace("\\", "\\\\"))
+    }
     # รวมเป็น regex เดียว เรียงยาวก่อน จึงไม่มีแบบไหนไปจับแค่บางส่วนของอีกแบบ
     alternatives = "|".join(re.escape(v) for v in sorted(variants, key=len, reverse=True))
     # ไม่แตะโฟลเดอร์ข้างเคียงที่ชื่อขึ้นต้นเหมือนกัน เช่น C:\Users\Som กับ C:\Users\Somchai

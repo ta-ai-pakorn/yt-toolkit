@@ -64,3 +64,6 @@ class MacPlatform:
         except OSError:
             pass
         f.close()
+
+    def path_aliases(self, path: Path) -> list[str]:
+        return []
