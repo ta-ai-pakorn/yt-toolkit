@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sysconfig
 import threading
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -18,6 +19,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 
+import httpx
+
 from ..config import Paths, env_flag
 from ..platform import Platform
 
@@ -26,6 +29,10 @@ Status = Literal["ok", "warn", "error"]
 YTDLP_MAX_AGE_DAYS = 30
 FFMPEG_INSTALLING_MESSAGE = "กำลังโหลด ffmpeg อาจใช้เวลา 1-3 นาที"
 MIN_FREE_BYTES = 2 * 1024**3
+PYPI_YTDLP_URL = "https://pypi.org/pypi/yt-dlp/json"
+LATEST_YTDLP_CACHE_SECONDS = 3600
+
+_latest_ytdlp_cache: tuple[float, str] | None = None  # (เวลาที่เช็ก, เวอร์ชัน)
 
 
 @dataclass(frozen=True)
@@ -106,7 +113,39 @@ def find_js_runtime(plat: Platform) -> ToolStatus:
     return ToolStatus("warn", name=None, message="ไม่พบตัวช่วยของ yt-dlp (deno)")
 
 
-def ytdlp_status(version: str | None = None, today: date | None = None) -> ToolStatus:
+def _fetch_latest_ytdlp() -> str:
+    response = httpx.get(PYPI_YTDLP_URL, timeout=3)
+    response.raise_for_status()
+    return str(response.json()["info"]["version"])
+
+
+def latest_ytdlp_version(
+    fetch: Callable[[], str] | None = None, *, clock: Callable[[], float] = time.monotonic
+) -> str | None:
+    """เวอร์ชันเสถียรล่าสุดของ yt-dlp บน PyPI (จำไว้ 1 ชั่วโมง) คืน None ถ้าเช็กไม่ได้"""
+    global _latest_ytdlp_cache
+    now = clock()
+    if _latest_ytdlp_cache is not None and now - _latest_ytdlp_cache[0] < LATEST_YTDLP_CACHE_SECONDS:
+        return _latest_ytdlp_cache[1]
+    try:
+        latest = (fetch or _fetch_latest_ytdlp)()
+    except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError):
+        return None  # ไม่จำความล้มเหลว เน็ตกลับมาเมื่อไรก็เช็กได้ทันที
+    _latest_ytdlp_cache = (now, latest)
+    return latest
+
+
+def _version_key(version: str) -> tuple[int, ...] | None:
+    """yt-dlp ใช้เวอร์ชันแบบวันที่ (2026.08.19 หรือ 2026.8.19.123456) เทียบเป็นตัวเลขทีละส่วน"""
+    parts = version.split(".")
+    if len(parts) < 3 or not all(p.isdigit() for p in parts[:3]):
+        return None
+    return tuple(int(p) for p in parts if p.isdigit())
+
+
+def ytdlp_status(
+    version: str | None = None, today: date | None = None, fetch_latest: Callable[[], str] | None = None
+) -> ToolStatus:
     if version is None:
         from yt_dlp.version import __version__ as version
     today = today or date.today()
@@ -115,6 +154,17 @@ def ytdlp_status(version: str | None = None, today: date | None = None) -> ToolS
     except ValueError:
         return ToolStatus("ok", name="yt-dlp", version=version)
     age = (today - released).days
+    latest = latest_ytdlp_version(fetch_latest)
+    installed_key, latest_key = _version_key(version), _version_key(latest) if latest else None
+    if installed_key is not None and latest_key is not None:
+        # อายุมากแต่เป็นตัวล่าสุดแล้ว ไม่ต้องเตือน เพราะผู้ใช้ทำอะไรเพิ่มไม่ได้
+        if installed_key >= latest_key:
+            return ToolStatus("ok", name="yt-dlp", version=version, message=f"อัปเดตล่าสุด {age} วันก่อน (เป็นเวอร์ชันล่าสุด)")
+        return ToolStatus(
+            "warn", name="yt-dlp", version=version,
+            message=f"มีเวอร์ชันใหม่ {latest} ถ้าโหลดคลิปไม่ได้ ให้ปิดแล้วเปิดใหม่ด้วย start.bat เพื่อรับเวอร์ชันล่าสุด",
+        )
+    # เช็ก PyPI ไม่ได้ ใช้กฎอายุแบบเดิม
     if age > YTDLP_MAX_AGE_DAYS:
         return ToolStatus(
             "warn", name="yt-dlp", version=version, message=f"อัปเดตล่าสุด {age} วันก่อน ถ้าโหลดคลิปไม่ได้ ให้ปิดแล้วเปิดใหม่ด้วย start.bat เพื่อรับเวอร์ชันล่าสุด",

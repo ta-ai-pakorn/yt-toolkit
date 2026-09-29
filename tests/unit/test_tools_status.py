@@ -7,6 +7,8 @@ from yttoolkit.core import tools
 from yttoolkit.core.tools import ToolStatus
 from yttoolkit.platform import current
 
+REAL_FETCH_LATEST = tools._fetch_latest_ytdlp  # เก็บตัวจริงไว้ก่อน fixture กลางจะแทนเป็นออฟไลน์
+
 
 def test_find_ffmpeg_prefers_bin(paths, fake_platform):
     exe = paths.bin / "ffmpeg.exe"
@@ -123,6 +125,66 @@ def test_ytdlp_status_age():
     old = tools.ytdlp_status(version="2026.08.01", today=date(2026, 9, 28))
     assert old.status == "warn"
     assert old.message == "อัปเดตล่าสุด 58 วันก่อน ถ้าโหลดคลิปไม่ได้ ให้ปิดแล้วเปิดใหม่ด้วย start.bat เพื่อรับเวอร์ชันล่าสุด"
+
+
+def test_ytdlp_status_ok_when_already_latest_even_if_old():
+    status = tools.ytdlp_status(version="2026.08.01", today=date(2026, 9, 28), fetch_latest=lambda: "2026.8.1")
+    assert status.status == "ok"
+    assert status.message == "อัปเดตล่าสุด 58 วันก่อน (เป็นเวอร์ชันล่าสุด)"
+
+
+def test_ytdlp_status_warns_when_newer_version_exists():
+    status = tools.ytdlp_status(version="2026.09.20", today=date(2026, 9, 28), fetch_latest=lambda: "2026.9.27")
+    assert status.status == "warn"
+    assert status.message == "มีเวอร์ชันใหม่ 2026.9.27 ถ้าโหลดคลิปไม่ได้ ให้ปิดแล้วเปิดใหม่ด้วย start.bat เพื่อรับเวอร์ชันล่าสุด"
+
+
+def test_ytdlp_status_falls_back_to_age_rule_when_lookup_fails():
+    def offline() -> str:
+        raise OSError("offline")
+
+    def bad_json() -> str:
+        raise ValueError("Expecting value")
+
+    for fetch in (offline, bad_json, lambda: "not-a-version"):
+        tools._latest_ytdlp_cache = None
+        old = tools.ytdlp_status(version="2026.08.01", today=date(2026, 9, 28), fetch_latest=fetch)
+        assert old.status == "warn"
+        assert old.message == "อัปเดตล่าสุด 58 วันก่อน ถ้าโหลดคลิปไม่ได้ ให้ปิดแล้วเปิดใหม่ด้วย start.bat เพื่อรับเวอร์ชันล่าสุด"
+
+
+def test_latest_ytdlp_version_is_cached_for_an_hour():
+    calls = []
+    clock = [1000.0]
+
+    def fetch() -> str:
+        calls.append(1)
+        return "2026.9.27"
+
+    def now() -> float:
+        return clock[0]
+
+    assert tools.latest_ytdlp_version(fetch, clock=now) == "2026.9.27"
+    clock[0] += 3599
+    assert tools.latest_ytdlp_version(fetch, clock=now) == "2026.9.27"
+    assert len(calls) == 1
+    clock[0] += 2
+    tools.latest_ytdlp_version(fetch, clock=now)
+    assert len(calls) == 2
+
+
+def test_fetch_latest_ytdlp_reads_pypi_info_version(monkeypatch):
+    import httpx
+
+    seen = {}
+
+    def fake_get(url, timeout):
+        seen["url"], seen["timeout"] = url, timeout
+        return httpx.Response(200, json={"info": {"version": "2026.9.27"}}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(tools.httpx, "get", fake_get)
+    assert REAL_FETCH_LATEST() == "2026.9.27"
+    assert seen == {"url": "https://pypi.org/pypi/yt-dlp/json", "timeout": 3}
 
 
 def test_ytdlp_status_real_version_is_ok_shape():

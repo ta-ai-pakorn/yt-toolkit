@@ -61,3 +61,15 @@ def paths(tmp_path: Path) -> Paths:
     p = Paths(data_root=tmp_path)
     p.ensure()
     return p
+
+
+@pytest.fixture(autouse=True)
+def no_pypi_lookup(monkeypatch):
+    """เทสต้องไม่ต่อ PyPI จริง ถ้าไม่ได้ส่ง fetcher เองให้ถือว่าออฟไลน์ และล้าง cache ทุกเทส"""
+    from yttoolkit.core import tools
+
+    def offline() -> str:
+        raise OSError("เทสห้ามเรียก PyPI จริง")
+
+    monkeypatch.setattr(tools, "_fetch_latest_ytdlp", offline)
+    monkeypatch.setattr(tools, "_latest_ytdlp_cache", None)
