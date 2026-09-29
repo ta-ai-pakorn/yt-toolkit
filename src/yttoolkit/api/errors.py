@@ -10,11 +10,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException
 
+from ..core.yterrors import MESSAGES
+
 log = logging.getLogger("yttoolkit")
 
 NOT_FOUND_MESSAGE = "ไม่พบสิ่งที่ขอ"
 BAD_REQUEST_MESSAGE = "ข้อมูลที่ส่งมาไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ"
-UNKNOWN_MESSAGE = "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล"
+UNKNOWN_MESSAGE = MESSAGES["E_UNKNOWN"]
 
 
 @functools.cache

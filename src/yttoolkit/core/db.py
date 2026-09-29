@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import shutil
 import sqlite3
 import threading
@@ -13,10 +12,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from .inputs import VIDEO_ID
+
 log = logging.getLogger("yttoolkit")
 
 SCHEMA_VERSION = 1
-_VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 
 _SCHEMA = """
 CREATE TABLE schema_version (version INTEGER NOT NULL);
@@ -166,7 +166,7 @@ def purge_stale_cache(db: Database, cache_root: Path, now: datetime, days: int =
 
 def _remove_cache_folder(root: Path, video_id: str) -> bool:
     """คืน True เมื่อไม่มีโฟลเดอร์เหลือค้าง (ลบแล้ว ไม่มี หรือ id ผิดรูปจึงไม่แตะดิสก์)"""
-    if not _VIDEO_ID.fullmatch(video_id):
+    if not VIDEO_ID.fullmatch(video_id):
         log.warning("ข้ามการลบโฟลเดอร์ cache: video_id รูปแบบไม่ถูกต้อง %r", video_id)
         return True
     folder = (root / video_id).resolve()

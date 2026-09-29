@@ -14,8 +14,8 @@ from urllib.parse import parse_qs, urlsplit
 
 Kind = Literal["video", "playlist", "ambiguous", "invalid"]
 
-_VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
-_PLAYLIST_ID = re.compile(r"[A-Za-z0-9_-]{10,64}")
+VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
+PLAYLIST_ID = re.compile(r"[A-Za-z0-9_-]{10,64}")
 _HAS_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 _MARKDOWN_LINK = re.compile(r"\[[^\[\]]*\]\(([^()]*)\)")
 _WRAPPERS = {"<": ">", '"': '"', "'": "'", "(": ")"}
@@ -95,7 +95,7 @@ def _prefixed_segment(path: str, prefix: str) -> str | None:
 
 
 def _parse_line_body(text: str) -> InputItem:
-    if _VIDEO_ID.fullmatch(text):
+    if VIDEO_ID.fullmatch(text):
         return InputItem(input=text, kind="video", video_id=text)
     if _WHITESPACE.search(text) or _SHELL_CHARS.search(text):
         return _invalid(text)
@@ -113,12 +113,12 @@ def _parse_line_body(text: str) -> InputItem:
         return _invalid(text)
 
     query = parse_qs(parts.query, keep_blank_values=False)
-    list_id = _first_param(query, "list", _PLAYLIST_ID)
+    list_id = _first_param(query, "list", PLAYLIST_ID)
     path = parts.path
 
     if host in _SHORT_HOSTS:
         video_id = _single_segment(path)
-        if video_id and _VIDEO_ID.fullmatch(video_id):
+        if video_id and VIDEO_ID.fullmatch(video_id):
             return _video_item(text, video_id, list_id)
         return _invalid(text)
 
@@ -129,7 +129,7 @@ def _parse_line_body(text: str) -> InputItem:
         return _invalid(text)
 
     if _single_segment(path) == "watch":
-        video_id = _first_param(query, "v", _VIDEO_ID)
+        video_id = _first_param(query, "v", VIDEO_ID)
         if video_id:
             return _video_item(text, video_id, list_id)
         return _playlist_item(text, list_id)
@@ -139,7 +139,7 @@ def _parse_line_body(text: str) -> InputItem:
 
     for prefix in ("shorts", "live", "v", "e"):
         video_id = _prefixed_segment(path, prefix)
-        if video_id and _VIDEO_ID.fullmatch(video_id):
+        if video_id and VIDEO_ID.fullmatch(video_id):
             return _video_item(text, video_id, list_id)
 
     return _parse_embed(text, path, list_id)
@@ -149,7 +149,7 @@ def _parse_embed(text: str, path: str, list_id: str | None) -> InputItem:
     segment = _prefixed_segment(path, "embed")
     if segment == "videoseries":
         return _playlist_item(text, list_id)
-    if segment and _VIDEO_ID.fullmatch(segment):
+    if segment and VIDEO_ID.fullmatch(segment):
         return _video_item(text, segment, list_id)
     return _invalid(text)
 

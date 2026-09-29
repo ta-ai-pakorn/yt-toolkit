@@ -39,6 +39,9 @@ def test_every_code_has_a_fixture() -> None:
         ("SIGN IN TO CONFIRM YOU’RE NOT A BOT", "E_BOT_CHECK"),
         ("confirm you're not a bot", "E_BOT_CHECK"),
         ("private VIDEO", "E_VIDEO_PRIVATE"),
+        ("This playlist is private.", "E_VIDEO_PRIVATE"),
+        ("YouTube is requiring a CAPTCHA challenge", "E_BOT_CHECK"),
+        ("A network error has occurred.", "E_NETWORK"),
         ("VIDEO UNAVAILABLE", "E_VIDEO_UNAVAILABLE"),
         (
             "This video has been removed for violating YouTube's policy",
@@ -115,3 +118,9 @@ def test_yterror_without_detail_uses_thai_message() -> None:
 
 def test_yterror_unknown_code_falls_back_to_unknown_message() -> None:
     assert YtError("E_SOMETHING_NEW").message == MESSAGES["E_UNKNOWN"]
+
+
+def test_api_reuses_the_unknown_message() -> None:
+    from yttoolkit.api import errors
+
+    assert errors.UNKNOWN_MESSAGE is MESSAGES["E_UNKNOWN"]

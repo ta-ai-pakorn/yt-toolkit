@@ -33,9 +33,13 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             # ยูทูปจำกัดความถี่ (rate limit) ต้องพักคิวแบบเดียวกับโดนถามว่าเป็นบอท
             "rate-limited by youtube",
             "http error 429",
+            "captcha",
         ),
     ),
-    ("E_VIDEO_PRIVATE", ("private video", "this video is private")),
+    (
+        "E_VIDEO_PRIVATE",
+        ("private video", "this video is private", "this playlist is private"),
+    ),
     (
         "E_GEO_BLOCKED",
         (
@@ -73,6 +77,7 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "getaddrinfo failed",
             "connection reset",
             "http error 5",
+            "a network error has occurred",
         ),
     ),
 )

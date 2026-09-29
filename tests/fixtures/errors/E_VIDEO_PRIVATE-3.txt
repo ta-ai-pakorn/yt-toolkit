@@ -1,0 +1,1 @@
+ERROR: [youtube:tab] PLtPgu7CB4gbY9oDN3drwC3cMbJggS7dKl: YouTube said: This playlist is private.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import io
 import json
 import re
@@ -10,9 +11,11 @@ import httpx
 import pytest
 import yt_dlp
 from PIL import Image
-from yt_dlp.utils import DownloadError, ExtractorError
+from yt_dlp.networking.exceptions import RequestError, TransportError
+from yt_dlp.utils import DownloadError, ExtractorError, UnsupportedError
 
 from yttoolkit.core import extractor as extractor_mod
+from yttoolkit.core import inputs
 from yttoolkit.core.extractor import (
     Extractor,
     FakeExtractor,
@@ -25,6 +28,7 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 SRC = Path(__file__).resolve().parents[2] / "src" / "yttoolkit"
 BBB = "aqz-KE-bpKQ"
 ZOO = "jNQXAC9IVRw"
+PLAYLIST = "PLfakeplaylist250"
 
 
 @pytest.fixture
@@ -96,47 +100,55 @@ def test_fake_probe_private_id(fake: FakeExtractor) -> None:
     assert exc.value.code == "E_VIDEO_PRIVATE"
 
 
-@pytest.mark.parametrize("video_id", ["live_upcoming", "UPCOMINGLV1"])
-def test_fake_probe_live_fixture_goes_through_live_check(
-    fake: FakeExtractor, video_id: str
-) -> None:
-    # ใช้ได้ทั้งชื่อไฟล์และ id 11 ตัวในไฟล์ (ให้เทส API ที่ตรวจรูปแบบ id ใช้ได้)
+def test_fake_probe_live_fixture_goes_through_live_check(fake: FakeExtractor) -> None:
+    # live_upcoming.json หาเจอจาก id 11 ตัวในไฟล์ (UPCOMINGLV1)
     with pytest.raises(YtError) as exc:
-        fake.probe(video_id)
+        fake.probe("UPCOMINGLV1")
     assert exc.value.code == "E_LIVE_NOT_READY"
 
 
 @pytest.mark.parametrize(
-    "video_id", ["../playlist/PLfake250", "..\\probe\\x", "/etc/passwd", "", "."]
+    "video_id",
+    ["live_upcoming", "../playlist/x", "..\\probe\\x", "/etc/passwd", "", "."],
 )
-def test_fake_probe_rejects_path_like_ids(fake: FakeExtractor, video_id: str) -> None:
+def test_fake_probe_uses_the_same_id_rule(fake: FakeExtractor, video_id: str) -> None:
     with pytest.raises(YtError) as exc:
         fake.probe(video_id)
-    assert exc.value.code == "E_VIDEO_UNAVAILABLE"
+    assert exc.value.code == "E_INVALID_INPUT"
+    assert fake.calls == [("probe", video_id)]
 
 
 # ---------- FakeExtractor: playlist ----------
 
 
 def test_fake_playlist_reads_at_most_limit_plus_one(fake: FakeExtractor) -> None:
-    info = fake.playlist("PLfake250", 200)
+    info = fake.playlist(PLAYLIST, 200)
     assert info["title"]
     assert info["playlist_count"] == 250
     assert len(info["entries"]) == 201
     first = info["entries"][0]
     assert {"id", "title", "duration"} <= first.keys()
     assert first.get("thumbnails") or first.get("thumbnail")
-    assert fake.calls == [("playlist", "PLfake250")]
+    assert fake.calls == [("playlist", PLAYLIST)]
 
 
 def test_fake_playlist_under_limit_returns_everything(fake: FakeExtractor) -> None:
-    assert len(fake.playlist("PLfake250", 300)["entries"]) == 250
+    assert len(fake.playlist(PLAYLIST, 300)["entries"]) == 250
 
 
 def test_fake_playlist_missing(fake: FakeExtractor) -> None:
     with pytest.raises(YtError) as exc:
         fake.playlist("PLdoesnotexist", 200)
     assert exc.value.code == "E_VIDEO_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("playlist_id", ["PLfake250", "PL/../x", "", "PL x" * 5])
+def test_fake_playlist_uses_the_same_id_rule(
+    fake: FakeExtractor, playlist_id: str
+) -> None:
+    with pytest.raises(YtError) as exc:
+        fake.playlist(playlist_id, 200)
+    assert exc.value.code == "E_INVALID_INPUT"
 
 
 # ---------- FakeExtractor: fetch ----------
@@ -235,12 +247,19 @@ def test_probe_fixtures_are_trimmed(path: Path) -> None:
             assert "fragments" not in fmt
 
 
+_TEXT_SUFFIXES = {".json", ".txt", ".md"}
+# พารามิเตอร์ของลิงก์ที่มีลายเซ็น/วันหมดอายุ/ผูก IP ห้ามหลุดเข้า repo
+_SIGNED_PARAM = re.compile(r"(?:sig|sigh|sqp|expire|rs)=|[?&/]ip[=/]")
+
+
 def test_no_signed_urls_in_fixtures() -> None:
-    for path in FIXTURES.rglob("*.json"):
+    files = [p for p in FIXTURES.rglob("*") if p.suffix in _TEXT_SUFFIXES]
+    assert len(files) > 30
+    for path in files:
         text = path.read_text(encoding="utf-8")
-        assert "googlevideo" not in text, path
-        assert "sigh=" not in text, path
+        assert "googlevideo.com" not in text, path
         assert "i.ytimg.com/sb/" not in text, path
+        assert not _SIGNED_PARAM.search(text), path
 
 
 # ---------- check_live ----------
@@ -279,7 +298,7 @@ class FakeYDL:
     def __exit__(self, *exc: object) -> None:
         return None
 
-    def extract_info(self, url: str, download: bool = True) -> dict:
+    def extract_info(self, url: str, download: bool = True) -> dict | None:
         assert download is False
         self.urls.append(url)
         if isinstance(FakeYDL.result, BaseException):
@@ -307,6 +326,7 @@ def test_ytdlp_probe_options_and_url(ydl: type[FakeYDL]) -> None:
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
+        "socket_timeout": 10,
     }
     assert expected.items() <= inst.params.items()
     assert inst.urls == [f"https://www.youtube.com/watch?v={BBB}"]
@@ -354,7 +374,7 @@ def test_ytdlp_errors_are_wrapped(
 
 def test_ytdlp_playlist_options_and_truncation(ydl: type[FakeYDL]) -> None:
     ydl.result = {
-        "id": "PLfake250",
+        "id": PLAYLIST,
         "title": "t",
         "entries": iter([{"id": f"v{n:010d}", "title": str(n)} for n in range(10)]),
     }
@@ -363,6 +383,7 @@ def test_ytdlp_playlist_options_and_truncation(ydl: type[FakeYDL]) -> None:
     assert inst.params["extract_flat"] == "in_playlist"
     assert inst.params["playlistend"] == 4
     assert inst.params["quiet"] is True
+    assert inst.params["socket_timeout"] == 10
     assert "noplaylist" not in inst.params
     assert inst.urls == [
         "https://www.youtube.com/playlist?list=PLt5yu3-wZAlSLRHmI1qNm0wjyVNWw1pCU"
@@ -374,6 +395,55 @@ def test_ytdlp_playlist_options_and_truncation(ydl: type[FakeYDL]) -> None:
 def test_ytdlp_playlist_without_entries(ydl: type[FakeYDL]) -> None:
     ydl.result = {"id": "PLempty0000", "title": "t", "entries": None}
     assert YtDlpExtractor().playlist("PLempty0000", 200)["entries"] == []
+
+
+_UNEXPECTED = [
+    (UnsupportedError("https://www.youtube.com/x"), "E_UNKNOWN"),
+    (RequestError("Connection to www.youtube.com timed out."), "E_NETWORK"),
+    (TransportError("getaddrinfo failed"), "E_NETWORK"),
+    (RuntimeError("boom inside yt-dlp"), "E_UNKNOWN"),
+    (KeyError("formats"), "E_UNKNOWN"),
+]
+
+
+@pytest.mark.parametrize(("error", "code"), _UNEXPECTED)
+def test_ytdlp_probe_wraps_every_error(
+    ydl: type[FakeYDL], error: Exception, code: str
+) -> None:
+    ydl.result = error
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().probe(BBB)
+    assert exc.value.code == code
+    assert exc.value.detail
+    assert exc.value.__cause__ is error
+
+
+@pytest.mark.parametrize(("error", "code"), _UNEXPECTED)
+def test_ytdlp_playlist_wraps_every_error(
+    ydl: type[FakeYDL], error: Exception, code: str
+) -> None:
+    ydl.result = error
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().playlist(PLAYLIST, 200)
+    assert exc.value.code == code
+    assert exc.value.__cause__ is error
+
+
+def test_unexpected_error_detail_names_the_type(ydl: type[FakeYDL]) -> None:
+    ydl.result = RuntimeError("boom")
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().probe(BBB)
+    assert exc.value.detail == "RuntimeError: boom"
+
+
+def test_ytdlp_none_result_is_unknown(ydl: type[FakeYDL]) -> None:
+    ydl.result = None
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().probe(BBB)
+    assert exc.value.code == "E_UNKNOWN"
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().playlist(PLAYLIST, 200)
+    assert exc.value.code == "E_UNKNOWN"
 
 
 def test_ytdlp_playlist_errors_are_wrapped(ydl: type[FakeYDL]) -> None:
@@ -397,7 +467,9 @@ def test_ytdlp_probe_rejects_malformed_ids_without_calling_ytdlp(
     assert ydl.instances == []
 
 
-@pytest.mark.parametrize("playlist_id", ["", "PL&x=1", "PL/../x", "PL x"])
+@pytest.mark.parametrize(
+    "playlist_id", ["", "PL&x=1", "PL/../x", "PL x", "PLfake250", "P" * 65]
+)
 def test_ytdlp_playlist_rejects_malformed_ids(
     ydl: type[FakeYDL], playlist_id: str
 ) -> None:
@@ -463,14 +535,40 @@ def test_ytdlp_version_is_read_through_the_adapter() -> None:
     assert extractor_mod.ytdlp_version() == yt_dlp.version.__version__
 
 
+def _imports_yt_dlp(source: str) -> bool:
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names = [node.module]
+        else:
+            continue
+        if any(name == "yt_dlp" or name.startswith("yt_dlp.") for name in names):
+            return True
+    # นำเข้าแบบไดนามิก
+    return bool(re.search(r"""(?:import_module|__import__)\(\s*["']yt_dlp""", source))
+
+
+def test_import_detector() -> None:
+    assert _imports_yt_dlp("def f():\n    from yt_dlp.version import __version__")
+    assert _imports_yt_dlp("import os, yt_dlp as y")
+    assert _imports_yt_dlp("importlib.import_module('yt_dlp.utils')")
+    assert _imports_yt_dlp('__import__("yt_dlp")')
+    assert not _imports_yt_dlp("from .extractor import ytdlp_version\nimport yt_dlpx")
+
+
 def test_only_extractor_imports_yt_dlp() -> None:
-    pattern = re.compile(r"^\s*(?:import\s+yt_dlp|from\s+yt_dlp[\s.])", re.MULTILINE)
     offenders = [
         p.relative_to(SRC).as_posix()
         for p in SRC.rglob("*.py")
-        if pattern.search(p.read_text(encoding="utf-8"))
+        if _imports_yt_dlp(p.read_text(encoding="utf-8"))
     ]
     assert offenders == ["core/extractor.py"]
+
+
+def test_one_id_rule_everywhere() -> None:
+    assert extractor_mod.VIDEO_ID is inputs.VIDEO_ID
+    assert extractor_mod.PLAYLIST_ID is inputs.PLAYLIST_ID
 
 
 def test_extractor_does_not_import_api_or_platform() -> None:

@@ -9,10 +9,11 @@
 
 - `aqz-KE-bpKQ.json`: ข้อมูลจริงของ Big Buck Bunny (635 วินาที, storyboard sb0..sb3)
 - `jNQXAC9IVRw.json`: ข้อมูลจริงของ "Me at the zoo" (19 วินาที, ไม่มี storyboard, มี chapters)
-- `live_upcoming.json`: ข้อมูลสังเคราะห์ `live_status: is_upcoming` ใช้ได้ทั้งชื่อ `live_upcoming` และ id `UPCOMINGLV1`
+- `live_upcoming.json`: ข้อมูลสังเคราะห์ `live_status: is_upcoming` `FakeExtractor` หาไฟล์นี้จาก id `UPCOMINGLV1` ในไฟล์ (id ต้องผ่านกฎ 11 ตัวเดียวกับของจริง)
 
 ฟิลด์ที่เก็บ:
 - ระดับบน: `id, title, channel, uploader, duration, upload_date, timestamp, live_status, availability, thumbnail, chapters` (และ `playlist_count` ถ้ามี)
+- `thumbnail` ตัด query string (พารามิเตอร์ลายเซ็นของภาพย่อ) ออก เหลือแค่ path
 - ต่อ format: `format_id, format_note, ext, vcodec, acodec, height, width, fps, abr, tbr, filesize, filesize_approx, language, language_preference, rows, columns` และ `fragments` เฉพาะ storyboard
 
 ลิงก์ทั้งหมดของ format (googlevideo ที่มีลายเซ็น) ถูกลบออก ลิงก์ fragment ของ storyboard ถูกเขียนใหม่เป็น:
@@ -27,7 +28,7 @@
 - แผ่นสุดท้าย `M14` ขนาด 640×180 (มีแค่ 2 ช่อง แถวเดียว) ขนาดช่องจึงต้องคิดจาก `width`/`height` ของ format ไม่ใช่จากขนาดรูปหารจำนวนช่อง
 
 ## playlist/
-- `PLfake250.json`: ข้อมูลสังเคราะห์ รูปแบบเดียวกับผล `extract_flat="in_playlist"` มี 250 คลิป (`fake0000001`..`fake0000250`) ใช้เทสการตัดที่ 200 คลิป (AC-IN-07)
+- `PLfakeplaylist250.json` (id `PLfakeplaylist250` ยาวผ่านกฎ 10-64 ตัวของ `core/inputs.py`): ข้อมูลสังเคราะห์ รูปแบบเดียวกับผล `extract_flat="in_playlist"` มี 250 คลิป (`fake0000001`..`fake0000250`) ใช้เทสการตัดที่ 200 คลิป (AC-IN-07)
 
 ## errors/
 ข้อความ error ของ yt-dlp หนึ่งไฟล์ต่อหนึ่งข้อความ ชื่อไฟล์ `<รหัส>-<n>.txt` เทส `tests/unit/test_yterrors.py` ตรวจว่า `classify` ได้รหัสตามชื่อไฟล์
@@ -37,8 +38,10 @@
 | `E_BOT_CHECK-1`, `-2` | เหตุผลจากยูทูปผ่าน `extractor/youtube/_video.py` (กิ่ง `'sign in' in reason`) ต่อด้วย `_youtube_login_hint` ใน `extractor/youtube/_base.py` และ `_login_hint` ใน `extractor/common.py` (`-2` ใช้ `'` ธรรมดาแทน `’`) |
 | `E_BOT_CHECK-3` | ข้อความ rate limit ใน `extractor/youtube/_video.py` ("This content isn't available, try again later") |
 | `E_BOT_CHECK-4` | errnote `Unable to download API page` ใน `extractor/youtube/_base.py` + `HTTP Error 429` จาก `networking/exceptions.py` |
+| `E_BOT_CHECK-5` | `reason += '. YouTube is requiring a captcha challenge before playback'` ใน `extractor/youtube/_video.py` |
 | `E_VIDEO_PRIVATE-1` | ข้อความจริงจากการ probe `yZIXLfi8CZQ` (คลิปที่ `extractor/youtube/_video.py` ระบุ `'skip': 'Private video'`) |
 | `E_VIDEO_PRIVATE-2` | เหตุผลแบบยาวของยูทูป ผ่านกิ่ง `'sign in'` ใน `extractor/youtube/_video.py` |
+| `E_VIDEO_PRIVATE-3` | `'skip': 'This playlist is private'` ใน `extractor/youtube/_tab.py` ในรูป `YouTube said: ...` ของ `extractor/youtube/_base.py` |
 | `E_VIDEO_UNAVAILABLE-1` | ข้อความจริงจากการ probe id ที่ไม่มีอยู่ (`aaaaaaaaaaa`) |
 | `E_VIDEO_UNAVAILABLE-2` | `'skip': 'Video unavailable'` ใน `extractor/youtube/_video.py` |
 | `E_VIDEO_UNAVAILABLE-3`, `-4` | เหตุผล + subreason ที่ `extractor/youtube/_video.py` ต่อกันเป็น `reason. subreason` ("This video has been removed", "This video is no longer available") |
@@ -49,13 +52,13 @@
 | `E_GEO_BLOCKED-2` | subreason "blocked it in your country" ผ่าน `extractor/youtube/_video.py` |
 | `E_GEO_BLOCKED-3` | ข้อความตั้งต้นของ `raise_geo_restricted` ใน `extractor/common.py` |
 | `E_AGE_RESTRICTED-1` | เหตุผลจากยูทูปที่ `_is_agegated` ใน `extractor/youtube/_video.py` ตรวจ ("confirm your age", "inappropriate") |
-| `E_AGE_RESTRICTED-2` | ข้อความ `age-restricted` ใน `extractor/youtube/_video.py` |
 | `E_LIVE_NOT_READY-1`, `-2` | เหตุผลของยูทูปที่ส่งผ่าน `raise_no_formats` ใน `extractor/youtube/_video.py` (รูปแบบ "This live event will begin" เดียวกับ `extractor/eplus.py`) |
 | `E_NETWORK-1` | errnote ใน `extractor/youtube/_base.py` + `getaddrinfo failed` ของ Windows (`networking/_helper.py`) |
 | `E_NETWORK-2` | `Connection to ... timed out` ใน `networking/_requests.py` |
 | `E_NETWORK-3` | connection reset ของ Windows (10054) ห่อด้วย errnote `Unable to download API page` ใน `extractor/youtube/_base.py` (ตัวข้อความ reset มาจากระบบปฏิบัติการ ไม่ได้อยู่ใน yt-dlp) |
 | `E_NETWORK-5` | `Connection reset by peer` (Errno 104) มาจากระบบปฏิบัติการ ไม่ได้อยู่ใน yt-dlp |
 | `E_NETWORK-4` | `unable to download video data` + `HTTP Error 503` จาก `networking/exceptions.py` |
+| `E_NETWORK-6` | `A network error has occurred.` ใน `extractor/common.py` (ห่อ `IncompleteRead`) |
 | `E_UNKNOWN-1` | `Requested format is not available` ใน `YoutubeDL.py` |
 | `E_UNKNOWN-2` | `This video is DRM protected` ใน `extractor/common.py` (`report_drm`) |
 

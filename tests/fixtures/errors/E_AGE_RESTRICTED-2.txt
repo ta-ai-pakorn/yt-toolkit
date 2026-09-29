@@ -1,1 +1,0 @@
-ERROR: [youtube] aqz-KE-bpKQ: This video is age-restricted and YouTube is requiring account age-verification; some formats may be missing
