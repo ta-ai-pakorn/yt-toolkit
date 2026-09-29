@@ -66,36 +66,14 @@ def test_try_lock_returns_none_when_lock_file_cannot_be_opened(tmp_path, caplog)
     assert any(r.levelname == "WARNING" for r in caplog.records)
 
 
-def test_macos_try_lock_returns_none_when_lock_file_cannot_be_opened(tmp_path, monkeypatch, caplog):
-    import importlib
-    import types
+def test_macos_try_lock_returns_none_when_lock_file_cannot_be_opened(macos_module, tmp_path, monkeypatch, caplog):
+    def deny(*args, **kwargs):
+        raise PermissionError("denied")
 
-    import yttoolkit.platform as platform_pkg
-
-    had_attr = hasattr(platform_pkg, "macos")
-    # macos.py import fcntl ซึ่งไม่มีบน Windows จึงสร้างตัวแทนขึ้นมาแค่พอให้ import ได้
-    monkeypatch.setitem(sys.modules, "fcntl", types.SimpleNamespace(LOCK_EX=2, LOCK_NB=4, LOCK_UN=8, flock=None))
-    monkeypatch.delitem(sys.modules, "yttoolkit.platform.macos", raising=False)
-    try:
-        macos = importlib.import_module("yttoolkit.platform.macos")
-
-        def deny(*args, **kwargs):
-            raise PermissionError("denied")
-
-        monkeypatch.setattr("builtins.open", deny)
-        with caplog.at_level("WARNING", logger="yttoolkit"):
-            assert macos.MacPlatform().try_lock(tmp_path / "app.lock") is None
-        assert any(r.levelname == "WARNING" for r in caplog.records)
-    finally:
-        # ห้ามทิ้งโมดูลที่ผูกกับ fcntl ตัวแทนไว้ให้เทสอื่น
-        sys.modules.pop("yttoolkit.platform.macos", None)
-        if not had_attr and hasattr(platform_pkg, "macos"):
-            delattr(platform_pkg, "macos")
-
-
-def test_macos_stub_does_not_leak_into_later_tests():
-    assert "yttoolkit.platform.macos" not in sys.modules
-    assert sys.platform != "win32" or "fcntl" not in sys.modules
+    monkeypatch.setattr("builtins.open", deny)
+    with caplog.at_level("WARNING", logger="yttoolkit"):
+        assert macos_module.MacPlatform().try_lock(tmp_path / "app.lock") is None
+    assert any(r.levelname == "WARNING" for r in caplog.records)
 
 
 def test_try_lock_logs_unopenable_lock_file_only_once(tmp_path, caplog):
