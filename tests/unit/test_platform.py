@@ -71,15 +71,47 @@ def test_macos_try_lock_returns_none_when_lock_file_cannot_be_opened(tmp_path, m
     import importlib
     import types
 
+    import yttoolkit.platform as platform_pkg
+
+    had_attr = hasattr(platform_pkg, "macos")
     # macos.py import fcntl ซึ่งไม่มีบน Windows จึงสร้างตัวแทนขึ้นมาแค่พอให้ import ได้
     monkeypatch.setitem(sys.modules, "fcntl", types.SimpleNamespace(LOCK_EX=2, LOCK_NB=4, LOCK_UN=8, flock=None))
     monkeypatch.delitem(sys.modules, "yttoolkit.platform.macos", raising=False)
-    macos = importlib.import_module("yttoolkit.platform.macos")
+    try:
+        macos = importlib.import_module("yttoolkit.platform.macos")
 
-    def deny(*args, **kwargs):
-        raise PermissionError("denied")
+        def deny(*args, **kwargs):
+            raise PermissionError("denied")
 
-    monkeypatch.setattr("builtins.open", deny)
+        monkeypatch.setattr("builtins.open", deny)
+        with caplog.at_level("WARNING", logger="yttoolkit"):
+            assert macos.MacPlatform().try_lock(tmp_path / "app.lock") is None
+        assert any(r.levelname == "WARNING" for r in caplog.records)
+    finally:
+        # ห้ามทิ้งโมดูลที่ผูกกับ fcntl ตัวแทนไว้ให้เทสอื่น
+        sys.modules.pop("yttoolkit.platform.macos", None)
+        if not had_attr and hasattr(platform_pkg, "macos"):
+            delattr(platform_pkg, "macos")
+
+
+def test_macos_stub_does_not_leak_into_later_tests():
+    assert "yttoolkit.platform.macos" not in sys.modules
+    assert sys.platform != "win32" or "fcntl" not in sys.modules
+
+
+def test_try_lock_logs_unopenable_lock_file_only_once(tmp_path, caplog):
+    plat = current()
+    lock_path = tmp_path / "app.lock"
+    lock_path.mkdir()
+    with caplog.at_level("DEBUG", logger="yttoolkit"):
+        for _ in range(5):  # start() วนลองซ้ำทุก 0.5 วินาที
+            assert plat.try_lock(lock_path) is None
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert warnings[0].exc_info is not None  # ครั้งแรกเก็บ traceback ไว้ให้ตรวจ
+    # ที่อื่นไม่ถูกกลบ: ไฟล์ lock คนละที่ยังต้องเตือนของมันเอง
+    other = tmp_path / "other" / "app.lock"
+    other.mkdir(parents=True)
     with caplog.at_level("WARNING", logger="yttoolkit"):
-        assert macos.MacPlatform().try_lock(tmp_path / "app.lock") is None
-    assert any(r.levelname == "WARNING" for r in caplog.records)
+        assert plat.try_lock(other) is None
+    assert len([r for r in caplog.records if r.levelname == "WARNING"]) == 2

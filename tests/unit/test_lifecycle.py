@@ -39,13 +39,13 @@ def test_is_alive_handles_errors():
 
 def test_find_running_ignores_stale_file(paths, fake_platform):
     runstate.write(paths.app_json, RunInfo(8787, 999, "t", "x"))
-    assert lifecycle.find_running(paths, fake_platform, alive=lambda port: True) is None
+    assert lifecycle.find_running(paths, fake_platform, alive=lambda port, pid: True) is None
 
 
 def test_find_running_detects_live_instance(paths, fake_platform):
     info = _running(paths, fake_platform)
-    assert lifecycle.find_running(paths, fake_platform, alive=lambda port: True) == info
-    assert lifecycle.find_running(paths, fake_platform, alive=lambda port: False) is None
+    assert lifecycle.find_running(paths, fake_platform, alive=lambda port, pid: True) == info
+    assert lifecycle.find_running(paths, fake_platform, alive=lambda port, pid: False) is None
 
 
 def test_default_output_dir(fake_platform):
@@ -492,3 +492,53 @@ def test_cli_wait_passes_timeout(monkeypatch):  # item 7
     assert cli.main(["wait", "--timeout", "0"]) == 0
     assert cli.main(["wait", "--timeout", "3.5"]) == 0
     assert [kw["timeout"] for kw in seen] == [25.0, 0.0, 3.5]
+
+
+# ---- M1 follow-ups: Task 1 fix round 1 ----------------------------------------------------------------------------
+
+
+def test_stop_early_branch_does_not_clear_replaced_app_json(paths, fake_platform):  # fix round 1, item 2
+    _running(paths, fake_platform, holds_lock=False)  # ล็อกว่าง = ไม่มีแอพเปิดอยู่
+    newer = RunInfo(port=8788, pid=7777, token="new", started_at="newer")
+    real_try_lock = fake_platform.try_lock
+
+    def try_lock(path):
+        runstate.write(paths.app_json, newer)  # อินสแตนซ์ใหม่เขียน app.json ทันทีหลังเราเช็ก lock
+        return real_try_lock(path)
+
+    fake_platform.try_lock = try_lock
+    out = []
+    assert lifecycle.stop(paths, fake_platform, out=out.append) == 0
+    assert runstate.read(paths.app_json) == newer
+    assert out == ["YT Toolkit ไม่ได้เปิดอยู่"]
+
+
+def test_is_alive_checks_ping_pid():  # fix round 1, item 3
+    class Ping:
+        status_code = 200
+
+        def __init__(self, pid):
+            self._pid = pid
+
+        def json(self):
+            return {"ok": True, "pid": self._pid}
+
+    assert lifecycle.is_alive(8787, 42, get=lambda url, timeout: Ping(42)) is True
+    assert lifecycle.is_alive(8787, 42, get=lambda url, timeout: Ping(43)) is False
+    assert lifecycle.is_alive(8787, 42, get=lambda url, timeout: FakeResponse(200, {"ok": True})) is False
+    assert lifecycle.is_alive(8787, get=lambda url, timeout: FakeResponse(200)) is True  # ไม่ระบุ pid = เช็กแค่ตอบกลับ
+
+
+def test_find_running_rejects_instance_whose_ping_reports_other_pid(paths, fake_platform):  # item 3
+    _running(paths, fake_platform, pid=4242, port=8787)
+
+    class Ping:
+        status_code = 200
+
+        def json(self):
+            return {"ok": True, "pid": 9999}  # พอร์ตนี้มีโปรแกรมอื่นตอบ ไม่ใช่แอพตาม app.json
+
+    def alive(port, pid):
+        return lifecycle.is_alive(port, pid, get=lambda url, timeout: Ping())
+
+    assert lifecycle.find_running(paths, fake_platform, alive=alive) is None

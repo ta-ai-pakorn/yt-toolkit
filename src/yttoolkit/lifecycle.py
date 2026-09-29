@@ -31,16 +31,20 @@ def base_url(port: int) -> str:
     return f"http://{HOST}:{port}"
 
 
-def is_alive(port: int, get=httpx.get) -> bool:
+def is_alive(port: int, pid: int | None = None, get=httpx.get) -> bool:
+    """พอร์ตนี้ตอบ /api/ping และ (ถ้าระบุ pid) pid ที่ตอบกลับตรงกัน กันพอร์ตที่โปรแกรมอื่นมาใช้แทน"""
     try:
-        return get(f"{base_url(port)}/api/ping", timeout=2).status_code == 200
-    except httpx.HTTPError:
+        response = get(f"{base_url(port)}/api/ping", timeout=2)
+        if response.status_code != 200:
+            return False
+        return pid is None or response.json().get("pid") == pid
+    except (httpx.HTTPError, ValueError, AttributeError):
         return False
 
 
 def find_running(paths: Paths, plat: Platform, alive=is_alive) -> runstate.RunInfo | None:
     info = runstate.read(paths.app_json)
-    if info and plat.pid_alive(info.pid) and alive(info.port):
+    if info and plat.pid_alive(info.pid) and alive(info.port, info.pid):
         return info
     return None
 
@@ -308,7 +312,8 @@ def stop(
     # pid ใน app.json อาจค้างจากตอนเครื่องดับ แล้ว Windows เอาเลขนี้ไปให้โปรแกรมอื่น
     # แอพที่รันอยู่จริงถือ run/app.lock ไว้ตลอด ถ้าจับ lock ได้แปลว่าไม่มีแอพเปิดอยู่
     if info is None or not plat.pid_alive(info.pid) or not _app_holds_lock(paths, plat):
-        runstate.clear(paths.app_json)
+        if info is not None and _still_named_by_app_json(paths, info):  # ห้ามลบ app.json ของอินสแตนซ์ใหม่
+            runstate.clear(paths.app_json)
         out("YT Toolkit ไม่ได้เปิดอยู่")
         return 0
     url = f"{base_url(info.port)}/api/shutdown"

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ctypes
-import logging
 import msvcrt
 import os
 import subprocess
@@ -9,7 +8,7 @@ import uuid
 from ctypes import wintypes
 from pathlib import Path
 
-log = logging.getLogger("yttoolkit")
+from .base import report_lock_open_failure
 
 _FOLDERID_DOWNLOADS = uuid.UUID("{374DE290-123F-4565-9164-39C4925E467B}")
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -96,7 +95,7 @@ class WindowsPlatform:
             path.parent.mkdir(parents=True, exist_ok=True)
             handle = open(path, "a+b")  # noqa: SIM115 (ตัวจัดการเก็บไว้ให้ release_lock ปิดเอง)
         except OSError:
-            log.warning("เปิดไฟล์ lock ไม่ได้: %s", path, exc_info=True)
+            report_lock_open_failure(path)
             return None
         try:
             handle.seek(0)
