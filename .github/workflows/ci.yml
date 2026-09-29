@@ -22,7 +22,7 @@ jobs:
       - run: uv run pytest -v
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # ตรึงเวอร์ชัน ให้ขั้นตรวจ web/dist ไม่เปลี่ยนเองเมื่อ ubuntu-latest ขยับ
     defaults:
       run:
         working-directory: web
@@ -56,7 +56,12 @@ jobs:
       - run: uv sync --frozen
       - run: npm ci
         working-directory: web
-      - run: npx playwright install chromium
+      - name: cache browser ของ Playwright
+        uses: actions/cache@v6
+        with:
+          path: ~\AppData\Local\ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - run: npx playwright install chromium # ถ้า cache ตรง จะข้ามการดาวน์โหลด
         working-directory: web
       - run: npm run e2e
         working-directory: web
