@@ -30,11 +30,14 @@ def _safe_parts(full_path: str) -> tuple[str, ...] | None:
 
 
 def _same_file(a: Path, b: Path) -> bool:
-    """บน Windows ชื่ออย่าง "index.html." หรือชื่อย่อ 8.3 ก็ชี้ไปที่ index.html ได้ ต้องเทียบที่ตัวไฟล์"""
+    """บน Windows ชื่ออย่าง "index.html." หรือชื่อย่อ 8.3 ก็ชี้ไปที่ index.html ได้ ต้องเทียบที่ตัวไฟล์
+
+    ถ้าเทียบไม่ได้ให้ถือว่าเป็นไฟล์เดียวกัน (fail closed) จะได้เสิร์ฟหน้าที่ฝัง token แทนไฟล์ดิบ
+    """
     try:
         return os.path.samefile(a, b)
     except OSError:
-        return False
+        return True
 
 
 def mount_web(app: FastAPI, dist: Path, token: str) -> None:

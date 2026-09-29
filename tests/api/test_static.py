@@ -127,3 +127,15 @@ def test_index_html_aliases_never_serve_raw_copy(tmp_path, path):
     assert resp.status_code == 200
     assert 'name="yt-token"' in resp.text
     assert resp.headers["cache-control"] == "no-store"
+
+
+def test_samefile_error_fails_closed_to_token_index(tmp_path, monkeypatch):
+    from yttoolkit.api import static
+
+    def broken_samefile(a, b):
+        raise OSError("cannot stat")
+
+    monkeypatch.setattr(static.os.path, "samefile", broken_samefile)
+    resp = _client(_dist(tmp_path)).get("/assets/app.js")
+    assert resp.status_code == 200
+    assert 'name="yt-token"' in resp.text
