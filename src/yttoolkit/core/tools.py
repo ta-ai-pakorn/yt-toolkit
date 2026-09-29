@@ -153,7 +153,9 @@ def ytdlp_status(
     version: str | None = None, today: date | None = None, fetch_latest: Callable[[], str] | None = None
 ) -> ToolStatus:
     if version is None:
-        from yt_dlp.version import __version__ as version
+        from .extractor import ytdlp_version
+
+        version = ytdlp_version()
     today = today or date.today()
     try:
         released = datetime.strptime(version[:10], "%Y.%m.%d").date()
