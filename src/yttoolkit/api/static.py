@@ -18,7 +18,7 @@ def _safe_parts(full_path: str) -> tuple[str, ...] | None:
     """ตรวจ path แบบไม่แตะดิสก์ คืน None ถ้าอาจหลุดออกนอก dist
 
     ห้ามส่ง path ที่ผู้ใช้ส่งมาเข้า resolve()/is_file() ตรงๆ เพราะบน Windows
-    path แบบ UNC (\\host\share) จะทำให้เครื่องไปต่อ SMB และหลุด NTLM hash
+    path แบบ UNC (ขึ้นต้นด้วย backslash สองตัว) จะทำให้เครื่องไปต่อ SMB และหลุด NTLM hash
     """
     if any(ch in full_path for ch in ("\\", ":", "\x00")) or full_path.startswith("/"):
         return None
