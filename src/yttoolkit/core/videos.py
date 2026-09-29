@@ -1,0 +1,452 @@
+"""ข้อมูลคลิป: แปลงผล probe ดิบเป็น VideoInfo (PRD 6.2.1), cache 24 ชม. ใน SQLite,
+ประวัติคลิปล่าสุด และรายการคลิปในเพลย์ลิสต์
+
+ไม่ import yt_dlp เอง (เรียกผ่าน Extractor) และไม่ import api/platform (PRD 6.6)
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from .db import Database
+from .extractor import Extractor
+from .inputs import PLAYLIST_ID, VIDEO_ID
+from .yterrors import YtError
+
+CACHE_TTL = timedelta(hours=24)
+PLAYLIST_LIMIT = 200
+
+_DRC_NOTE = re.compile(r"\bdrc\b", re.IGNORECASE)
+_STORYBOARD = "storyboard"
+
+# ฟิลด์ของ format ที่เก็บลง probe_json (ไม่เก็บ URL ตรงของ googlevideo)
+_MEDIA_FIELDS = (
+    "format_id",
+    "format_note",
+    "height",
+    "fps",
+    "vcodec",
+    "acodec",
+    "filesize",
+    "filesize_approx",
+    "language",
+    "language_preference",
+    "abr",
+)
+_STORYBOARD_FIELDS = (
+    "format_id",
+    "format_note",
+    "width",
+    "height",
+    "rows",
+    "columns",
+    "fps",
+)
+
+
+def utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+# ---------- แปลงข้อมูลดิบ ----------
+
+
+def _is_storyboard(fmt: dict) -> bool:
+    return fmt.get("format_note") == _STORYBOARD
+
+
+def _thumbnail(raw: dict) -> str:
+    if raw.get("thumbnail"):
+        return str(raw["thumbnail"])
+    for item in reversed(raw.get("thumbnails") or []):
+        if isinstance(item, dict) and item.get("url"):
+            return str(item["url"])
+    video_id = raw.get("id") or ""
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else ""
+
+
+def _seconds(value: Any) -> int:
+    return round(value) if isinstance(value, int | float) else 0
+
+
+def _number(value: Any) -> int | float:
+    """fps/เวลา: 30.0 -> 30 ให้อ่านง่ายและเทียบเท่ากันได้"""
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        return 0
+    return int(value) if float(value).is_integer() else value
+
+
+def _published_at(raw: dict) -> str | None:
+    upload_date = str(raw.get("upload_date") or "")
+    if re.fullmatch(r"\d{8}", upload_date):
+        return f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
+    timestamp = raw.get("timestamp")
+    if isinstance(timestamp, int | float):
+        try:
+            return datetime.fromtimestamp(timestamp, UTC).date().isoformat()
+        except (OverflowError, OSError, ValueError):
+            return None
+    return None
+
+
+def _chapters(raw: dict) -> list[dict]:
+    items = [c for c in (raw.get("chapters") or []) if isinstance(c, dict)]
+    duration = raw.get("duration")
+    result = []
+    for index, chapter in enumerate(items):
+        start = _number(chapter.get("start_time"))
+        end = chapter.get("end_time")
+        if end is None:
+            following = (
+                items[index + 1].get("start_time") if index + 1 < len(items) else None
+            )
+            end = following if following is not None else duration
+        result.append(
+            {
+                "startS": start,
+                "endS": _number(end) if end is not None else start,
+                "title": chapter.get("title") or "",
+            }
+        )
+    return result
+
+
+def _codec_family(vcodec: str) -> str:
+    family = vcodec.split(".")[0].lower()
+    return "vp9" if family == "vp09" else family
+
+
+def _size(fmt: dict) -> int | None:
+    for key in ("filesize", "filesize_approx"):
+        value = fmt.get(key)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return round(value)
+    return None
+
+
+def _video_formats(formats: list[dict]) -> list[dict]:
+    best: dict[tuple, dict] = {}
+    for fmt in formats:
+        vcodec = fmt.get("vcodec")
+        height = fmt.get("height")
+        if (
+            _is_storyboard(fmt)
+            or not vcodec
+            or vcodec == "none"
+            or fmt.get("acodec") not in (None, "none")
+        ):
+            continue
+        if not isinstance(height, int | float) or not fmt.get("format_id"):
+            continue
+        entry: dict[str, Any] = {
+            "formatId": str(fmt["format_id"]),
+            "height": round(height),
+            "fps": _number(fmt.get("fps")),
+            "vcodec": str(vcodec),
+            "compat": str(vcodec).startswith("avc1"),
+        }
+        size = _size(fmt)
+        if size is not None:
+            entry["sizeBytes"] = size
+        key = (entry["height"], entry["fps"], _codec_family(entry["vcodec"]))
+        held = best.get(key)
+        if held is None or (entry.get("sizeBytes") or -1) > (
+            held.get("sizeBytes") or -1
+        ):
+            best[key] = entry
+    return sorted(
+        best.values(),
+        key=lambda e: (
+            -e["height"],
+            -e["fps"],
+            -(e.get("sizeBytes") or 0),
+            e["formatId"],
+        ),
+    )
+
+
+def _audio_candidates(formats: list[dict]) -> list[dict]:
+    result = []
+    for fmt in formats:
+        if (
+            _is_storyboard(fmt)
+            or fmt.get("vcodec") != "none"
+            or fmt.get("acodec") == "none"
+        ):
+            continue
+        if not fmt.get("format_id"):
+            continue
+        if str(fmt["format_id"]).endswith("-drc") or _DRC_NOTE.search(
+            str(fmt.get("format_note") or "")
+        ):
+            continue
+        result.append(fmt)
+    return result
+
+
+def _preference(fmt: dict) -> int | float | None:
+    value = fmt.get("language_preference")
+    return (
+        value
+        if isinstance(value, int | float) and not isinstance(value, bool)
+        else None
+    )
+
+
+def _audio_formats(formats: list[dict]) -> list[dict]:
+    candidates = _audio_candidates(formats)
+    by_note = [
+        "original" in (note := str(f.get("format_note") or "").lower())
+        or "default" in note
+        for f in candidates
+    ]
+    if not any(by_note):
+        preferences = {p for f in candidates if (p := _preference(f)) is not None}
+        if len(preferences) > 1:
+            top = max(preferences)
+            by_note = [_preference(f) == top for f in candidates]
+    result = []
+    for fmt, original in zip(candidates, by_note, strict=True):
+        abr = fmt.get("abr")
+        result.append(
+            {
+                "formatId": str(fmt["format_id"]),
+                "language": fmt.get("language") or None,
+                "isOriginal": original,
+                "acodec": str(fmt.get("acodec") or "unknown"),
+                "abrKbps": round(abr) if isinstance(abr, int | float) and abr else None,
+            }
+        )
+    return result
+
+
+def to_video_info(raw: dict) -> dict:
+    """ข้อมูลดิบ (หรือแบบที่ตัดแล้วจาก trim_probe) -> VideoInfo ตาม PRD 6.2.1 (คีย์ camelCase)"""
+    formats = [f for f in (raw.get("formats") or []) if isinstance(f, dict)]
+    info: dict[str, Any] = {
+        "videoId": raw.get("id") or "",
+        "title": raw.get("title") or "",
+        "channel": raw.get("channel") or raw.get("uploader") or "",
+        "durationS": _seconds(raw.get("duration")),
+    }
+    published = _published_at(raw)
+    if published:
+        info["publishedAt"] = published
+    info["thumbnailUrl"] = _thumbnail(raw)
+    info["chapters"] = _chapters(raw)
+    info["video"] = _video_formats(formats)
+    info["audio"] = _audio_formats(formats)
+    info["hasStoryboard"] = any(_is_storyboard(f) for f in formats)
+    info["isLive"] = raw.get("live_status") == "is_live"
+    return info
+
+
+def trim_probe(raw: dict) -> dict:
+    """ตัดข้อมูลดิบให้เหลือที่งานถัดไปต้องใช้: ฟิลด์ของ VideoInfo, format วิดีโอ/เสียงล้วน
+    และ storyboard (พร้อม fragments/rows/columns/fps/width/height) ไม่เก็บ URL ตรงของสื่อ"""
+    formats: list[dict] = []
+    for fmt in raw.get("formats") or []:
+        if not isinstance(fmt, dict):
+            continue
+        if _is_storyboard(fmt):
+            kept = {k: fmt[k] for k in _STORYBOARD_FIELDS if fmt.get(k) is not None}
+            kept["fragments"] = [
+                {"url": frag["url"], "duration": frag.get("duration")}
+                for frag in (fmt.get("fragments") or [])
+                if isinstance(frag, dict) and frag.get("url")
+            ]
+            formats.append(kept)
+        elif fmt.get("vcodec") == "none" or fmt.get("acodec") in (None, "none"):
+            formats.append({k: fmt[k] for k in _MEDIA_FIELDS if fmt.get(k) is not None})
+    trimmed: dict[str, Any] = {
+        key: raw[key]
+        for key in (
+            "id",
+            "title",
+            "channel",
+            "uploader",
+            "duration",
+            "upload_date",
+            "timestamp",
+            "live_status",
+        )
+        if raw.get(key) is not None
+    }
+    trimmed["thumbnail"] = _thumbnail(raw)
+    trimmed["chapters"] = [
+        {k: c[k] for k in ("start_time", "end_time", "title") if c.get(k) is not None}
+        for c in (raw.get("chapters") or [])
+        if isinstance(c, dict)
+    ]
+    trimmed["formats"] = formats
+    return trimmed
+
+
+# ---------- บริการ ----------
+
+
+def _like_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _playlist_thumbnail(entry: dict, video_id: str) -> str:
+    for item in reversed(entry.get("thumbnails") or []):
+        if isinstance(item, dict) and item.get("url"):
+            return str(item["url"])
+    return str(
+        entry.get("thumbnail") or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg"
+    )
+
+
+class VideoService:
+    def __init__(
+        self,
+        db: Database,
+        extractor: Extractor,
+        now: Callable[[], datetime] = utcnow,
+    ) -> None:
+        self._db = db
+        self._extractor = extractor
+        self._now = now
+
+    def _stamp(self) -> tuple[datetime, str]:
+        moment = self._now().astimezone(UTC)
+        return moment, moment.isoformat(timespec="microseconds")
+
+    @staticmethod
+    def _check_video_id(video_id: str) -> None:
+        if not VIDEO_ID.fullmatch(video_id):
+            raise YtError("E_INVALID_INPUT", f"video id ไม่ถูกรูปแบบ: {video_id!r}")
+
+    def get(self, video_id: str, refresh: bool = False) -> dict:
+        self._check_video_id(video_id)
+        moment, stamp = self._stamp()
+        if not refresh:
+            info = self._cached_info(video_id, moment)
+            if info is not None:
+                self._db.execute(
+                    "UPDATE videos SET opened_at = ? WHERE video_id = ?",
+                    (stamp, video_id),
+                )
+                return info
+        trimmed = trim_probe(self._extractor.probe(video_id))
+        info = to_video_info(trimmed)
+        chapters = [
+            {"start_s": c["startS"], "end_s": c["endS"], "title": c["title"]}
+            for c in info["chapters"]
+        ]
+        self._db.execute(
+            "INSERT INTO videos (video_id, title, channel, duration_s, thumbnail_url, chapters_json,"
+            " probe_json, probed_at, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(video_id) DO UPDATE SET title = excluded.title, channel = excluded.channel,"
+            " duration_s = excluded.duration_s, thumbnail_url = excluded.thumbnail_url,"
+            " chapters_json = excluded.chapters_json, probe_json = excluded.probe_json,"
+            " probed_at = excluded.probed_at, opened_at = excluded.opened_at",
+            (
+                video_id,
+                info["title"],
+                info["channel"],
+                info["durationS"],
+                info["thumbnailUrl"],
+                json.dumps(chapters, ensure_ascii=False),
+                json.dumps(trimmed, ensure_ascii=False, separators=(",", ":")),
+                stamp,
+                stamp,
+            ),
+        )
+        return info
+
+    def _cached_info(self, video_id: str, moment: datetime) -> dict | None:
+        rows = self._db.execute(
+            "SELECT probe_json, probed_at FROM videos WHERE video_id = ?", (video_id,)
+        )
+        if not rows:
+            return None
+        try:
+            probed = datetime.fromisoformat(rows[0]["probed_at"])
+            if probed.tzinfo is None:
+                probed = probed.replace(tzinfo=UTC)
+            age = moment - probed
+            if not timedelta(0) <= age < CACHE_TTL:  # ติดลบ = นาฬิกาถอยหลัง ถือว่าเก่า
+                return None
+            return to_video_info(json.loads(rows[0]["probe_json"]))
+        except (ValueError, TypeError, AttributeError, KeyError):
+            return None  # แถวเสีย: probe ใหม่แล้วเขียนทับ
+
+    def raw(self, video_id: str) -> dict:
+        """ข้อมูลดิบที่ตัดแล้ว (ใช้ทำ storyboard) ถ้ายังไม่มีในเครื่องจะ probe ให้ก่อน"""
+        self._check_video_id(video_id)
+        for _ in range(2):
+            rows = self._db.execute(
+                "SELECT probe_json FROM videos WHERE video_id = ?", (video_id,)
+            )
+            if rows:
+                try:
+                    data = json.loads(rows[0]["probe_json"])
+                except ValueError:
+                    data = None
+                if isinstance(data, dict):
+                    return data
+            self.get(video_id, refresh=True)
+        raise YtError("E_UNKNOWN", f"อ่านข้อมูลคลิป {video_id} ที่เก็บไว้ไม่ได้")
+
+    def recent(
+        self, limit: int, offset: int = 0, q: str | None = None
+    ) -> tuple[list[dict], int]:
+        where, params = "", []
+        if q and q.strip():
+            where = " WHERE title LIKE ? ESCAPE '\\'"
+            params.append(f"%{_like_escape(q.strip())}%")
+        total = self._db.execute(f"SELECT count(*) AS n FROM videos{where}", params)[0][
+            "n"
+        ]
+        rows = self._db.execute(
+            "SELECT video_id, title, thumbnail_url, duration_s, opened_at FROM videos"
+            f"{where} ORDER BY opened_at DESC, video_id LIMIT ? OFFSET ?",
+            [*params, max(limit, 0), max(offset, 0)],
+        )
+        items = [
+            {
+                "videoId": row["video_id"],
+                "title": row["title"],
+                "thumbnailUrl": row["thumbnail_url"] or "",
+                "durationS": row["duration_s"] or 0,
+                "outputs": [],
+                "lastAt": row["opened_at"],
+            }
+            for row in rows
+        ]
+        return items, total
+
+    def playlist(self, playlist_id: str, limit: int = PLAYLIST_LIMIT) -> dict:
+        if not PLAYLIST_ID.fullmatch(playlist_id):
+            raise YtError("E_INVALID_INPUT", f"playlist id ไม่ถูกรูปแบบ: {playlist_id!r}")
+        limit = max(limit, 0)
+        info = self._extractor.playlist(playlist_id, limit)
+        returned = [e for e in (info.get("entries") or []) if isinstance(e, dict)]
+        entries = []
+        for entry in returned[:limit]:
+            video_id = str(entry.get("id") or "")
+            if not VIDEO_ID.fullmatch(video_id):
+                continue  # คลิปที่ถูกลบ/ไม่มี id เปิดต่อไม่ได้
+            entries.append(
+                {
+                    "videoId": video_id,
+                    "title": entry.get("title") or "",
+                    "durationS": _seconds(entry.get("duration")),
+                    "thumbnailUrl": _playlist_thumbnail(entry, video_id),
+                }
+            )
+        count = info.get("playlist_count")
+        return {
+            "title": info.get("title") or "",
+            "total": count
+            if isinstance(count, int) and not isinstance(count, bool)
+            else len(returned),
+            "truncated": len(returned) > limit,
+            "entries": entries,
+        }
