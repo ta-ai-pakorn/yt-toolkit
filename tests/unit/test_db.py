@@ -308,3 +308,11 @@ def test_transaction_holds_lock_against_other_threads(db: Database):
         assert t.is_alive()  # reader ติด lock ระหว่าง transaction
     t.join(timeout=5)
     assert seen == [1]
+
+
+def test_db_execute_inside_transaction_joins_it(db: Database):
+    db.execute("INSERT INTO settings (key, value_json) VALUES ('a', '1')")
+    with pytest.raises(RuntimeError), db.transaction():
+        db.execute("UPDATE settings SET value_json = '2' WHERE key = 'a'")  # ไม่ค้าง เพราะ lock เป็น RLock
+        raise RuntimeError("boom")
+    assert db.execute("SELECT value_json FROM settings WHERE key = 'a'")[0]["value_json"] == "1"

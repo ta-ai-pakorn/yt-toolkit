@@ -72,7 +72,7 @@ class Database:
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # reentrant: db.execute ในบล็อก transaction ใช้ได้ ไม่ค้าง
         # isolation_level=None = autocommit: คำสั่งนอก transaction จบในตัว ไม่มี transaction ค้าง
         self._conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
@@ -103,7 +103,7 @@ class Database:
         if found > SCHEMA_VERSION:
             raise RuntimeError(
                 f"ฐานข้อมูลเป็นเวอร์ชัน {found} ใหม่กว่าโปรแกรมนี้ ({SCHEMA_VERSION}) "
-                "กรุณาอัปเดตโปรแกรมก่อนเปิดใช้"
+                "ให้อัปเดตโปรแกรมก่อนเปิดใช้"
             )
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
@@ -113,7 +113,7 @@ class Database:
     @contextmanager
     def transaction(self) -> Iterator[Transaction]:
         """ถือ lock ตลอดบล็อก: COMMIT เมื่อจบปกติ ROLLBACK เมื่อเกิด exception
-        ห้ามเรียก db.execute ในบล็อกเดียวกัน (lock ไม่ reentrant ให้ใช้ tx.execute)"""
+        db.execute ในบล็อกเดียวกันจาก thread เดียวกันจะอยู่ใน transaction นี้ด้วย"""
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
