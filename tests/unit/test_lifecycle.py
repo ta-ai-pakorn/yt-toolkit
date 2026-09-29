@@ -16,10 +16,12 @@ class FakeResponse:
         return self._body
 
 
-def _running(paths, fake_platform, pid=4242, port=8787) -> RunInfo:
+def _running(paths, fake_platform, pid=4242, port=8787, holds_lock=True) -> RunInfo:
     info = RunInfo(port=port, pid=pid, token="tok", started_at="x")
     runstate.write(paths.app_json, info)
     fake_platform.alive.add(pid)
+    if holds_lock:  # แอพที่รันอยู่จริงถือ run/app.lock ไว้ตลอดอายุ
+        fake_platform.locked.add(paths.run / "app.lock")
     return info
 
 
@@ -165,7 +167,7 @@ def test_stop_pending_user_confirms_forces(paths, fake_platform):
 
 
 def test_stop_kills_when_app_does_not_exit(paths, fake_platform):
-    info = _running(paths, fake_platform)
+    info = _running(paths, fake_platform, holds_lock=True)
     result = lifecycle.stop(
         paths,
         fake_platform,
@@ -178,10 +180,49 @@ def test_stop_kills_when_app_does_not_exit(paths, fake_platform):
 
 
 def test_stop_kills_when_api_unreachable(paths, fake_platform):
-    info = _running(paths, fake_platform)
+    info = _running(paths, fake_platform, holds_lock=True)
 
     def refused(url, json, headers, timeout):
         raise httpx.ConnectError("refused")
 
     lifecycle.stop(paths, fake_platform, post=refused, sleep=lambda s: None, out=lambda m: None)
     assert fake_platform.killed == [info.pid]
+
+
+def test_stop_does_not_kill_reused_pid_when_lock_is_free(paths, fake_platform):
+    # app.json ค้างจากตอนเครื่องดับ แล้ว Windows เอา pid เดิมไปให้โปรแกรมอื่น (เช่น Excel)
+    info = _running(paths, fake_platform, holds_lock=False)
+
+    def post_must_not_be_called(url, json, headers, timeout):
+        raise AssertionError("ไม่ควรเรียก /api/shutdown เมื่อไม่มีแอพถือ lock")
+
+    out = []
+    result = lifecycle.stop(paths, fake_platform, post=post_must_not_be_called, sleep=lambda s: None, out=out.append)
+    assert result == 0
+    assert fake_platform.killed == []
+    assert info.pid in fake_platform.alive
+    assert not paths.app_json.exists()
+    assert out == ["YT Toolkit ไม่ได้เปิดอยู่"]
+    assert fake_platform.locked == set()  # ปล่อย lock คืนทันที
+
+
+def test_stop_does_not_kill_when_lock_frees_during_wait(paths, fake_platform):
+    info = _running(paths, fake_platform, holds_lock=True)
+    lock = paths.run / "app.lock"
+
+    def sleep(seconds):
+        fake_platform.locked.discard(lock)  # แอพปิดตัวและปล่อย lock ระหว่างรอ แต่ pid ยังไม่หายทันที
+
+    out = []
+    result = lifecycle.stop(
+        paths,
+        fake_platform,
+        post=lambda url, json, headers, timeout: FakeResponse(200, {"ok": True}),
+        sleep=sleep,
+        out=out.append,
+    )
+    assert result == 0
+    assert fake_platform.killed == []
+    assert info.pid in fake_platform.alive
+    assert not paths.app_json.exists()
+    assert fake_platform.locked == set()

@@ -264,6 +264,15 @@ def serve(port: int | None = None, dev: bool = False) -> int:
         plat.release_lock(lock)
 
 
+def _app_holds_lock(paths: Paths, plat: Platform) -> bool:
+    """True ถ้ามีแอพถือ run/app.lock อยู่ ถ้าจับได้เองจะปล่อยคืนทันที"""
+    lock = plat.try_lock(paths.run / "app.lock")
+    if lock is None:
+        return True
+    plat.release_lock(lock)
+    return False
+
+
 def stop(
     paths: Paths | None = None,
     plat: Platform | None = None,
@@ -276,7 +285,9 @@ def stop(
     paths = paths or default_paths()
     plat = plat or current()
     info = runstate.read(paths.app_json)
-    if info is None or not plat.pid_alive(info.pid):
+    # pid ใน app.json อาจค้างจากตอนเครื่องดับ แล้ว Windows เอาเลขนี้ไปให้โปรแกรมอื่น
+    # แอพที่รันอยู่จริงถือ run/app.lock ไว้ตลอด ถ้าจับ lock ได้แปลว่าไม่มีแอพเปิดอยู่
+    if info is None or not plat.pid_alive(info.pid) or not _app_holds_lock(paths, plat):
         runstate.clear(paths.app_json)
         out("YT Toolkit ไม่ได้เปิดอยู่")
         return 0
@@ -298,7 +309,8 @@ def stop(
             break
         sleep(0.1)
     else:
-        plat.kill(info.pid)
+        if _app_holds_lock(paths, plat):  # lock ว่างแล้วแปลว่าแอพปิดตัวไปแล้ว ห้าม kill
+            plat.kill(info.pid)
     runstate.clear(paths.app_json)
     out("ปิดโปรแกรมแล้ว")
     return 0
