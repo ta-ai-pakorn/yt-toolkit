@@ -46,6 +46,11 @@ _FONT_FILES = {
     "semibold": "IBMPlexSansThai-SemiBold.ttf",
 }
 _ELLIPSIS = "…"
+# ข้อความที่ผู้ใช้เห็น (หัว contact sheet และรายละเอียด error)
+LABEL_DURATION = "ความยาว"
+LABEL_FRAMES = "เฟรม"
+LABEL_SAMPLED = "แสดง {shown} จาก {total} เฟรม"
+FRAME_FILE_BAD = "ไฟล์เฟรมหายหรือเสีย"
 _ZIP_DATE = (1980, 1, 1, 0, 0, 0)
 _SPACES = re.compile(r"\s+")
 # สระนำ: ห้ามทิ้งท้ายชื่อที่ตัดไว้ตามลำพัง เช่น "เ…"
@@ -82,6 +87,11 @@ def load_font(weight: str, size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(path), size, layout_engine=_layout_engine())
 
 
+def _attached(char: str) -> bool:
+    """อักษรที่ต้องติดกับตัวหน้า: สระบน/ล่าง/วรรณยุกต์ (Mn) และ ำ (Lo แต่เป็นสระตามหลัง)"""
+    return unicodedata.category(char) == "Mn" or char == _SARA_AM
+
+
 def fit_text(font: ImageFont.FreeTypeFont, text: str, max_width: float) -> str:
     """ตัดข้อความให้ไม่กว้างเกิน max_width แล้วต่อ "…" ไม่ตัดกลางกลุ่มพยัญชนะ+สระ/วรรณยุกต์"""
     text = _SPACES.sub(" ", text).strip()
@@ -96,7 +106,7 @@ def fit_text(font: ImageFont.FreeTypeFont, text: str, max_width: float) -> str:
             high = mid - 1
     keep = low
     # ตัวถัดไปเป็นสระบน/ล่าง/วรรณยุกต์ = ติดกับตัวที่เก็บไว้ ต้องถอยทั้งกลุ่ม
-    while 0 < keep < len(text) and unicodedata.category(text[keep]) == "Mn":
+    while 0 < keep < len(text) and _attached(text[keep]):
         keep -= 1
     while keep > 0 and text[keep - 1] in _LEADING_VOWELS:
         keep -= 1
@@ -121,7 +131,7 @@ _PLAIN_TOP = "ก"  # พยัญชนะไม่มีหัวสูง ใ
 
 
 def _marks_needed(text: str) -> bool:
-    return any(unicodedata.category(c) == "Mn" or c == _SARA_AM for c in text)
+    return any(_attached(c) for c in text)
 
 
 @cache
@@ -210,9 +220,7 @@ def draw_text(
     i = 0
     while i < len(text):
         j = i + 1
-        while j < len(text) and (
-            unicodedata.category(text[j]) == "Mn" or text[j] == _SARA_AM
-        ):
+        while j < len(text) and (_attached(text[j])):
             j += 1
         base, marks = text[i], text[i + 1 : j]
         i = j
@@ -235,8 +243,12 @@ def draw_text(
 
 
 def summary_line(duration_s: int, shown: int, total: int) -> str:
-    count = f"{shown} เฟรม" if shown == total else f"แสดง {shown} จาก {total} เฟรม"
-    return f"ความยาว {timecode(int(duration_s) * 1000)} · {count}"
+    count = (
+        f"{shown} {LABEL_FRAMES}"
+        if shown == total
+        else LABEL_SAMPLED.format(shown=shown, total=total)
+    )
+    return f"{LABEL_DURATION} {timecode(int(duration_s) * 1000)} · {count}"
 
 
 def sample_frames(frames: Frames, limit: int = MAX_SHEET_FRAMES) -> Frames:
@@ -252,7 +264,7 @@ def _missing(path: Path, exc: Exception) -> YtError:
     # ไฟล์เฟรมหาย/เสียหมายถึง cache ของ storyboard ไม่ครบ ให้ผู้เรียกสร้างใหม่ได้
     return YtError(
         "E_NO_STORYBOARD",
-        f"ไฟล์เฟรมหายหรือเสีย ({type(exc).__name__}): {path}",
+        f"{FRAME_FILE_BAD} ({type(exc).__name__}): {path}",
     )
 
 

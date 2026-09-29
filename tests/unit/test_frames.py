@@ -244,6 +244,9 @@ def test_title_whitespace_and_newlines_are_collapsed() -> None:
 
 def test_summary_line_states_duration_and_count() -> None:
     assert frames.summary_line(635, 128, 128) == "ความยาว 00:10:35 · 128 เฟรม"
+    assert frames.LABEL_DURATION == "ความยาว"
+    assert frames.LABEL_FRAMES == "เฟรม"
+    assert frames.LABEL_SAMPLED == "แสดง {shown} จาก {total} เฟรม"
 
 
 def test_summary_line_says_sampled_when_capped() -> None:
@@ -362,6 +365,7 @@ def test_sheet_maps_missing_frame_to_no_storyboard(tmp_path: Path) -> None:
         contact_sheet([(0, tmp_path / "nope.jpg")], "x", 1)
     assert caught.value.code == "E_NO_STORYBOARD"
     assert "nope.jpg" in caught.value.detail
+    assert caught.value.detail.startswith(frames.FRAME_FILE_BAD)
 
 
 def test_sheet_maps_corrupt_frame_to_no_storyboard(tmp_path: Path) -> None:
@@ -501,3 +505,39 @@ def test_marked_text_keeps_the_same_advance_width_after_the_cluster() -> None:
     for word in ("ที่", "น้ำ", "ปั๊ม"):
         tail = added(word + "ก", word)
         assert tail[0] >= ORIGIN[0] + font.getlength(word) - 6
+
+
+# ---------- fit_text: ำ ติดกับตัวหน้า และหมึกไม่เกินความกว้าง ----------
+
+SARA_AM_TITLE = "ทดสอบน้ำมันรถยนต์ทุกชนิด"
+
+
+def test_truncation_never_separates_sara_am_from_its_tone_mark() -> None:
+    font = frames.load_font("semibold", 28)
+    seen = set()
+    for width in range(100, 320):
+        fitted = frames.fit_text(font, SARA_AM_TITLE, width)
+        kept = fitted.removesuffix("…")
+        assert SARA_AM_TITLE.startswith(kept)
+        if kept.startswith("ทดสอบ"):
+            seen.add(fitted)
+            if len(kept) < len(SARA_AM_TITLE):
+                assert SARA_AM_TITLE[len(kept)] != "ำ", width
+            assert not kept.endswith("้"), width  # ไม้โท ค้างโดยไม่มี ำ
+    assert "ทดสอบน้ำ…" in seen
+    assert "ทดสอบน้…" not in seen
+    assert "ทดสอบ…" in seen
+
+
+@pytest.mark.parametrize("weight", ["semibold", "regular"])
+def test_rendered_title_ink_stays_within_max_width(weight: str) -> None:
+    font = frames.load_font(weight, 28)
+    title = "ปั๊มน้ำที่บ้านผู้ใหญ่ก็ซ่อมได้ " * 6
+    for width in range(150, 700, 23):
+        fitted = frames.fit_text(font, title, width)
+        image = Image.new("L", (1000, 120), 0)
+        frames.draw_text(ImageDraw.Draw(image), (0, 80), fitted, font, (255,))
+        box = image.getbbox()
+        assert box is not None
+        assert box[0] >= 0
+        assert box[2] <= width, (width, fitted)
