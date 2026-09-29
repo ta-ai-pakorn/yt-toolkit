@@ -3,6 +3,7 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch: # update-ytdlp สั่งรันหลัง push uv.lock เข้า main
 
 permissions:
   contents: read

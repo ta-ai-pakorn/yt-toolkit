@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: write # สั่งรัน ci.yml หลัง push เพราะ push ด้วย GITHUB_TOKEN ไม่ทำให้ CI รันเอง
 
 concurrency:
   group: update-ytdlp
@@ -23,16 +24,25 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: main
+          # ไม่เก็บ token ไว้ใน .git/config โค้ดของแพ็กเกจใหม่ที่รันตอน pytest จะได้ไม่เห็น
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v10.2.0
-      - run: uv lock --upgrade-package yt-dlp --upgrade-package yt-dlp-ejs
-      - name: uv.lock เปลี่ยนไหม
+      - name: อัปเกรด yt-dlp ใน uv.lock
         id: lock
         run: |
-          if git diff --quiet uv.lock; then
+          pattern='^name = "yt-dlp(-ejs)?"$'
+          before=$(grep -A1 -E "$pattern" uv.lock)
+          uv lock --upgrade-package yt-dlp --upgrade-package yt-dlp-ejs
+          after=$(grep -A1 -E "$pattern" uv.lock)
+          # ดูแค่ yt-dlp กับ yt-dlp-ejs ถ้า lock เปลี่ยนเพราะอย่างอื่น (เช่น uv รุ่นใหม่) ไม่ต้อง commit
+          if [ "$before" = "$after" ]; then
+            git checkout -- uv.lock
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "yt-dlp ล่าสุดอยู่แล้ว ไม่ต้องทำอะไร"
           else
+            version=$(grep -A1 -E '^name = "yt-dlp"$' uv.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.lock.outputs.changed == 'true'
         run: uv sync --frozen
@@ -40,9 +50,17 @@ jobs:
         run: uv run pytest -q
       - name: commit uv.lock เข้า main
         if: steps.lock.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.lock.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git add uv.lock
-          git commit -m "chore: update yt-dlp" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
-          git push origin HEAD:main
+          git commit -m "chore: update yt-dlp to ${VERSION}" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+      - name: สั่งรัน CI เต็มบน main
+        if: steps.lock.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref main --repo "$GITHUB_REPOSITORY"
