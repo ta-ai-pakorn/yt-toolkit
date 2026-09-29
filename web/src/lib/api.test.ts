@@ -42,6 +42,17 @@ describe("api", () => {
     expect(error.code).toBe("E_UNKNOWN")
     expect(error.body).toEqual({ pendingJobs: 2 })
   })
+
+  it("fetch ล้มเพราะต่อ backend ไม่ได้ → ApiError E_OFFLINE ภาษาไทย", async () => {
+    const fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
+    const error = (await api("/health", {}, { fetch, token: "t" }).catch((e) => e)) as ApiError
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.status).toBe(0)
+    expect(error.code).toBe("E_OFFLINE")
+    expect(error.message).toBe("เชื่อมต่อโปรแกรมไม่ได้ ถ้าปิดโปรแกรมไปแล้ว เปิดใหม่ด้วย start.bat")
+    expect(error.detail).toBe("TypeError: Failed to fetch")
+    expect(error.body).toBeNull()
+  })
 })
 
 describe("pasteShortcut", () => {
