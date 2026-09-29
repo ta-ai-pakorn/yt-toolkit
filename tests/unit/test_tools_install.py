@@ -142,7 +142,7 @@ def test_concurrent_installs_download_once(paths, fake_platform, monkeypatch, no
     monkeypatch.setattr(
         tools,
         "_run_version",
-        lambda exe, arg="--version": "ffmpeg version 8.1 Copyright" if Path(exe).is_file() else None,
+        lambda exe, plat, arg="--version": "ffmpeg version 8.1 Copyright" if Path(exe).is_file() else None,
     )
     inner = _fake_download(GOOD_ZIP)
     zip_downloads = []
@@ -189,7 +189,7 @@ def test_status_is_warn_while_installing(paths, fake_platform, no_path_ffmpeg):
 
 def test_install_skips_download_when_ffmpeg_already_ok(paths, fake_platform, monkeypatch, no_path_ffmpeg):
     (paths.bin / "ffmpeg.exe").write_bytes(b"x")
-    monkeypatch.setattr(tools, "_run_version", lambda exe, arg="--version": "ffmpeg version 8.1 Copyright")
+    monkeypatch.setattr(tools, "_run_version", lambda exe, plat, arg="--version": "ffmpeg version 8.1 Copyright")
 
     def must_not_download(url, dest):
         raise AssertionError("ไม่ควรโหลดซ้ำเมื่อ ffmpeg ใช้งานได้แล้ว")

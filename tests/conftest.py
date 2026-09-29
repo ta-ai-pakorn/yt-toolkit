@@ -15,12 +15,16 @@ class FakePlatform:
     name: str = "windows"
     ffmpeg_exe: str = "ffmpeg.exe"
     ffprobe_exe: str = "ffprobe.exe"
+    popen_flags: int = 0
     downloads: Path = Path("Downloads")
     alive: set[int] = field(default_factory=set)
     killed: list[int] = field(default_factory=list)
     opened: list[Path] = field(default_factory=list)
     revealed: list[Path] = field(default_factory=list)
     locked: set[Path] = field(default_factory=set)
+
+    def exe_name(self, name: str) -> str:
+        return f"{name}.exe" if self.name == "windows" else name
 
     def downloads_dir(self) -> Path:
         return self.downloads

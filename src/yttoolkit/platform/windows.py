@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import functools
 import msvcrt
 import os
 import subprocess
@@ -41,22 +42,42 @@ def _kernel32() -> ctypes.WinDLL:
     return k32
 
 
+@functools.cache
+def _shell_libs() -> tuple[ctypes.WinDLL, ctypes.WinDLL]:
+    """โหลด shell32/ole32 ครั้งเดียวตอนใช้ครั้งแรก (ไม่โหลดตอน import เพื่อให้ import บน macOS ได้)"""
+    shell32 = ctypes.WinDLL("shell32")
+    shell32.SHGetKnownFolderPath.argtypes = (
+        ctypes.POINTER(_GUID),
+        wintypes.DWORD,
+        wintypes.HANDLE,
+        ctypes.POINTER(ctypes.c_wchar_p),
+    )
+    shell32.SHGetKnownFolderPath.restype = ctypes.HRESULT
+    ole32 = ctypes.WinDLL("ole32")
+    ole32.CoTaskMemFree.argtypes = (ctypes.c_void_p,)
+    ole32.CoTaskMemFree.restype = None
+    return shell32, ole32
+
+
 class WindowsPlatform:
     name = "windows"
     ffmpeg_exe = "ffmpeg.exe"
     ffprobe_exe = "ffprobe.exe"
+    popen_flags = subprocess.CREATE_NO_WINDOW
+
+    def exe_name(self, name: str) -> str:
+        return f"{name}.exe"
 
     def downloads_dir(self) -> Path:
         try:
-            shell32 = ctypes.WinDLL("shell32")
-            ole32 = ctypes.WinDLL("ole32")
+            shell32, ole32 = _shell_libs()
             out = ctypes.c_wchar_p()
             guid = _guid(_FOLDERID_DOWNLOADS)
-            if shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(out)) == 0:
-                try:
-                    return Path(out.value)
-                finally:
-                    ole32.CoTaskMemFree(out)
+            try:
+                shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(out))
+                return Path(out.value)
+            finally:
+                ole32.CoTaskMemFree(out)
         except OSError:
             pass
         return Path.home() / "Downloads"
@@ -87,7 +108,7 @@ class WindowsPlatform:
             ["taskkill", "/PID", str(pid), "/T", "/F"],
             capture_output=True,
             check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=self.popen_flags,
         )
 
     def try_lock(self, path: Path) -> object | None:

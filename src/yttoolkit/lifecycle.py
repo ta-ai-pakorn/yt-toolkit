@@ -60,7 +60,7 @@ def prepare_environment() -> None:
         os.environ["PATH"] = os.pathsep.join([scripts, *[p for p in parts if p != scripts]])
 
 
-def git_commit(root: Path) -> str | None:
+def git_commit(root: Path, plat: Platform) -> str | None:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -68,7 +68,7 @@ def git_commit(root: Path) -> str | None:
             capture_output=True,
             text=True,
             timeout=5,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            creationflags=plat.popen_flags,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -84,7 +84,7 @@ def setup_file_logging(paths: Paths) -> None:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(handler)
-    if sys.stdout is None or sys.stderr is None:  # pythonw.exe ไม่มี console
+    if sys.stdout is None or sys.stderr is None:  # แอพที่เปิดแบบไม่มีหน้าต่างดำจะไม่มี console
         stream = open(paths.logs / "console.log", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
         sys.stdout = sys.stdout or stream
         sys.stderr = sys.stderr or stream
@@ -155,7 +155,7 @@ def run_app(
         port=port,
         token=token,
         version=__version__,
-        commit=git_commit(paths.code_root),
+        commit=git_commit(paths.code_root, plat),
         output_dir=default_output_dir(plat),
         request_shutdown=request_shutdown,
         extra_origins=tuple(extra_origins),

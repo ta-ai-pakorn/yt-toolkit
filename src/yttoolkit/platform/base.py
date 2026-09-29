@@ -22,6 +22,9 @@ class Platform(Protocol):
     name: str
     ffmpeg_exe: str
     ffprobe_exe: str
+    popen_flags: int  # creationflags สำหรับ subprocess (Windows: ไม่เด้งหน้าต่างดำ)
+
+    def exe_name(self, name: str) -> str: ...
 
     def downloads_dir(self) -> Path: ...
 

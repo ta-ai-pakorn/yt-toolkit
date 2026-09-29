@@ -542,3 +542,20 @@ def test_find_running_rejects_instance_whose_ping_reports_other_pid(paths, fake_
         return lifecycle.is_alive(port, pid, get=lambda url, timeout: Ping())
 
     assert lifecycle.find_running(paths, fake_platform, alive=alive) is None
+
+
+def test_git_commit_passes_platform_popen_flags(monkeypatch, tmp_path, fake_platform):
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+
+        class Out:
+            stdout = "abc1234\n"
+
+        return Out()
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", fake_run)
+    fake_platform.popen_flags = 0x1234
+    assert lifecycle.git_commit(tmp_path, fake_platform) == "abc1234"
+    assert captured["creationflags"] == 0x1234

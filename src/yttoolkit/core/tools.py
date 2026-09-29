@@ -26,7 +26,6 @@ Status = Literal["ok", "warn", "error"]
 YTDLP_MAX_AGE_DAYS = 30
 FFMPEG_INSTALLING_MESSAGE = "กำลังโหลด ffmpeg อาจใช้เวลา 1-3 นาที"
 MIN_FREE_BYTES = 2 * 1024**3
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 @dataclass(frozen=True)
@@ -42,10 +41,10 @@ class ToolInstallError(RuntimeError):
     pass
 
 
-def _run_version(exe: Path | str, arg: str = "--version") -> str | None:
+def _run_version(exe: Path | str, plat: Platform, arg: str = "--version") -> str | None:
     try:
         out = subprocess.run(
-            [str(exe), arg], capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW
+            [str(exe), arg], capture_output=True, text=True, timeout=10, creationflags=plat.popen_flags
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -58,11 +57,11 @@ def scripts_dir() -> Path:
 
 
 def find_ffmpeg(paths: Paths, plat: Platform) -> Path | None:
-    local = paths.bin / plat.ffmpeg_exe
+    local = paths.bin / plat.exe_name("ffmpeg")
     if local.is_file():
         return local
     if env_flag("YT_TOOLKIT_FFMPEG_PATH_LOOKUP", True):
-        found = shutil.which("ffmpeg")
+        found = shutil.which(plat.exe_name("ffmpeg"))
         if found:
             return Path(found)
     return None
@@ -81,25 +80,22 @@ def ffmpeg_status(paths: Paths, plat: Platform) -> ToolStatus:
     exe = find_ffmpeg(paths, plat)
     if exe is None:
         return ToolStatus("error", name="ffmpeg", message="ยังไม่มีโปรแกรมแปลงไฟล์ (ffmpeg)")
-    version = parse_ffmpeg_version(_run_version(exe, "-version"))
+    version = parse_ffmpeg_version(_run_version(exe, plat, "-version"))
     if version is None:
         return ToolStatus("error", name="ffmpeg", path=str(exe), message="มี ffmpeg แต่เรียกใช้งานไม่ได้")
     return ToolStatus("ok", name="ffmpeg", version=version, path=str(exe))
 
 
-def find_js_runtime() -> ToolStatus:
-    scripts = scripts_dir()
-    # Try bundled deno with both .exe and no extension (works cross-platform)
-    bundled_paths = [scripts / "deno.exe", scripts / "deno"]
-    bundled = next((p for p in bundled_paths if p.is_file()), None)
+def find_js_runtime(plat: Platform) -> ToolStatus:
+    bundled = scripts_dir() / plat.exe_name("deno")
     candidates = [
-        ("deno", str(bundled) if bundled else shutil.which("deno")),
+        ("deno", str(bundled) if bundled.is_file() else shutil.which("deno")),
         ("node", shutil.which("node")),
     ]
     for name, exe in candidates:
         if not exe:
             continue
-        line = _run_version(exe)
+        line = _run_version(exe, plat)
         if line is None:
             continue
         if name == "deno":
@@ -107,9 +103,7 @@ def find_js_runtime() -> ToolStatus:
             version = parts[1] if len(parts) > 1 else line
             return ToolStatus("ok", name="deno", version=version, path=exe)
         return ToolStatus("warn", name="node", version=line.lstrip("v"), path=exe, message="ใช้ node แทน deno")
-    return ToolStatus(
-        "warn", message="บางคุณภาพอาจไม่แสดง เพราะเครื่องยังไม่มีตัวช่วยที่ yt-dlp ต้องใช้"
-    )
+    return ToolStatus("warn", name=None, message="ไม่พบตัวช่วยของ yt-dlp (deno)")
 
 
 def ytdlp_status(version: str | None = None, today: date | None = None) -> ToolStatus:
@@ -130,10 +124,10 @@ def ytdlp_status(version: str | None = None, today: date | None = None) -> ToolS
 
 def disk_status(path: Path) -> ToolStatus:
     free = shutil.disk_usage(path).free
-    gb = free / 1024**3
+    message = f"เหลือ {free / 1024**3:.0f} GB"
     if free < MIN_FREE_BYTES:
-        return ToolStatus("warn", name="disk", message=f"เหลือ {gb:.1f} GB")
-    return ToolStatus("ok", name="disk", message=f"เหลือ {gb:.0f} GB")
+        return ToolStatus("warn", name="disk", message=message)
+    return ToolStatus("ok", name="disk", message=message)
 
 
 def output_status(output_dir: Path) -> ToolStatus:
@@ -168,17 +162,17 @@ def collect_health(
     plat: Platform,
     output_dir: Path,
     *,
-    network: Callable[[], ToolStatus] = network_status,
+    network: Callable[[], ToolStatus] | None = None,
 ) -> dict:
     return {
         "tools": {
             "ffmpeg": asdict(ffmpeg_status(paths, plat)),
             "ytdlp": asdict(ytdlp_status()),
-            "jsRuntime": asdict(find_js_runtime()),
+            "jsRuntime": asdict(find_js_runtime(plat)),
         },
         "disk": asdict(disk_status(paths.data_root)),
         "output": asdict(output_status(output_dir)),
-        "network": asdict(network()),
+        "network": asdict((network or network_status)()),
     }
 
 

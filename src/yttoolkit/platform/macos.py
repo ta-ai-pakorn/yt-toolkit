@@ -13,6 +13,10 @@ class MacPlatform:
     name = "macos"
     ffmpeg_exe = "ffmpeg"
     ffprobe_exe = "ffprobe"
+    popen_flags = 0
+
+    def exe_name(self, name: str) -> str:
+        return name
 
     def downloads_dir(self) -> Path:
         return Path.home() / "Downloads"
