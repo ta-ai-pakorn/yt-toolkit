@@ -49,7 +49,9 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
     onMutate: () => toast.loading(th.health.installing, { id: "ffmpeg" }),
     onSuccess: (status) => {
       // backend ตอบ 200 ทั้งที่ติดตั้งไม่สำเร็จได้ ดูสถานะจริงก่อนบอกว่าสำเร็จ
+      // warn = มีการโหลดค้างอยู่แล้ว เป็นแค่ข้อมูล ไม่ใช่ข้อผิดพลาด จึงไม่ต้องค้างบนจอ
       if (status.status === "ok") toast.success(th.health.installed, { id: "ffmpeg" })
+      else if (status.status === "warn") toast.info(status.message ?? th.health.installing, { id: "ffmpeg" })
       else toast.error(status.message ?? th.errors.unknown, { id: "ffmpeg", duration: Infinity })
       void queryClient.invalidateQueries({ queryKey: ["health"] })
     },

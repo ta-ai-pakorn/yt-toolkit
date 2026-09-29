@@ -40,6 +40,22 @@ test("ติดตั้ง ffmpeg แล้ว backend ตอบสถานะ
   await expect(page.getByText("ติดตั้ง ffmpeg แล้ว")).toBeVisible()
 })
 
+test("ติดตั้ง ffmpeg ซ้ำตอนกำลังโหลดอยู่ (สถานะเตือน) → แจ้งข้อมูล ไม่ใช่ error และหายเอง", async ({ page }) => {
+  await page.route(INSTALL, (route) =>
+    route.fulfill({
+      json: { status: "warn", name: "ffmpeg", version: null, message: "กำลังโหลดอยู่แล้ว รอสักครู่", path: null },
+    }),
+  )
+  await page.goto("/settings/health")
+  await page.getByRole("button", { name: "โหลด ffmpeg ใหม่" }).click()
+  const toast = page.locator("[data-sonner-toast]", { hasText: "กำลังโหลดอยู่แล้ว รอสักครู่" })
+  await expect(toast).toBeVisible()
+  await expect(toast).toHaveAttribute("data-type", "info")
+  await expect(page.getByText("ติดตั้ง ffmpeg แล้ว")).toHaveCount(0)
+  // ไม่ค้างถาวร: sonner ปิดเองหลังราว 4 วินาที
+  await expect(toast).toHaveCount(0, { timeout: 10_000 })
+})
+
 test("ปิดโปรแกรม: ปุ่มหมุนระหว่างรอ แล้วขึ้นหน้าปิดแล้ว และไม่เหลือแจ้งเตือนค้าง", async ({ page }) => {
   await page.route("**/api/tools/ffmpeg/install", (route) =>
     route.fulfill({ json: { status: "error", name: "ffmpeg", version: null, message: "แจ้งเตือนเก่า", path: null } }),
