@@ -126,7 +126,7 @@ def ensure_ffmpeg(paths: Paths, plat: Platform) -> None:
     try:
         tools.install_ffmpeg(paths, plat)
         log.info("ติดตั้ง ffmpeg อัตโนมัติสำเร็จ")
-    except tools.ToolInstallError:
+    except Exception:  # รันใน daemon thread ถ้าหลุดจะเหลือแค่ traceback ดิบ ไม่ลง log
         log.exception("ติดตั้ง ffmpeg อัตโนมัติไม่สำเร็จ")
 
 

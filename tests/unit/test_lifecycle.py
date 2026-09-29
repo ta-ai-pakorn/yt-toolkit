@@ -1,3 +1,4 @@
+import logging
 import os
 
 import httpx
@@ -579,3 +580,15 @@ def test_ensure_ffmpeg_skips_when_already_present(paths, fake_platform, monkeypa
     (paths.bin / fake_platform.exe_name("ffmpeg")).write_bytes(b"x")
     monkeypatch.setattr(tools, "install_ffmpeg", lambda p, plat: pytest.fail("must not install"))
     lifecycle.ensure_ffmpeg(paths, fake_platform)
+
+
+def test_ensure_ffmpeg_logs_unexpected_errors(paths, fake_platform, monkeypatch, caplog):
+    monkeypatch.setenv("YT_TOOLKIT_FFMPEG_PATH_LOOKUP", "0")
+
+    def boom(p, plat):
+        raise PermissionError("file is in use")
+
+    monkeypatch.setattr(tools, "install_ffmpeg", boom)
+    with caplog.at_level(logging.ERROR, logger="yttoolkit"):
+        lifecycle.ensure_ffmpeg(paths, fake_platform)  # ต้องไม่หลุด exception ออกจาก thread
+    assert any(r.exc_info and isinstance(r.exc_info[1], PermissionError) for r in caplog.records)

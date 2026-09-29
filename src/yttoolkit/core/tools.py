@@ -240,8 +240,9 @@ def install_ffmpeg_windows(paths: Paths, download: Downloader = _download) -> Pa
                     temp.write_bytes(archive.read(member))
         if set(temps) != _FFMPEG_WIN_FILES:
             raise ToolInstallError("ไฟล์ ffmpeg ใน zip ไม่ครบ")
-        for base, temp in temps.items():
-            os.replace(temp, paths.bin / base)
+        # วาง ffprobe ก่อน ffmpeg เป็นตัวสุดท้าย เพราะแอพถือว่ามี ffmpeg = ติดตั้งครบแล้ว
+        for base in ("ffprobe.exe", "ffmpeg.exe"):
+            os.replace(temps[base], paths.bin / base)
     except (OSError, zipfile.BadZipFile) as error:
         raise ToolInstallError(f"โหลด ffmpeg ไม่สำเร็จ: {error}") from error
     finally:
@@ -254,6 +255,9 @@ def install_ffmpeg_windows(paths: Paths, download: Downloader = _download) -> Pa
 
 def install_ffmpeg(paths: Paths, plat: Platform, download: Downloader = _download) -> Path:
     with _ffmpeg_install_lock:
+        # ไฟล์ .part ที่ค้างจากรอบก่อน (เช่นปิดแอพกลางคัน) ลบทิ้งได้ เพราะตอนนี้ไม่มีงานอื่นเขียนอยู่
+        for leftover in paths.bin.glob("*.part"):
+            _unlink_quietly(leftover)
         current = ffmpeg_status(paths, plat)
         if current.status == "ok" and current.path:
             return Path(current.path)  # อีกงานเพิ่งติดตั้งเสร็จระหว่างที่รอ lock

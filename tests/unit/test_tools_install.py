@@ -201,3 +201,33 @@ def test_install_skips_download_when_ffmpeg_already_ok(paths, fake_platform, mon
         raise AssertionError("ไม่ควรโหลดซ้ำเมื่อ ffmpeg ใช้งานได้แล้ว")
 
     assert tools.install_ffmpeg(paths, fake_platform, download=must_not_download) == paths.bin / "ffmpeg.exe"
+
+
+def test_install_removes_leftover_part_files(paths, fake_platform, no_path_ffmpeg):
+    paths.bin.mkdir(parents=True, exist_ok=True)
+    (paths.bin / "ffmpeg.exe.part").write_bytes(b"half")
+    (paths.bin / "old.part").write_bytes(b"half")
+    seen = []
+    inner = _fake_download(GOOD_ZIP)
+
+    def download(url, dest):
+        seen.append(sorted(p.name for p in paths.bin.glob("*.part")))
+        inner(url, dest)
+
+    tools.install_ffmpeg(paths, fake_platform, download=download)
+    assert seen[0] == []  # ลบของค้างก่อนเริ่มโหลด
+    assert sorted(p.name for p in paths.bin.iterdir()) == ["ffmpeg.exe", "ffprobe.exe"]
+
+
+def test_install_replaces_ffprobe_before_ffmpeg(paths, monkeypatch):
+    # มี ffmpeg แปลว่าติดตั้งครบแล้ว จึงต้องวาง ffmpeg เป็นตัวสุดท้าย (zip นี้มี ffmpeg มาก่อน)
+    order = []
+    real_replace = tools.os.replace
+
+    def recording_replace(src, dst):
+        order.append(Path(dst).name)
+        real_replace(src, dst)
+
+    monkeypatch.setattr(tools.os, "replace", recording_replace)
+    tools.install_ffmpeg_windows(paths, download=_fake_download(GOOD_ZIP))
+    assert order == ["ffprobe.exe", "ffmpeg.exe"]
