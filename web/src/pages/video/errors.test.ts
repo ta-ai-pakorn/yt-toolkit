@@ -1,0 +1,34 @@
+import { describe, expect, it } from "vitest"
+
+import { ApiError } from "@/lib/api"
+
+import { canRetry, errorMessage } from "./errors"
+
+const err = (code: string) => new ApiError(400, code, "ข้อความ", null, null)
+
+describe("canRetry", () => {
+  it.each(["E_LIVE_NOT_READY", "E_VIDEO_PRIVATE", "E_VIDEO_UNAVAILABLE", "E_GEO_BLOCKED", "E_AGE_RESTRICTED"])(
+    "%s ลองใหม่ไม่ช่วย ซ่อนปุ่ม",
+    (code) => {
+      expect(canRetry(err(code))).toBe(false)
+    },
+  )
+
+  it.each(["E_NETWORK", "E_OFFLINE", "E_BOT_CHECK", "E_UNKNOWN", "E_ไม่รู้จัก"])("%s ยังให้ลองใหม่", (code) => {
+    expect(canRetry(err(code))).toBe(true)
+  })
+
+  it("error ที่ไม่ใช่ ApiError ให้ลองใหม่ได้", () => {
+    expect(canRetry(new Error("boom"))).toBe(true)
+  })
+})
+
+describe("errorMessage", () => {
+  it("ใช้ข้อความจาก envelope", () => {
+    expect(errorMessage(err("E_VIDEO_PRIVATE"), "สำรอง")).toBe("ข้อความ")
+  })
+
+  it("error อื่นใช้ข้อความสำรอง", () => {
+    expect(errorMessage(new Error("boom"), "สำรอง")).toBe("สำรอง")
+  })
+})

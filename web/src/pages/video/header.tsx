@@ -1,0 +1,71 @@
+import type { UseQueryResult } from "@tanstack/react-query"
+import type { ReactNode } from "react"
+
+import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
+import { fill, th } from "@/i18n/th"
+import { formatDuration, formatPublished } from "@/lib/format"
+import type { VideoInfo } from "@/lib/types"
+import { Thumbnail } from "@/pages/home/thumbnail"
+
+import { LoadError } from "./load-error"
+
+const t = th.video
+
+// ปกกับข้อมูลวางข้างกัน จอแคบวางซ้อน (ทั้งตอนโหลดและตอนมีข้อมูลใช้ขนาดเดียวกัน ภาพไม่กระโดด)
+const LAYOUT = "flex flex-col gap-4 sm:flex-row"
+const COVER = "w-full sm:w-72"
+
+function HeaderSkeleton() {
+  return (
+    <div className={LAYOUT} aria-busy="true">
+      <span className="sr-only" role="status">
+        {t.loading}
+      </span>
+      <Skeleton className={`aspect-video ${COVER}`} />
+      <div className="flex flex-1 flex-col gap-3">
+        <Skeleton className="h-7 w-3/4" />
+        <Skeleton className="h-4 w-1/2" />
+      </div>
+    </div>
+  )
+}
+
+function Meta({ video }: { video: VideoInfo }) {
+  const published = video.publishedAt ? formatPublished(video.publishedAt) : ""
+  const parts: ReactNode[] = [
+    <span key="channel">
+      {t.channel} {video.channel}
+    </span>,
+    <span key="duration">
+      {t.duration} <span className="font-mono">{formatDuration(video.durationS)}</span>
+    </span>,
+  ]
+  if (video.chapters.length > 0) {
+    parts.push(
+      <Badge key="chapters" variant="secondary">
+        {fill(t.chapters, { n: video.chapters.length })}
+      </Badge>,
+    )
+  }
+  if (published) parts.push(<span key="published">{fill(t.publishedOn, { date: published })}</span>)
+  return <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">{parts}</p>
+}
+
+/** หัวคลิปของ W2: ปก ชื่อ ช่อง ความยาว จำนวนตอน วันที่เผยแพร่ (โหลดอยู่ = Skeleton รูปเดียวกัน, ผิดพลาด = Alert) */
+export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error> }) {
+  if (video.isPending) return <HeaderSkeleton />
+  if (video.isError) {
+    return <LoadError showHome title={t.loadError} error={video.error} onRetry={() => void video.refetch()} />
+  }
+  const data = video.data
+  return (
+    <div className={LAYOUT}>
+      <Thumbnail src={data.thumbnailUrl} className={COVER} />
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <h1 className="text-xl leading-relaxed font-semibold break-words">{data.title}</h1>
+        <Meta video={data} />
+      </div>
+    </div>
+  )
+}

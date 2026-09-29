@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { formatDuration, formatTimecode, relativeTime } from "./format"
+import { formatDuration, formatPublished, formatTimecode, relativeTime } from "./format"
 
 describe("formatDuration", () => {
   it("ต่ำกว่า 1 ชั่วโมงเป็น M:SS", () => {
@@ -78,5 +78,17 @@ describe("relativeTime", () => {
 
   it("อ่านเวลาแบบมี offset ได้", () => {
     expect(relativeTime("2026-09-29T18:55:00+07:00", now)).toBe("5 นาทีก่อน")
+  })
+})
+
+describe("formatPublished", () => {
+  it("แสดงวันที่แบบไทย พ.ศ.", () => {
+    expect(formatPublished("2008-05-30")).toBe("30 พฤษภาคม 2551")
+    expect(formatPublished("2024-01-01")).toBe("1 มกราคม 2567")
+  })
+
+  it("วันที่ที่อ่านไม่ได้ให้ข้อความว่าง", () => {
+    expect(formatPublished("")).toBe("")
+    expect(formatPublished("ไม่ใช่วันที่")).toBe("")
   })
 })

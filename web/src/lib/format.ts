@@ -35,3 +35,11 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
   if (days < 365) return fill(th.time.monthsAgo, { n: Math.floor(days / 30) })
   return fill(th.time.yearsAgo, { n: Math.floor(days / 365) })
 }
+
+/** วันที่เผยแพร่แบบไทย เช่น "30 พฤษภาคม 2551" (พ.ศ.) · วันที่ที่อ่านไม่ได้ = ข้อความว่าง */
+export function formatPublished(iso: string): string {
+  // วันที่จาก backend เป็น YYYY-MM-DD (ไม่มีเวลา) อ่านเป็น UTC แล้วแสดงเป็น UTC จะได้วันเดิมไม่ว่าเครื่องอยู่เขตเวลาไหน
+  const time = Date.parse(iso)
+  if (Number.isNaN(time)) return ""
+  return new Intl.DateTimeFormat("th-TH", { dateStyle: "long", timeZone: "UTC" }).format(time)
+}
