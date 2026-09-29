@@ -1,5 +1,25 @@
 @echo off
 setlocal
+rem git pull ในขั้น [1/4] อาจเขียนทับไฟล์นี้ แต่ cmd อ่านไฟล์ .bat ต่อจากตำแหน่ง byte เดิม ไฟล์ใหม่จึงพังกลางทาง
+rem รอบแรกจึงคัดลอกตัวเองไปไว้ในโฟลเดอร์ TEMP แล้วรันสำเนานั้น โดยส่งโฟลเดอร์ของโปรแกรมไปเป็นพารามิเตอร์ตัวแรก
+if defined YT_START_RELAUNCHED goto relaunched
+set "YT_START_RELAUNCHED=1"
+set "_YT_COPY=%TEMP%\yt-toolkit-start-%RANDOM%%RANDOM%.bat"
+rem ถ้าคัดลอกไม่ได้ (เช่นโฟลเดอร์ TEMP เขียนไม่ได้) ก็รันจากไฟล์เดิมแบบก่อนหน้านี้
+copy /y "%~f0" "%_YT_COPY%" >nul 2>nul
+if errorlevel 1 (
+  call "%~f0" "%~dp0"
+  exit /b
+)
+rem คำสั่งหลัง call ต้องอยู่ในวงเล็บชุดเดียว cmd อ่านทั้งชุดไว้ก่อน จึงไม่ต้องกลับไปอ่านไฟล์นี้ที่อาจถูกเขียนทับแล้ว
+(
+  call "%_YT_COPY%" "%~dp0"
+  call set "_YT_RC=%%ERRORLEVEL%%"
+  del "%_YT_COPY%" >nul 2>nul
+  call exit /b %%_YT_RC%%
+)
+
+:relaunched
 rem เก็บ code page เดิมไว้ก่อน แล้วคืนค่าทุกทางออก (ดู :done และ :fail)
 set "_OLDCP="
 for /f "tokens=* delims=" %%a in ('chcp') do for %%b in (%%a) do set "_OLDCP=%%b"
@@ -8,7 +28,7 @@ echo %_OLDCP%| findstr /r "^[0-9][0-9]*$" >nul
 if errorlevel 1 set "_OLDCP=65001"
 chcp 65001 >nul
 set "PYTHONUTF8=1"
-cd /d "%~dp0"
+cd /d "%~1"
 
 set "GIT_TERMINAL_PROMPT=0"
 set "GCM_INTERACTIVE=never"
@@ -52,7 +72,12 @@ start "" ".venv\Scripts\pythonw.exe" -m yttoolkit start
 echo       รอให้โปรแกรมพร้อม อาจใช้เวลาสูงสุด 25 วินาที
 ".venv\Scripts\python.exe" -m yttoolkit wait --timeout 25
 if errorlevel 1 goto startfail
-timeout /t 2 >nul
+rem ถ้าโปรแกรมเปิดอยู่แล้ว ค้างหน้าต่างไว้นานขึ้นให้อ่านข้อความด้านบนทัน
+if defined _RUNNING (
+  timeout /t 6 >nul
+) else (
+  timeout /t 2 >nul
+)
 goto done
 
 :startfail
