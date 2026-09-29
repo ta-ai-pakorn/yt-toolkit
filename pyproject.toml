@@ -1,7 +1,7 @@
 [project]
 name = "yttoolkit"
 version = "0.1.0"
-description = "Add your description here"
+description = "เครื่องมือจัดการสื่อจากยูทูปที่รันบนเครื่องของคุณ"
 authors = [
     { name = "พิธ", email = "ta.ai@pakorn.in.th" }
 ]

@@ -1,0 +1,48 @@
+name: update-ytdlp
+
+# BRD หัวข้อ 7 "อัปเดต yt-dlp": เช็กทุกวัน ถ้ามีเวอร์ชันใหม่และเทสผ่าน ให้ commit uv.lock เข้า main
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-ytdlp
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: astral-sh/setup-uv@v10.2.0
+      - run: uv lock --upgrade-package yt-dlp --upgrade-package yt-dlp-ejs
+      - name: uv.lock เปลี่ยนไหม
+        id: lock
+        run: |
+          if git diff --quiet uv.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "yt-dlp ล่าสุดอยู่แล้ว ไม่ต้องทำอะไร"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.lock.outputs.changed == 'true'
+        run: uv sync --frozen
+      - if: steps.lock.outputs.changed == 'true'
+        run: uv run pytest -q
+      - name: commit uv.lock เข้า main
+        if: steps.lock.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore: update yt-dlp" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+          git push origin HEAD:main
