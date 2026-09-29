@@ -49,6 +49,7 @@ echo       โปรแกรมเปิดอยู่แล้ว ถ้า�
 :launch
 echo [4/4] กำลังเปิด YT Toolkit...
 start "" ".venv\Scripts\pythonw.exe" -m yttoolkit start
+echo       รอให้โปรแกรมพร้อม อาจใช้เวลาสูงสุด 25 วินาที
 ".venv\Scripts\python.exe" -m yttoolkit wait --timeout 25
 if errorlevel 1 goto startfail
 timeout /t 2 >nul
