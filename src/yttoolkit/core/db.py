@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import shutil
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
+
+log = logging.getLogger("yttoolkit")
 
 SCHEMA_VERSION = 1
+_VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 
 _SCHEMA = """
 CREATE TABLE schema_version (version INTEGER NOT NULL);
@@ -50,13 +57,23 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
 """
 
 
+class Transaction:
+    """ใช้ได้เฉพาะในบล็อก `with db.transaction()` ซึ่งถือ lock ไว้ทั้งบล็อกแล้ว"""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        return self._conn.execute(sql, params).fetchall()
+
+
 class Database:
     """SQLite connection เดียว ใช้ร่วมกันได้ทุก thread โดยทุกการเข้าถึงผ่าน lock"""
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
-        # isolation_level=None = autocommit: แต่ละคำสั่งจบในตัว ไม่มี transaction ค้าง
+        # isolation_level=None = autocommit: คำสั่งนอก transaction จบในตัว ไม่มี transaction ค้าง
         self._conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -64,26 +81,48 @@ class Database:
 
     def migrate(self) -> None:
         with self._lock:
-            has_table = self._conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
-            ).fetchone()
-            if has_table is None:
-                # executescript ทำงานทั้งก้อนใน transaction เดียว ถ้าพังกลางทางจะไม่เหลือตารางครึ่งๆ
-                self._conn.executescript(
-                    f"BEGIN;{_SCHEMA}INSERT INTO schema_version (version) VALUES ({SCHEMA_VERSION});COMMIT;"
-                )
-                return
-            row = self._conn.execute("SELECT max(version) FROM schema_version").fetchone()
-            found = row[0] if row and row[0] is not None else 0
-            if found > SCHEMA_VERSION:
-                raise RuntimeError(
-                    f"ฐานข้อมูลเป็นเวอร์ชัน {found} ใหม่กว่าโปรแกรมนี้ ({SCHEMA_VERSION}) "
-                    "กรุณาอัปเดตโปรแกรมก่อนเปิดใช้"
-                )
+            try:
+                self._migrate_locked()
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.execute("ROLLBACK")
+                raise
+
+    def _migrate_locked(self) -> None:
+        has_table = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
+        ).fetchone()
+        if has_table is None:
+            # ทำทั้งก้อนใน transaction เดียว ถ้าพังกลางทางจะไม่เหลือตารางครึ่งๆ
+            self._conn.executescript(
+                f"BEGIN;{_SCHEMA}INSERT INTO schema_version (version) VALUES ({SCHEMA_VERSION});COMMIT;"
+            )
+            return
+        row = self._conn.execute("SELECT max(version) FROM schema_version").fetchone()
+        found = row[0] if row and row[0] is not None else 0
+        if found > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"ฐานข้อมูลเป็นเวอร์ชัน {found} ใหม่กว่าโปรแกรมนี้ ({SCHEMA_VERSION}) "
+                "กรุณาอัปเดตโปรแกรมก่อนเปิดใช้"
+            )
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
         with self._lock:
             return self._conn.execute(sql, params).fetchall()
+
+    @contextmanager
+    def transaction(self) -> Iterator[Transaction]:
+        """ถือ lock ตลอดบล็อก: COMMIT เมื่อจบปกติ ROLLBACK เมื่อเกิด exception
+        ห้ามเรียก db.execute ในบล็อกเดียวกัน (lock ไม่ reentrant ให้ใช้ tx.execute)"""
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield Transaction(self._conn)
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
 
     def close(self) -> None:
         with self._lock:
@@ -92,27 +131,53 @@ class Database:
 
 def _parse_time(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def purge_stale_cache(db: Database, cache_root: Path, now: datetime, days: int = 30) -> int:
-    """ลบคลิปที่ไม่ได้เปิดเกิน `days` วัน พร้อมโฟลเดอร์ cache คลิปที่ยังมีงานอ้างอิงอยู่จะไม่ถูกลบ"""
-    cutoff = now - timedelta(days=days)
+    """ลบคลิปที่ไม่ได้เปิดเกิน `days` วัน พร้อมโฟลเดอร์ cache คลิปที่ยังมีงานอ้างอิงอยู่จะไม่ถูกลบ
+    ลบโฟลเดอร์ก่อนแล้วค่อยลบแถว ถ้าลบโฟลเดอร์ไม่ได้จะเก็บแถวไว้ให้รอบหน้าลองใหม่"""
+    cutoff = _parse_time(now.isoformat()) - timedelta(days=days)
+    root = cache_root.resolve()
     rows = db.execute(
         "SELECT video_id, opened_at FROM videos "
         "WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.video_id = videos.video_id)"
     )
     removed = 0
     for row in rows:
+        video_id = row["video_id"]
         try:
             opened = _parse_time(row["opened_at"])
         except ValueError:
             continue  # เวลาอ่านไม่ออก ไม่เสี่ยงลบ
         if opened >= cutoff:
             continue
-        video_id = row["video_id"]
-        db.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
-        if video_id and Path(video_id).name == video_id:
-            shutil.rmtree(cache_root / video_id, ignore_errors=True)
-        removed += 1
+        if not _remove_cache_folder(root, video_id):
+            continue
+        deleted = db.execute(
+            "DELETE FROM videos WHERE video_id = ? "
+            "AND NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.video_id = videos.video_id) "
+            "RETURNING video_id",
+            (video_id,),
+        )
+        removed += len(deleted)
     return removed
+
+
+def _remove_cache_folder(root: Path, video_id: str) -> bool:
+    """คืน True เมื่อไม่มีโฟลเดอร์เหลือค้าง (ลบแล้ว ไม่มี หรือ id ผิดรูปจึงไม่แตะดิสก์)"""
+    if not _VIDEO_ID.fullmatch(video_id):
+        log.warning("ข้ามการลบโฟลเดอร์ cache: video_id รูปแบบไม่ถูกต้อง %r", video_id)
+        return True
+    folder = (root / video_id).resolve()
+    if folder == root or not folder.is_relative_to(root):
+        log.warning("ข้ามการลบโฟลเดอร์ cache: %s อยู่นอก %s", folder, root)
+        return True
+    if not folder.exists():
+        return True
+    try:
+        shutil.rmtree(folder)
+    except OSError as e:
+        log.warning("ลบโฟลเดอร์ cache ไม่ได้ %s: %s", folder, e)
+        return False
+    return True
