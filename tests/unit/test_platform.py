@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from yttoolkit.platform import current
+from yttoolkit.platform import LockFileError, current
 
 
 def test_current_matches_os():
@@ -57,23 +57,27 @@ def test_try_lock_is_exclusive_until_released(tmp_path):
     plat.release_lock(other)
 
 
-def test_try_lock_returns_none_when_lock_file_cannot_be_opened(tmp_path, caplog):  # M1 follow-up item 5
+def test_try_lock_raises_when_lock_file_cannot_be_opened(tmp_path, caplog):  # M1 follow-up item 5, final fix item 2
     plat = current()
     lock_path = tmp_path / "app.lock"
     lock_path.mkdir()  # โฟลเดอร์ชื่อเดียวกับไฟล์ lock เปิดเป็นไฟล์ไม่ได้
-    with caplog.at_level("WARNING", logger="yttoolkit"):
-        assert plat.try_lock(lock_path) is None
+    with caplog.at_level("WARNING", logger="yttoolkit"), pytest.raises(LockFileError):
+        plat.try_lock(lock_path)  # ต้องไม่คืน None เพราะ None แปลว่า "มีคนถือ lock อยู่"
     assert any(r.levelname == "WARNING" for r in caplog.records)
 
 
-def test_macos_try_lock_returns_none_when_lock_file_cannot_be_opened(macos_module, tmp_path, monkeypatch, caplog):
+def test_macos_try_lock_raises_when_lock_file_cannot_be_opened(macos_module, tmp_path, monkeypatch, caplog):
     def deny(*args, **kwargs):
         raise PermissionError("denied")
 
     monkeypatch.setattr("builtins.open", deny)
-    with caplog.at_level("WARNING", logger="yttoolkit"):
-        assert macos_module.MacPlatform().try_lock(tmp_path / "app.lock") is None
+    with caplog.at_level("WARNING", logger="yttoolkit"), pytest.raises(LockFileError):
+        macos_module.MacPlatform().try_lock(tmp_path / "app.lock")
     assert any(r.levelname == "WARNING" for r in caplog.records)
+
+
+def test_lock_file_error_is_an_oserror():
+    assert issubclass(LockFileError, OSError)
 
 
 def test_try_lock_logs_unopenable_lock_file_only_once(tmp_path, caplog):
@@ -82,15 +86,16 @@ def test_try_lock_logs_unopenable_lock_file_only_once(tmp_path, caplog):
     lock_path.mkdir()
     with caplog.at_level("DEBUG", logger="yttoolkit"):
         for _ in range(5):  # start() วนลองซ้ำทุก 0.5 วินาที
-            assert plat.try_lock(lock_path) is None
+            with pytest.raises(LockFileError):
+                plat.try_lock(lock_path)
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert len(warnings) == 1
     assert warnings[0].exc_info is not None  # ครั้งแรกเก็บ traceback ไว้ให้ตรวจ
     # ที่อื่นไม่ถูกกลบ: ไฟล์ lock คนละที่ยังต้องเตือนของมันเอง
     other = tmp_path / "other" / "app.lock"
     other.mkdir(parents=True)
-    with caplog.at_level("WARNING", logger="yttoolkit"):
-        assert plat.try_lock(other) is None
+    with caplog.at_level("WARNING", logger="yttoolkit"), pytest.raises(LockFileError):
+        plat.try_lock(other)
     assert len([r for r in caplog.records if r.levelname == "WARNING"]) == 2
 
 

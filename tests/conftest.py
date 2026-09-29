@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from yttoolkit.config import Paths
+from yttoolkit.platform import LockFileError
 
 
 @dataclass
@@ -21,6 +22,7 @@ class FakePlatform:
     opened: list[Path] = field(default_factory=list)
     revealed: list[Path] = field(default_factory=list)
     locked: set[Path] = field(default_factory=set)
+    unopenable: set[Path] = field(default_factory=set)  # ไฟล์ lock ที่เปิดไม่ได้ (เช่นมีโฟลเดอร์ชื่อเดียวกัน)
 
     def exe_name(self, name: str) -> str:
         return f"{name}.exe" if self.name == "windows" else name
@@ -42,6 +44,8 @@ class FakePlatform:
         self.alive.discard(pid)
 
     def try_lock(self, path: Path) -> object | None:
+        if path in self.unopenable:
+            raise LockFileError(f"เปิดไฟล์ lock ไม่ได้: {path}")
         if path in self.locked:
             return None
         self.locked.add(path)

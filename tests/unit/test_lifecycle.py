@@ -592,3 +592,81 @@ def test_ensure_ffmpeg_logs_unexpected_errors(paths, fake_platform, monkeypatch,
     with caplog.at_level(logging.ERROR, logger="yttoolkit"):
         lifecycle.ensure_ffmpeg(paths, fake_platform)  # ต้องไม่หลุด exception ออกจาก thread
     assert any(r.exc_info and isinstance(r.exc_info[1], PermissionError) for r in caplog.records)
+
+
+# ---- M1 follow-ups: final fix wave ---------------------------------------------------------------------------------
+
+
+def _must_not_run_app(**kwargs):
+    raise AssertionError("run_app ไม่ควรถูกเรียกเมื่อเปิดไฟล์ lock ไม่ได้")
+
+
+def test_start_fails_fast_when_lock_file_cannot_be_opened(paths, fake_platform, monkeypatch, caplog):  # item 2
+    fake_platform.unopenable.add(paths.run / "app.lock")
+    monkeypatch.setattr(lifecycle, "run_app", _must_not_run_app)
+    sleeps = []
+    with caplog.at_level(logging.ERROR, logger="yttoolkit"):
+        assert lifecycle.start(paths, fake_platform, wait_timeout=20.0, sleep=sleeps.append) == 1
+    assert sleeps == []  # ไม่วนรอ 20 วินาที
+    assert "app.lock" in caplog.text
+
+
+def test_start_fails_fast_when_lock_becomes_unopenable_during_wait(paths, fake_platform, monkeypatch):  # item 2
+    lock = paths.run / "app.lock"
+    fake_platform.locked.add(lock)
+    monkeypatch.setattr(lifecycle, "find_running", lambda p, pl: None)
+    monkeypatch.setattr(lifecycle, "run_app", _must_not_run_app)
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        fake_platform.unopenable.add(lock)
+
+    assert lifecycle.start(paths, fake_platform, wait_timeout=100.0, sleep=sleep) == 1
+    assert len(sleeps) == 1
+
+
+def test_serve_fails_fast_when_lock_file_cannot_be_opened(paths, fake_platform, monkeypatch, caplog):  # item 2
+    fake_platform.unopenable.add(paths.run / "app.lock")
+    monkeypatch.setattr(lifecycle, "default_paths", lambda: paths)
+    monkeypatch.setattr(lifecycle, "current", lambda: fake_platform)
+    monkeypatch.setattr(lifecycle, "run_app", _must_not_run_app)
+    with caplog.at_level(logging.ERROR, logger="yttoolkit"):
+        assert lifecycle.serve(port=9000) == 1
+    assert "app.lock" in caplog.text
+
+
+def _post_must_not_be_called(url, json, headers, timeout):
+    raise AssertionError("ไม่ควรเรียก /api/shutdown เมื่อตรวจ lock ไม่ได้")
+
+
+def test_stop_reports_when_lock_file_cannot_be_opened(paths, fake_platform):  # item 2
+    info = _running(paths, fake_platform, holds_lock=False)
+    fake_platform.unopenable.add(paths.run / "app.lock")
+    out = []
+    result = lifecycle.stop(paths, fake_platform, post=_post_must_not_be_called, sleep=lambda s: None, out=out.append)
+    assert result == 1
+    assert fake_platform.killed == []
+    assert info.pid in fake_platform.alive
+    assert runstate.read(paths.app_json) == info  # ห้ามลบ
+    assert out == [f"ตรวจสถานะโปรแกรมไม่ได้ ดูรายละเอียดได้ที่ {(paths.logs / 'app.log').absolute()}"]
+
+
+def test_stop_never_kills_when_lock_check_fails_after_waiting(paths, fake_platform):  # item 2
+    info = _running(paths, fake_platform, holds_lock=True)
+
+    def sleep(seconds):
+        fake_platform.unopenable.add(paths.run / "app.lock")  # แอพไม่ยอมปิด แล้วเช็ก lock ซ้ำก่อน kill ไม่ได้
+
+    out = []
+    result = lifecycle.stop(
+        paths,
+        fake_platform,
+        post=lambda url, json, headers, timeout: FakeResponse(200, {"ok": True}),
+        sleep=sleep,
+        out=out.append,
+    )
+    assert result == 1
+    assert fake_platform.killed == []
+    assert runstate.read(paths.app_json) == info
+    assert out == [f"ตรวจสถานะโปรแกรมไม่ได้ ดูรายละเอียดได้ที่ {(paths.logs / 'app.log').absolute()}"]

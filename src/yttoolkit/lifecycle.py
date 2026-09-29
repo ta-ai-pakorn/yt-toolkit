@@ -20,7 +20,7 @@ from . import __version__, runstate
 from .app import AppContext, create_app
 from .config import HOST, Paths, default_paths, env_flag
 from .core import tools
-from .platform import Platform, current
+from .platform import LockFileError, Platform, current
 
 log = logging.getLogger("yttoolkit")
 
@@ -218,29 +218,33 @@ def start(
     paths.ensure()
     setup_file_logging(paths)
     prepare_environment()
-    lock = plat.try_lock(paths.run / "app.lock")
-    if lock is None:
-        # อีกโปรเซสถือ lock อยู่ (กำลังเปิดหรือรันอยู่แล้ว) รอให้มันเขียน run/app.json แล้วค่อยเปิดเบราว์เซอร์
-        # แทนที่จะแข่งกันเลือก port เอง (FR-LIFE-2)
-        # ถ้าระหว่างรอ lock ว่างลง (โปรเซสนั้นตายไปก่อนเขียน app.json) ให้รับช่วงเป็นเจ้าของเอง
-        deadline = time.monotonic() + wait_timeout
-        while True:
-            info = find_running(paths, plat)
-            if info is not None:
-                webbrowser.open(base_url(info.port))
-                return 0
-            if time.monotonic() >= deadline:
-                break
-            sleep(0.5)
-            lock = plat.try_lock(paths.run / "app.lock")
-            if lock is not None:
-                break
+    try:
+        lock = plat.try_lock(paths.run / "app.lock")
         if lock is None:
-            log.error(
-                "เปิดโปรแกรมไม่สำเร็จ: มีโปรเซสอื่นกำลังเปิดอยู่ แต่ตรวจไม่พบเซิร์ฟเวอร์ที่ทำงานภายใน %s วินาที",
-                wait_timeout,
-            )
-            return 1
+            # อีกโปรเซสถือ lock อยู่ (กำลังเปิดหรือรันอยู่แล้ว) รอให้มันเขียน run/app.json แล้วค่อยเปิดเบราว์เซอร์
+            # แทนที่จะแข่งกันเลือก port เอง (FR-LIFE-2)
+            # ถ้าระหว่างรอ lock ว่างลง (โปรเซสนั้นตายไปก่อนเขียน app.json) ให้รับช่วงเป็นเจ้าของเอง
+            deadline = time.monotonic() + wait_timeout
+            while True:
+                info = find_running(paths, plat)
+                if info is not None:
+                    webbrowser.open(base_url(info.port))
+                    return 0
+                if time.monotonic() >= deadline:
+                    break
+                sleep(0.5)
+                lock = plat.try_lock(paths.run / "app.lock")
+                if lock is not None:
+                    break
+            if lock is None:
+                log.error(
+                    "เปิดโปรแกรมไม่สำเร็จ: มีโปรเซสอื่นกำลังเปิดอยู่ แต่ตรวจไม่พบเซิร์ฟเวอร์ที่ทำงานภายใน %s วินาที",
+                    wait_timeout,
+                )
+                return 1
+    except LockFileError as error:  # เปิดไฟล์ lock ไม่ได้ ไม่ใช่มีคนถือ lock รอไปก็ไม่หาย
+        log.error("เปิดโปรแกรมไม่สำเร็จ: %s", error)
+        return 1
     try:
         # ถือ lock อยู่ แปลว่าไม่มีอินสแตนซ์อื่นรัน app.json ที่เหลืออยู่จึงเป็นของเก่า
         runstate.clear(paths.app_json)
@@ -263,7 +267,11 @@ def serve(port: int | None = None, dev: bool = False) -> int:
     paths.ensure()
     logging.basicConfig(level=logging.INFO)
     prepare_environment()
-    lock = plat.try_lock(paths.run / "app.lock")
+    try:
+        lock = plat.try_lock(paths.run / "app.lock")
+    except LockFileError as error:
+        log.error("เปิดเซิร์ฟเวอร์ไม่สำเร็จ: %s", error)
+        return 1
     if lock is None:
         log.error("เปิดเซิร์ฟเวอร์ไม่สำเร็จ: มีโปรเซสอื่นถือ lock ของ YT Toolkit อยู่แล้ว")
         return 1
@@ -283,7 +291,7 @@ def serve(port: int | None = None, dev: bool = False) -> int:
 
 
 def _app_holds_lock(paths: Paths, plat: Platform) -> bool:
-    """True ถ้ามีแอพถือ run/app.lock อยู่ ถ้าจับได้เองจะปล่อยคืนทันที"""
+    """True ถ้ามีแอพถือ run/app.lock อยู่ ถ้าจับได้เองจะปล่อยคืนทันที ถ้าเปิดไฟล์ lock ไม่ได้จะโยน LockFileError"""
     lock = plat.try_lock(paths.run / "app.lock")
     if lock is None:
         return True
@@ -308,6 +316,24 @@ def stop(
 ) -> int:
     paths = paths or default_paths()
     plat = plat or current()
+    try:
+        return _stop(paths, plat, post=post, ask=ask, sleep=sleep, out=out)
+    except LockFileError as error:
+        # เปิดไฟล์ lock ไม่ได้ จึงบอกไม่ได้ว่าแอพยังถือ lock อยู่หรือไม่ ห้าม kill และห้ามลบ app.json
+        log.error("ตรวจสถานะโปรแกรมไม่ได้: %s", error)
+        out(f"ตรวจสถานะโปรแกรมไม่ได้ ดูรายละเอียดได้ที่ {(paths.logs / 'app.log').absolute()}")
+        return 1
+
+
+def _stop(
+    paths: Paths,
+    plat: Platform,
+    *,
+    post,
+    ask: Callable[[str], str],
+    sleep: Callable[[float], None],
+    out: Callable[[str], None],
+) -> int:
     info = runstate.read(paths.app_json)
     # pid ใน app.json อาจค้างจากตอนเครื่องดับ แล้ว Windows เอาเลขนี้ไปให้โปรแกรมอื่น
     # แอพที่รันอยู่จริงถือ run/app.lock ไว้ตลอด ถ้าจับ lock ได้แปลว่าไม่มีแอพเปิดอยู่

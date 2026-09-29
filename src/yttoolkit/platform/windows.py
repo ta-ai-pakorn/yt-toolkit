@@ -9,7 +9,7 @@ import uuid
 from ctypes import wintypes
 from pathlib import Path
 
-from .base import report_lock_open_failure
+from .base import LockFileError, report_lock_open_failure
 
 _FOLDERID_DOWNLOADS = uuid.UUID("{374DE290-123F-4565-9164-39C4925E467B}")
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -114,9 +114,9 @@ class WindowsPlatform:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             handle = open(path, "a+b")  # noqa: SIM115 (ตัวจัดการเก็บไว้ให้ release_lock ปิดเอง)
-        except OSError:
+        except OSError as error:
             report_lock_open_failure(path)
-            return None
+            raise LockFileError(f"เปิดไฟล์ lock ไม่ได้: {path}") from error
         try:
             handle.seek(0)
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)

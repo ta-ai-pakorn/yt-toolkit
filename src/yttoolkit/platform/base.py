@@ -9,6 +9,10 @@ log = logging.getLogger("yttoolkit")
 _lock_failures_reported: set[Path] = set()
 
 
+class LockFileError(OSError):
+    """เปิดหรือสร้างไฟล์ lock ไม่ได้ ต่างจาก try_lock คืน None ซึ่งแปลว่ามีโปรเซสอื่นถือ lock อยู่จริง"""
+
+
 def report_lock_open_failure(path: Path) -> None:
     """try_lock ถูกเรียกซ้ำทุก 0.5 วินาทีตอนรอ จึงเก็บ traceback แค่ครั้งแรกของแต่ละไฟล์ ไม่ให้ log ท่วม"""
     if path in _lock_failures_reported:
@@ -35,6 +39,8 @@ class Platform(Protocol):
 
     def kill(self, pid: int) -> None: ...
 
-    def try_lock(self, path: Path) -> object | None: ...
+    def try_lock(self, path: Path) -> object | None:
+        """คืนตัวจัดการ lock หรือ None ถ้ามีโปรเซสอื่นถือ lock อยู่ ถ้าเปิดไฟล์ไม่ได้จะโยน LockFileError"""
+        ...
 
     def release_lock(self, handle: object) -> None: ...

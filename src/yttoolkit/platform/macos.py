@@ -6,7 +6,7 @@ import signal
 import subprocess
 from pathlib import Path
 
-from .base import report_lock_open_failure
+from .base import LockFileError, report_lock_open_failure
 
 
 class MacPlatform:
@@ -47,9 +47,9 @@ class MacPlatform:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             handle = open(path, "a+b")  # noqa: SIM115 (ตัวจัดการเก็บไว้ให้ release_lock ปิดเอง)
-        except OSError:
+        except OSError as error:
             report_lock_open_failure(path)
-            return None
+            raise LockFileError(f"เปิดไฟล์ lock ไม่ได้: {path}") from error
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
