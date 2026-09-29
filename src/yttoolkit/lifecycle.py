@@ -333,8 +333,9 @@ def _stop(
         sleep(0.1)
     else:
         # อ่าน app.json ซ้ำก่อน kill ถ้าไฟล์หายหรือเป็นของอินสแตนซ์อื่นแล้ว pid นี้ไม่ใช่แอพที่เราจะปิดอีกต่อไป
+        # ตอนเริ่ม stop แอพเปิดอยู่จริง แอพเดิมปิดตัวไปแล้ว จึงบอกว่าปิดแล้ว ไม่ใช่ "ไม่ได้เปิดอยู่"
         if not _still_named_by_app_json(paths, info):
-            out("YT Toolkit ไม่ได้เปิดอยู่")
+            out("ปิดโปรแกรมแล้ว")
             return 0
         if _app_holds_lock(paths, plat):  # lock ว่างแล้วแปลว่าแอพปิดตัวไปแล้ว ห้าม kill
             plat.kill(info.pid)

@@ -335,7 +335,7 @@ def test_stop_does_not_kill_when_app_json_was_replaced(paths, fake_platform):  #
     assert fake_platform.killed == []
     assert info.pid in fake_platform.alive
     assert runstate.read(paths.app_json) == newer  # ห้ามลบ app.json ของอินสแตนซ์ใหม่
-    assert out == ["YT Toolkit ไม่ได้เปิดอยู่"]
+    assert out == ["ปิดโปรแกรมแล้ว"]  # final fix item 7: ส่งคำขอปิดสำเร็จแล้ว แอพเดิมปิดไปแล้ว
 
 
 def test_stop_does_not_kill_when_same_pid_but_different_started_at(paths, fake_platform):  # item 3
@@ -355,7 +355,7 @@ def test_stop_does_not_kill_when_same_pid_but_different_started_at(paths, fake_p
     )
     assert fake_platform.killed == []
     assert runstate.read(paths.app_json) == reused
-    assert out == ["YT Toolkit ไม่ได้เปิดอยู่"]
+    assert out == ["ปิดโปรแกรมแล้ว"]  # final fix item 7: ส่งคำขอปิดสำเร็จแล้ว แอพเดิมปิดไปแล้ว
 
 
 def test_stop_does_not_kill_when_app_json_vanished(paths, fake_platform):  # item 3
@@ -373,7 +373,7 @@ def test_stop_does_not_kill_when_app_json_vanished(paths, fake_platform):  # ite
         out=out.append,
     )
     assert fake_platform.killed == []
-    assert out == ["YT Toolkit ไม่ได้เปิดอยู่"]
+    assert out == ["ปิดโปรแกรมแล้ว"]  # final fix item 7: ส่งคำขอปิดสำเร็จแล้ว แอพเดิมปิดไปแล้ว
 
 
 def test_stop_does_not_clear_newer_app_json_after_graceful_exit(paths, fake_platform):  # item 3
@@ -685,3 +685,19 @@ def test_start_with_real_platform_fails_fast_when_lock_path_is_a_folder(paths, m
     assert sleeps == []
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert warnings and "app.lock" in warnings[0].getMessage()
+
+
+def test_stop_says_closed_when_app_json_vanishes_after_failed_request(paths, fake_platform):  # item 7
+    # ตอนเริ่ม stop มีแอพเปิดอยู่จริง (pid ยังอยู่และถือ lock) จึงไม่ใช่กรณี "ไม่ได้เปิดอยู่"
+    _running(paths, fake_platform, holds_lock=True)
+
+    def refused(url, json, headers, timeout):
+        raise httpx.ConnectError("refused")
+
+    def sleep(seconds):
+        runstate.clear(paths.app_json)  # แอพปิดตัวเองและลบ app.json ระหว่างรอ
+
+    out = []
+    assert lifecycle.stop(paths, fake_platform, post=refused, sleep=sleep, out=out.append) == 0
+    assert fake_platform.killed == []
+    assert out == ["ปิดโปรแกรมแล้ว"]
