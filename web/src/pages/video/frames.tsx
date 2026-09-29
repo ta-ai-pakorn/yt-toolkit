@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
-import { ChevronDown, ChevronUp, Copy, Download, ImageOff } from "lucide-react"
-import { useState, type KeyboardEvent, type MouseEvent } from "react"
+import { ChevronDown, ChevronUp, Copy, Download, ImageOff, Link2 } from "lucide-react"
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react"
 import { toast } from "sonner"
 
 import { AspectRatio } from "@/components/ui/aspect-ratio"
@@ -16,7 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { fill, th } from "@/i18n/th"
 import { ApiError } from "@/lib/api"
 import { downloadFile } from "@/lib/download"
-import { formatTimecode } from "@/lib/format"
+import { formatTimecode, youtubeLinkAt } from "@/lib/format"
 import type { StoryboardFrame } from "@/lib/types"
 import { cn } from "cn"
 
@@ -43,9 +43,9 @@ async function downloadWithToast(url: string, fallbackName: string): Promise<voi
   }
 }
 
-async function copyTimecode(time: string): Promise<void> {
+async function copyText(text: string): Promise<void> {
   try {
-    await navigator.clipboard.writeText(time)
+    await navigator.clipboard.writeText(text)
     toast.success(t.copied)
   } catch {
     toast.error(t.copyFailed)
@@ -75,27 +75,74 @@ function openContextMenuAt(target: HTMLElement, x?: number, y?: number): void {
   )
 }
 
-function FrameTile({ frame, hideOnNarrow }: { frame: StoryboardFrame; hideOnNarrow: boolean }) {
+/** โฟกัสรายการแรกของเมนูที่เพิ่งเปิดด้วยคีย์บอร์ด (Base UI โฟกัสที่ตัวเมนู ต้องกดลูกศรลงอีกครั้งถึงจะถึงรายการแรก) */
+function focusFirstItem(itemRef: RefObject<HTMLElement | null>): () => void {
+  let frame = 0
+  let tries = 0
+  const attempt = () => {
+    // เมนูอยู่ใน portal จึงอาจยังไม่ถูกสร้างตอนเริ่ม: อ่าน ref ใหม่ทุกครั้งที่ลอง
+    const item = itemRef.current
+    item?.focus()
+    // Base UI ย้ายโฟกัสเข้าเมนูหลังเปิดเล็กน้อย ลองซ้ำจนกว่าโฟกัสจะอยู่ที่รายการจริง
+    if (document.activeElement !== item && tries++ < 20) frame = requestAnimationFrame(attempt)
+  }
+  frame = requestAnimationFrame(attempt)
+  return () => cancelAnimationFrame(frame)
+}
+
+// content-visibility: ภาพที่อยู่ไกลจอไม่ต้องเรนเดอร์จนกว่าจะเลื่อนใกล้ (ตอนขยาย 128 ภาพ) · ต้องเว้น padding รอบ li
+// เพราะ content-visibility ตัดทุกอย่างที่ล้นกรอบ ไม่งั้นวงโฟกัสของปุ่มในภาพจะถูกตัด (margin ติดลบชดเชยให้ระยะห่างเท่าเดิม)
+const TILE = "group relative -m-[3px] p-[3px] [contain-intrinsic-size:auto_80px] [content-visibility:auto]"
+
+function FrameTile({ frame, videoId, hideOnNarrow }: { frame: StoryboardFrame; videoId: string; hideOnNarrow: boolean }) {
   const time = formatTimecode(frame.tMs)
   const [menuOpen, setMenuOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const keyboardOpenRef = useRef(false)
+  const firstItemRef = useRef<HTMLDivElement>(null)
+  const downloadingRef = useRef(false)
+
+  useEffect(() => {
+    if (!menuOpen) {
+      keyboardOpenRef.current = false
+      return
+    }
+    if (keyboardOpenRef.current) return focusFirstItem(firstItemRef)
+  }, [menuOpen])
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
       event.preventDefault()
+      keyboardOpenRef.current = true
       openContextMenuAt(event.currentTarget)
     }
   }
 
   // คลิกซ้าย/Enter/Space ที่ภาพ = เปิดเมนูเดียวกัน (คนที่ไม่รู้ว่าคลิกขวาได้ก็เจอ และใช้บนจอสัมผัสได้)
   function onClick(event: MouseEvent<HTMLButtonElement>) {
-    if (event.detail === 0) openContextMenuAt(event.currentTarget)
-    else openContextMenuAt(event.currentTarget, event.clientX, event.clientY)
+    if (event.detail === 0) {
+      keyboardOpenRef.current = true
+      openContextMenuAt(event.currentTarget)
+    } else {
+      keyboardOpenRef.current = false
+      openContextMenuAt(event.currentTarget, event.clientX, event.clientY)
+    }
+  }
+
+  // กดซ้ำระหว่างรอไม่ส่งคำขอซ้ำ
+  async function downloadFrame() {
+    if (downloadingRef.current) return
+    downloadingRef.current = true
+    try {
+      await downloadWithToast(frameDownloadUrl(frame.url), frameFileName(time))
+    } finally {
+      downloadingRef.current = false
+    }
   }
 
   return (
     <ContextMenu onOpenChange={setMenuOpen}>
-      <ContextMenuTrigger render={<li className={cn("group relative", hideOnNarrow && "max-sm:hidden")} />}>
+      <ContextMenuTrigger render={<li className={cn(TILE, hideOnNarrow && "max-sm:hidden")} />}>
         <HoverCard open={previewOpen && !menuOpen} onOpenChange={setPreviewOpen}>
           <HoverCardTrigger
             delay={250}
@@ -103,6 +150,8 @@ function FrameTile({ frame, hideOnNarrow }: { frame: StoryboardFrame; hideOnNarr
             render={
               <button
                 type="button"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
                 onClick={onClick}
                 onKeyDown={onKeyDown}
                 className="block w-full cursor-pointer rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring"
@@ -132,20 +181,24 @@ function FrameTile({ frame, hideOnNarrow }: { frame: StoryboardFrame; hideOnNarr
         </HoverCard>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onClick={() => void downloadWithToast(frameDownloadUrl(frame.url), frameFileName(time))}>
+        <ContextMenuItem ref={firstItemRef} onClick={() => void downloadFrame()}>
           <Download aria-hidden />
           {t.downloadFrame}
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => void copyTimecode(time)}>
+        <ContextMenuItem onClick={() => void copyText(time)}>
           <Copy aria-hidden />
           {t.copyTime}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => void copyText(youtubeLinkAt(videoId, frame.tMs))}>
+          <Link2 aria-hidden />
+          {t.copyLink}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   )
 }
 
-function FrameGrid({ frames }: { frames: StoryboardFrame[] }) {
+function FrameGrid({ frames, videoId }: { frames: StoryboardFrame[]; videoId: string }) {
   const [expanded, setExpanded] = useState(false)
   const shown = expanded ? frames : frames.slice(0, COLLAPSED_COUNT)
   // 12 ภาพหรือน้อยกว่าบนจอกว้างเห็นครบแล้ว ปุ่มจึงจำเป็นเฉพาะจอแคบ (ที่เห็นแค่ 6 ภาพ)
@@ -154,7 +207,7 @@ function FrameGrid({ frames }: { frames: StoryboardFrame[] }) {
     <div className="flex flex-col gap-3">
       <ul className={GRID} aria-label={t.listLabel}>
         {shown.map((frame, index) => (
-          <FrameTile key={frame.index} frame={frame} hideOnNarrow={!expanded && index >= NARROW_COUNT} />
+          <FrameTile key={frame.index} frame={frame} videoId={videoId} hideOnNarrow={!expanded && index >= NARROW_COUNT} />
         ))}
       </ul>
       {frames.length > NARROW_COUNT && (
@@ -258,7 +311,7 @@ export function FramesSection({ videoId, enabled }: { videoId: string; enabled: 
   if (noStoryboard) body = <NoStoryboard />
   else if (storyboard.isError) {
     body = <LoadError title={t.loadError} error={storyboard.error} onRetry={() => void storyboard.refetch()} />
-  } else if (storyboard.isSuccess) body = <FrameGrid frames={frames} />
+  } else if (storyboard.isSuccess) body = <FrameGrid frames={frames} videoId={videoId} />
   else body = <FrameSkeleton />
 
   return (

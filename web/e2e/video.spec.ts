@@ -9,6 +9,7 @@ const PRIVATE = "PRIVATEVID1"
 const PRIVATE_MESSAGE = "คลิปนี้เป็นส่วนตัว เจ้าของต้องเปิดเป็นสาธารณะก่อน"
 const NO_STORYBOARD_MESSAGE = 'คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว กด "ขอภาพคม" แทนได้'
 const FRAME_LIST = "รายการภาพเฟรม"
+const MENU_ITEMS = ["โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้"]
 
 const frameItems = (page: Page) => page.getByRole("list", { name: FRAME_LIST }).getByRole("listitem")
 const frameButton = (page: Page, time: string) => page.getByRole("button", { name: `ภาพเฟรมที่ ${time}` })
@@ -84,6 +85,61 @@ test.describe("W2 หัวคลิป", () => {
   })
 })
 
+test.describe("W2 ลำดับการโหลดและความทนทาน", () => {
+  test("ยังไม่ขอ storyboard จนกว่าข้อมูลคลิปจะมา", async ({ page }) => {
+    const storyboardRequests: string[] = []
+    page.on("request", (request) => {
+      if (request.url().includes("/storyboard")) storyboardRequests.push(request.url())
+    })
+    await page.route(`**/api/videos/${BBB}`, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      await route.continue()
+    })
+    await page.goto(`/v/${BBB}`)
+    await expect(page.getByText("กำลังโหลดข้อมูลคลิป")).toBeAttached()
+    await page.waitForTimeout(700)
+    expect(storyboardRequests).toEqual([])
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    await expect(frameItems(page)).toHaveCount(12)
+    expect(storyboardRequests.filter((url) => url.endsWith("/storyboard"))).toHaveLength(1)
+  })
+
+  test("รีเฟรชเบื้องหลังล้มเหลว แต่มีข้อมูลจากรายการผลของ W1 อยู่แล้ว → คงข้อมูลไว้ และแจ้งด้วย toast ไม่ใช่ Alert", async ({ page }) => {
+    await page.goto("/")
+    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await expect(page.getByRole("listitem").first()).toContainText("Big Buck Bunny")
+    await page.route(`**/api/videos/${BBB}`, (route) =>
+      route.fulfill({
+        status: 502,
+        json: { error: { code: "E_NETWORK", message: "เน็ตหลุด ลองใหม่อีกครั้ง", detail: null } },
+      }),
+    )
+    await page.getByRole("link", { name: /เปิดดู/ }).click()
+    await expect(page.getByText("เน็ตหลุด ลองใหม่อีกครั้ง")).toBeVisible()
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    await expect(page.locator('[data-slot="alert"]')).toHaveCount(0)
+    await expect(frameItems(page)).toHaveCount(12)
+  })
+
+  test("หน้าพัง (ข้อมูลผิดรูป) แล้วเปลี่ยนไปคลิปอื่นในหน้าเดิม → กล่อง error ถูกล้าง แสดงคลิปใหม่ได้", async ({ page }) => {
+    await page.route(`**/api/videos/${BBB}`, async (route) => {
+      const response = await route.fetch()
+      const body = await response.json()
+      await route.fulfill({ response, json: { ...body, chapters: null } })
+    })
+    await page.goto(`/v/${BBB}`)
+    await expect(page.getByRole("alert")).toBeVisible()
+    await expect(page.getByRole("button", { name: "โหลดหน้าใหม่" })).toBeVisible()
+    await page.evaluate((id) => {
+      window.history.pushState({}, "", `/v/${id}`)
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    }, ZOO)
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Me at the zoo")
+    await expect(page.getByRole("alert")).toHaveCount(0)
+  })
+})
+
 test.describe("W2 ภาพเฟรม", () => {
   test("เห็น 12 ภาพก่อน · 'ดูทั้งหมด (128)' แสดงครบ 128 · 'ย่อ' กลับเป็น 12", async ({ page }) => {
     await openBbb(page)
@@ -107,7 +163,7 @@ test.describe("W2 ภาพเฟรม", () => {
     const card = page.locator('[data-slot="hover-card-content"]')
     await expect(card).toContainText("00:00:04")
     const image = card.locator("img")
-    expect(await image.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+    await expect.poll(() => image.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
     const box = await image.boundingBox()
     expect(Math.round(box!.width)).toBeGreaterThanOrEqual(460)
     expect(Math.round(box!.width)).toBeLessThanOrEqual(480)
@@ -121,18 +177,24 @@ test.describe("W2 ภาพเฟรม", () => {
     }
     await expect(first).toBeFocused()
     await expect(page.locator('[data-slot="hover-card-content"]')).toContainText("00:00:00")
+    // ชิป timecode บนภาพเอง (ไม่พึ่ง hover card) เห็นเฉพาะภาพที่โฟกัสอยู่
+    const chip = (time: string) => page.getByRole("list", { name: FRAME_LIST }).getByText(time, { exact: true })
+    await expect(chip("00:00:00")).toBeVisible()
+    await expect(chip("00:00:04")).toBeHidden()
     await page.keyboard.press("Tab")
     await expect(frameButton(page, "00:00:04")).toBeFocused()
+    await expect(chip("00:00:04")).toBeVisible()
+    await expect(chip("00:00:00")).toBeHidden()
   })
 
-  test("คีย์บอร์ด: Shift+F10 และปุ่ม Menu เปิดเมนู มีสองรายการ · Esc ปิดแล้วโฟกัสกลับที่ภาพ", async ({ page }) => {
+  test("คีย์บอร์ด: Shift+F10 และปุ่ม Menu เปิดเมนู มีสามรายการ · Esc ปิดแล้วโฟกัสกลับที่ภาพ", async ({ page }) => {
     await openBbb(page)
     const frame = frameButton(page, "00:00:09")
     await frame.focus()
     await page.keyboard.press("Shift+F10")
     const menu = page.getByRole("menu")
     await expect(menu).toBeVisible()
-    await expect(menu.getByRole("menuitem")).toHaveText(["โหลดภาพนี้", "คัดลอกเวลา"])
+    await expect(menu.getByRole("menuitem")).toHaveText(MENU_ITEMS)
     await page.keyboard.press("Escape")
     await expect(menu).toHaveCount(0)
     await expect(frame).toBeFocused()
@@ -150,7 +212,6 @@ test.describe("W2 ภาพเฟรม", () => {
     await page.keyboard.press("Shift+F10")
     await expect(page.getByRole("menu")).toBeVisible()
     await page.keyboard.press("ArrowDown")
-    await page.keyboard.press("ArrowDown")
     await page.keyboard.press("Enter")
     await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("00:00:04")
@@ -163,6 +224,84 @@ test.describe("W2 ภาพเฟรม", () => {
     await page.getByRole("menuitem", { name: "คัดลอกเวลา" }).click()
     await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("00:00:04")
+  })
+
+  test("AC-FRAME-07: คัดลอกลิงก์ช่วงนี้ ที่ภาพที่สอง (tMs 4961) ได้ลิงก์ youtu.be?t=4 และขึ้น toast", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"])
+    await openBbb(page)
+    await frameItems(page).nth(1).click({ button: "right" })
+    await page.getByRole("menuitem", { name: "คัดลอกลิงก์ช่วงนี้" }).click()
+    await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`https://youtu.be/${BBB}?t=4`)
+  })
+
+  test("AC-FRAME-07: เปิดเมนูด้วยคีย์บอร์ดแล้วเลือก คัดลอกลิงก์ช่วงนี้ ได้เหมือนกัน", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"])
+    await openBbb(page)
+    await frameButton(page, "00:00:09").focus()
+    await page.keyboard.press("Shift+F10")
+    await expect(page.getByRole("menuitem", { name: "โหลดภาพนี้" })).toBeFocused()
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.press("ArrowDown")
+    await expect(page.getByRole("menuitem", { name: "คัดลอกลิงก์ช่วงนี้" })).toBeFocused()
+    await page.keyboard.press("Enter")
+    await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`https://youtu.be/${BBB}?t=9`)
+  })
+
+  test("คัดลอกลิงก์ไม่ได้ → toast error", async ({ page }) => {
+    await openBbb(page)
+    await page.evaluate(() => {
+      Object.defineProperty(navigator.clipboard, "writeText", { value: () => Promise.reject(new Error("denied")) })
+    })
+    await frameItems(page).nth(1).click({ button: "right" })
+    await page.getByRole("menuitem", { name: "คัดลอกลิงก์ช่วงนี้" }).click()
+    await expect(page.getByText("คัดลอกไม่สำเร็จ ลองอีกครั้ง")).toBeVisible()
+  })
+
+  test("ภาพเฟรมบอกว่าเปิดเมนู (aria-haspopup) และสถานะเปิด/ปิด (aria-expanded) เปลี่ยนตามจริง", async ({ page }) => {
+    await openBbb(page)
+    // เมนูเปิดอยู่ Base UI ซ่อนเนื้อหานอกเมนูจากโปรแกรมอ่านหน้าจอ (aria-hidden) จึงต้องรวมองค์ประกอบที่ถูกซ่อน
+    const frame = (time: string) => page.getByRole("button", { name: `ภาพเฟรมที่ ${time}`, includeHidden: true })
+    await expect(frame("00:00:09")).toHaveAttribute("aria-haspopup", "menu")
+    await expect(frame("00:00:09")).toHaveAttribute("aria-expanded", "false")
+    await frame("00:00:09").click({ button: "right" })
+    await expect(page.getByRole("menu")).toBeVisible()
+    await expect(frame("00:00:09")).toHaveAttribute("aria-expanded", "true")
+    await expect(frame("00:00:04")).toHaveAttribute("aria-expanded", "false")
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("menu")).toHaveCount(0)
+    await expect(frame("00:00:09")).toHaveAttribute("aria-expanded", "false")
+  })
+
+  for (const key of ["Enter", "Space", "Shift+F10", "ContextMenu"]) {
+    test(`เปิดเมนูด้วยคีย์บอร์ด (${key}) โฟกัสไปที่รายการแรกของเมนู`, async ({ page }) => {
+      await openBbb(page)
+      await frameButton(page, "00:00:09").focus()
+      await page.keyboard.press(key)
+      await expect(page.getByRole("menuitem", { name: "โหลดภาพนี้" })).toBeFocused()
+      await page.keyboard.press("ArrowDown")
+      await expect(page.getByRole("menuitem", { name: "คัดลอกเวลา" })).toBeFocused()
+    })
+  }
+
+  test("โหลดภาพนี้ กดซ้ำระหว่างรอ ไม่ส่งคำขอซ้ำ", async ({ page }) => {
+    await openBbb(page)
+    const frame = frameButton(page, "00:00:09")
+    let requests = 0
+    await page.route("**/storyboard/f_*.jpg?*download=1", async (route) => {
+      requests += 1
+      await new Promise((resolve) => setTimeout(resolve, 800))
+      await route.continue()
+    })
+    const downloading = page.waitForEvent("download")
+    await frame.click({ button: "right" })
+    await page.getByRole("menuitem", { name: "โหลดภาพนี้" }).click()
+    await frame.click({ button: "right" })
+    await page.getByRole("menuitem", { name: "โหลดภาพนี้" }).click({ force: true })
+    await downloading
+    await page.waitForTimeout(300)
+    expect(requests).toBe(1)
   })
 
   test("คัดลอกไม่ได้ (เบราว์เซอร์ไม่ให้เขียนคลิปบอร์ด) → toast error", async ({ page }) => {
@@ -178,7 +317,7 @@ test.describe("W2 ภาพเฟรม", () => {
   test("คลิกซ้ายที่ภาพก็เปิดเมนู (คนที่ไม่รู้ว่าคลิกขวาได้)", async ({ page }) => {
     await openBbb(page)
     await frameItems(page).nth(2).click()
-    await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["โหลดภาพนี้", "คัดลอกเวลา"])
+    await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(MENU_ITEMS)
   })
 
   test("'โหลดภาพนี้' ได้ไฟล์ frame_00-00-00.jpg (เป็นภาพจริง ไม่ใช่ JSON)", async ({ page }) => {
@@ -212,6 +351,18 @@ test.describe("W2 ภาพเฟรม", () => {
       return Buffer.concat(chunks)
     })
     expect(bytes.subarray(0, 2).toString("latin1")).toBe("PK")
+  })
+
+  test("ตอนขยายทั้งหมด ภาพที่อยู่ไกลจอ (content-visibility) ยังโฟกัสด้วยคีย์บอร์ดและเปิดเมนูได้", async ({ page }) => {
+    await openBbb(page)
+    await page.getByRole("button", { name: "ดูทั้งหมด (128)" }).click()
+    await expect(frameItems(page)).toHaveCount(128)
+    await expect(frameItems(page).first()).toHaveCSS("content-visibility", "auto")
+    const last = page.getByRole("button", { name: /ภาพเฟรมที่ 00:10:3\d/ })
+    await last.focus()
+    await expect(last).toBeFocused()
+    await page.keyboard.press("Shift+F10")
+    await expect(page.getByRole("menuitem", { name: "โหลดภาพนี้" })).toBeFocused()
   })
 
   test("ปุ่มโหลดชุดใหญ่เป็นปุ่มรอง ไม่ใช่ปุ่มหลักสีเหลือง และหน้านี้ไม่มีปุ่มหลัก", async ({ page }) => {
@@ -249,6 +400,7 @@ test.describe("W2 ภาพเฟรม", () => {
     await sheet.click()
     await expect(page.getByText("กำลังเตรียมไฟล์…")).toBeVisible()
     await expect(sheet).toHaveAttribute("aria-disabled", "true")
+    await expect(sheet).toHaveCSS("opacity", "0.5")
     await downloading
     await expect(sheet).not.toHaveAttribute("aria-disabled", "true")
   })
@@ -258,6 +410,9 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(page.getByText(NO_STORYBOARD_MESSAGE)).toBeVisible()
     const button = page.getByRole("button", { name: "ขอภาพคม" })
     await expect(button).toBeDisabled()
+    // ปุ่มที่ปิดใช้งานต้องดูจางลง (aria-disabled ไม่ได้ทำให้สไตล์ disabled: ทำงาน)
+    await expect(button).toHaveCSS("opacity", "0.5")
+    await expect(button).toHaveCSS("cursor", "not-allowed")
     await button.hover()
     await expect(page.locator('[data-slot="tooltip-content"]')).toHaveText("เปิดใช้ในเวอร์ชันถัดไป")
     await expect(page.getByRole("button", { name: "Contact sheet" })).toHaveCount(0)

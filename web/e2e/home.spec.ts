@@ -45,6 +45,11 @@ const PLAYLIST_TITLE: string = JSON.parse(
 ).title
 
 const DIALOG_TITLE = "ลิงก์นี้อยู่ในเพลย์ลิสต์ จะเอาแค่คลิปนี้ หรือทั้งเพลย์ลิสต์?"
+// คำขอข้อมูลคลิปแบบปกติ (ไม่ใช่ peek และไม่ใช่ /storyboard) ของหน้า W2
+const isNormalVideoGet = (url: string) => {
+  const parsed = new URL(url)
+  return /^\/api\/videos\/[^/]+$/.test(parsed.pathname) && !parsed.searchParams.has("peek")
+}
 const RESULT_ROWS = 'section[aria-labelledby="results-title"] [role="listitem"]'
 
 test.describe("W1 วิเคราะห์ลิงก์", () => {
@@ -58,6 +63,7 @@ test.describe("W1 วิเคราะห์ลิงก์", () => {
     const button = page.getByRole("button", { name: "วิเคราะห์" })
     await button.click()
     await expect(button).toBeDisabled()
+    await expect(button).toHaveCSS("opacity", "0.5")
     await expect(button.getByRole("status", { name: "กำลังโหลด" })).toBeVisible()
     await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
@@ -391,7 +397,7 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     await page.getByRole("link", { name: /เปิดดู/ }).click()
     await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
-    expect(requests.some((url) => !url.includes("peek"))).toBe(true)
+    expect(requests.filter(isNormalVideoGet)).toHaveLength(1)
   })
 
   test("คลิปที่ดึงแค่ชื่อในรายการผล ไม่ขึ้นใน 'ล่าสุด' จนกว่าจะกดเปิดดู", async ({ page }) => {
@@ -407,7 +413,7 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     expect(requests.every((url) => url.endsWith("?peek=1"))).toBe(true)
     await page.getByRole("link", { name: /เปิดดู/ }).click()
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
-    expect(requests.some((url) => !url.includes("peek"))).toBe(true)
+    expect(requests.filter(isNormalVideoGet)).toHaveLength(1)
   })
 
   test("ดึงชื่อครั้งละไม่เกิน 3 คลิป และเฉพาะ 10 แถวแรก · แถวที่ 11 เป็นต้นไปกด 'แสดงชื่อ'", async ({ page }) => {

@@ -25,6 +25,24 @@ describe("parseContentDisposition", () => {
     expect(parseContentDisposition(`attachment; filename="fallback.jpg"; filename*=UTF-8''%E0%A4%A`)).toBe("fallback.jpg")
   })
 
+  it("filename* ที่ครอบด้วยเครื่องหมายคำพูดก็อ่านได้", () => {
+    expect(parseContentDisposition(`attachment; filename*="UTF-8''a%20b.jpg"`)).toBe("a b.jpg")
+  })
+
+  it("filename* ใช้ charset ตามที่ระบุ (ISO-8859-1)", () => {
+    expect(parseContentDisposition("attachment; filename*=ISO-8859-1''caf%E9.jpg")).toBe("café.jpg")
+    expect(parseContentDisposition("attachment; filename*=iso-8859-1''%E9.jpg")).toBe("é.jpg")
+  })
+
+  it("charset ที่ไม่รู้จักหรือไบต์ไม่ตรงกับ charset → ใช้ filename สำรอง", () => {
+    expect(parseContentDisposition(`attachment; filename="fallback.jpg"; filename*=x-nonsense''a.jpg`)).toBe("fallback.jpg")
+    expect(parseContentDisposition(`attachment; filename="fallback.jpg"; filename*=UTF-8''%E9.jpg`)).toBe("fallback.jpg")
+  })
+
+  it("filename* ไม่มี charset (ไม่มี ' คั่น) ถือเป็น UTF-8", () => {
+    expect(parseContentDisposition("attachment; filename*=a%20b.jpg")).toBe("a b.jpg")
+  })
+
   it("อ่านเครื่องหมายคำพูดที่ escape ไว้ในชื่อ", () => {
     expect(parseContentDisposition('attachment; filename="a\\"b.jpg"')).toBe('a"b.jpg')
   })

@@ -65,6 +65,7 @@ export const th = {
     collapse: "ย่อ",
     downloadFrame: "โหลดภาพนี้",
     copyTime: "คัดลอกเวลา",
+    copyLink: "คัดลอกลิงก์ช่วงนี้",
     copied: "คัดลอกแล้ว",
     copyFailed: "คัดลอกไม่สำเร็จ ลองอีกครั้ง",
     contactSheet: "Contact sheet",

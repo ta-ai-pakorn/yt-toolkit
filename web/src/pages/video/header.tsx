@@ -54,11 +54,14 @@ function Meta({ video }: { video: VideoInfo }) {
 
 /** หัวคลิปของ W2: ปก ชื่อ ช่อง ความยาว จำนวนตอน วันที่เผยแพร่ (โหลดอยู่ = Skeleton รูปเดียวกัน, ผิดพลาด = Alert) */
 export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error> }) {
-  if (video.isPending) return <HeaderSkeleton />
-  if (video.isError) {
-    return <LoadError showHome title={t.loadError} error={video.error} onRetry={() => void video.refetch()} />
-  }
+  // มีข้อมูลอยู่แล้ว (เช่นจากรายการผลของ W1) แต่รีเฟรชเบื้องหลังล้มเหลว = ยังแสดงข้อมูลเดิม (หน้าแม่แจ้งด้วย toast)
   const data = video.data
+  if (!data) {
+    if (video.isError) {
+      return <LoadError showHome title={t.loadError} error={video.error} onRetry={() => void video.refetch()} />
+    }
+    return <HeaderSkeleton />
+  }
   return (
     <div className={LAYOUT}>
       <Thumbnail src={data.thumbnailUrl} className={COVER} />

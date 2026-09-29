@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { formatDuration, formatPublished, formatTimecode, relativeTime } from "./format"
+import { formatDuration, formatPublished, formatTimecode, relativeTime, youtubeLinkAt } from "./format"
 
 describe("formatDuration", () => {
   it("ต่ำกว่า 1 ชั่วโมงเป็น M:SS", () => {
@@ -90,5 +90,18 @@ describe("formatPublished", () => {
   it("วันที่ที่อ่านไม่ได้ให้ข้อความว่าง", () => {
     expect(formatPublished("")).toBe("")
     expect(formatPublished("ไม่ใช่วันที่")).toBe("")
+  })
+})
+
+describe("youtubeLinkAt", () => {
+  it("ลิงก์ youtu.be พร้อมวินาทีที่ตัดเศษทิ้ง (ไม่ปัดขึ้น)", () => {
+    expect(youtubeLinkAt("aqz-KE-bpKQ", 4961)).toBe("https://youtu.be/aqz-KE-bpKQ?t=4")
+    expect(youtubeLinkAt("aqz-KE-bpKQ", 90_500)).toBe("https://youtu.be/aqz-KE-bpKQ?t=90")
+    expect(youtubeLinkAt("abc", 0)).toBe("https://youtu.be/abc?t=0")
+  })
+
+  it("ค่าที่ผิดปกติได้ t=0", () => {
+    expect(youtubeLinkAt("abc", -5)).toBe("https://youtu.be/abc?t=0")
+    expect(youtubeLinkAt("abc", Number.NaN)).toBe("https://youtu.be/abc?t=0")
   })
 })

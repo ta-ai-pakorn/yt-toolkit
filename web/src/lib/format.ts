@@ -43,3 +43,9 @@ export function formatPublished(iso: string): string {
   if (Number.isNaN(time)) return ""
   return new Intl.DateTimeFormat("th-TH", { dateStyle: "long", timeZone: "UTC" }).format(time)
 }
+
+/** ลิงก์ youtu.be ที่เปิดคลิปตรงวินาทีนั้น (ตัดเศษวินาทีทิ้ง ไม่ปัดขึ้น เหมือน timecode) */
+export function youtubeLinkAt(videoId: string, ms: number): string {
+  const seconds = Math.max(0, Math.floor((Number.isFinite(ms) ? ms : 0) / 1000))
+  return `https://youtu.be/${videoId}?t=${seconds}`
+}

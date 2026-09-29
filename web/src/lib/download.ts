@@ -1,22 +1,39 @@
 import { th } from "@/i18n/th"
 import { ApiError } from "@/lib/api"
 
+/** ถอดรหัสค่า filename* ตาม RFC 5987: charset'ภาษา'ข้อความที่เข้ารหัส % · ผิดรูปหรือ charset ไม่รู้จัก = null */
+function decodeExtended(raw: string): string | null {
+  const value = raw.trim().replace(/^"(.*)"$/, "$1")
+  const match = /^([^']*)'[^']*'(.*)$/.exec(value)
+  const charset = (match?.[1] || "UTF-8").trim()
+  const encoded = match ? (match[2] ?? "") : value
+  // % ที่ไม่ตามด้วยเลขฐานสิบหกสองหลักคือรูปแบบที่ผิด
+  if (/%(?![0-9A-Fa-f]{2})/.test(encoded)) return null
+  const bytes: number[] = []
+  const chunks = encoded.split(/(%[0-9A-Fa-f]{2})/)
+  for (const chunk of chunks) {
+    if (/^%[0-9A-Fa-f]{2}$/.test(chunk)) bytes.push(parseInt(chunk.slice(1), 16))
+    else bytes.push(...new TextEncoder().encode(chunk))
+  }
+  try {
+    const name = new TextDecoder(charset, { fatal: true }).decode(new Uint8Array(bytes)).trim()
+    return name || null
+  } catch {
+    // charset ที่เบราว์เซอร์ไม่รู้จัก หรือไบต์ไม่ตรงกับ charset
+    return null
+  }
+}
+
 /**
- * ชื่อไฟล์จากหัว Content-Disposition: ใช้ filename* (UTF-8, RFC 5987) ก่อน ถ้าไม่มีหรือถอดรหัสไม่ได้ใช้ filename
- * ไม่มีทั้งคู่ = null
+ * ชื่อไฟล์จากหัว Content-Disposition: ใช้ filename* (ตาม charset ที่ระบุ, RFC 5987) ก่อน
+ * ถ้าไม่มีหรือถอดรหัสไม่ได้ใช้ filename · ไม่มีทั้งคู่ = null
  */
 export function parseContentDisposition(header: string | null): string | null {
   if (!header) return null
-  const extended = /filename\*\s*=\s*([^;]*)/i.exec(header)?.[1]?.trim()
+  const extended = /filename\*\s*=\s*("[^"]*"|[^;]*)/i.exec(header)?.[1]
   if (extended) {
-    // รูปแบบ charset'ภาษา'ข้อความที่เข้ารหัส % เช่น UTF-8''%E0%B8%A0.jpg
-    const encoded = /^[^']*'[^']*'(.*)$/.exec(extended)?.[1] ?? extended
-    try {
-      const name = decodeURIComponent(encoded).trim()
-      if (name) return name
-    } catch {
-      // ถอดรหัสไม่ได้: ไปใช้ filename ธรรมดาแทน
-    }
+    const name = decodeExtended(extended)
+    if (name) return name
   }
   const plain = /(?:^|[;\s])filename\s*=\s*("((?:[^"\\]|\\.)*)"|[^;]*)/i.exec(header)
   if (!plain) return null

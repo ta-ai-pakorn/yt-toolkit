@@ -1,4 +1,5 @@
 import { Suspense, lazy } from "react"
+import { useLocation } from "react-router"
 
 import { PageErrorBoundary } from "@/components/page-error-boundary"
 import { PageSkeleton } from "@/components/page-skeleton"
@@ -16,9 +17,12 @@ const VideoPage = lazy(() =>
   }))
 )
 
+// resetKey = เส้นทางปัจจุบัน: หน้าหนึ่งพังแล้วผู้ใช้ไปหน้า/คลิปอื่น กล่อง error ต้องถูกล้างด้วย
+// (ไม่ใช้ key เพราะจะสร้างหน้าใหม่ทุกครั้งที่เปลี่ยนแท็บในตั้งค่า โฟกัสหลุด)
 export function LazySettingsPage() {
+  const { pathname } = useLocation()
   return (
-    <PageErrorBoundary>
+    <PageErrorBoundary resetKey={pathname}>
       <Suspense fallback={<PageSkeleton />}>
         <SettingsPage />
       </Suspense>
@@ -27,8 +31,9 @@ export function LazySettingsPage() {
 }
 
 export function LazyVideoPage() {
+  const { pathname } = useLocation()
   return (
-    <PageErrorBoundary>
+    <PageErrorBoundary resetKey={pathname}>
       <Suspense fallback={<PageSkeleton />}>
         <VideoPage />
       </Suspense>
