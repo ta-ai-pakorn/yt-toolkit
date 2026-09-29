@@ -38,8 +38,8 @@ def build_router(ctx: AppContext) -> APIRouter:
     def health() -> dict:
         return {"version": ctx.version, "commit": ctx.commit, **_health()}
 
-    @router.post("/tools/ffmpeg/install")
-    def install_ffmpeg():
+    @router.post("/tools/ffmpeg/install", response_model=None)
+    def install_ffmpeg() -> dict | JSONResponse:
         try:
             tools.install_ffmpeg(ctx.paths, ctx.plat)
         except Exception as error:  # noqa: BLE001 (ทุกความผิดพลาดต้องกลับไปเป็น error envelope ไม่ใช่ 500 ดิบ)

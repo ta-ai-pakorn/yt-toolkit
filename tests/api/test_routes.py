@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from yttoolkit.core import tools
 from yttoolkit.core.tools import ToolStatus
 
@@ -51,6 +53,15 @@ def test_shutdown_force_when_pending(make_client):
     resp = client.post("/api/shutdown", json={"force": True}, headers=AUTH)
     assert resp.status_code == 200
     assert client.calls["shutdown"] == 1
+
+
+def test_install_ffmpeg_requires_token(make_client, monkeypatch):
+    monkeypatch.setattr(tools, "install_ffmpeg", lambda paths, plat: pytest.fail("ต้องไม่ถึงการติดตั้ง"))
+    resp = make_client().post("/api/tools/ffmpeg/install", headers={"Origin": BASE})
+    assert resp.status_code == 403
+    assert resp.json() == {
+        "error": {"code": "E_FORBIDDEN", "message": "คำขอนี้ไม่ได้รับอนุญาต ลองรีเฟรชหน้าเว็บ", "detail": None}
+    }
 
 
 def test_install_ffmpeg_success(make_client, monkeypatch):
