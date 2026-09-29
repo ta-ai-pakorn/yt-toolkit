@@ -129,6 +129,10 @@ class Database:
             self._conn.close()
 
 
+# opened_at ของคลิปที่แค่ "แอบดูชื่อ" (peek) ยังไม่เคยเปิดจริง: เก่ามากจึงไม่ขึ้นใน "ล่าสุด"
+PEEK_SENTINEL = "1970-01-01T00:00:00+00:00"
+
+
 def _parse_time(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
@@ -140,14 +144,15 @@ def purge_stale_cache(db: Database, cache_root: Path, now: datetime, days: int =
     cutoff = _parse_time(now.isoformat()) - timedelta(days=days)
     root = cache_root.resolve()
     rows = db.execute(
-        "SELECT video_id, opened_at FROM videos "
+        "SELECT video_id, opened_at, probed_at FROM videos "
         "WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.video_id = videos.video_id)"
     )
     removed = 0
     for row in rows:
         video_id = row["video_id"]
         try:
-            opened = _parse_time(row["opened_at"])
+            # คลิปที่ไม่เคยเปิดจริง (peek อย่างเดียว) นับอายุจากเวลา probe แทน
+            opened = _parse_time(row["probed_at"] if row["opened_at"] == PEEK_SENTINEL else row["opened_at"])
         except ValueError:
             continue  # เวลาอ่านไม่ออก ไม่เสี่ยงลบ
         if opened >= cutoff:

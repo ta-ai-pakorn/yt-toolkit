@@ -17,6 +17,7 @@ export const th = {
     subtitle: "วางได้หลายลิงก์ บรรทัดละลิงก์ หรือลิงก์เพลย์ลิสต์",
     pasteHint: "กด {key} ที่ไหนก็ได้",
     placeholder: "https://youtube.com/watch?v=...",
+    inputLabel: "ลิงก์ยูทูป",
     analyze: "วิเคราะห์",
     resolveFailed: "วิเคราะห์ลิงก์ไม่สำเร็จ",
     results: {
@@ -31,6 +32,10 @@ export const th = {
       playlistLoading: "กำลังโหลดข้อมูลเพลย์ลิสต์",
       wholePlaylist: "ทั้งเพลย์ลิสต์",
       none: "ไม่พบลิงก์ในข้อความที่วาง",
+      count: "ผลการวิเคราะห์ {n} รายการ",
+      showTitle: "แสดงชื่อ",
+      titleLoading: "กำลังโหลดชื่อคลิป",
+      titleError: "ดึงชื่อคลิปไม่สำเร็จ",
     },
     dialog: {
       title: "ลิงก์นี้อยู่ในเพลย์ลิสต์ จะเอาแค่คลิปนี้ หรือทั้งเพลย์ลิสต์?",

@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui/input-group"
 import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
-import { th } from "@/i18n/th"
+import { fill, th } from "@/i18n/th"
 import { api } from "@/lib/api"
+import { looksLikeYoutube } from "@/lib/paste"
 import { pasteShortcut } from "@/lib/platform"
 import type { ResolveItem, ResolveResult } from "@/lib/types"
 
@@ -55,21 +56,23 @@ export function HomePage() {
     resolve.mutate(value)
   }
 
-  // ตัวฟัง paste ผูกครั้งเดียว แต่ต้องเรียก analyze เวอร์ชันล่าสุดเสมอ
-  const analyzePasted = useEffectEvent((value: string) => analyze(value))
+  // ตัวฟัง paste ผูกครั้งเดียว แต่ต้องอ่านสถานะล่าสุดเสมอ
+  const onGlobalPaste = useEffectEvent((event: ClipboardEvent) => {
+    // กำลังวิเคราะห์อยู่: ปล่อยให้เบราว์เซอร์ทำตามปกติ ห้ามทับข้อความในช่องหรือกลืนลิงก์ที่วางมา
+    if (resolve.isPending) return
+    const target = event.target as HTMLElement | null
+    if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable)) return
+    const pasted = event.clipboardData?.getData("text") ?? ""
+    if (!looksLikeYoutube(pasted)) return
+    event.preventDefault()
+    setText(pasted)
+    analyze(pasted)
+  })
 
   useEffect(() => {
-    function onPaste(event: ClipboardEvent) {
-      const target = event.target as HTMLElement | null
-      if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable)) return
-      const pasted = event.clipboardData?.getData("text") ?? ""
-      if (!/youtu\.?be/.test(pasted)) return
-      event.preventDefault()
-      setText(pasted)
-      analyzePasted(pasted)
-    }
-    window.addEventListener("paste", onPaste)
-    return () => window.removeEventListener("paste", onPaste)
+    const listener = (event: ClipboardEvent) => onGlobalPaste(event)
+    window.addEventListener("paste", listener)
+    return () => window.removeEventListener("paste", listener)
   }, [])
 
   const [before, after] = th.home.pasteHint.split("{key}")
@@ -94,7 +97,7 @@ export function HomePage() {
         <InputGroup>
           <InputGroupTextarea
             ref={inputRef}
-            aria-label={th.home.placeholder}
+            aria-label={th.home.inputLabel}
             placeholder={th.home.placeholder}
             className="max-h-[calc(8lh+1rem)] min-h-24 overflow-y-auto"
             value={text}
@@ -107,7 +110,12 @@ export function HomePage() {
             }}
           />
           <InputGroupAddon align="block-end" className="justify-end">
-            <Button type="submit" disabled={resolve.isPending}>
+            {/* aria-disabled แทน disabled เพื่อให้โฟกัสยังอยู่ที่ปุ่ม (analyze() กันการกดซ้ำอยู่แล้ว) */}
+            <Button
+              type="submit"
+              aria-disabled={resolve.isPending}
+              className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+            >
               {resolve.isPending && <Spinner />}
               {th.home.analyze}
             </Button>
@@ -121,6 +129,9 @@ export function HomePage() {
           </Alert>
         )}
       </form>
+      <p role="status" className="sr-only">
+        {results ? fill(th.home.results.count, { n: results.length }) : ""}
+      </p>
       {results && <ResultList items={results} />}
       <RecentSection />
       <p className="text-center text-sm text-muted-foreground">{th.home.usage}</p>

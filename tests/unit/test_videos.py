@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from yttoolkit.core.db import Database, purge_stale_cache
+from yttoolkit.core.db import PEEK_SENTINEL, Database, purge_stale_cache
 from yttoolkit.core.extractor import FakeExtractor
 from yttoolkit.core.videos import VideoService, to_video_info
 from yttoolkit.core.yterrors import YtError
@@ -1004,3 +1004,131 @@ def test_recent_search_with_backslash_is_literal(
     assert svc.recent(10, q="\\%")[1] == 0
     assert svc.recent(10, q="%")[1] == 1  # "50% off" เท่านั้น
     assert svc.recent(10, q="a_b")[1] == 1
+
+
+# ---------- peek (ดูชื่อคลิปโดยไม่เข้า "ล่าสุด") ----------
+
+
+def _opened_at(db: Database, video_id: str) -> str:
+    return db.execute("SELECT opened_at FROM videos WHERE video_id = ?", (video_id,))[
+        0
+    ]["opened_at"]
+
+
+def test_peek_probe_stores_row_with_sentinel_opened_at_and_stays_out_of_recent(
+    svc: VideoService, db: Database, ext: CountingExtractor
+) -> None:
+    info = svc.get(BBB, peek=True)
+    assert info == to_video_info(load(BBB))
+    assert ext.count["probe"] == 1
+    row = db.execute(
+        "SELECT probed_at, opened_at FROM videos WHERE video_id = ?", (BBB,)
+    )[0]
+    assert row["probed_at"] == stamp(T0)
+    assert row["opened_at"] == PEEK_SENTINEL
+    assert svc.recent(10) == ([], 0)
+
+
+def test_peek_cache_hit_does_not_change_opened_at(
+    svc: VideoService, db: Database, clock: Clock, ext: CountingExtractor
+) -> None:
+    svc.get(BBB, peek=True)
+    clock.advance(hours=2)
+    svc.get(BBB, peek=True)
+    assert ext.count["probe"] == 1
+    assert _opened_at(db, BBB) == PEEK_SENTINEL
+    assert svc.recent(10) == ([], 0)
+
+
+def test_peek_on_a_video_already_opened_keeps_its_place_in_recent(
+    svc: VideoService, db: Database, clock: Clock
+) -> None:
+    svc.get(BBB)
+    opened = _opened_at(db, BBB)
+    clock.advance(hours=2)
+    svc.get(BBB, peek=True)
+    assert _opened_at(db, BBB) == opened
+    assert [i["videoId"] for i in svc.recent(10)[0]] == [BBB]
+
+
+def test_peek_reprobe_after_24h_keeps_opened_at_of_an_opened_video(
+    svc: VideoService, db: Database, clock: Clock, ext: CountingExtractor
+) -> None:
+    svc.get(BBB)
+    opened = _opened_at(db, BBB)
+    clock.advance(hours=25)
+    svc.get(BBB, peek=True)
+    assert ext.count["probe"] == 2
+    assert _opened_at(db, BBB) == opened
+    row = db.execute("SELECT probed_at FROM videos WHERE video_id = ?", (BBB,))[0]
+    assert row["probed_at"] == stamp(T0 + timedelta(hours=25))
+
+
+def test_peek_reprobe_keeps_sentinel_for_a_peek_only_video(
+    svc: VideoService, db: Database, clock: Clock
+) -> None:
+    svc.get(BBB, peek=True)
+    clock.advance(hours=25)
+    svc.get(BBB, peek=True, refresh=True)
+    assert _opened_at(db, BBB) == PEEK_SENTINEL
+
+
+def test_normal_get_after_peek_moves_video_into_recent(
+    svc: VideoService, db: Database, clock: Clock, ext: CountingExtractor
+) -> None:
+    svc.get(BBB, peek=True)
+    clock.advance(minutes=3)
+    svc.get(BBB)
+    assert ext.count["probe"] == 1  # อ่านจาก cache ไม่ probe ซ้ำ
+    assert _opened_at(db, BBB) == stamp(T0 + timedelta(minutes=3))
+    items, total = svc.recent(10)
+    assert total == 1
+    assert [i["videoId"] for i in items] == [BBB]
+
+
+def test_recent_and_its_total_skip_peek_only_rows(
+    svc: VideoService, clock: Clock
+) -> None:
+    svc.get(BBB, peek=True)
+    clock.advance(minutes=1)
+    svc.get(ZOO)
+    items, total = svc.recent(10)
+    assert total == 1
+    assert [i["videoId"] for i in items] == [ZOO]
+    assert svc.recent(10, q="bunny") == ([], 0)
+
+
+def test_peek_errors_store_nothing(svc: VideoService, db: Database) -> None:
+    with pytest.raises(YtError):
+        svc.get("UPCOMINGLV1", peek=True)
+    assert db.execute("SELECT 1 FROM videos") == []
+
+
+def test_peek_rejects_invalid_id_without_probing(
+    svc: VideoService, ext: CountingExtractor
+) -> None:
+    with pytest.raises(YtError):
+        svc.get("bad", peek=True)
+    assert ext.count["probe"] == 0
+
+
+def test_concurrent_peeks_for_same_id_probe_once(db: Database, clock: Clock) -> None:
+    slow = SlowExtractor()
+    service = VideoService(db, slow, now=clock)
+    results = _run_threads([lambda: service.get(BBB, peek=True)] * 6)
+    assert slow.count["probe"] == 1
+    assert all(r == results[0] for r in results)
+    assert _opened_at(db, BBB) == PEEK_SENTINEL
+
+
+def test_concurrent_peek_and_open_probe_once_and_end_up_in_recent(
+    db: Database, clock: Clock
+) -> None:
+    slow = SlowExtractor()
+    service = VideoService(db, slow, now=clock)
+    _run_threads(
+        [lambda: service.get(BBB, peek=True), lambda: service.get(BBB)]
+        + [lambda: service.get(BBB, peek=True)] * 2
+    )
+    assert slow.count["probe"] == 1
+    assert [i["videoId"] for i in service.recent(10)[0]] == [BBB]

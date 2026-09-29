@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .db import Database
+from .db import PEEK_SENTINEL, Database
 from .extractor import Extractor
 from .inputs import PLAYLIST_ID, VIDEO_ID
 from .yterrors import YtError
@@ -330,15 +330,18 @@ class VideoService:
         if not VIDEO_ID.fullmatch(video_id):
             raise YtError("E_INVALID_INPUT", f"video id ไม่ถูกรูปแบบ: {video_id!r}")
 
-    def get(self, video_id: str, refresh: bool = False) -> dict:
+    def get(self, video_id: str, refresh: bool = False, peek: bool = False) -> dict:
         """คืน VideoInfo ของคลิป (probe ใหม่ถ้าไม่มี cache, cache เก่ากว่า 24 ชม. หรือ refresh)
+
+        peek=True = ขอดูข้อมูล (เช่น ชื่อคลิปในรายการผล W1) โดยไม่นับว่าเปิดคลิป: ไม่แตะ opened_at
+        ของแถวที่มีอยู่ และแถวใหม่ได้ PEEK_SENTINEL จึงไม่ขึ้นใน "ล่าสุด" จนกว่าจะมี get ปกติ
 
         เรียกซ้อนกันด้วย id เดียวกัน (เช่น กดเปิดคลิปเดิมสองแท็บ) จะ probe ครั้งเดียว:
         คนที่มาทีหลังรอคิว แล้วอ่าน cache ที่คนแรกเพิ่งเขียนแทนการ probe ซ้ำ
         """
         self._check_video_id(video_id)
         if not refresh:
-            info = self._cached_hit(video_id)
+            info = self._cached_hit(video_id, peek)
             if info is not None:
                 return info
         lock = self._id_lock(video_id)
@@ -348,23 +351,23 @@ class VideoService:
         try:
             if contended or not refresh:
                 # มีคนกำลัง probe ให้อยู่ (หรือเพิ่งเสร็จ) ใช้ผลของเขา แม้จะเป็นการ refresh
-                info = self._cached_hit(video_id)
+                info = self._cached_hit(video_id, peek)
                 if info is not None:
                     return info
-            return self._probe_and_store(video_id)
+            return self._probe_and_store(video_id, peek)
         finally:
             lock.release()
 
-    def _cached_hit(self, video_id: str) -> dict | None:
+    def _cached_hit(self, video_id: str, peek: bool = False) -> dict | None:
         moment, stamp = self._stamp()
         info = self._cached_info(video_id, moment)
-        if info is not None:
+        if info is not None and not peek:
             self._db.execute(
                 "UPDATE videos SET opened_at = ? WHERE video_id = ?", (stamp, video_id)
             )
         return info
 
-    def _probe_and_store(self, video_id: str) -> dict:
+    def _probe_and_store(self, video_id: str, peek: bool = False) -> dict:
         trimmed = trim_probe(self._extractor.probe(video_id))
         info = to_video_info(trimmed)
         _, stamp = self._stamp()
@@ -378,7 +381,8 @@ class VideoService:
             "ON CONFLICT(video_id) DO UPDATE SET title = excluded.title, channel = excluded.channel,"
             " duration_s = excluded.duration_s, thumbnail_url = excluded.thumbnail_url,"
             " chapters_json = excluded.chapters_json, probe_json = excluded.probe_json,"
-            " probed_at = excluded.probed_at, opened_at = excluded.opened_at",
+            " probed_at = excluded.probed_at, opened_at = CASE WHEN excluded.opened_at = ?"
+            " THEN videos.opened_at ELSE excluded.opened_at END",
             (
                 video_id,
                 info["title"],
@@ -388,7 +392,8 @@ class VideoService:
                 json.dumps(chapters, ensure_ascii=False),
                 json.dumps(trimmed, ensure_ascii=False, separators=(",", ":")),
                 stamp,
-                stamp,
+                PEEK_SENTINEL if peek else stamp,
+                PEEK_SENTINEL,
             ),
         )
         return info
@@ -436,9 +441,10 @@ class VideoService:
     def recent(
         self, limit: int, offset: int = 0, q: str | None = None
     ) -> tuple[list[dict], int]:
-        where, params = "", []
+        # คลิปที่แค่ peek (ยังไม่เคยเปิดจริง) ไม่ขึ้นใน "ล่าสุด" ทั้งรายการและยอดรวม
+        where, params = " WHERE opened_at != ?", [PEEK_SENTINEL]
         if q and q.strip():
-            where = " WHERE title LIKE ? ESCAPE '\\'"
+            where += " AND title LIKE ? ESCAPE '\\'"
             params.append(f"%{_like_escape(q.strip())}%")
         total = self._db.execute(f"SELECT count(*) AS n FROM videos{where}", params)[0][
             "n"

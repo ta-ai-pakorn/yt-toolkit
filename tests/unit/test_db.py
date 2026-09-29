@@ -10,7 +10,7 @@ import pytest
 
 from yttoolkit.config import Paths
 from yttoolkit.core import db as db_module
-from yttoolkit.core.db import SCHEMA_VERSION, Database, purge_stale_cache
+from yttoolkit.core.db import PEEK_SENTINEL, SCHEMA_VERSION, Database, purge_stale_cache
 
 NOW = datetime(2026, 9, 29, 12, 0, 0, tzinfo=UTC)
 
@@ -316,3 +316,25 @@ def test_db_execute_inside_transaction_joins_it(db: Database):
         db.execute("UPDATE settings SET value_json = '2' WHERE key = 'a'")  # ไม่ค้าง เพราะ lock เป็น RLock
         raise RuntimeError("boom")
     assert db.execute("SELECT value_json FROM settings WHERE key = 'a'")[0]["value_json"] == "1"
+
+
+def add_peeked_video(db: Database, video_id: str, probed_at: datetime) -> None:
+    db.execute(
+        "INSERT INTO videos (video_id, title, probe_json, probed_at, opened_at) VALUES (?, ?, ?, ?, ?)",
+        (video_id, f"title {video_id}", "{}", probed_at.isoformat(), PEEK_SENTINEL),
+    )
+
+
+def test_purge_removes_peek_only_rows_30_days_after_probe(db: Database, tmp_path: Path):
+    cache = tmp_path / "cache"
+    add_peeked_video(db, "peekold0001", NOW - timedelta(days=31))
+    folder = make_cache(cache, "peekold0001")
+    assert purge_stale_cache(db, cache, NOW) == 1
+    assert db.execute("SELECT video_id FROM videos") == []
+    assert not folder.exists()
+
+
+def test_purge_keeps_fresh_peek_only_rows(db: Database, tmp_path: Path):
+    add_peeked_video(db, "peeknew0001", NOW - timedelta(days=1))
+    assert purge_stale_cache(db, tmp_path / "cache", NOW) == 0
+    assert len(db.execute("SELECT video_id FROM videos")) == 1

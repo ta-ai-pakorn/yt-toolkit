@@ -106,7 +106,10 @@ W7 กล่องยืนยัน / toast / error: ซ้อนบนทุ�
 **ผลการวิเคราะห์ (M2):** กด "วิเคราะห์" แล้วหน้าเว็บเรียก `POST /resolve`
 - ได้คลิปเดียว → ไป W2 ทันที · ได้ลิงก์เดียวที่เป็นทั้งคลิปและเพลย์ลิสต์ → กล่องถาม (W7) "คลิปนี้" หรือ "ทั้งเพลย์ลิสต์"
 - หลายลิงก์หรือเพลย์ลิสต์ → แสดงรายการผลใต้ช่องวางลิงก์ เรียงตามลำดับที่วาง แต่ละแถวมีสถานะกำลังโหลด/ผิดพลาดของตัวเอง
-  - คลิป: รหัสคลิป + ลิงก์ "เปิดดู" ไป W2
+  - คลิป: ภาพปก (สร้างจากรหัสคลิป ไม่ต้องเรียก API) + ชื่อคลิป + ลิงก์ "เปิดดู" ไป W2
+    - ดึงชื่อเฉพาะ 10 แถวแรก ครั้งละไม่เกิน 3 คลิป ผ่าน `GET /videos/{id}?peek=1` (ใช้ query key เดียวกับหน้า W2 เปิดต่อได้ทันทีจาก cache) · กำลังโหลด: Skeleton · ผิดพลาด: แสดงรหัสคลิปพร้อมข้อความเล็ก ๆ
+    - แถวที่ 11 เป็นต้นไปแสดงรหัสคลิปกับปุ่ม "แสดงชื่อ" กดแล้วจึงดึง
+    - คลิปที่ดึงแค่ชื่อ (peek) **ไม่ขึ้นใน "ล่าสุด"** จนกว่าจะเปิดหน้า W2 จริง
   - ลิงก์ที่อ่านไม่ออก: ข้อความที่วาง + ข้อความ `E_INVALID_INPUT` สีแดง
   - เพลย์ลิสต์: ชื่อเพลย์ลิสต์, จำนวนคลิป และหมายเหตุ "เลือกคลิปจากเพลย์ลิสต์ได้ในเวอร์ชันถัดไป" (เกิน 200 คลิปบอกว่าแสดงแค่ 200 คลิปแรก)
 - ตารางเลือกคลิปแบบเต็ม (W3) มาใน M4
@@ -347,7 +350,7 @@ queued ──► running ──► done
 | GET | `/ping` | — | `{ok:true, pid}` ตอบทันที ใช้เช็คว่าแอพยังทำงานอยู่ (ไฟล์เปิด/ปิดโปรแกรมและ dev server ใช้ตัวนี้) |
 | GET | `/health` | — | `{version, commit, tools:{ffmpeg, ytdlp, jsRuntime}, disk, output, network}` ทุกตัวเป็น `ToolStatus = {status: ok\|warn\|error, name, version, message, path}` (ใช้เวลาได้ถึง 5 วิเพราะเช็คเน็ต) |
 | POST | `/resolve` | `{text}` (ไม่เกิน 20,000 ตัวอักษร) | `{resolveId, items:[{input, kind: video\|playlist\|ambiguous\|invalid, videoId?, playlistId?, error?}]}` เรียงตามลำดับที่วาง · `error` มีเฉพาะแถว invalid = `{code:"E_INVALID_INPUT", message}` · `resolveId` ยังไม่เก็บลงฐานข้อมูล (W3 ใช้ใน M4) |
-| GET | `/videos/{id}` | `?refresh=1` | `VideoInfo` (ข้อ 6.2.1) · probe ใหม่ถ้าไม่มี cache หรือขอ refresh · id ผิดรูปแบบ → 422 `E_INVALID_INPUT` |
+| GET | `/videos/{id}` | `?refresh=1` · `?peek=1` | `VideoInfo` (ข้อ 6.2.1) · probe ใหม่ถ้าไม่มี cache หรือขอ refresh · `peek=1` = ขอแค่ข้อมูล (ชื่อในรายการผล W1) ใช้ probe และ cache 24 ชม. เดียวกัน แต่ไม่นับว่าเปิดคลิป: ไม่อัปเดต `opened_at` จึงไม่ขึ้น `/history` · id ผิดรูปแบบ → 422 `E_INVALID_INPUT` |
 | GET | `/videos/{id}/storyboard` | — | `{intervalMs, frames:[{index, tMs, url}]}` · `url` = `/api/cache/{id}/storyboard/f_NNNN.jpg?v=<เวลาที่สร้างชุดภาพ>` (ภาพชุดใหม่ได้ URL ใหม่) |
 | GET | `/videos/{id}/storyboard/contact-sheet.jpg` | — | ไฟล์ JPEG (Content-Disposition: attachment) ชื่อ `<ชื่อคลิป> - contact sheet.jpg` (ชื่อภาษาไทยส่งใน `filename*` ตาม RFC 5987 ชื่อสำรอง `contact-sheet.jpg`) |
 | GET | `/videos/{id}/storyboard/frames.zip` | — | ไฟล์ zip (Content-Disposition: attachment) ชื่อ `<ชื่อคลิป> - frames.zip` ข้างในเป็น `frame_HH-MM-SS.jpg` |

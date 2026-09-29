@@ -1,30 +1,94 @@
 import { useQuery } from "@tanstack/react-query"
-import { CircleX, ListVideo, Video } from "lucide-react"
-import { useState } from "react"
+import { CircleX, ListVideo } from "lucide-react"
+import { useState, type ReactNode } from "react"
 import { Link } from "react-router"
 
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
 import { Skeleton } from "@/components/ui/skeleton"
 import { fill, th } from "@/i18n/th"
-import { api } from "@/lib/api"
-import type { PlaylistInfo, ResolveItem } from "@/lib/types"
+import type { ResolveItem } from "@/lib/types"
+
+import {
+  AUTO_TITLE_ROWS,
+  playlistQuery,
+  thumbnailUrl,
+  videoTitleQuery,
+} from "./queries"
+import { Thumbnail } from "./thumbnail"
 
 const t = th.home.results
 
-function VideoRow({ item, onPlaylist }: { item: ResolveItem; onPlaylist?: () => void }) {
+type VideoRowProps = {
+  item: ResolveItem
+  /** 10 แถวแรกดึงชื่อเอง แถวหลังจากนั้นรอให้ผู้ใช้กด "แสดงชื่อ" */
+  autoTitle: boolean
+  onPlaylist?: () => void
+}
+
+function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
   const id = item.videoId ?? ""
+  const [requested, setRequested] = useState(false)
+  const wantsTitle = autoTitle || requested
+  const video = useQuery({ ...videoTitleQuery(id), enabled: wantsTitle })
+  const title = video.data?.title
+
+  let name: ReactNode
+  let hint: ReactNode = null
+  if (title) {
+    name = <ItemTitle className="line-clamp-2 w-auto">{title}</ItemTitle>
+    hint = <ItemDescription className="font-mono text-xs">{id}</ItemDescription>
+  } else if (video.isError) {
+    name = <ItemTitle className="font-mono">{id}</ItemTitle>
+    hint = (
+      <ItemDescription className="text-xs text-destructive">
+        {t.titleError} · {video.error.message}
+      </ItemDescription>
+    )
+  } else if (wantsTitle) {
+    name = (
+      <>
+        <span className="sr-only" role="status">
+          {t.titleLoading}
+        </span>
+        <Skeleton className="h-4 w-56 max-w-full" />
+      </>
+    )
+    hint = <ItemDescription className="font-mono text-xs">{id}</ItemDescription>
+  } else {
+    name = <ItemTitle className="font-mono">{id}</ItemTitle>
+  }
+
   return (
-    <Item role="listitem" variant="outline" size="sm">
-      <ItemMedia variant="icon">
-        <Video aria-hidden className="text-muted-foreground" />
+    <Item
+      role="listitem"
+      variant="outline"
+      size="sm"
+      aria-busy={wantsTitle && video.isFetching && !title}
+    >
+      <ItemMedia>
+        <Thumbnail src={thumbnailUrl(id)} className="w-24" />
       </ItemMedia>
       <ItemContent>
-        <ItemTitle className="font-mono">{id}</ItemTitle>
+        {name}
+        {hint}
       </ItemContent>
       <ItemActions>
+        {!wantsTitle && !title && (
+          <Button variant="ghost" size="sm" onClick={() => setRequested(true)}>
+            {t.showTitle}
+          </Button>
+        )}
         {onPlaylist && (
           <Button variant="outline" size="sm" onClick={onPlaylist}>
             {t.wholePlaylist}
@@ -32,7 +96,7 @@ function VideoRow({ item, onPlaylist }: { item: ResolveItem; onPlaylist?: () => 
         )}
         <Link
           to={`/v/${id}`}
-          aria-label={`${t.open} ${id}`}
+          aria-label={`${t.open} ${title ?? id}`}
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
           {t.open}
@@ -44,26 +108,29 @@ function VideoRow({ item, onPlaylist }: { item: ResolveItem; onPlaylist?: () => 
 
 function InvalidRow({ item }: { item: ResolveItem }) {
   return (
-    <Item role="listitem" variant="outline" size="sm" className="border-destructive/40">
+    <Item
+      role="listitem"
+      variant="outline"
+      size="sm"
+      className="border-destructive/40"
+    >
       <ItemMedia variant="icon">
         <CircleX aria-hidden className="text-destructive" />
       </ItemMedia>
       <ItemContent>
-        <ItemTitle className="line-clamp-2 break-all font-mono">{item.input}</ItemTitle>
-        <ItemDescription className="text-destructive">{item.error?.message ?? th.errors.unknown}</ItemDescription>
+        <ItemTitle className="line-clamp-2 font-mono break-all">
+          {item.input}
+        </ItemTitle>
+        <ItemDescription className="text-destructive">
+          {item.error?.message ?? th.errors.unknown}
+        </ItemDescription>
       </ItemContent>
     </Item>
   )
 }
 
 function PlaylistRow({ playlistId }: { playlistId: string }) {
-  // retry ปิด: ความผิดพลาดจากยูทูปมักไม่หายเอง ให้ผู้ใช้กด "ลองใหม่" เองจะเห็นผลเร็วกว่ารอลองซ้ำเบื้องหลัง
-  const playlist = useQuery({
-    queryKey: ["playlist", playlistId],
-    queryFn: () => api<PlaylistInfo>(`/playlists/${playlistId}`),
-    retry: false,
-    staleTime: 5 * 60_000,
-  })
+  const playlist = useQuery(playlistQuery(playlistId))
 
   if (playlist.isPending) {
     return (
@@ -91,7 +158,12 @@ function PlaylistRow({ playlistId }: { playlistId: string }) {
             {t.playlistError} · {playlist.error.message}
           </AlertDescription>
           <AlertAction>
-            <Button variant="outline" size="sm" disabled={playlist.isFetching} onClick={() => void playlist.refetch()}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={playlist.isFetching}
+              onClick={() => void playlist.refetch()}
+            >
               {th.common.retry}
             </Button>
           </AlertAction>
@@ -107,12 +179,15 @@ function PlaylistRow({ playlistId }: { playlistId: string }) {
         <ListVideo aria-hidden className="text-muted-foreground" />
       </ItemMedia>
       <ItemContent>
-        <ItemTitle className="line-clamp-2 w-auto">{title || t.playlistUntitled}</ItemTitle>
+        <ItemTitle className="line-clamp-2 w-auto">
+          {title || t.playlistUntitled}
+        </ItemTitle>
         {entries.length === 0 ? (
           <ItemDescription>{t.playlistEmpty}</ItemDescription>
         ) : (
           <ItemDescription>
-            <span className="font-mono">{fill(t.clips, { n: total })}</span> · {t.playlistLater}
+            <span className="font-mono">{fill(t.clips, { n: total })}</span> ·{" "}
+            {t.playlistLater}
             {truncated && (
               <>
                 <br />
@@ -127,29 +202,61 @@ function PlaylistRow({ playlistId }: { playlistId: string }) {
 }
 
 // ลิงก์ที่เป็นทั้งคลิปและเพลย์ลิสต์ปนอยู่ในรายการหลายบรรทัด: เริ่มที่คลิป แล้วให้ผู้ใช้กดขอทั้งเพลย์ลิสต์ได้เอง
-function AmbiguousRow({ item }: { item: ResolveItem }) {
+function AmbiguousRow({
+  item,
+  autoTitle,
+}: {
+  item: ResolveItem
+  autoTitle: boolean
+}) {
   const [wholePlaylist, setWholePlaylist] = useState(false)
-  if (wholePlaylist && item.playlistId) return <PlaylistRow playlistId={item.playlistId} />
-  return <VideoRow item={item} onPlaylist={item.playlistId ? () => setWholePlaylist(true) : undefined} />
+  if (wholePlaylist && item.playlistId)
+    return <PlaylistRow playlistId={item.playlistId} />
+  return (
+    <VideoRow
+      item={item}
+      autoTitle={autoTitle}
+      onPlaylist={item.playlistId ? () => setWholePlaylist(true) : undefined}
+    />
+  )
 }
 
-function Row({ item }: { item: ResolveItem }) {
+function Row({ item, autoTitle }: { item: ResolveItem; autoTitle: boolean }) {
   switch (item.kind) {
     case "video":
-      return <VideoRow item={item} />
+      return <VideoRow item={item} autoTitle={autoTitle} />
     case "playlist":
-      return item.playlistId ? <PlaylistRow playlistId={item.playlistId} /> : <InvalidRow item={item} />
+      return item.playlistId ? (
+        <PlaylistRow playlistId={item.playlistId} />
+      ) : (
+        <InvalidRow item={item} />
+      )
     case "ambiguous":
-      return <AmbiguousRow item={item} />
+      return <AmbiguousRow item={item} autoTitle={autoTitle} />
     default:
       return <InvalidRow item={item} />
   }
 }
 
+const isClip = (item: ResolveItem) =>
+  item.kind === "video" || item.kind === "ambiguous"
+
 export function ResultList({ items }: { items: ResolveItem[] }) {
+  // นับเฉพาะแถวที่เป็นคลิป: 10 แถวแรกของคลิปดึงชื่อเอง
+  const autoTitle = items.map(
+    (item, index) =>
+      isClip(item) &&
+      items.slice(0, index).filter(isClip).length < AUTO_TITLE_ROWS
+  )
   return (
-    <section aria-labelledby="results-title" className="flex flex-col gap-2 text-left">
-      <h2 id="results-title" className="text-sm font-medium text-muted-foreground">
+    <section
+      aria-labelledby="results-title"
+      className="flex flex-col gap-2 text-left"
+    >
+      <h2
+        id="results-title"
+        className="text-sm font-medium text-muted-foreground"
+      >
         {t.title}
       </h2>
       {items.length === 0 ? (
@@ -161,7 +268,11 @@ export function ResultList({ items }: { items: ResolveItem[] }) {
       ) : (
         <ItemGroup className="gap-2">
           {items.map((item, index) => (
-            <Row key={`${index}-${item.input}`} item={item} />
+            <Row
+              key={`${index}-${item.input}`}
+              item={item}
+              autoTitle={autoTitle[index]}
+            />
           ))}
         </ItemGroup>
       )}

@@ -310,7 +310,7 @@ test.describe("W1 ล่าสุด", () => {
     )
     await page.goto("/")
     await expect(page.getByRole("textbox")).toBeVisible()
-    await expect.poll(() => warnings.some((text) => text.includes("โหลดรายการล่าสุดไม่สำเร็จ"))).toBe(true)
+    await expect.poll(() => warnings.some((text) => text.includes("[recent] failed to load history"))).toBe(true)
     await expect(page.getByText("ล่าสุด", { exact: true })).toHaveCount(0)
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0)
     await expect(page.getByRole("alert")).toHaveCount(0)
@@ -333,6 +333,209 @@ test.describe("W1 ล่าสุด", () => {
     await expect(section.getByRole("link").first()).toContainText("1:02:05")
     await expect(section.getByRole("link").first()).toContainText("3 วันก่อน")
     await expect(section.locator("img")).toHaveCount(0)
+  })
+})
+
+const PIXEL = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+)
+
+const fakeVideo = (videoId: string, title = `คลิปทดสอบ ${videoId}`) => ({
+  videoId,
+  title,
+  channel: "ช่องทดสอบ",
+  durationS: 60,
+  thumbnailUrl: "",
+  chapters: [],
+  video: [],
+  audio: [],
+  hasStoryboard: false,
+  isLive: false,
+})
+
+const clipIds = (n: number) => Array.from({ length: n }, (_, i) => `vid${String(i).padStart(8, "0")}`)
+
+test.describe("W1 รายการผล: ภาพปกและชื่อคลิป", () => {
+  test("แถวคลิปแสดงภาพปกจากรหัสทันที และชื่อคลิป ดึงแบบ peek", async ({ page }) => {
+    await page.route("https://i.ytimg.com/**", (route) => route.fulfill({ contentType: "image/png", body: PIXEL }))
+    const peekUrls: string[] = []
+    page.on("request", (request) => {
+      if (request.url().includes(`/api/videos/${ZOO}`)) peekUrls.push(request.url())
+    })
+    await page.goto("/")
+    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const row = page.locator(RESULT_ROWS).first()
+    await expect(row.locator("img")).toHaveAttribute("src", `https://i.ytimg.com/vi/${ZOO}/mqdefault.jpg`)
+    await expect(row).toContainText("Me at the zoo")
+    await expect(row).toContainText(ZOO)
+    expect(peekUrls.length).toBeGreaterThan(0)
+    expect(peekUrls.every((url) => url.endsWith("?peek=1"))).toBe(true)
+  })
+
+  test("คลิปที่ดึงแค่ชื่อในรายการผล ไม่ขึ้นใน 'ล่าสุด' จนกว่าจะกดเปิดดู", async ({ page }) => {
+    // ตัวตรวจอยู่ที่ pytest (peek ไม่แตะ opened_at) ที่นี่ดูว่าหน้าเว็บส่ง peek จริง และตอนเปิดหน้าคลิปไม่ส่ง
+    const requests: string[] = []
+    page.on("request", (request) => {
+      if (request.url().includes(`/api/videos/${BBB}`)) requests.push(request.url())
+    })
+    await page.goto("/")
+    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await expect(page.locator(RESULT_ROWS).first()).toContainText("Big Buck Bunny")
+    expect(requests.every((url) => url.endsWith("?peek=1"))).toBe(true)
+    await page.getByRole("link", { name: /เปิดดู/ }).click()
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    expect(requests.some((url) => !url.includes("peek"))).toBe(true)
+  })
+
+  test("ดึงชื่อครั้งละไม่เกิน 3 คลิป และเฉพาะ 10 แถวแรก · แถวที่ 11 เป็นต้นไปกด 'แสดงชื่อ'", async ({ page }) => {
+    const ids = clipIds(12)
+    let inFlight = 0
+    let peak = 0
+    const fetched: string[] = []
+    await page.route("**/api/videos/*", async (route) => {
+      const id = new URL(route.request().url()).pathname.split("/").pop() ?? ""
+      fetched.push(id)
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      inFlight -= 1
+      await route.fulfill({ json: fakeVideo(id) })
+    })
+    await page.goto("/")
+    await page.getByRole("textbox").fill(ids.join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const rows = page.locator(RESULT_ROWS)
+    await expect(rows).toHaveCount(12)
+    await expect(rows.nth(9)).toContainText(`คลิปทดสอบ ${ids[9]}`, { timeout: 10_000 })
+    expect(peak).toBe(3)
+    expect(fetched.sort()).toEqual(ids.slice(0, 10))
+    // แถวที่ 11-12 ยังไม่ดึง: แสดงรหัสกับปุ่ม
+    await expect(page.getByRole("button", { name: "แสดงชื่อ" })).toHaveCount(2)
+    await expect(rows.nth(10)).toContainText(ids[10])
+    await rows.nth(10).getByRole("button", { name: "แสดงชื่อ" }).click()
+    await expect(rows.nth(10)).toContainText(`คลิปทดสอบ ${ids[10]}`)
+    await expect(page.getByRole("button", { name: "แสดงชื่อ" })).toHaveCount(1)
+    expect(fetched).toHaveLength(11)
+  })
+
+  test("ดึงชื่อไม่สำเร็จ → แสดงรหัสคลิปกับข้อความเล็ก ๆ และลิงก์เปิดดูยังใช้ได้", async ({ page }) => {
+    await page.route("**/api/videos/PRIVATEVID1*", (route) =>
+      route.fulfill({
+        status: 404,
+        json: { error: { code: "E_VIDEO_PRIVATE", message: "คลิปนี้เป็นส่วนตัว", detail: null } },
+      }),
+    )
+    await page.goto("/")
+    await page.getByRole("textbox").fill(["PRIVATEVID1", "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const row = page.locator(RESULT_ROWS).first()
+    await expect(row).toContainText("PRIVATEVID1")
+    await expect(row).toContainText("ดึงชื่อคลิปไม่สำเร็จ")
+    await expect(row).toContainText("คลิปนี้เป็นส่วนตัว")
+    await expect(row.getByRole("link", { name: /เปิดดู/ })).toHaveAttribute("href", "/v/PRIVATEVID1")
+  })
+
+  test("ระหว่างรอชื่อ แสดงโครงรอ", async ({ page }) => {
+    await page.route("**/api/videos/*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      await route.continue()
+    })
+    await page.goto("/")
+    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const row = page.locator(RESULT_ROWS).first()
+    await expect(row.getByText("กำลังโหลดชื่อคลิป")).toBeAttached()
+    await expect(row.locator("[data-slot=skeleton]")).toBeVisible()
+    await expect(row).toContainText("Me at the zoo")
+  })
+
+  test("เพลย์ลิสต์ดึงข้อมูลครั้งละไม่เกิน 3 รายการ", async ({ page }) => {
+    let inFlight = 0
+    let peak = 0
+    await page.route("**/api/playlists/*", async (route) => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      inFlight -= 1
+      await route.fulfill({ json: { title: "รายการทดสอบ", total: 3, truncated: false, entries: [{ videoId: ZOO }] } })
+    })
+    await page.goto("/")
+    const lines = Array.from({ length: 6 }, (_, i) => `https://www.youtube.com/playlist?list=PLtest00000${i}`)
+    await page.getByRole("textbox").fill(lines.join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const rows = page.locator(RESULT_ROWS)
+    await expect(rows).toHaveCount(6)
+    await expect(rows.filter({ hasText: "รายการทดสอบ" })).toHaveCount(6, { timeout: 10_000 })
+    expect(peak).toBe(3)
+  })
+})
+
+test.describe("W1 การวาง การเข้าถึง และข้อผิดพลาด", () => {
+  test("วางลิงก์ใหม่ระหว่างกำลังวิเคราะห์ → ไม่ทำอะไร: เรียก /resolve ครั้งเดียว ช่องไม่ถูกทับ", async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"])
+    let calls = 0
+    await page.route("**/api/resolve", async (route) => {
+      calls += 1
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      await route.continue()
+    })
+    await page.goto("/")
+    await page.getByRole("textbox").fill(BBB_URL)
+    const button = page.getByRole("button", { name: "วิเคราะห์" })
+    await button.click()
+    await expect(button).toHaveAttribute("aria-disabled", "true")
+    await expect(button).toBeFocused()
+    await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(`https://youtu.be/${ZOO}`)})`)
+    await page.keyboard.press("Control+V")
+    await expect(page.getByRole("textbox")).toHaveValue(BBB_URL)
+    await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
+    expect(calls).toBe(1)
+  })
+
+  test("Ctrl+V ที่ไม่ใช่ลิงก์ยูทูป (ประโยคที่มีคำว่า youtube) → ไม่มีอะไรเกิดขึ้น", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"])
+    let calls = 0
+    await page.route("**/api/resolve", (route) => {
+      calls += 1
+      return route.continue()
+    })
+    await page.goto("/")
+    await page.evaluate(`navigator.clipboard.writeText("ดูคลิปนี้ใน youtube ตอนพักเที่ยง")`)
+    await page.locator("body").click({ position: { x: 5, y: 300 } })
+    await page.keyboard.press("Control+V")
+    await page.waitForTimeout(500)
+    expect(calls).toBe(0)
+    await expect(page.getByRole("textbox")).toHaveValue("")
+    await expect(page).toHaveURL(/\/$/)
+  })
+
+  test("ช่องวางลิงก์มีป้ายชื่อจริง ไม่ใช่แค่ตัวอย่าง URL", async ({ page }) => {
+    await page.goto("/")
+    await expect(page.getByLabel("ลิงก์ยูทูป")).toBeVisible()
+    await expect(page.getByRole("textbox", { name: "ลิงก์ยูทูป" })).toHaveAttribute("placeholder", /youtube\.com/)
+  })
+
+  test("แสดงผลแล้วประกาศจำนวนรายการให้โปรแกรมอ่านหน้าจอ", async ({ page }) => {
+    await page.goto("/")
+    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, "ไม่ใช่ลิงก์", PLAYLIST_URL].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await expect(page.getByRole("status").filter({ hasText: "ผลการวิเคราะห์ 3 รายการ" })).toBeAttached()
+  })
+
+  test("ต่อ backend ไม่ได้ (E_OFFLINE) → แจ้งข้อความภาษาไทยใต้ช่อง", async ({ page }) => {
+    await page.route("**/api/resolve", (route) => route.abort())
+    await page.goto("/")
+    await page.getByRole("textbox").fill(BBB_URL)
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const alert = page.getByRole("alert")
+    await expect(alert).toContainText("วิเคราะห์ลิงก์ไม่สำเร็จ")
+    await expect(alert).toContainText("เชื่อมต่อโปรแกรมไม่ได้")
   })
 })
 

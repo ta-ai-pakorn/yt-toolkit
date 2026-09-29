@@ -170,8 +170,9 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
 
     @router.get("/videos/{video_id}", response_model=None)
     @_maps_yt_errors
-    def video_info(video_id: str, refresh: bool = False) -> dict:
-        return videos.get(video_id, refresh=refresh)
+    def video_info(video_id: str, refresh: bool = False, peek: bool = False) -> dict:
+        # peek=1: หน้าเว็บขอแค่ชื่อ/ภาพปก (รายการผล W1) ไม่นับว่าเปิดคลิป จึงไม่ขึ้น "ล่าสุด"
+        return videos.get(video_id, refresh=refresh, peek=peek)
 
     @router.get("/videos/{video_id}/storyboard", response_model=None)
     @_maps_yt_errors

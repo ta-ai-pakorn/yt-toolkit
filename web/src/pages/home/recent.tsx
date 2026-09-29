@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { Link } from "react-router"
 
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
@@ -12,6 +12,7 @@ import type { HistoryPage } from "@/lib/types"
 import { Thumbnail } from "./thumbnail"
 
 const LIMIT = 5
+const SKELETON_DELAY_MS = 300
 
 // ข้อมูลรอง: โหลดไม่ได้ก็ซ่อนเงียบ ๆ ไม่เด้ง toast ไม่ให้กวนงานหลักของหน้า
 export function RecentSection() {
@@ -20,11 +21,19 @@ export function RecentSection() {
     queryFn: () => api<HistoryPage>(`/history?limit=${LIMIT}`),
   })
 
+  // โหลดเร็ว (ปกติคือเสี้ยววินาที) ไม่ต้องขึ้นโครงรอให้หน้ากระตุก: ขึ้นเมื่อช้าเกิน 300 ms เท่านั้น
+  const [slow, setSlow] = useState(false)
   useEffect(() => {
-    if (history.isError) console.warn("โหลดรายการล่าสุดไม่สำเร็จ", history.error)
+    const timer = setTimeout(() => setSlow(true), SKELETON_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    if (history.isError) console.warn("[recent] failed to load history", history.error)
   }, [history.isError, history.error])
 
   if (history.isPending) {
+    if (!slow) return null
     return (
       <section aria-label={th.home.recent.title} aria-busy="true" className="flex flex-col gap-2">
         <Skeleton className="h-5 w-16" />

@@ -221,6 +221,31 @@ def test_video_info_uses_cache_within_24h(api):  # AC-PROBE-01
     assert _probes(client.fake) == 1
 
 
+def test_video_info_peek_returns_info_but_stays_out_of_history(api):
+    client = api()
+    resp = client.get(f"/api/videos/{BBB}?peek=1")
+    assert resp.status_code == 200
+    assert resp.json()["videoId"] == BBB
+    assert client.get("/api/history").json() == {"items": [], "total": 0}
+
+
+def test_video_info_peek_then_open_uses_cache_and_enters_history(api):
+    client = api()
+    client.get(f"/api/videos/{BBB}?peek=1")
+    client.get(f"/api/videos/{BBB}")
+    assert _probes(client.fake) == 1
+    body = client.get("/api/history").json()
+    assert [i["videoId"] for i in body["items"]] == [BBB]
+    assert body["total"] == 1
+
+
+def test_video_info_peek_on_opened_video_keeps_history_entry(api):
+    client = api()
+    client.get(f"/api/videos/{BBB}")
+    client.get(f"/api/videos/{BBB}?peek=1")
+    assert client.get("/api/history").json()["total"] == 1
+
+
 def test_video_info_refresh_probes_again(api):
     client = api()
     client.get(f"/api/videos/{BBB}")

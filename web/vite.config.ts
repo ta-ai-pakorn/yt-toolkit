@@ -33,10 +33,6 @@ export default defineConfig({
     // e2e/ เป็นของ Playwright ไม่ใช่ vitest
     exclude: [...configDefaults.exclude, "**/dist/**", "e2e/**"],
   },
-  build: {
-    // งบขนาดของโปรเจกต์วัดที่ JS หลังบีบอัด ≤ 400 KB (PRD 6.5) ไม่ใช่ขนาดดิบที่ Vite เตือนที่ 500 KB
-    chunkSizeWarningLimit: 700,
-  },
   plugins: [react(), tailwindcss(), devToken()],
   resolve: {
     alias: { "@": path.resolve(import.meta.dirname, "./src") },
