@@ -59,3 +59,61 @@ def test_api_routes_win_and_unknown_api_is_404(tmp_path):
 def test_missing_dist_returns_503(tmp_path):
     resp = _client(tmp_path / "missing").get("/")
     assert resp.status_code == 503
+
+
+def _record_fs_calls(monkeypatch):
+    """บันทึก path ทุกตัวที่ถูกส่งเข้า Path.resolve / Path.is_file"""
+    import pathlib
+
+    seen: list[str] = []
+    real_resolve = pathlib.Path.resolve
+    real_is_file = pathlib.Path.is_file
+
+    def resolve(self, *args, **kwargs):
+        seen.append(str(self))
+        return real_resolve(self, *args, **kwargs)
+
+    def is_file(self, *args, **kwargs):
+        seen.append(str(self))
+        return real_is_file(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "resolve", resolve)
+    monkeypatch.setattr(pathlib.Path, "is_file", is_file)
+    return seen
+
+
+def test_unc_path_never_touches_filesystem(tmp_path, monkeypatch):
+    client = _client(_dist(tmp_path))
+    seen = _record_fs_calls(monkeypatch)
+    resp = client.get("/%5C%5Cevil%5Cshare%5Cx")
+    assert resp.status_code == 200
+    assert "yt-token" in resp.text
+    assert not any("evil" in p for p in seen), seen
+
+
+def test_encoded_dotdot_traversal_is_rejected(tmp_path, monkeypatch):
+    dist = _dist(tmp_path)
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    client = _client(dist)
+    seen = _record_fs_calls(monkeypatch)
+    resp = client.get("/assets/%2e%2e/%2e%2e/secret.txt")
+    assert resp.status_code == 200
+    assert "secret" not in resp.text
+    assert "yt-token" in resp.text
+    assert not any("secret" in p for p in seen), seen
+
+
+def test_drive_letter_path_never_touches_filesystem(tmp_path, monkeypatch):
+    client = _client(_dist(tmp_path))
+    seen = _record_fs_calls(monkeypatch)
+    resp = client.get("/C:%5CWindows%5Cwin.ini")
+    assert resp.status_code == 200
+    assert "yt-token" in resp.text
+    assert not any("win.ini" in p for p in seen), seen
+
+
+def test_index_html_is_served_with_token(tmp_path):
+    resp = _client(_dist(tmp_path)).get("/index.html")
+    assert resp.status_code == 200
+    assert 'name="yt-token"' in resp.text
+    assert resp.headers["cache-control"] == "no-store"
