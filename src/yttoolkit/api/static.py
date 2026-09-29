@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import os
 from pathlib import Path, PurePosixPath
 
 from fastapi import FastAPI, HTTPException
@@ -28,6 +29,14 @@ def _safe_parts(full_path: str) -> tuple[str, ...] | None:
     return parts
 
 
+def _same_file(a: Path, b: Path) -> bool:
+    """บน Windows ชื่ออย่าง "index.html." หรือชื่อย่อ 8.3 ก็ชี้ไปที่ index.html ได้ ต้องเทียบที่ตัวไฟล์"""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
 def mount_web(app: FastAPI, dist: Path, token: str) -> None:
     root = dist.resolve()
 
@@ -42,7 +51,7 @@ def mount_web(app: FastAPI, dist: Path, token: str) -> None:
         # index.html ตัวดิบไม่มี token ต้องเสิร์ฟตัวที่ฝัง token แล้วเสมอ
         if parts and [p.lower() for p in parts] != ["index.html"]:
             candidate = root.joinpath(*parts)
-            if candidate.is_file():
+            if candidate.is_file() and not _same_file(candidate, index):
                 return FileResponse(candidate)
         page = inject_token(index.read_text(encoding="utf-8"), token)
         return HTMLResponse(page, headers={"Cache-Control": "no-store"})

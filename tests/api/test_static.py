@@ -1,3 +1,4 @@
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -114,6 +115,15 @@ def test_drive_letter_path_never_touches_filesystem(tmp_path, monkeypatch):
 
 def test_index_html_is_served_with_token(tmp_path):
     resp = _client(_dist(tmp_path)).get("/index.html")
+    assert resp.status_code == 200
+    assert 'name="yt-token"' in resp.text
+    assert resp.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("path", ["/index.html.", "/INDEX.HTML.", "/index.html%20", "/Index.Html"])
+def test_index_html_aliases_never_serve_raw_copy(tmp_path, path):
+    # บน Windows ชื่อที่มีจุดหรือช่องว่างท้าย และตัวพิมพ์ต่างกัน ชี้ไปที่ไฟล์ index.html เดียวกัน
+    resp = _client(_dist(tmp_path)).get(path)
     assert resp.status_code == 200
     assert 'name="yt-token"' in resp.text
     assert resp.headers["cache-control"] == "no-store"
