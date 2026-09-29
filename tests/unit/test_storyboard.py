@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import threading
 import time
 from datetime import UTC, datetime
@@ -522,3 +523,126 @@ def test_module_does_not_import_api_or_platform() -> None:
     assert "yttoolkit.api" not in text
     assert "yttoolkit.platform" not in text
     assert "import yt_dlp" not in text
+
+
+# ---------- Fix round 1 ----------
+
+
+def _corrupt_cache(tmp_path: Path) -> dict:
+    fetch = fetch_from({"https://x.invalid/M0.jpg": make_grid(9)})
+    index = build(VID, make_raw(make_sb([36])), tmp_path, fetch)
+    (tmp_path / "storyboard" / "index.json").write_text("{bad", encoding="utf-8")
+    return index
+
+
+def test_rename_race_uses_valid_index_built_by_someone_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_rename = Path.rename
+    fetch = fetch_from({"https://x.invalid/M0.jpg": make_grid(9)})
+
+    def racing_rename(self: Path, target):
+        if self.name.startswith("storyboard.tmp-"):
+            shutil.copytree(self, target)  # อีกโปรเซสสร้างเสร็จก่อนเรา
+            raise FileExistsError("target exists")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", racing_rename)
+    index = build(VID, make_raw(make_sb([36])), tmp_path, fetch)
+    assert len(index["frames"]) == 9
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["storyboard"]
+
+
+def test_rename_failure_without_valid_target_is_e_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def denied(self: Path, target):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "rename", denied)
+    fetch = fetch_from({"https://x.invalid/M0.jpg": make_grid(9)})
+    with pytest.raises(YtError) as info:
+        build(VID, make_raw(make_sb([36])), tmp_path, fetch)
+    assert info.value.code == "E_UNKNOWN"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_rmtree_permission_error_on_rebuild_is_e_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _corrupt_cache(tmp_path)
+    real_rmtree = shutil.rmtree
+
+    def locked(path, *args, **kwargs):
+        if Path(path).name == "storyboard":
+            raise PermissionError("file in use")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(storyboard.shutil, "rmtree", locked)
+    fetch = fetch_from({"https://x.invalid/M0.jpg": make_grid(9)})
+    with pytest.raises(YtError) as info:
+        build(VID, make_raw(make_sb([36])), tmp_path, fetch)
+    assert info.value.code == "E_UNKNOWN"
+    assert [p.name for p in tmp_path.iterdir()] == ["storyboard"]  # tmp ถูกเก็บกวาด
+
+
+def test_fragment_failure_fails_fast_and_cancels_pending(tmp_path: Path) -> None:
+    # M0 ช้า (1 วิ) ส่วน M1 พลาดทันที: ถ้ารอตามลำดับจะต้องรอ M0 จบก่อนถึงเห็น error
+    # ระหว่างนั้น worker ตัวที่ว่างจะไล่โหลดแผ่นที่เหลือ; ถ้าล้มเร็วจริง แผ่นที่เหลือถูกยกเลิก
+    sb = make_sb([36] * 8)
+    started: list[str] = []
+    lock = threading.Lock()
+
+    def fetch(url: str) -> bytes:
+        with lock:
+            started.append(url)
+        if url.endswith("M1.jpg"):
+            raise YtError("E_NETWORK", "หลุด")
+        time.sleep(1.0 if url.endswith("M0.jpg") else 0.4)
+        return make_grid(9)
+
+    with pytest.raises(YtError) as info:
+        build(VID, make_raw(sb, duration=400), tmp_path, fetch, max_workers=2)
+    assert info.value.code == "E_NETWORK"
+    assert len(started) <= 3
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_get_storyboard_does_not_reprobe_when_first_raw_fails(tmp_path: Path) -> None:
+    class Videos:
+        gets = 0
+
+        def raw(self, video_id: str) -> dict:
+            raise YtError("E_NETWORK", "probe ครั้งแรกพลาด")
+
+        def get(self, video_id: str, refresh: bool = False) -> dict:
+            Videos.gets += 1
+            return {}
+
+    with pytest.raises(YtError) as info:
+        get_storyboard(VID, Videos(), tmp_path, lambda url: b"")  # type: ignore[arg-type]
+    assert info.value.code == "E_NETWORK"
+    assert Videos.gets == 0
+
+
+def test_cache_with_missing_frame_file_is_rebuilt(tmp_path: Path) -> None:
+    calls: list[str] = []
+    fetch = fetch_from({"https://x.invalid/M0.jpg": make_grid(9)}, calls)
+    build(VID, make_raw(make_sb([36])), tmp_path, fetch)
+    (tmp_path / "storyboard" / "f_0004.jpg").unlink()
+    index = build(VID, make_raw(make_sb([36])), tmp_path, fetch)
+    assert len(calls) == 2
+    assert len(index["frames"]) == 9
+    assert (tmp_path / "storyboard" / "f_0004.jpg").is_file()
+
+
+def test_cache_index_with_unsafe_file_name_is_a_miss(tmp_path: Path) -> None:
+    calls: list[str] = []
+    fetch = fetch_from({"https://x.invalid/M0.jpg": make_grid(9)}, calls)
+    build(VID, make_raw(make_sb([36])), tmp_path, fetch)
+    index_path = tmp_path / "storyboard" / "index.json"
+    data = json.loads(index_path.read_text(encoding="utf-8"))
+    data["frames"][0]["file"] = "../index.json"
+    index_path.write_text(json.dumps(data), encoding="utf-8")
+    build(VID, make_raw(make_sb([36])), tmp_path, fetch)
+    assert len(calls) == 2

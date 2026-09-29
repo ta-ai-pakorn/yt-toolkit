@@ -14,7 +14,7 @@ import shutil
 import threading
 import uuid
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -32,6 +32,7 @@ INDEX = "index.json"
 JPEG_QUALITY = 90
 _STORYBOARD = "storyboard"
 _TRAILING_NUMBER = re.compile(r"(\d+)$")
+_FRAME_FILE = re.compile(r"f_\d{4,}\.jpg")
 
 Fetch = Callable[[str], bytes]
 
@@ -103,6 +104,8 @@ def plan_frames(sb: dict, duration_s: float | None) -> list[FrameSpec]:
 
 # ---------- สร้างและเก็บ cache ----------
 
+# ล็อกนี้ใช้ได้ในโปรเซสเดียวเท่านั้น: ดีไซน์นี้สมมติว่ามีแอพรันอยู่โปรเซสเดียวต่อโฟลเดอร์ cache
+# (ถ้ามีสองโปรเซสสร้างพร้อมกัน ตัวที่เปลี่ยนชื่อทีหลังจะเห็นผลของตัวแรกแล้วใช้ต่อ ดู build)
 _guard = threading.Lock()
 _locks: dict[Path, threading.Lock] = {}
 
@@ -118,18 +121,26 @@ def _check_video_id(video_id: str) -> None:
 
 
 def _read_index(target: Path) -> dict | None:
-    """index ที่สมบูรณ์ในโฟลเดอร์ cache หรือ None (ไม่มี/เสีย = สร้างใหม่)"""
+    """index ที่สมบูรณ์ในโฟลเดอร์ cache หรือ None (ไม่มี/เสีย/ไฟล์เฟรมหายไป = สร้างใหม่)"""
     try:
         data = json.loads((target / INDEX).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if (
+    if not (
         isinstance(data, dict)
         and isinstance(data.get("intervalMs"), int)
         and isinstance(data.get("frames"), list)
     ):
-        return data
-    return None
+        return None
+    for frame in data["frames"]:
+        name = frame.get("file") if isinstance(frame, dict) else None
+        if not (
+            isinstance(name, str)
+            and _FRAME_FILE.fullmatch(name)
+            and (target / name).is_file()
+        ):
+            return None
+    return data
 
 
 def _open_grid(data: bytes, url: str) -> Image.Image:
@@ -180,8 +191,12 @@ def _build_into(
             executor.submit(_crop_fragment, sb, no, specs, fetch, out_dir)
             for no, specs in by_fragment.items()
         ]
-        for future in futures:
-            future.result()  # โยน YtError ตัวแรกที่เจอ
+        # พลาดแผ่นเดียวก็หยุดทั้งงาน: ไม่รอแผ่นที่เหลือ (finally จะยกเลิกแผ่นที่ยังไม่เริ่ม)
+        done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+        for future in done:
+            error = future.exception()
+            if error is not None:
+                raise error
     finally:
         # รอให้ worker ที่ทำอยู่หยุดก่อน ไม่งั้นลบโฟลเดอร์ชั่วคราวไม่ได้/มีไฟล์งอกใหม่
         executor.shutdown(wait=True, cancel_futures=True)
@@ -233,9 +248,25 @@ def build(
         tmp.mkdir()
         try:
             index = _build_into(tmp, sb, frames, fetch, max_workers)
-            if target.exists():  # โฟลเดอร์เก่าที่ index เสีย
-                shutil.rmtree(target)
-            tmp.rename(target)
+            if target.exists():  # โฟลเดอร์เก่าที่ index เสีย/ไฟล์เฟรมหาย
+                try:
+                    shutil.rmtree(target)
+                except OSError as exc:  # Windows: ไฟล์ถูกเปิดค้างอยู่ ฯลฯ
+                    raise YtError(
+                        "E_UNKNOWN", f"ลบ cache เก่าไม่ได้ ({type(exc).__name__}): {exc}"
+                    ) from exc
+            try:
+                tmp.rename(target)
+            except OSError as exc:
+                existing = _read_index(target)
+                if existing is None:
+                    raise YtError(
+                        "E_UNKNOWN",
+                        f"เปลี่ยนชื่อโฟลเดอร์ cache ไม่ได้ ({type(exc).__name__}): {exc}",
+                    ) from exc
+                # มีตัวอื่นสร้างเสร็จก่อนเรา (เช่นโปรเซสที่สอง) ใช้ผลของเขา
+                shutil.rmtree(tmp, ignore_errors=True)
+                return existing
         except BaseException:
             shutil.rmtree(tmp, ignore_errors=True)
             raise
@@ -249,8 +280,9 @@ def get_storyboard(
     probe ใหม่หนึ่งครั้งแล้วลองอีกรอบเดียว ครั้งที่สองพลาดก็โยนต่อ (ไม่วนซ้ำ)"""
     _check_video_id(video_id)
     cache_dir = Path(cache_root) / video_id
+    raw = videos.raw(video_id)  # ล้มตรงนี้ (probe ครั้งแรกพลาด) = ไม่ probe ซ้ำ
     try:
-        return build(video_id, videos.raw(video_id), cache_dir, fetch)
+        return build(video_id, raw, cache_dir, fetch)
     except YtError as exc:
         if exc.code != "E_NETWORK":
             raise
