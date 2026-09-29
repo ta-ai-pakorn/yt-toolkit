@@ -9,7 +9,7 @@ from itertools import pairwise
 from pathlib import Path
 
 import pytest
-from PIL import Image, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont, features
 
 from yttoolkit.core import frames
 from yttoolkit.core.extractor import FakeExtractor
@@ -25,6 +25,7 @@ from yttoolkit.core.frames import (
     timecode,
 )
 from yttoolkit.core.storyboard import build
+from yttoolkit.core.yterrors import YtError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 BBB = "aqz-KE-bpKQ"
@@ -351,3 +352,152 @@ def test_zip_count_matches_a_real_128_frame_set(tmp_path: Path) -> None:
 def test_zip_rejects_empty(white: Path) -> None:
     with pytest.raises(ValueError):
         frames_zip([])
+
+
+# ---------- ไฟล์เฟรมหาย/เสีย ----------
+
+
+def test_sheet_maps_missing_frame_to_no_storyboard(tmp_path: Path) -> None:
+    with pytest.raises(YtError) as caught:
+        contact_sheet([(0, tmp_path / "nope.jpg")], "x", 1)
+    assert caught.value.code == "E_NO_STORYBOARD"
+    assert "nope.jpg" in caught.value.detail
+
+
+def test_sheet_maps_corrupt_frame_to_no_storyboard(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.jpg"
+    bad.write_bytes(b"not a jpeg at all")
+    with pytest.raises(YtError) as caught:
+        contact_sheet([(0, bad)], "x", 1)
+    assert caught.value.code == "E_NO_STORYBOARD"
+
+
+def test_sheet_maps_truncated_frame_to_no_storyboard(
+    tmp_path: Path, white: Path
+) -> None:
+    cut = tmp_path / "cut.jpg"
+    cut.write_bytes(white.read_bytes()[:200])
+    with pytest.raises(YtError) as caught:
+        contact_sheet([(0, cut)], "x", 1)
+    assert caught.value.code == "E_NO_STORYBOARD"
+
+
+def test_zip_maps_missing_frame_to_no_storyboard(tmp_path: Path, white: Path) -> None:
+    with pytest.raises(YtError) as caught:
+        frames_zip([(0, white), (1000, tmp_path / "gone.jpg")])
+    assert caught.value.code == "E_NO_STORYBOARD"
+    assert "gone.jpg" in caught.value.detail
+
+
+# ---------- วางสระ/วรรณยุกต์ไทย (ไม่มี raqm) ----------
+
+needs_basic = pytest.mark.skipif(
+    features.check("raqm"), reason="มี raqm: Pillow จัดวางเอง ไม่ใช้ตัวช่วยวาดของเรา"
+)
+CANVAS = (700, 300)
+ORIGIN = (60, 200)  # จุดวาง (x, เส้นบรรทัด)
+
+
+def render(text: str, *, plain: bool = False, weight: str = "semibold") -> Image.Image:
+    font = frames.load_font(weight, 64)
+    image = Image.new("L", CANVAS, 0)
+    draw = ImageDraw.Draw(image)
+    if plain:
+        draw.text(ORIGIN, text, font=font, fill=255, anchor="ls")
+    else:
+        frames.draw_text(draw, ORIGIN, text, font, (255,))
+    return image
+
+
+def added(full: str, part: str) -> tuple[int, int, int, int]:
+    """กรอบหมึกที่ full มีเพิ่มจาก part (ใช้แยกหมึกของเครื่องหมายออกจากตัวอักษรหลัก)"""
+    box = ImageChops.subtract(render(full), render(part)).getbbox()
+    assert box is not None, f"{full!r} adds no ink over {part!r}"
+    return box
+
+
+def column_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
+    return max(0, min(a[2], b[2]) - max(a[0], b[0]))
+
+
+def ascender_box(char: str) -> tuple[int, int, int, int]:
+    plain_top = render("ก").getbbox()[1]
+    box = render(char).crop((0, 0, CANVAS[0], plain_top)).getbbox()
+    assert box is not None
+    return box
+
+
+@needs_basic
+def test_tone_mark_sits_strictly_above_upper_vowel() -> None:
+    tone = added("ที่", "ที")
+    vowel = added("ที", "ท")
+    assert tone[3] < vowel[1]
+
+
+@needs_basic
+def test_tone_and_vowel_stay_clear_of_the_pho_pla_ascender() -> None:
+    ascender = ascender_box("ป")
+    vowel = added("ปั", "ป")
+    tone = added("ปั๊", "ปั")
+    assert tone[3] < vowel[1]  # ๊ อยู่เหนือ ั
+    assert column_overlap(vowel, ascender) <= 2
+    assert column_overlap(tone, ascender) <= 2
+
+
+@needs_basic
+def test_plain_pillow_layout_does_collide_which_is_why_we_fix_it() -> None:
+    ascender = ascender_box("ป")
+    plain = ImageChops.subtract(render("ปั๊", plain=True), render("ป", plain=True))
+    assert column_overlap(plain.getbbox(), ascender) > 2
+
+
+@needs_basic
+@pytest.mark.parametrize("base", ["น", "ป", "ฟ"])
+def test_sara_am_tone_mark_is_above_the_nikhahit_ring(base: str) -> None:
+    tone = added(f"{base}้ำ", f"{base}ำ")
+    ring = added(f"{base}ํ", base)
+    assert tone[3] < ring[1]
+
+
+@needs_basic
+def test_sara_am_is_drawn_as_ring_plus_sara_aa() -> None:
+    together = render("นำ")
+    assert together.tobytes() == render("นํา").tobytes()
+
+
+@needs_basic
+@pytest.mark.parametrize("base", ["ฎ", "ฏ"])
+@pytest.mark.parametrize("vowel", ["ุ", "ู"])
+def test_lower_vowel_is_below_the_descender_tail(base: str, vowel: str) -> None:
+    tail = render(base).getbbox()
+    assert added(base + vowel, base)[1] >= tail[3]
+
+
+@needs_basic
+@pytest.mark.parametrize("text", ["ก้", "ก็", "กุ", "ผู", "ญุ", "ฐู"])
+def test_marks_without_a_collision_keep_their_default_place(text: str) -> None:
+    assert render(text).tobytes() == render(text, plain=True).tobytes()
+
+
+@needs_basic
+def test_tone_mark_without_upper_vowel_keeps_default_position() -> None:
+    assert render("ก้").tobytes() == render("ก้", plain=True).tobytes()
+
+
+@pytest.mark.parametrize("text", ["ทดสอบ ภาษา 123 Abc", "กขค ง", "", "Hello"])
+def test_text_without_marks_is_identical_to_plain_draw(text: str) -> None:
+    assert render(text).tobytes() == render(text, plain=True).tobytes()
+
+
+def test_raqm_path_is_left_to_pillow(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(frames, "_layout_engine", lambda: ImageFont.Layout.RAQM)
+    assert render("ปั๊ม น้ำ ที่").tobytes() == render("ปั๊ม น้ำ ที่", plain=True).tobytes()
+
+
+@needs_basic
+def test_marked_text_keeps_the_same_advance_width_after_the_cluster() -> None:
+    font = frames.load_font("semibold", 64)
+    # ตัวอักษรหลังกลุ่มที่มีเครื่องหมายต้องเริ่มที่เดิม: เทียบกับ ก ที่วางต่อท้าย
+    for word in ("ที่", "น้ำ", "ปั๊ม"):
+        tail = added(word + "ก", word)
+        assert tail[0] >= ORIGIN[0] + font.getlength(word) - 6

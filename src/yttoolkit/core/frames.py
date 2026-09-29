@@ -20,6 +20,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps, features
 
+from .yterrors import YtError
+
 log = logging.getLogger("yttoolkit")
 
 Frames = list[tuple[int, Path]]
@@ -101,6 +103,137 @@ def fit_text(font: ImageFont.FreeTypeFont, text: str, max_width: float) -> str:
     return text[:keep].rstrip() + _ELLIPSIS
 
 
+# ---------- วางสระ/วรรณยุกต์ไทยเองเมื่อไม่มี raqm ----------
+# layout แบบ BASIC ของ Pillow วางเครื่องหมายทุกตัวที่ตำแหน่งตั้งต้นของฟอนต์ ไม่รู้ว่าตัวหน้าเป็นสระบนหรือ
+# พยัญชนะหัวสูง จึงซ้อนทับกัน (ที่ = วรรณยุกต์จมอยู่ใต้ ี) ฟังก์ชันด้านล่างวาดทีละกลุ่มอักษร (พยัญชนะ + เครื่องหมาย)
+# แล้วขยับเครื่องหมายเองโดยวัดจากหมึกของอักษรจริงในฟอนต์ ไม่ใช้เลขพิกเซลตายตัว
+_UPPER_VOWELS = "ัิีึื็"  # ั ิ ี ึ ื ็
+_NIKHAHIT = "ํ"  # ํ
+_SARA_AM = "ำ"  # ำ = ํ + า
+_SARA_AA = "า"
+_TONES = "่้๊๋์"  # ่ ้ ๊ ๋ และการันต์ ์
+_LOWER_VOWELS = "ฺุู"  # ุ ู ฺ
+_ASCENDERS = "ปฝฟฬ"
+# ฎ ฏ หางยาวลงใต้เส้นบรรทัด สระล่างต้องลงต่ำกว่าหาง ส่วน ญ ฐ ปล่อยตำแหน่งตั้งต้น: ฟอนต์มีรูปหางสั้น
+# สำหรับสองตัวนี้แต่ต้องใช้ GSUB ซึ่ง BASIC เรียกไม่ได้
+_DESCENDERS = "ฎฏ"
+_PLAIN_TOP = "ก"  # พยัญชนะไม่มีหัวสูง ใช้เป็นเส้นแบ่งเขตหัว
+
+
+def _marks_needed(text: str) -> bool:
+    return any(unicodedata.category(c) == "Mn" or c == _SARA_AM for c in text)
+
+
+@cache
+def _ink(font: ImageFont.FreeTypeFont, char: str) -> tuple[int, int, int, int] | None:
+    """กรอบหมึกจริง (ซ้าย, บน, ขวา, ล่าง) ของอักษร เทียบจุดวาง (x) และเส้นบรรทัด (y) ค่า y ติดลบ = เหนือเส้น"""
+    pad = font.size * 3
+    image = Image.new("L", (pad * 2, pad * 2), 0)
+    ImageDraw.Draw(image).text((pad, pad), char, font=font, fill=255, anchor="ls")
+    box = image.getbbox()
+    if box is None:
+        return None
+    return (box[0] - pad, box[1] - pad, box[2] - pad, box[3] - pad)
+
+
+@cache
+def _ascender_left(font: ImageFont.FreeTypeFont, char: str) -> int | None:
+    """ขอบซ้ายของส่วนหัวสูง (ส่วนที่โผล่เหนือพยัญชนะทั่วไป) ของพยัญชนะ ป ฝ ฟ ฬ"""
+    plain, ink = _ink(font, _PLAIN_TOP), _ink(font, char)
+    if plain is None or ink is None or ink[1] >= plain[1]:
+        return None
+    pad = font.size * 3
+    image = Image.new("L", (pad * 2, pad * 2), 0)
+    ImageDraw.Draw(image).text((pad, pad), char, font=font, fill=255, anchor="ls")
+    head = image.crop((0, 0, pad * 2, pad + plain[1])).getbbox()
+    return None if head is None else head[0] - pad
+
+
+def _gap(ink: tuple[int, int, int, int]) -> int:
+    return max(1, round((ink[3] - ink[1]) * 0.15))
+
+
+def _placements(
+    font: ImageFont.FreeTypeFont, base: str, marks: str
+) -> list[tuple[str, float, int]]:
+    """[(อักษร, x เทียบต้นกลุ่ม, ขยับ y)] ของเครื่องหมายแต่ละตัว: ำ แตกเป็น ํ ตามด้วย า ที่ท้ายกลุ่ม"""
+    base_adv = font.getlength(base)
+    base_ink = _ink(font, base)
+    asc_left = _ascender_left(font, base) if base in _ASCENDERS else None
+    placed: list[tuple[str, float, int]] = []
+    stack_top: int | None = None  # ขอบบนสุดของสระบน/นิคหิตที่วางไปแล้ว
+    stack_dx = 0.0
+    # วรรณยุกต์ต้องคิดหลังสระบน/นิคหิต แม้ในตัวหนังสือจะเขียนก่อน ำ (น้ำ = น ้ ำ)
+    ordered = sorted(marks.replace(_SARA_AM, _NIKHAHIT), key=lambda m: m in _TONES)
+    for mark in ordered:
+        ink = _ink(font, mark)
+        dx, dy = 0.0, 0
+        if ink is not None:
+            # หัวสูง: ดันเครื่องหมายซ้ายให้ขอบขวาห่างขอบซ้ายของหัว
+            left_shift = (
+                max(0, base_adv + ink[2] - asc_left + _gap(ink))
+                if asc_left is not None and mark not in _LOWER_VOWELS
+                else 0
+            )
+            if mark in _UPPER_VOWELS or mark == _NIKHAHIT:
+                dx = -left_shift
+                stack_top, stack_dx = ink[1], dx
+            elif mark in _TONES:
+                if stack_top is not None:
+                    dx = stack_dx
+                    dy = min(0, stack_top - _gap(ink) - ink[3])
+                    stack_top = ink[1] + dy
+                else:
+                    dx = -left_shift
+            elif mark in _LOWER_VOWELS and base in _DESCENDERS and base_ink:
+                dy = max(0, base_ink[3] - ink[1] + _gap(ink))
+        placed.append((mark, base_adv + dx, dy))
+    return placed
+
+
+def draw_text(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[float, float],
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill: tuple[int, ...],
+) -> None:
+    """เหมือน draw.text(..., anchor="ls") แต่วางสระ/วรรณยุกต์ไทยให้ถูกเมื่อ Pillow ไม่มี raqm
+
+    มี raqm = ปล่อยให้ Pillow จัดวางเอง ข้อความที่ไม่มีเครื่องหมายไทยก็วาดตามปกติทั้งบรรทัด
+    """
+    x, y = xy
+    if _layout_engine() == ImageFont.Layout.RAQM or not _marks_needed(text):
+        draw.text((x, y), text, font=font, fill=fill, anchor="ls")
+        return
+    run = ""  # ตัวอักษรธรรมดาที่รอวาดรวดเดียว
+    i = 0
+    while i < len(text):
+        j = i + 1
+        while j < len(text) and (
+            unicodedata.category(text[j]) == "Mn" or text[j] == _SARA_AM
+        ):
+            j += 1
+        base, marks = text[i], text[i + 1 : j]
+        i = j
+        if not marks or unicodedata.category(base) == "Mn":
+            run += base + marks
+            continue
+        if run:
+            draw.text((x, y), run, font=font, fill=fill, anchor="ls")
+            x += font.getlength(run)
+            run = ""
+        for mark, dx, dy in _placements(font, base, marks):
+            draw.text((x + dx, y + dy), mark, font=font, fill=fill, anchor="ls")
+        draw.text((x, y), base, font=font, fill=fill, anchor="ls")
+        x += font.getlength(base)
+        if _SARA_AM in marks:
+            draw.text((x, y), _SARA_AA, font=font, fill=fill, anchor="ls")
+            x += font.getlength(_SARA_AA)
+    if run:
+        draw.text((x, y), run, font=font, fill=fill, anchor="ls")
+
+
 def summary_line(duration_s: int, shown: int, total: int) -> str:
     count = f"{shown} เฟรม" if shown == total else f"แสดง {shown} จาก {total} เฟรม"
     return f"ความยาว {timecode(int(duration_s) * 1000)} · {count}"
@@ -115,9 +248,20 @@ def sample_frames(frames: Frames, limit: int = MAX_SHEET_FRAMES) -> Frames:
     return [frames[round(i * step)] for i in range(limit)]
 
 
+def _missing(path: Path, exc: Exception) -> YtError:
+    # ไฟล์เฟรมหาย/เสียหมายถึง cache ของ storyboard ไม่ครบ ให้ผู้เรียกสร้างใหม่ได้
+    return YtError(
+        "E_NO_STORYBOARD",
+        f"ไฟล์เฟรมหายหรือเสีย ({type(exc).__name__}): {path}",
+    )
+
+
 def _load_cell(path: Path) -> Image.Image:
-    with Image.open(path) as source:
-        image = source.convert("RGB")
+    try:
+        with Image.open(path) as source:
+            image = source.convert("RGB")
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+        raise _missing(Path(path), exc) from exc
     if image.size != (CELL_W, CELL_H):
         image = ImageOps.pad(image, (CELL_W, CELL_H), color=(0, 0, 0))
     return image
@@ -159,19 +303,19 @@ def contact_sheet(
     draw = ImageDraw.Draw(sheet, "RGBA")  # โหมด RGBA = สีโปร่งของป้ายผสมกับภาพเฟรมจริง
 
     title_font = load_font("semibold", 28)
-    draw.text(
+    draw_text(
+        draw,
         (TEXT_MARGIN, 44),
         fit_text(title_font, title, width - 2 * TEXT_MARGIN),
-        font=title_font,
-        fill=TEXT,
-        anchor="ls",
+        title_font,
+        TEXT,
     )
-    draw.text(
+    draw_text(
+        draw,
         (TEXT_MARGIN, 74),
         summary_line(duration_s, len(shown), total),
-        font=load_font("regular", 18),
-        fill=TEXT,
-        anchor="ls",
+        load_font("regular", 18),
+        TEXT,
     )
 
     for position, (t_ms, path) in enumerate(shown):
@@ -204,5 +348,9 @@ def frames_zip(frames: Frames) -> bytes:
             info = zipfile.ZipInfo(name, date_time=_ZIP_DATE)
             info.compress_type = zipfile.ZIP_STORED
             info.external_attr = 0o644 << 16
-            archive.writestr(info, Path(path).read_bytes())
+            try:
+                data = Path(path).read_bytes()
+            except OSError as exc:
+                raise _missing(Path(path), exc) from exc
+            archive.writestr(info, data)
     return out.getvalue()
