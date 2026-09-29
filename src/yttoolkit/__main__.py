@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
-from . import lifecycle
+log = logging.getLogger("yttoolkit")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -17,13 +18,41 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--port", type=int)
     serve.add_argument("--dev", action="store_true", help="อนุญาต origin ของ Vite dev server")
     args = parser.parse_args(argv)
-    if args.command == "start":
-        return lifecycle.start()
-    if args.command == "stop":
-        return lifecycle.stop()
+    # import เฉพาะที่แต่ละคำสั่งใช้ ถ้าไลบรารีของเว็บหายหรือพัง wait ยังตอบเป็นภาษาไทย และ start ยังเขียน log ได้
     if args.command == "wait":
-        return lifecycle.wait(timeout=args.timeout)
+        from . import probe
+
+        return probe.wait(timeout=args.timeout)
+    if args.command == "start":
+        return _start()
+    if args.command == "stop":
+        from . import probe
+        from .config import default_paths
+
+        probe.setup_file_log(default_paths())  # stop บอกให้ไปดู app.log จึงต้องเขียนรายละเอียดลงไฟล์นั้นด้วย
+        from . import lifecycle
+
+        return lifecycle.stop()
+    from . import lifecycle
+
     return lifecycle.serve(port=args.port, dev=args.dev)
+
+
+def _start() -> int:
+    from . import probe
+    from .config import default_paths
+
+    # ตั้ง log ก่อน import lifecycle (ซึ่งโหลด uvicorn และ FastAPI) ถ้า import พัง traceback จะลง app.log
+    probe.setup_file_log(default_paths())
+    try:
+        from . import lifecycle
+
+        return lifecycle.start()
+    except (SystemExit, KeyboardInterrupt):
+        raise
+    except BaseException:
+        log.exception("เปิดโปรแกรมไม่สำเร็จ")
+        return 1
 
 
 if __name__ == "__main__":

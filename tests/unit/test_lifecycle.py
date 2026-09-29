@@ -1,10 +1,11 @@
 import logging
 import os
+import urllib.error
 
 import httpx
 import pytest
 
-from yttoolkit import lifecycle, runstate
+from yttoolkit import lifecycle, probe, runstate
 from yttoolkit.core import tools
 from yttoolkit.runstate import RunInfo
 
@@ -33,7 +34,7 @@ def test_base_url():
 
 def test_is_alive_handles_errors():
     def boom(url, timeout):
-        raise httpx.ConnectError("refused")
+        raise urllib.error.URLError("refused")
 
     assert lifecycle.is_alive(8787, get=boom) is False
     assert lifecycle.is_alive(8787, get=lambda url, timeout: FakeResponse(200)) is True
@@ -450,18 +451,18 @@ def test_setup_file_logging_uses_rotating_handler(paths):  # item 6
 def test_wait_succeeds_when_instance_answers(paths, fake_platform, monkeypatch):  # item 7
     info = RunInfo(port=8790, pid=1, token="t", started_at="x")
     responses = iter([None, None, info])
-    monkeypatch.setattr(lifecycle, "find_running", lambda p, pl: next(responses))
+    monkeypatch.setattr(probe, "find_running", lambda p, pl: next(responses))
     sleeps = []
     out = []
-    assert lifecycle.wait(paths, fake_platform, timeout=25, sleep=sleeps.append, out=out.append) == 0
+    assert probe.wait(paths, fake_platform, timeout=25, sleep=sleeps.append, out=out.append) == 0
     assert sleeps == [0.5, 0.5]
     assert out == ["เปิด YT Toolkit แล้ว ที่ http://127.0.0.1:8790"]
 
 
 def test_wait_times_out_with_log_path(paths, fake_platform, monkeypatch):  # item 7
-    monkeypatch.setattr(lifecycle, "find_running", lambda p, pl: None)
+    monkeypatch.setattr(probe, "find_running", lambda p, pl: None)
     out = []
-    assert lifecycle.wait(paths, fake_platform, timeout=0.05, sleep=lambda s: None, out=out.append) == 1
+    assert probe.wait(paths, fake_platform, timeout=0.05, sleep=lambda s: None, out=out.append) == 1
     expected = str((paths.logs / "app.log").absolute())
     assert out == [f"เปิดโปรแกรมไม่สำเร็จ ดูรายละเอียดได้ที่ {expected}"]
 
@@ -472,24 +473,24 @@ def test_wait_timeout_zero_checks_exactly_once(paths, fake_platform, monkeypatch
     def find(p, pl):
         calls.append(1)
 
-    monkeypatch.setattr(lifecycle, "find_running", find)
+    monkeypatch.setattr(probe, "find_running", find)
     sleeps = []
     out = []
-    assert lifecycle.wait(paths, fake_platform, timeout=0, sleep=sleeps.append, out=out.append) == 1
+    assert probe.wait(paths, fake_platform, timeout=0, sleep=sleeps.append, out=out.append) == 1
     assert len(calls) == 1
     assert sleeps == []
     assert out[0].startswith("เปิดโปรแกรมไม่สำเร็จ")
 
     info = RunInfo(port=8787, pid=1, token="t", started_at="x")
-    monkeypatch.setattr(lifecycle, "find_running", lambda p, pl: info)
-    assert lifecycle.wait(paths, fake_platform, timeout=0, sleep=sleeps.append, out=out.append) == 0
+    monkeypatch.setattr(probe, "find_running", lambda p, pl: info)
+    assert probe.wait(paths, fake_platform, timeout=0, sleep=sleeps.append, out=out.append) == 0
 
 
 def test_cli_wait_passes_timeout(monkeypatch):  # item 7
     from yttoolkit import __main__ as cli
 
     seen = []
-    monkeypatch.setattr(lifecycle, "wait", lambda **kw: seen.append(kw) or 0)
+    monkeypatch.setattr(probe, "wait", lambda **kw: seen.append(kw) or 0)
     assert cli.main(["wait"]) == 0
     assert cli.main(["wait", "--timeout", "0"]) == 0
     assert cli.main(["wait", "--timeout", "3.5"]) == 0
@@ -670,3 +671,17 @@ def test_stop_never_kills_when_lock_check_fails_after_waiting(paths, fake_platfo
     assert fake_platform.killed == []
     assert runstate.read(paths.app_json) == info
     assert out == [f"ตรวจสถานะโปรแกรมไม่ได้ ดูรายละเอียดได้ที่ {(paths.logs / 'app.log').absolute()}"]
+
+
+def test_start_with_real_platform_fails_fast_when_lock_path_is_a_folder(paths, monkeypatch, caplog):  # AC-LIFE-02b
+    from yttoolkit.platform import current
+
+    (paths.run / "app.lock").mkdir()
+    monkeypatch.setattr(lifecycle, "run_app", _must_not_run_app)
+    monkeypatch.setattr(lifecycle, "setup_file_logging", lambda p: None)  # ไม่ทิ้ง handler ไว้ใน root logger ของเทส
+    sleeps = []
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        assert lifecycle.start(paths, current(), sleep=sleeps.append) == 1
+    assert sleeps == []
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings and "app.lock" in warnings[0].getMessage()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import logging.handlers
 import os
 import subprocess
 import sys
@@ -21,32 +20,12 @@ from .app import AppContext, create_app
 from .config import HOST, Paths, default_paths, env_flag
 from .core import tools
 from .platform import LockFileError, Platform, current
+# ตัวจริงอยู่ใน probe (stdlib ล้วน) ที่นี่ส่งต่อชื่อเดิมให้โค้ดและเทสที่เรียกผ่าน lifecycle
+from .probe import base_url, find_running, is_alive, setup_file_log  # noqa: F401
 
 log = logging.getLogger("yttoolkit")
 
 DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
-
-
-def base_url(port: int) -> str:
-    return f"http://{HOST}:{port}"
-
-
-def is_alive(port: int, pid: int | None = None, get=httpx.get) -> bool:
-    """พอร์ตนี้ตอบ /api/ping และ (ถ้าระบุ pid) pid ที่ตอบกลับตรงกัน กันพอร์ตที่โปรแกรมอื่นมาใช้แทน"""
-    try:
-        response = get(f"{base_url(port)}/api/ping", timeout=2)
-        if response.status_code != 200:
-            return False
-        return pid is None or response.json().get("pid") == pid
-    except (httpx.HTTPError, ValueError, AttributeError):
-        return False
-
-
-def find_running(paths: Paths, plat: Platform, alive=is_alive) -> runstate.RunInfo | None:
-    info = runstate.read(paths.app_json)
-    if info and plat.pid_alive(info.pid) and alive(info.port, info.pid):
-        return info
-    return None
 
 
 def default_output_dir(plat: Platform) -> Path:
@@ -76,14 +55,7 @@ def git_commit(root: Path, plat: Platform) -> str | None:
 
 
 def setup_file_logging(paths: Paths) -> None:
-    paths.logs.mkdir(parents=True, exist_ok=True)
-    handler = logging.handlers.RotatingFileHandler(
-        paths.logs / "app.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8"
-    )
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    root.addHandler(handler)
+    setup_file_log(paths)  # เรียกซ้ำได้ (__main__ ตั้งไว้ก่อน import lifecycle แล้ว) ไม่เกิด handler ซ้ำ
     if sys.stdout is None or sys.stderr is None:  # แอพที่เปิดแบบไม่มีหน้าต่างดำจะไม่มี console
         stream = open(paths.logs / "console.log", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
         sys.stdout = sys.stdout or stream
@@ -371,26 +343,3 @@ def _stop(
     out("ปิดโปรแกรมแล้ว")
     return 0
 
-
-def wait(
-    paths: Paths | None = None,
-    plat: Platform | None = None,
-    *,
-    timeout: float = 25.0,
-    sleep: Callable[[float], None] = time.sleep,
-    out: Callable[[str], None] = print,
-) -> int:
-    """รอจนแอพตอบกลับ ใช้ตอน start แบบไม่มีหน้าต่าง (ไฟล์ .bat) เพื่อบอกผลให้ผู้ใช้ทราบ"""
-    paths = paths or default_paths()
-    plat = plat or current()
-    deadline = time.monotonic() + timeout
-    while True:
-        info = find_running(paths, plat)
-        if info is not None:
-            out(f"เปิด YT Toolkit แล้ว ที่ {base_url(info.port)}")
-            return 0
-        if time.monotonic() >= deadline:
-            break
-        sleep(0.5)
-    out(f"เปิดโปรแกรมไม่สำเร็จ ดูรายละเอียดได้ที่ {(paths.logs / 'app.log').absolute()}")
-    return 1
