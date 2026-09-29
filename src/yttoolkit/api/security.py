@@ -10,6 +10,8 @@ from .errors import error_body
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 FORBIDDEN_MESSAGE = "คำขอนี้ไม่ได้รับอนุญาต ลองรีเฟรชหน้าเว็บ"
+_CHECKED_HEADERS = ("host", "origin", "x-toolkit-token")
+WS_POLICY_VIOLATION = 1008
 
 
 class LocalOnlyMiddleware:
@@ -20,20 +22,47 @@ class LocalOnlyMiddleware:
         self._origins = frozenset({f"http://{h}" for h in self._hosts} | set(extra_origins))
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http":
+        kind = scope["type"]
+        if kind not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
-        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
-        if headers.get("host") not in self._hosts:
-            await _send_json(send, 421)
-            return
+        status = self._reject_status(scope)
+        if status is None:
+            await self.app(scope, receive, send)
+        elif kind == "websocket":
+            # ปิดก่อน accept เซิร์ฟเวอร์จะตอบ handshake เป็น 403 และ app ไม่ถูกเรียกเลย
+            await send({"type": "websocket.close", "code": WS_POLICY_VIOLATION})
+        else:
+            await _send_json(send, status)
+
+    def _reject_status(self, scope) -> int | None:
+        """คืน status ที่ต้องปฏิเสธ หรือ None ถ้าผ่าน"""
+        headers = _collect_headers(scope["headers"])
+        # header ซ้ำอาจทำให้ส่วนต่าง ๆ อ่านคนละค่ากัน จึงปฏิเสธเลย ไม่ใช้ค่าสุดท้าย
+        host = headers.get("host", [])
+        if len(host) != 1 or host[0] not in self._hosts:
+            return 421
+        if any(len(headers.get(name, [])) > 1 for name in _CHECKED_HEADERS):
+            return 403
+        origin = headers.get("origin", [None])[0]
+        if scope["type"] == "websocket":
+            return None if origin in self._origins else 403
         if scope["method"] not in SAFE_METHODS:
-            origin_ok = headers.get("origin") in self._origins
-            token_ok = secrets.compare_digest(headers.get("x-toolkit-token", "").encode("latin-1"), self._token)
+            origin_ok = origin in self._origins
+            token = headers.get("x-toolkit-token", [""])[0]
+            token_ok = secrets.compare_digest(token.encode("latin-1"), self._token)
             if not (origin_ok and token_ok):
-                await _send_json(send, 403)
-                return
-        await self.app(scope, receive, send)
+                return 403
+        return None
+
+
+def _collect_headers(raw: Iterable[tuple[bytes, bytes]]) -> dict[str, list[str]]:
+    headers: dict[str, list[str]] = {}
+    for key, value in raw:
+        name = key.decode("latin-1").lower()
+        if name in _CHECKED_HEADERS:
+            headers.setdefault(name, []).append(value.decode("latin-1"))
+    return headers
 
 
 async def _send_json(send, status: int) -> None:
