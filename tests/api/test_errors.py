@@ -86,3 +86,39 @@ def test_error_body_keeps_sibling_folder_that_shares_home_prefix(monkeypatch):
 
 def test_error_body_keeps_none_detail():
     assert error_body("E_X", "m")["error"]["detail"] is None
+
+
+def test_error_body_redacts_home_inside_real_oserror_repr():
+    # str(OSError) ใส่ path แบบ repr บน Windows backslash จะกลายเป็นสองตัว
+    home = str(Path.home())
+    detail = str(FileNotFoundError(2, "No such file", home + r"\Videos\a.mp4"))
+    expected = str(FileNotFoundError(2, "No such file", "~" + r"\Videos\a.mp4"))
+    assert error_body("E_X", "m", detail)["error"]["detail"] == expected
+
+
+def test_error_body_redacts_doubled_backslash_windows_home(monkeypatch):
+    monkeypatch.setattr(errors.Path, "home", lambda: PureWindowsPath("C:/Users/Somchai"))
+    detail = str(FileNotFoundError(2, "No such file", r"C:\Users\Somchai\Videos\a.mp4"))
+    assert detail == r"[Errno 2] No such file: 'C:\\Users\\Somchai\\Videos\\a.mp4'"
+    assert error_body("E_X", "m", detail)["error"]["detail"] == r"[Errno 2] No such file: '~\\Videos\\a.mp4'"
+
+
+def test_error_body_keeps_home_followed_by_dot(monkeypatch):
+    # ตั้งใจไม่แทน: ตัวกันโฟลเดอร์ข้างเคียงมองจุดเป็นส่วนของชื่อ (เช่น C:\Users\Somchai.old)
+    monkeypatch.setattr(errors.Path, "home", lambda: PureWindowsPath("C:/Users/Somchai"))
+    assert error_body("E_X", "m", r"อยู่ที่ C:\Users\Somchai.")["error"]["detail"] == r"อยู่ที่ C:\Users\Somchai."
+
+
+def test_http_exception_304_has_no_body():
+    from fastapi import HTTPException as FastAPIHTTPException
+
+    app = FastAPI()
+    install_error_handlers(app)
+
+    @app.get("/cached")
+    def cached():
+        raise FastAPIHTTPException(status_code=304)
+
+    resp = TestClient(app, base_url=BASE).get("/cached")
+    assert resp.status_code == 304
+    assert resp.content == b""

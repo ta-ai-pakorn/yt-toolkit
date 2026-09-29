@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException
 
 log = logging.getLogger("yttoolkit")
@@ -21,10 +21,13 @@ def _redact_home(text: str) -> str:
     home = str(Path.home())
     if not home.strip("/\\"):
         return text
-    for variant in {home, home.replace("\\", "/")}:
-        # ไม่แตะโฟลเดอร์ข้างเคียงที่ชื่อขึ้นต้นเหมือนกัน เช่น C:\Users\Som กับ C:\Users\Somchai
-        text = re.sub(re.escape(variant) + r"(?![\w.\-])", "~", text, flags=re.IGNORECASE)
-    return text
+    # แบบปกติ, แบบ / และแบบ backslash สองตัว (มาจาก repr เช่น str(OSError) บน Windows)
+    variants = {home, home.replace("\\", "/"), home.replace("\\", "\\\\")}
+    # รวมเป็น regex เดียว เรียงยาวก่อน จึงไม่มีแบบไหนไปจับแค่บางส่วนของอีกแบบ
+    alternatives = "|".join(re.escape(v) for v in sorted(variants, key=len, reverse=True))
+    # ไม่แตะโฟลเดอร์ข้างเคียงที่ชื่อขึ้นต้นเหมือนกัน เช่น C:\Users\Som กับ C:\Users\Somchai
+    # ผลข้างเคียงที่ตั้งใจ: home ที่ตามด้วยจุดทันที (เช่นท้ายประโยค) จะไม่ถูกแทน เพราะจุดเป็นส่วนของชื่อโฟลเดอร์ได้
+    return re.sub(f"(?:{alternatives})" + r"(?![\w.\-])", "~", text, flags=re.IGNORECASE)
 
 
 def error_body(code: str, message: str, detail: str | None = None) -> dict:
@@ -39,7 +42,9 @@ def error_response(
     return JSONResponse(status_code=status, content=error_body(code, message, detail), headers=headers)
 
 
-async def _http_error(request: Request, exc: HTTPException) -> JSONResponse:
+async def _http_error(request: Request, exc: HTTPException) -> Response:
+    if exc.status_code in {204, 304}:
+        return Response(status_code=exc.status_code, headers=exc.headers)  # แบบเดียวกับ Starlette: ห้ามมี body
     detail = str(exc.detail) if exc.detail is not None else None
     if exc.status_code == 404:
         return error_response(404, "E_NOT_FOUND", NOT_FOUND_MESSAGE, detail, exc.headers)
