@@ -1,35 +1,43 @@
 name: update-ytdlp
 
 # BRD หัวข้อ 7 "อัปเดต yt-dlp": เช็กทุกวัน ถ้ามีเวอร์ชันใหม่และเทสผ่าน ให้ commit uv.lock เข้า main
+# แยกเป็น 3 job ตามสิทธิ์: lock กับ test อ่าน repo ได้อย่างเดียว (test รันโค้ดของแพ็กเกจใหม่)
+# ส่วน commit มีสิทธิ์เขียน แต่ไม่รันโค้ดของแพ็กเกจใดเลย
 on:
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-  actions: write # สั่งรัน ci.yml หลัง push เพราะ push ด้วย GITHUB_TOKEN ไม่ทำให้ CI รันเอง
+permissions: {}
 
 concurrency:
   group: update-ytdlp
   cancel-in-progress: false
 
 jobs:
-  update:
+  lock:
     runs-on: windows-latest
+    permissions:
+      contents: read
     defaults:
       run:
         shell: bash
+    outputs:
+      changed: ${{ steps.lock.outputs.changed }}
+      version: ${{ steps.lock.outputs.version }}
+      base: ${{ steps.lock.outputs.base }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: main
-          # ไม่เก็บ token ไว้ใน .git/config โค้ดของแพ็กเกจใหม่ที่รันตอน pytest จะได้ไม่เห็น
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.11.1"
       - name: อัปเกรด yt-dlp ใน uv.lock
         id: lock
         run: |
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           pattern='^name = "yt-dlp(-ejs)?"$'
           before=$(grep -A1 -E "$pattern" uv.lock)
           uv lock --upgrade-package yt-dlp --upgrade-package yt-dlp-ejs
@@ -45,23 +53,80 @@ jobs:
             echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.lock.outputs.changed == 'true'
-        run: uv sync --frozen
-      - if: steps.lock.outputs.changed == 'true'
-        run: uv run pytest -q
+        uses: actions/upload-artifact@v7
+        with:
+          name: uv-lock
+          path: uv.lock
+          if-no-files-found: error
+          retention-days: 1
+
+  test:
+    needs: lock
+    if: needs.lock.outputs.changed == 'true'
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.11.1"
+      - uses: actions/download-artifact@v8
+        with:
+          name: uv-lock
+          path: .
+      - run: uv sync --frozen
+      - run: uv run pytest -q
+
+  commit:
+    needs: [lock, test]
+    if: needs.lock.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write # สั่งรัน ci.yml หลัง push เพราะ push ด้วย GITHUB_TOKEN ไม่ทำให้ CI รันเอง
+    steps:
+      # checkout ใหม่ ไม่ใช้ของจาก job ที่รันโค้ดแพ็กเกจ job นี้ห้ามรัน uv sync หรือ pytest
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+      - name: main ต้องยังอยู่ที่ commit เดิมตอน lock
+        env:
+          BASE: ${{ needs.lock.outputs.base }}
+        run: |
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "$BASE" ]; then
+            echo "::error::main ขยับไปแล้วระหว่างรัน (ตอน lock: $BASE, ตอนนี้: $head) ไม่ rebase ให้ รอรอบถัดไป"
+            exit 1
+          fi
+      - uses: actions/download-artifact@v8
+        with:
+          name: uv-lock
+          path: .
       - name: commit uv.lock เข้า main
-        if: steps.lock.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.lock.outputs.version }}
+          VERSION: ${{ needs.lock.outputs.version }}
         run: |
+          changed=$(git status --porcelain)
+          if [ "$changed" != " M uv.lock" ]; then
+            echo "::error::คาดว่าจะเปลี่ยนแค่ uv.lock แต่เจอ: $changed"
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git add uv.lock
-          # ขั้นเทสรันโค้ดของแพ็กเกจใหม่ไปแล้ว ห้ามใช้ hook ที่อาจถูกเขียนทิ้งไว้ใน .git ตอนที่มี token
           git -c core.hooksPath=/dev/null commit -m "chore: update yt-dlp to ${VERSION}" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+          # push แบบไม่ force ถ้า main ขยับหลัง checkout จะถูกปฏิเสธ (non-fast-forward) และ job นี้ล้ม
           git -c core.hooksPath=/dev/null push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
       - name: สั่งรัน CI เต็มบน main
-        if: steps.lock.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run ci.yml --ref main --repo "$GITHUB_REPOSITORY"
