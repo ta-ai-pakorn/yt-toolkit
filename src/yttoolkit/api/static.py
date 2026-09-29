@@ -4,29 +4,17 @@ from __future__ import annotations
 
 import html
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+
+from .safepath import safe_parts
 
 
 def inject_token(index_html: str, token: str) -> str:
     meta = f'<meta name="yt-token" content="{html.escape(token, quote=True)}">'
     return index_html.replace("</head>", f"{meta}</head>", 1)
-
-
-def _safe_parts(full_path: str) -> tuple[str, ...] | None:
-    """ตรวจ path แบบไม่แตะดิสก์ คืน None ถ้าอาจหลุดออกนอก dist
-
-    ห้ามส่ง path ที่ผู้ใช้ส่งมาเข้า resolve()/is_file() ตรงๆ เพราะบน Windows
-    path แบบ UNC (ขึ้นต้นด้วย backslash สองตัว) จะทำให้เครื่องไปต่อ SMB และหลุด NTLM hash
-    """
-    if any(ch in full_path for ch in ("\\", ":", "\x00")) or full_path.startswith("/"):
-        return None
-    parts = tuple(p for p in PurePosixPath(full_path).parts if p not in ("", "."))
-    if not parts or ".." in parts:
-        return None
-    return parts
 
 
 def _same_file(a: Path, b: Path) -> bool:
@@ -50,7 +38,7 @@ def mount_web(app: FastAPI, dist: Path, token: str) -> None:
         index = root / "index.html"
         if not index.is_file():
             return PlainTextResponse("ยังไม่ได้ build หน้าเว็บ (web/dist)", status_code=503)
-        parts = _safe_parts(full_path)
+        parts = safe_parts(full_path)
         # index.html ตัวดิบไม่มี token ต้องเสิร์ฟตัวที่ฝัง token แล้วเสมอ
         if parts and [p.lower() for p in parts] != ["index.html"]:
             candidate = root.joinpath(*parts)

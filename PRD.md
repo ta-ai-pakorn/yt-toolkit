@@ -97,10 +97,19 @@ W7 กล่องยืนยัน / toast / error: ซ้อนบนทุ�
 | แถบบน | Button (ghost) | ลิงก์ไป W5, W6 |
 | ช่องวางลิงก์ | Input Group + Textarea (สูงขึ้นเองได้ถึง 8 บรรทัด) | placeholder `https://youtube.com/watch?v=...` · ปุ่ม **วิเคราะห์** เป็นปุ่มหลักปุ่มเดียวของหน้า |
 | คำแนะนำ | Kbd | "กด Ctrl+V ที่ไหนก็ได้" (macOS แสดง ⌘V) |
+| ผลการวิเคราะห์ | รายการใต้ช่องวางลิงก์ | ดูหัวข้อ "ผลการวิเคราะห์" ด้านล่าง · ยังไม่ได้กดวิเคราะห์ → ซ่อนส่วนนี้ |
 | ล่าสุด | Item × 5 | ปก, ชื่อ, ความยาว · คลิกไป W2 · ไม่มีประวัติ → ซ่อนส่วนนี้ |
 | ข้อความเตือนการใช้งาน | ข้อความเล็ก | BRD ข้อ 20 |
 
 **คีย์ลัด:** `Ctrl/⌘+V` นอกช่องกรอก = วางแล้ววิเคราะห์ทันที · `Ctrl/⌘+Enter` ในช่อง = วิเคราะห์ · `Enter` = ขึ้นบรรทัดใหม่
+
+**ผลการวิเคราะห์ (M2):** กด "วิเคราะห์" แล้วหน้าเว็บเรียก `POST /resolve`
+- ได้คลิปเดียว → ไป W2 ทันที · ได้ลิงก์เดียวที่เป็นทั้งคลิปและเพลย์ลิสต์ → กล่องถาม (W7) "คลิปนี้" หรือ "ทั้งเพลย์ลิสต์"
+- หลายลิงก์หรือเพลย์ลิสต์ → แสดงรายการผลใต้ช่องวางลิงก์ เรียงตามลำดับที่วาง แต่ละแถวมีสถานะกำลังโหลด/ผิดพลาดของตัวเอง
+  - คลิป: รหัสคลิป + ลิงก์ "เปิดดู" ไป W2
+  - ลิงก์ที่อ่านไม่ออก: ข้อความที่วาง + ข้อความ `E_INVALID_INPUT` สีแดง
+  - เพลย์ลิสต์: ชื่อเพลย์ลิสต์, จำนวนคลิป และหมายเหตุ "เลือกคลิปจากเพลย์ลิสต์ได้ในเวอร์ชันถัดไป" (เกิน 200 คลิปบอกว่าแสดงแค่ 200 คลิปแรก)
+- ตารางเลือกคลิปแบบเต็ม (W3) มาใน M4
 
 ### W2 หน้าผลลัพธ์
 เรียงจากบนลงล่าง ส่วนไหนข้อมูลมาก่อน แสดงก่อน ไม่ต้องรอกันทั้งหน้า
@@ -115,6 +124,14 @@ W7 กล่องยืนยัน / toast / error: ซ้อนบนทุ�
 | **ซับ** | Select แทร็ก (3 กลุ่มตาม FR-SUB-2), Toggle Group (สั้น/กลาง/ยาว), Collapsible "ปรับเอง" (Slider + Field), กล่อง preview 5 ซับแรก + ตัวนับ, Button Group (.srt .txt .md คัดลอก) | ไม่มีซับ: ซ่อนทั้งส่วน แสดงข้อความ "คลิปนี้ไม่มีซับ" |
 | **ตัวเลือกขั้นสูง** (พับไว้) | Collapsible · ช่องเวลาเริ่ม/จบ · Switch "แยกไฟล์ตาม chapter" (ซ่อนถ้าไม่มี chapter) · Switch "ตัดโฆษณา" + รายการหมวด | ค่าในส่วนนี้มีผลกับปุ่มโหลดวิดีโอ เสียง และซับทั้งหมด · เมื่อเปิดใช้ ให้แสดง Badge "ใช้ตัวเลือกขั้นสูงอยู่" ที่หัวส่วนวิดีโอ |
 | **ทรานสคริปต์** | Input Group (ค้นหา), Scroll Area (สูงสูงสุด 360px) | คลิกบรรทัด → ไฮไลต์เฟรมที่ใกล้ที่สุดและเลื่อนแถวภาพเฟรมไปหา |
+
+**เมนูคลิกขวาที่ภาพเฟรม (M2):** มี 2 รายการ
+- **โหลดภาพนี้** → โหลดไฟล์ภาพเฟรมนั้นชื่อ `frame_HH-MM-SS.jpg` (`/cache/...?download=1`)
+- **คัดลอกเวลา** → คัดลอก timecode รูปแบบ `HH:MM:SS` แล้วขึ้น toast "คัดลอกแล้ว"
+- "ตั้งจุดเริ่ม/จบ" มาใน M5 และ "ดูซับช่วงนี้" มาใน M3
+- เปิดเมนูด้วยคีย์บอร์ดได้ (Shift+F10 หรือปุ่ม Menu) ทุกภาพเฟรมกด Tab ไปถึงได้
+
+**ปุ่มโหลดภาพเฟรมทั้งชุด (M2):** "Contact sheet" และ "โหลดทั้งหมด (.zip)" เป็นปุ่มรอง โหลดผ่านเบราว์เซอร์ตรง ๆ (ไม่เข้าคิว) · M4 ย้ายเข้าคิวงานและบันทึกลงโฟลเดอร์ผลลัพธ์
 
 **กฎปุ่มหลัก:** "โหลด mp4" เป็นปุ่มหลักปุ่มเดียวของ W2 ปุ่มอื่นทั้งหมดเป็นปุ่มรองหรือปุ่มโปร่ง
 
@@ -328,12 +345,14 @@ queued ──► running ──► done
 |---|---|---|---|
 | GET | `/ping` | — | `{ok:true, pid}` ตอบทันที ใช้เช็คว่าแอพยังทำงานอยู่ (ไฟล์เปิด/ปิดโปรแกรมและ dev server ใช้ตัวนี้) |
 | GET | `/health` | — | `{version, commit, tools:{ffmpeg, ytdlp, jsRuntime}, disk, output, network}` ทุกตัวเป็น `ToolStatus = {status: ok\|warn\|error, name, version, message, path}` (ใช้เวลาได้ถึง 5 วิเพราะเช็คเน็ต) |
-| POST | `/resolve` | `{text}` | `{resolveId, items:[{input, kind: video\|playlist\|ambiguous\|invalid, videoId?, playlistId?, error?}]}` |
-| GET | `/videos/{id}` | `?refresh=1` | `VideoInfo` (ข้อ 6.2.1) · probe ใหม่ถ้าไม่มี cache หรือขอ refresh |
-| GET | `/videos/{id}/storyboard` | — | `{intervalMs, frames:[{tMs, url}]}` |
+| POST | `/resolve` | `{text}` (ไม่เกิน 20,000 ตัวอักษร) | `{resolveId, items:[{input, kind: video\|playlist\|ambiguous\|invalid, videoId?, playlistId?, error?}]}` เรียงตามลำดับที่วาง · `error` มีเฉพาะแถว invalid = `{code:"E_INVALID_INPUT", message}` · `resolveId` ยังไม่เก็บลงฐานข้อมูล (W3 ใช้ใน M4) |
+| GET | `/videos/{id}` | `?refresh=1` | `VideoInfo` (ข้อ 6.2.1) · probe ใหม่ถ้าไม่มี cache หรือขอ refresh · id ผิดรูปแบบ → 422 `E_INVALID_INPUT` |
+| GET | `/videos/{id}/storyboard` | — | `{intervalMs, frames:[{index, tMs, url}]}` · `url` = `/api/cache/{id}/storyboard/f_NNNN.jpg` |
+| GET | `/videos/{id}/storyboard/contact-sheet.jpg` | — | ไฟล์ JPEG (Content-Disposition: attachment) ชื่อ `<ชื่อคลิป> - contact sheet.jpg` (ชื่อภาษาไทยส่งใน `filename*` ตาม RFC 5987 ชื่อสำรอง `contact-sheet.jpg`) |
+| GET | `/videos/{id}/storyboard/frames.zip` | — | ไฟล์ zip (Content-Disposition: attachment) ชื่อ `<ชื่อคลิป> - frames.zip` ข้างในเป็น `frame_HH-MM-SS.jpg` |
 | GET | `/videos/{id}/subtitles` | — | `{tracks:[{id, lang, name, group: owner\|original\|translated}], defaultTrackId?}` |
 | GET | `/videos/{id}/subtitles/{trackId}/tokens` | — | `{hasWordTiming, tokens:[{t, s, e}]}` (t=ข้อความ, s/e=ms) |
-| GET | `/playlists/{id}` | — | `{title, total, truncated, entries:[{videoId, title, durationS, thumbnailUrl}]}` |
+| GET | `/playlists/{id}` | — | `{title, total, truncated, entries:[{videoId, title, durationS?, thumbnailUrl}]}` สูงสุด 200 คลิป |
 | POST | `/jobs` | `{items:[{videoId, kind, params}]}` | `{jobs:[Job]}` |
 | GET | `/jobs` | `?status=&limit=` | `{jobs:[Job]}` |
 | POST | `/jobs/{id}/cancel` | — | `Job` |
@@ -343,14 +362,17 @@ queued ──► running ──► done
 | POST | `/tools/ffmpeg/install` | — | `ToolStatus` ของ ffmpeg หลังติดตั้ง · ล้มเหลว → `E_TOOL_INSTALL_FAILED` |
 | GET | `/jobs/{id}/outputs/{n}` | — | ไฟล์ (Content-Disposition: attachment) |
 | POST | `/jobs/{id}/outputs/{n}/reveal` | — | `{ok:true}` เปิด Explorer/Finder |
-| GET | `/cache/{videoId}/{file}` | — | ไฟล์ภาพใน cache (ภาพเฟรม, ปก) |
-| GET | `/history` | `?q=&limit=&offset=` | `{items:[{videoId, title, thumbnailUrl, outputs:[kind], lastAt}], total}` |
+| GET | `/cache/{videoId}/{path}` | `?download=1` (ไม่บังคับ) | ไฟล์ภาพใน cache (ภาพเฟรม, ปก) เฉพาะที่อยู่ใต้ `data/cache/<videoId>/` · path ที่มี `..`, `\`, `:` หรือขึ้นต้นด้วย `/` → 404 (AC-SEC-04) · ภาพเฟรมมี `Cache-Control: public, max-age=86400, immutable` · `?download=1` → attachment ชื่อ `frame_HH-MM-SS.jpg` |
+| GET | `/history` | `?q=&limit=&offset=` (`limit` ค่าเริ่มต้น 20 สูงสุด 100) | `{items:[{videoId, title, thumbnailUrl, durationS, outputs:[kind], lastAt}], total}` |
 | GET | `/diagnostics` | `?jobId=` (ไม่บังคับ) | `{text}` รายงานแจ้งปัญหาแบบ Markdown ตามข้อ 7.1 |
 | GET | `/settings` | — | `Settings` |
 | PATCH | `/settings` | บางส่วนของ `Settings` | `Settings` |
 | POST | `/update` | — | `{updated, restarting}` |
 | POST | `/shutdown` | `{force?: bool}` | 200 `{ok}` หรือ 409 `{pendingJobs}` ถ้ามีงานค้างและไม่ force |
 | GET | `/events` | — | SSE (ข้อ 6.2.2) |
+
+- **contact sheet และ zip ใน M2** ทำตอนขอแล้วส่งให้เบราว์เซอร์โหลดทันที · M4 ย้ายเข้าคิวเป็นงานชนิด `contact_sheet` / `frames_zip` และบันทึกลงโฟลเดอร์ผลลัพธ์
+- **HTTP status ของ error จากยูทูป:** `E_INVALID_INPUT` 422 · `E_VIDEO_UNAVAILABLE`, `E_VIDEO_PRIVATE`, `E_NO_STORYBOARD` 404 · `E_LIVE_NOT_READY`, `E_AGE_RESTRICTED`, `E_GEO_BLOCKED` 409 · `E_BOT_CHECK` 429 · `E_NETWORK` 502 · รหัสอื่น (`E_UNKNOWN`) 500
 
 #### 6.2.1 ชนิดข้อมูลหลัก
 ```ts

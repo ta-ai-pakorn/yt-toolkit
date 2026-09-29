@@ -10,6 +10,7 @@ import threading
 import time
 import webbrowser
 from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -17,9 +18,13 @@ import uvicorn
 
 from . import __version__, runstate
 from .app import AppContext, create_app
-from .config import HOST, Paths, default_paths, env_flag
+from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
 from .core import tools
+from .core.db import Database, purge_stale_cache
+from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor
+from .core.videos import VideoService
 from .platform import LockFileError, Platform, current
+
 # ตัวจริงอยู่ใน probe (stdlib ล้วน) ที่นี่ส่งต่อชื่อเดิมให้โค้ดและเทสที่เรียกผ่าน lifecycle
 from .probe import base_url, find_running, is_alive, setup_file_log  # noqa: F401
 
@@ -46,6 +51,7 @@ def git_commit(root: Path, plat: Platform) -> str | None:
             cwd=root,
             capture_output=True,
             text=True,
+            check=False,
             timeout=5,
             creationflags=plat.popen_flags,
         )
@@ -102,6 +108,33 @@ def ensure_ffmpeg(paths: Paths, plat: Platform) -> None:
         log.exception("ติดตั้ง ffmpeg อัตโนมัติไม่สำเร็จ")
 
 
+def open_services(paths: Paths) -> tuple[Database, VideoService, Extractor]:
+    """เปิดฐานข้อมูล (สร้างตารางถ้ายังไม่มี) ล้าง cache เก่า และเลือก extractor
+
+    YT_TOOLKIT_FAKE=1 = ใช้ข้อมูลทดสอบใน tests/fixtures แทนยูทูปจริง (ใช้กับ E2E)
+    ล้าง cache ไม่สำเร็จแค่บันทึก log แล้วเปิดโปรแกรมต่อ ส่วนฐานข้อมูลเปิดไม่ได้จะโยนต่อ
+    """
+    if env_flag("YT_TOOLKIT_FAKE", False):
+        log.warning("โหมดข้อมูลปลอม (YT_TOOLKIT_FAKE): ใช้ข้อมูลทดสอบใน tests/fixtures ไม่ต่อยูทูปจริง")
+        extractor: Extractor = FakeExtractor(CODE_ROOT / "tests" / "fixtures")
+    else:
+        extractor = YtDlpExtractor()
+    paths.db.parent.mkdir(parents=True, exist_ok=True)
+    db = Database(paths.db)
+    try:
+        db.migrate()
+    except BaseException:
+        db.close()
+        raise
+    try:
+        removed = purge_stale_cache(db, paths.cache, datetime.now(UTC))
+        if removed:
+            log.info("ล้าง cache ของคลิปที่ไม่ได้เปิดเกิน 30 วันแล้ว %s คลิป", removed)
+    except Exception:  # ห้ามทำให้เปิดโปรแกรมไม่ได้ รอบหน้าค่อยลองใหม่
+        log.exception("ล้าง cache เก่าไม่สำเร็จ (ข้ามไปก่อน)")
+    return db, VideoService(db, extractor), extractor
+
+
 def run_app(
     *,
     paths: Paths,
@@ -111,6 +144,41 @@ def run_app(
     open_browser: bool,
     auto_ffmpeg: bool,
     extra_origins: Iterable[str] = (),
+) -> int:
+    try:
+        db, videos, extractor = open_services(paths)
+    except Exception:
+        log.exception("เปิดฐานข้อมูลไม่สำเร็จ (%s)", paths.db)
+        return 1
+    try:
+        return _run_server(
+            paths=paths,
+            plat=plat,
+            port=port,
+            with_tray=with_tray,
+            open_browser=open_browser,
+            auto_ffmpeg=auto_ffmpeg,
+            extra_origins=extra_origins,
+            db=db,
+            videos=videos,
+            extractor=extractor,
+        )
+    finally:
+        db.close()
+
+
+def _run_server(
+    *,
+    paths: Paths,
+    plat: Platform,
+    port: int,
+    with_tray: bool,
+    open_browser: bool,
+    auto_ffmpeg: bool,
+    extra_origins: Iterable[str],
+    db: Database,
+    videos: VideoService,
+    extractor: Extractor,
 ) -> int:
     token = runstate.new_token()
     stop_event = threading.Event()
@@ -131,6 +199,10 @@ def run_app(
         output_dir=default_output_dir(plat),
         request_shutdown=request_shutdown,
         extra_origins=tuple(extra_origins),
+        db=db,
+        videos=videos,
+        extractor=extractor,
+        cache_root=paths.cache,
     )
     server = Server(ctx)
     server.start()

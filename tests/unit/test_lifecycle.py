@@ -701,3 +701,126 @@ def test_stop_says_closed_when_app_json_vanishes_after_failed_request(paths, fak
     assert lifecycle.stop(paths, fake_platform, post=refused, sleep=sleep, out=out.append) == 0
     assert fake_platform.killed == []
     assert out == ["ปิดโปรแกรมแล้ว"]
+
+
+# ---------- บริการของ M2 (ฐานข้อมูล, extractor, โหมดข้อมูลปลอม) ----------
+
+
+def _run_capturing_ctx(paths, fake_platform, monkeypatch, ready: bool = True):
+    """รัน run_app โดยให้เซิร์ฟเวอร์ปลอมสั่งปิดทันทีที่เริ่ม คืน (exit code, ctx)"""
+    captured = []
+    server = FakeServer(ready=ready)
+
+    def make_server(ctx):
+        captured.append(ctx)
+        server.start = ctx.request_shutdown  # เริ่มแล้วปิดเลย ลูปรอใน run_app จะจบทันที
+        return server
+
+    monkeypatch.setattr(lifecycle, "Server", make_server)
+    code = lifecycle.run_app(**_run_app_kwargs(paths, fake_platform))
+    return code, captured[0]
+
+
+def _db_closed(db) -> bool:
+    import sqlite3
+
+    try:
+        db.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return True
+    return False
+
+
+def test_run_app_fake_mode_uses_fixture_extractor(paths, fake_platform, monkeypatch, caplog):
+    from yttoolkit.config import CODE_ROOT
+    from yttoolkit.core.extractor import FakeExtractor
+
+    monkeypatch.setenv("YT_TOOLKIT_FAKE", "1")
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    assert code == 0
+    assert isinstance(ctx.extractor, FakeExtractor)
+    assert ctx.extractor.root == CODE_ROOT / "tests" / "fixtures"
+    assert ctx.videos is not None and ctx.cache_root == paths.cache
+    assert any(
+        "โหมดข้อมูลปลอม (YT_TOOLKIT_FAKE)" in r.getMessage() and r.levelno == logging.WARNING
+        for r in caplog.records
+    )
+    assert paths.db.is_file()
+    assert _db_closed(ctx.db)  # ปิดฐานข้อมูลตอนปิดโปรแกรม
+
+
+def test_run_app_uses_real_extractor_by_default(paths, fake_platform, monkeypatch, caplog):
+    from yttoolkit.core.extractor import YtDlpExtractor
+
+    monkeypatch.delenv("YT_TOOLKIT_FAKE", raising=False)
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    assert code == 0
+    assert isinstance(ctx.extractor, YtDlpExtractor)
+    assert "YT_TOOLKIT_FAKE" not in caplog.text
+
+
+def test_run_app_closes_db_when_server_fails_to_start(paths, fake_platform, monkeypatch):
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, ready=False)
+    assert code == 1
+    assert _db_closed(ctx.db)
+
+
+def test_run_app_purges_stale_cache(paths, fake_platform, monkeypatch):
+    from yttoolkit.core.db import Database
+
+    db = Database(paths.db)
+    db.migrate()
+    db.execute(
+        "INSERT INTO videos (video_id, title, probe_json, probed_at, opened_at) VALUES (?, ?, ?, ?, ?)",
+        ("oldvideo001", "เก่า", "{}", "2020-01-01T00:00:00+00:00", "2020-01-01T00:00:00+00:00"),
+    )
+    db.close()
+    (paths.cache / "oldvideo001").mkdir(parents=True)
+    code, _ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    assert code == 0
+    assert not (paths.cache / "oldvideo001").exists()
+
+
+def test_run_app_starts_even_if_purge_fails(paths, fake_platform, monkeypatch, caplog):
+    def broken_purge(*args, **kwargs):
+        raise OSError("ดิสก์เสีย")
+
+    monkeypatch.setattr(lifecycle, "purge_stale_cache", broken_purge)
+    with caplog.at_level(logging.ERROR, logger="yttoolkit"):
+        code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    assert code == 0
+    assert ctx.videos is not None
+    assert "ล้าง cache เก่าไม่สำเร็จ" in caplog.text
+
+
+def test_run_app_fails_cleanly_when_db_cannot_open(paths, fake_platform, monkeypatch, caplog):
+    def broken_services(paths):
+        raise RuntimeError("ฐานข้อมูลเป็นเวอร์ชัน 9 ใหม่กว่าโปรแกรมนี้")
+
+    monkeypatch.setattr(lifecycle, "open_services", broken_services)
+    monkeypatch.setattr(lifecycle, "Server", lambda ctx: pytest.fail("ห้ามเปิดเซิร์ฟเวอร์"))
+    with caplog.at_level(logging.ERROR, logger="yttoolkit"):
+        assert lifecycle.run_app(**_run_app_kwargs(paths, fake_platform)) == 1
+    assert "ใหม่กว่าโปรแกรมนี้" in caplog.text
+
+
+def test_open_services_closes_db_when_migrate_fails(paths, monkeypatch):
+    from yttoolkit.core.db import Database
+
+    closed = []
+    original_close = Database.close
+
+    def boom(self):
+        raise RuntimeError("migrate พัง")
+
+    def tracking_close(self):
+        closed.append(self)
+        original_close(self)
+
+    monkeypatch.setattr(Database, "migrate", boom)
+    monkeypatch.setattr(Database, "close", tracking_close)
+    with pytest.raises(RuntimeError, match="migrate พัง"):
+        lifecycle.open_services(paths)
+    assert len(closed) == 1
