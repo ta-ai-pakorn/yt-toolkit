@@ -26,6 +26,7 @@ jobs:
       changed: ${{ steps.lock.outputs.changed }}
       version: ${{ steps.lock.outputs.version }}
       base: ${{ steps.lock.outputs.base }}
+      sha256: ${{ steps.lock.outputs.sha256 }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -51,6 +52,8 @@ jobs:
             version=$(grep -A1 -E '^name = "yt-dlp"$' uv.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "version=$version" >> "$GITHUB_OUTPUT"
+            # job test รันโค้ดของแพ็กเกจใหม่ จึงจด hash ไว้ ให้ job commit ตรวจว่า artifact ไม่ถูกแก้ระหว่างทาง
+            echo "sha256=$(sha256sum uv.lock | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.lock.outputs.changed == 'true'
         uses: actions/upload-artifact@v7
@@ -114,7 +117,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.lock.outputs.version }}
+          SHA256: ${{ needs.lock.outputs.sha256 }}
         run: |
+          actual=$(sha256sum uv.lock | cut -d' ' -f1)
+          if [ -z "$SHA256" ] || [ "$actual" != "$SHA256" ]; then
+            echo "::error::uv.lock ที่ได้จาก artifact ไม่ตรงกับตอน lock (คาด $SHA256 ได้ $actual)"
+            exit 1
+          fi
           changed=$(git status --porcelain)
           if [ "$changed" != " M uv.lock" ]; then
             echo "::error::คาดว่าจะเปลี่ยนแค่ uv.lock แต่เจอ: $changed"

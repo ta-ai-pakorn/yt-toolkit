@@ -4,7 +4,10 @@ rem git pull ในขั้น [1/4] อาจเขียนทับไฟล
 rem รอบแรกจึงคัดลอกตัวเองไปไว้ในโฟลเดอร์ TEMP แล้วรันสำเนานั้น โดยส่งโฟลเดอร์ของโปรแกรมไปเป็นพารามิเตอร์ตัวแรก
 if defined YT_START_RELAUNCHED goto relaunched
 set "YT_START_RELAUNCHED=1"
-set "_YT_COPY=%TEMP%\yt-toolkit-start-%RANDOM%%RANDOM%.bat"
+rem ตัวแปร RANDOM ตั้งต้นจากนาฬิกา ดับเบิลคลิกซ้ำในวินาทีเดียวกันจึงได้เลขซ้ำ ใส่เศษวินาทีและวนหาชื่อที่ยังไม่มี
+:ytname
+set "_YT_COPY=%TEMP%\yt-toolkit-start-%RANDOM%-%TIME:~-2%%RANDOM%.bat"
+if exist "%_YT_COPY%" goto ytname
 rem ถ้าคัดลอกไม่ได้ (เช่นโฟลเดอร์ TEMP เขียนไม่ได้) ก็รันจากไฟล์เดิมแบบก่อนหน้านี้
 copy /y "%~f0" "%_YT_COPY%" >nul 2>nul
 if errorlevel 1 (

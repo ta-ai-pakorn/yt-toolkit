@@ -43,7 +43,10 @@ def _start() -> int:
     from .config import default_paths
 
     # ตั้ง log ก่อน import lifecycle (ซึ่งโหลด uvicorn และ FastAPI) ถ้า import พัง traceback จะลง app.log
-    probe.setup_file_log(default_paths())
+    try:
+        probe.setup_file_log(default_paths())
+    except OSError:
+        pass  # สร้างโฟลเดอร์ log ไม่ได้ ก็ยังลองเปิดโปรแกรมต่อ (หน้าต่าง start.bat จะแจ้งเองถ้าไม่ขึ้น)
     try:
         from . import lifecycle
 
