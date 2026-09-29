@@ -1,0 +1,333 @@
+"""ตัวแยกลิงก์ยูทูป (AC-IN-01..05, AC-SEC-05) — ไม่แตะเครือข่ายและไม่รันอะไรเลย"""
+
+from __future__ import annotations
+
+import pytest
+
+from yttoolkit.core.inputs import InputItem, parse_line, parse_text
+
+VID = "dQw4w9WgXcQ"
+VID2 = "aqz-KE-bpKQ"
+PL = "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+
+
+def video(line: str, video_id: str = VID) -> InputItem:
+    return InputItem(input=line, kind="video", video_id=video_id)
+
+
+# ---------- AC-IN-01 ----------
+
+
+def test_ac_in_01_short_link_with_timestamp():
+    line = "https://youtu.be/dQw4w9WgXcQ?t=42"
+    assert parse_line(line) == video(line)
+
+
+# ---------- AC-IN-02: ทุกรูปแบบที่รองรับ ----------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://www.youtube.com/watch?v={VID}",
+        f"https://www.youtube.com/watch?v={VID}&t=1s",
+        f"https://www.youtube.com/watch?feature=share&v={VID}",
+        f"https://www.youtube.com/watch?pp=abc&v={VID}&index=3",
+        f"https://youtube.com/watch?v={VID}",
+        f"http://www.youtube.com/watch?v={VID}",
+        f"https://m.youtube.com/watch?v={VID}",
+        f"https://music.youtube.com/watch?v={VID}",
+        f"https://youtu.be/{VID}",
+        f"https://youtu.be/{VID}?si=abc",
+        f"https://youtu.be/{VID}?t=42&si=abc",
+        f"https://www.youtube.com/shorts/{VID}",
+        f"https://www.youtube.com/shorts/{VID}?feature=share",
+        f"https://m.youtube.com/shorts/{VID}",
+        f"https://www.youtube.com/live/{VID}",
+        f"https://www.youtube.com/live/{VID}?si=abc",
+        f"https://www.youtube.com/embed/{VID}",
+        f"https://www.youtube-nocookie.com/embed/{VID}",
+        f"https://www.youtube.com/watch?v={VID}#t=10",
+        # ไม่มี scheme
+        f"www.youtube.com/watch?v={VID}",
+        f"youtube.com/watch?feature=share&v={VID}",
+        f"m.youtube.com/watch?v={VID}",
+        f"youtu.be/{VID}",
+        f"youtu.be/{VID}?si=abc",
+        f"youtube.com/shorts/{VID}",
+        f"youtube-nocookie.com/embed/{VID}",
+        # ตัวพิมพ์ใหญ่ที่โดเมน/scheme (ID ต้องคงตัวพิมพ์เดิม)
+        f"HTTPS://WWW.YOUTUBE.COM/watch?v={VID}",
+        f"HTTPS://YOUTU.BE/{VID}",
+        f"WWW.YOUTUBE.COM/watch?v={VID}",
+        # เครื่องหมาย / ท้ายลิงก์
+        f"https://www.youtube.com/watch/?v={VID}",
+        f"https://youtu.be/{VID}/",
+        f"https://www.youtube.com/shorts/{VID}/",
+        f"https://www.youtube.com/live/{VID}/?si=abc",
+        # ID ล้วน
+        VID,
+        # ลิงก์ watch ที่มี list ขึ้นต้น RD (mix) ถือเป็นคลิปเดียว
+        f"https://www.youtube.com/watch?v={VID}&list=RDdQw4w9WgXcQ",
+        f"https://www.youtube.com/watch?v={VID}&list=RDMMdQw4w9WgXcQ&start_radio=1",
+        f"https://www.youtube.com/watch?list=RD{VID}&v={VID}",
+    ],
+)
+def test_ac_in_02_accepted_video_forms(line):
+    assert parse_line(line) == video(line)
+
+
+def test_video_id_keeps_case_and_symbols():
+    assert parse_line(VID2).video_id == VID2
+    assert parse_line("HTTPS://YOUTU.BE/aB_-cD1234E").video_id == "aB_-cD1234E"
+
+
+def test_input_is_stripped_but_otherwise_preserved():
+    item = parse_line(f"   https://youtu.be/{VID}\t ")
+    assert item.input == f"https://youtu.be/{VID}"
+    assert item.video_id == VID
+
+
+# ---------- เพลย์ลิสต์ ----------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://www.youtube.com/playlist?list={PL}",
+        f"youtube.com/playlist?list={PL}",
+        f"https://m.youtube.com/playlist?list={PL}&si=abc",
+        f"https://music.youtube.com/playlist?list={PL}",
+        f"https://www.youtube.com/playlist/?list={PL}",
+        f"https://www.youtube.com/embed/videoseries?list={PL}",
+        f"HTTPS://WWW.YOUTUBE.COM/playlist?list={PL}",
+    ],
+)
+def test_playlist_links(line):
+    assert parse_line(line) == InputItem(input=line, kind="playlist", playlist_id=PL)
+
+
+@pytest.mark.parametrize("prefix", ["PL", "UU", "OL", "LL", "RD"])
+def test_playlist_id_prefixes(prefix):
+    pid = prefix + "abcDEF1234567"
+    line = f"https://www.youtube.com/playlist?list={pid}"
+    assert parse_line(line).playlist_id == pid
+
+
+# ---------- AC-IN-05: ambiguous ----------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://www.youtube.com/watch?v={VID}&list={PL}",
+        f"https://www.youtube.com/watch?v={VID}&list={PL}&index=3",
+        f"https://www.youtube.com/watch?list={PL}&v={VID}&index=3",
+        f"youtube.com/watch?v={VID}&list={PL}&index=3",
+        f"https://youtu.be/{VID}?list={PL}",
+        f"https://music.youtube.com/watch?v={VID}&list={PL}",
+    ],
+)
+def test_ac_in_05_video_and_list_is_ambiguous(line):
+    assert parse_line(line) == InputItem(
+        input=line, kind="ambiguous", video_id=VID, playlist_id=PL
+    )
+
+
+def test_watch_with_unusable_list_is_video():
+    line = f"https://www.youtube.com/watch?v={VID}&list=x"
+    assert parse_line(line) == video(line)
+
+
+# ---------- ไม่ถูกต้อง ----------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # โดเมนอื่น
+        "https://vimeo.com/123",
+        f"https://vimeo.com/{VID}",
+        # ไม่ใช่ลิงก์
+        "hello",
+        "watch",
+        "https://",
+        "youtube.com",
+        "https://www.youtube.com/",
+        "https://www.youtube.com/watch",
+        "https://www.youtube.com/watch?v=",
+        "https://www.youtube.com/playlist",
+        "https://www.youtube.com/playlist?list=",
+        "https://www.youtube.com/channel/UC1234567890abcdefghij",
+        "https://www.youtube.com/@somebody",
+        # ID ผิดรูป
+        "dQw4w9WgXc",  # 10 ตัว
+        "dQw4w9WgXcQQ",  # 12 ตัว
+        "dQw4w9WgXc!",
+        f"https://youtu.be/{VID}x",
+        "https://youtu.be/short",
+        "https://www.youtube.com/watch?v=tooshort",
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQtoolong",
+        "https://www.youtube.com/shorts/abc",
+        "https://www.youtube.com/playlist?list=short",
+        # เส้นทางไม่ตรง
+        f"https://www.youtube.com/watch/extra/{VID}",
+        f"https://youtu.be/{VID}/extra",
+        f"https://www.youtube.com/shorts/{VID}/extra",
+        f"https://www.youtube.com/embed/{VID}/extra",
+        f"https://www.youtube-nocookie.com/watch?v={VID}",
+        f"https://youtu.be/watch?v={VID}",
+        # โดเมนหลอก
+        f"https://youtube.com.evil.example/watch?v={VID}",
+        f"youtube.com.evil.example/watch?v={VID}",
+        f"https://notyoutube.com/watch?v={VID}",
+        f"https://evilyoutube.com/watch?v={VID}",
+        f"https://youtu.be.evil.example/{VID}",
+        f"https://evil.example/youtube.com/watch?v={VID}",
+        f"https://evil.example/?u=youtube.com/watch?v={VID}",
+        f"https://www.youtube.com@evil.example/watch?v={VID}",
+        f"https://youtube.com:evil@evil.example/watch?v={VID}",
+        f"https://www.youtube.com:8080/watch?v={VID}",
+        f"https://www.youtube.com./watch?v={VID}",
+        f"https://xn--youtube.com/watch?v={VID}",
+        f"https://www.youtube.co/watch?v={VID}",
+        f"https://www.youtube.com.au/watch?v={VID}",
+        # scheme อื่น
+        f"ftp://www.youtube.com/watch?v={VID}",
+        f"javascript:alert(1)//youtube.com/watch?v={VID}",
+        f"file://youtube.com/watch?v={VID}",
+        f"data:text/html,youtube.com/watch?v={VID}",
+        # AC-SEC-05: อักขระคล้ายคำสั่งเชลล์
+        "; rm -rf /",
+        "$(whoami)",
+        "`whoami`",
+        "a | b",
+        "a & b",
+        f"{VID}; rm -rf /",
+        f"{VID}&whoami",
+        f"{VID}|calc",
+        f"{VID}$(whoami)",
+        f"https://youtu.be/{VID};rm -rf /",
+        f"https://youtu.be/{VID}?t=1; rm -rf /",
+        f"https://www.youtube.com/watch?v={VID}&x=$(whoami)",
+        f"https://www.youtube.com/watch?v={VID}|calc.exe",
+        f"https://www.youtube.com/watch?v={VID} & calc",
+        f"https://www.youtube.com/watch?v={VID}\nhttps://youtu.be/{VID}",
+        "https://$(whoami).youtube.com/watch?v=" + VID,
+        "https://[::1/watch?v=" + VID,
+        "http://[",
+        "%0a",
+        "\x00",
+        "\x00" + VID,
+        VID + "\x00",
+        "\u200b" + VID,
+    ],
+)
+def test_invalid_inputs(line):
+    item = parse_line(line)
+    assert item.kind == "invalid"
+    assert item.video_id is None
+    assert item.playlist_id is None
+    assert item.input == line.strip()
+
+
+def test_empty_and_blank_lines_are_invalid_for_parse_line():
+    assert parse_line("").kind == "invalid"
+    assert parse_line("   ").kind == "invalid"
+
+
+def test_parser_returns_data_only_and_never_runs_anything(monkeypatch):
+    import os
+    import subprocess
+
+    def boom(*args, **kwargs):
+        raise AssertionError("ห้ามรันคำสั่ง")
+
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    monkeypatch.setattr(os, "system", boom)
+    for line in ["; rm -rf /", "$(whoami)", "a & b", "x | y", f"{VID};id"]:
+        assert parse_line(line).kind == "invalid"
+
+
+# ---------- parse_text: AC-IN-03 / AC-IN-04 ----------
+
+
+def test_ac_in_03_five_lines_one_duplicate_one_blank_gives_three():
+    text = "\n".join(
+        [
+            f"https://youtu.be/{VID}",
+            "",
+            f"https://www.youtube.com/watch?v={VID2}",
+            f"https://www.youtube.com/watch?v={VID}&t=5s",  # ซ้ำกับบรรทัดแรก
+            f"https://www.youtube.com/playlist?list={PL}",
+        ]
+    )
+    items = parse_text(text)
+    assert [i.kind for i in items] == ["video", "video", "playlist"]
+    assert [i.video_id for i in items] == [VID, VID2, None]
+
+
+def test_first_occurrence_wins_and_order_is_kept():
+    first = f"https://youtu.be/{VID}"
+    text = f"{VID2}\n{first}\nhttps://www.youtube.com/watch?v={VID}\n{VID}\n{VID2}"
+    items = parse_text(text)
+    assert [i.video_id for i in items] == [VID2, VID]
+    assert items[1].input == first
+
+
+def test_ac_in_04_invalid_line_among_valid_ones():
+    text = f"https://youtu.be/{VID}\nhttps://vimeo.com/123\nhttps://youtu.be/{VID2}"
+    items = parse_text(text)
+    assert [i.kind for i in items] == ["video", "invalid", "video"]
+    assert items[1].input == "https://vimeo.com/123"
+    assert items[0].video_id == VID and items[2].video_id == VID2
+
+
+def test_different_invalid_lines_are_not_merged_but_repeats_are():
+    items = parse_text("hello\nworld\nhello\n; rm -rf /")
+    assert [i.input for i in items] == ["hello", "world", "; rm -rf /"]
+    assert all(i.kind == "invalid" for i in items)
+
+
+def test_ambiguous_and_video_of_same_id_are_distinct():
+    text = (
+        f"https://www.youtube.com/watch?v={VID}\n"
+        f"https://www.youtube.com/watch?v={VID}&list={PL}"
+    )
+    assert [i.kind for i in parse_text(text)] == ["video", "ambiguous"]
+
+
+def test_rd_mix_is_duplicate_of_plain_video():
+    text = f"{VID}\nhttps://www.youtube.com/watch?v={VID}&list=RD{VID}"
+    items = parse_text(text)
+    assert len(items) == 1 and items[0].kind == "video"
+
+
+def test_same_playlist_twice_is_deduplicated():
+    text = (
+        f"https://www.youtube.com/playlist?list={PL}\n"
+        f"youtube.com/playlist?list={PL}&si=x"
+    )
+    assert len(parse_text(text)) == 1
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+def test_line_endings(newline):
+    text = newline.join([VID, VID2])
+    assert [i.video_id for i in parse_text(text)] == [VID, VID2]
+
+
+@pytest.mark.parametrize("text", ["", "\n", "   \n\t\n  ", "\r\n\r\n"])
+def test_blank_text_gives_empty_list(text):
+    assert parse_text(text) == []
+
+
+def test_lines_are_stripped_in_parse_text():
+    items = parse_text(f"  {VID}  \n\t{VID2}\t")
+    assert [i.input for i in items] == [VID, VID2]
+
+
+def test_input_item_is_frozen():
+    item = parse_line(VID)
+    with pytest.raises(AttributeError):
+        item.kind = "invalid"  # type: ignore[misc]
