@@ -27,6 +27,7 @@ from ..platform import Platform
 Status = Literal["ok", "warn", "error"]
 
 YTDLP_MAX_AGE_DAYS = 30
+YTDLP_UPDATE_GRACE_DAYS = 7  # bot อัปเดต uv.lock ทุกวัน ให้เวลามันทำงานก่อนเตือนเรื่องเวอร์ชันใหม่
 FFMPEG_INSTALLING_MESSAGE = "กำลังโหลด ffmpeg อาจใช้เวลา 1-3 นาที"
 MIN_FREE_BYTES = 2 * 1024**3
 PYPI_YTDLP_URL = "https://pypi.org/pypi/yt-dlp/json"
@@ -51,7 +52,12 @@ class ToolInstallError(RuntimeError):
 def _run_version(exe: Path | str, plat: Platform, arg: str = "--version") -> str | None:
     try:
         out = subprocess.run(
-            [str(exe), arg], capture_output=True, text=True, timeout=10, creationflags=plat.popen_flags
+            [str(exe), arg],
+            capture_output=True,
+            text=True,
+            errors="replace",  # byte แปลก ๆ จาก ffmpeg หรือ deno ต้องไม่ทำให้หน้าตรวจสุขภาพพัง
+            timeout=10,
+            creationflags=plat.popen_flags,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -160,6 +166,8 @@ def ytdlp_status(
         # อายุมากแต่เป็นตัวล่าสุดแล้ว ไม่ต้องเตือน เพราะผู้ใช้ทำอะไรเพิ่มไม่ได้
         if installed_key >= latest_key:
             return ToolStatus("ok", name="yt-dlp", version=version, message=f"อัปเดตล่าสุด {age} วันก่อน (เป็นเวอร์ชันล่าสุด)")
+        if age <= YTDLP_UPDATE_GRACE_DAYS:
+            return ToolStatus("ok", name="yt-dlp", version=version, message=f"อัปเดตล่าสุด {age} วันก่อน")
         return ToolStatus(
             "warn", name="yt-dlp", version=version,
             message=f"มีเวอร์ชันใหม่ {latest} ถ้าโหลดคลิปไม่ได้ ให้ปิดแล้วเปิดใหม่ด้วย start.bat เพื่อรับเวอร์ชันล่าสุด",

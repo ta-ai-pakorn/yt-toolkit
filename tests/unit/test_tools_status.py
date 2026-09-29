@@ -139,6 +139,20 @@ def test_ytdlp_status_warns_when_newer_version_exists():
     assert status.message == "มีเวอร์ชันใหม่ 2026.9.27 ถ้าโหลดคลิปไม่ได้ ให้ปิดแล้วเปิดใหม่ด้วย start.bat เพื่อรับเวอร์ชันล่าสุด"
 
 
+def test_ytdlp_status_ok_within_grace_period_even_if_newer_exists():  # final fix item 4
+    # bot อัปเดตทุกวันต้องมีเวลาทำงาน ติดตั้งมาไม่เกิน 7 วันยังไม่เตือน
+    for installed, age in (("2026.09.28", 0), ("2026.09.21", 7)):
+        status = tools.ytdlp_status(version=installed, today=date(2026, 9, 28), fetch_latest=lambda: "2026.9.28.1")
+        assert status.status == "ok"
+        assert status.message == f"อัปเดตล่าสุด {age} วันก่อน"
+
+
+def test_ytdlp_status_warns_once_grace_period_is_over():  # final fix item 4
+    status = tools.ytdlp_status(version="2026.09.20", today=date(2026, 9, 28), fetch_latest=lambda: "2026.9.21")
+    assert status.status == "warn"
+    assert status.message == "มีเวอร์ชันใหม่ 2026.9.21 ถ้าโหลดคลิปไม่ได้ ให้ปิดแล้วเปิดใหม่ด้วย start.bat เพื่อรับเวอร์ชันล่าสุด"
+
+
 def test_ytdlp_status_falls_back_to_age_rule_when_lookup_fails():
     def offline() -> str:
         raise OSError("offline")
@@ -237,3 +251,13 @@ def test_collect_health_shape(paths, fake_platform, monkeypatch):
     assert set(health["tools"]) == {"ffmpeg", "ytdlp", "jsRuntime"}
     assert health["tools"]["ffmpeg"]["status"] == "error"
     assert health["network"] == {"status": "ok", "name": "network", "version": None, "message": None, "path": None}
+
+
+def test_run_version_survives_undecodable_output(tmp_path, fake_platform):  # final fix item 8
+    # ffmpeg หรือ deno บางรุ่นพิมพ์ byte แปลก ๆ ต้องไม่ทำให้หน้าตรวจสุขภาพพัง
+    script = tmp_path / "odd_version.py"
+    script.write_text(r"import sys; sys.stdout.buffer.write(b'odd \x81\xff\xfe 1.0\n')", encoding="utf-8")
+    line = tools._run_version(sys.executable, fake_platform, str(script))
+    assert line is not None
+    assert line.startswith("odd ") and line.endswith(" 1.0")
+    assert "�" in line
