@@ -1,7 +1,7 @@
 import { Settings } from "lucide-react"
 import { Link, NavLink, Outlet } from "react-router"
 
-import { Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { th } from "@/i18n/th"
 
@@ -14,10 +14,10 @@ export function Layout() {
           {th.app.name}
         </Link>
         <nav>
-          <Button variant="ghost" size="sm" nativeButton={false} render={<NavLink to="/settings/health" />}>
+          <NavLink to="/settings/health" className={buttonVariants({ variant: "ghost", size: "sm" })}>
             <Settings aria-hidden />
             {th.nav.settings}
-          </Button>
+          </NavLink>
         </nav>
       </header>
       <main className="mx-auto max-w-[960px] px-4 pb-16">

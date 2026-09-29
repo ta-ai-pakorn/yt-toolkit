@@ -1,6 +1,6 @@
 import { th } from "@/i18n/th"
 
-import { useHealth } from "./health-panel"
+import { useHealth } from "./use-health"
 
 export function AboutPanel() {
   const health = useHealth()

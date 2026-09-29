@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui/input-group"
@@ -19,6 +19,9 @@ export function HomePage() {
     setNote(th.home.notReady)
   }
 
+  // ตัวฟัง paste ผูกครั้งเดียว แต่ต้องเรียก analyze เวอร์ชันล่าสุดเสมอ
+  const analyzePasted = useEffectEvent((value: string) => analyze(value))
+
   useEffect(() => {
     function onPaste(event: ClipboardEvent) {
       const target = event.target as HTMLElement | null
@@ -27,7 +30,7 @@ export function HomePage() {
       if (!/youtu\.?be/.test(pasted)) return
       event.preventDefault()
       setText(pasted)
-      analyze(pasted)
+      analyzePasted(pasted)
     }
     window.addEventListener("paste", onPaste)
     return () => window.removeEventListener("paste", onPaste)
@@ -38,7 +41,7 @@ export function HomePage() {
   return (
     <section className="mx-auto flex max-w-[560px] flex-col items-center gap-6 pt-16 text-center">
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold leading-snug">{th.home.title}</h1>
+        <h1 className="text-2xl font-semibold leading-relaxed">{th.home.title}</h1>
         <p className="text-muted-foreground">
           {th.home.subtitle} · {before}
           <Kbd>{pasteShortcut()}</Kbd>
@@ -59,7 +62,10 @@ export function HomePage() {
             placeholder={th.home.placeholder}
             className="min-h-24"
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => {
+              setText(event.target.value)
+              setNote(null)
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault()
@@ -77,7 +83,7 @@ export function HomePage() {
           </p>
         )}
       </form>
-      <p className="text-xs text-muted-foreground">{th.home.usage}</p>
+      <p className="text-sm text-muted-foreground">{th.home.usage}</p>
     </section>
   )
 }

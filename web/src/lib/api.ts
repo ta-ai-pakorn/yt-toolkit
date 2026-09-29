@@ -28,7 +28,8 @@ export async function api<T>(path: string, init: RequestInit = {}, deps: Deps = 
   const headers = new Headers(init.headers)
   if (method !== "GET" && method !== "HEAD") {
     headers.set("X-Toolkit-Token", deps.token ?? readToken())
-    if (init.body !== undefined) headers.set("Content-Type", "application/json")
+    // ใส่เฉพาะ body ที่เป็นสตริง (JSON) และผู้เรียกยังไม่กำหนดเอง FormData ต้องให้เบราว์เซอร์ใส่ boundary เอง
+    if (typeof init.body === "string" && !headers.has("Content-Type")) headers.set("Content-Type", "application/json")
   }
   let res: Response
   try {

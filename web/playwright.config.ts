@@ -12,7 +12,8 @@ export default defineConfig({
   use: { baseURL: `http://127.0.0.1:${PORT}` },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `uv run python -m yttoolkit serve --port ${PORT}`,
+    // ล้างข้อมูลเก่าก่อนเปิด backend (ดูเหตุผลใน e2e/reset-data-root.mjs)
+    command: `node web/e2e/reset-data-root.mjs && uv run python -m yttoolkit serve --port ${PORT}`,
     cwd: "..",
     url: `http://127.0.0.1:${PORT}/api/ping`,
     reuseExistingServer: false,

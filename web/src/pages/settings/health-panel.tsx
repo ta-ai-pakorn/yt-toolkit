@@ -1,5 +1,4 @@
-/* eslint-disable react-refresh/only-export-components */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { CircleAlert, CircleCheck, CircleX, Power, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
@@ -13,14 +12,12 @@ import { fill, th } from "@/i18n/th"
 import { ApiError, api } from "@/lib/api"
 import type { Health, ToolState, ToolStatus } from "@/lib/types"
 
+import { useHealth } from "./use-health"
+
 type RowKey = keyof typeof th.health.rows
 
 const ICON: Record<ToolState, typeof CircleCheck> = { ok: CircleCheck, warn: CircleAlert, error: CircleX }
 const TONE: Record<ToolState, string> = { ok: "text-success", warn: "text-warning", error: "text-destructive" }
-
-export function useHealth() {
-  return useQuery({ queryKey: ["health"], queryFn: () => api<Health>("/health") })
-}
 
 function rows(health: Health): [RowKey, ToolStatus][] {
   return [
@@ -50,8 +47,10 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
   const install = useMutation({
     mutationFn: () => api<ToolStatus>("/tools/ffmpeg/install", { method: "POST" }),
     onMutate: () => toast.loading(th.health.installing, { id: "ffmpeg" }),
-    onSuccess: () => {
-      toast.success(th.health.installed, { id: "ffmpeg" })
+    onSuccess: (status) => {
+      // backend ตอบ 200 ทั้งที่ติดตั้งไม่สำเร็จได้ ดูสถานะจริงก่อนบอกว่าสำเร็จ
+      if (status.status === "ok") toast.success(th.health.installed, { id: "ffmpeg" })
+      else toast.error(status.message ?? th.errors.unknown, { id: "ffmpeg", duration: Infinity })
       void queryClient.invalidateQueries({ queryKey: ["health"] })
     },
     onError: (error) => toast.error(error.message, { id: "ffmpeg", duration: Infinity }),
@@ -59,7 +58,10 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
 
   const shutdown = useMutation({
     mutationFn: () => api<{ ok: boolean }>("/shutdown", { method: "POST", body: JSON.stringify({ force: false }) }),
-    onSuccess: onShutdown,
+    onSuccess: () => {
+      toast.dismiss()
+      onShutdown()
+    },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
         const pending = (error.body as { pendingJobs?: number }).pendingJobs ?? 0
@@ -100,6 +102,7 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
       <ItemGroup className="gap-2">
         {rows(health.data).map(([key, tool]) => {
           const Icon = ICON[tool.status]
+          const text = detail(key, tool)
           return (
             <Item key={key} variant="outline" data-testid={`tool-${key}`}>
               <ItemMedia>
@@ -107,7 +110,7 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>{th.health.rows[key]}</ItemTitle>
-                <ItemDescription className="font-mono text-xs">{detail(key, tool) || " "}</ItemDescription>
+                {text && <ItemDescription className="font-mono text-xs">{text}</ItemDescription>}
               </ItemContent>
               <ItemActions>
                 {key === "ffmpeg" && tool.status === "error" && (
@@ -128,7 +131,7 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
           {th.health.recheck}
         </Button>
         <Button variant="outline" onClick={() => shutdown.mutate()} disabled={shutdown.isPending}>
-          <Power aria-hidden />
+          {shutdown.isPending ? <Spinner /> : <Power aria-hidden />}
           {th.health.shutdown}
         </Button>
       </div>

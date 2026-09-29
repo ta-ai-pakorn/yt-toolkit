@@ -28,3 +28,46 @@ test("กดปุ่ม d ไม่สลับธีม (ไม่มีปุ
   await expect(page.locator("html")).toHaveAttribute("class", before ?? "")
   expect(await page.evaluate(() => localStorage.getItem("theme"))).toBeNull()
 })
+
+test("ปุ่มตั้งค่าที่หัวหน้าเป็นลิงก์จริง ไม่ใช่ปุ่ม", async ({ page }) => {
+  await page.goto("/")
+  await expect(page.getByRole("link", { name: "ตั้งค่า" })).toHaveAttribute("href", "/settings/health")
+  await expect(page.getByRole("button", { name: "ตั้งค่า" })).toHaveCount(0)
+  await page.getByRole("link", { name: "ตั้งค่า" }).click()
+  await expect(page.getByRole("link", { name: "ตั้งค่า" })).toHaveAttribute("aria-current", "page")
+})
+
+test("พิมพ์ในช่องหลังกดวิเคราะห์ ข้อความแจ้งเตือนหายไป", async ({ page }) => {
+  await page.goto("/")
+  await page.getByRole("textbox").fill("https://youtu.be/dQw4w9WgXcQ")
+  await page.getByRole("button", { name: "วิเคราะห์" }).click()
+  await expect(page.getByRole("status")).toBeVisible()
+  await page.getByRole("textbox").fill("https://youtu.be/abc")
+  await expect(page.getByRole("status")).toHaveCount(0)
+})
+
+const readColorScheme = "document.documentElement.style.colorScheme"
+
+test.describe("ธีมตั้งก่อนหน้าโหลดเสร็จ", () => {
+  for (const scheme of ["dark", "light"] as const) {
+    test(`ไม่ตั้งค่าไว้ ตามระบบ (${scheme})`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme })
+      // เก็บคลาสของ <html> ทันทีที่ DOM พร้อม ก่อนที่ React จะทำงาน
+      await page.addInitScript(
+        'document.addEventListener("DOMContentLoaded", function () { window.earlyClass = document.documentElement.className })',
+      )
+      await page.goto("/")
+      expect(await page.evaluate("window.earlyClass")).toBe(scheme)
+      await expect(page.locator("html")).toHaveClass(scheme)
+      expect(await page.evaluate(readColorScheme)).toBe(scheme)
+    })
+  }
+
+  test("ค่าที่บันทึกไว้ชนะระบบ และไม่มีทั้งสองคลาสพร้อมกัน", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "dark" })
+    await page.addInitScript('localStorage.setItem("theme", "light")')
+    await page.goto("/")
+    await expect(page.locator("html")).toHaveClass("light")
+    expect(await page.evaluate(readColorScheme)).toBe("light")
+  })
+})

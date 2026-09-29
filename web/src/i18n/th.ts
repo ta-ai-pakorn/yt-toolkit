@@ -1,5 +1,6 @@
 export const th = {
   app: { name: "YT Toolkit" },
+  common: { loading: "กำลังโหลด" },
   nav: { settings: "ตั้งค่า", home: "หน้าแรก" },
   home: {
     title: "วางลิงก์ยูทูป แล้วเลือกสิ่งที่อยากได้",

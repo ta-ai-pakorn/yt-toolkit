@@ -1,21 +1,4 @@
-# React + TypeScript + Vite + shadcn/ui
+# YT Toolkit (หน้าเว็บ)
 
-This is a template for a new Vite project with React, TypeScript, and shadcn/ui.
-
-## Adding components
-
-To add components to your app, run the following command:
-
-```bash
-npx shadcn@latest add button
-```
-
-This will place the ui components in the `src/components` directory.
-
-## Using components
-
-To use the components in your app, import them as follows:
-
-```tsx
-import { Button } from "@/components/ui/button"
-```
+โฟลเดอร์นี้คือหน้าเว็บ (React + Vite) ที่ backend ส่งให้เบราว์เซอร์ ไฟล์ที่ build แล้วอยู่ใน `web/dist` และต้อง commit ทุกครั้งที่แก้โค้ด
+วิธีรันและ build อยู่ในหัวข้อ "สำหรับผู้พัฒนา" ของ README.md ที่โฟลเดอร์หลัก
