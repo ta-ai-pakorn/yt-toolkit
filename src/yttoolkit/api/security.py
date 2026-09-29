@@ -11,6 +11,11 @@ from .errors import error_body
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 FORBIDDEN_MESSAGE = "คำขอนี้ไม่ได้รับอนุญาต ลองรีเฟรชหน้าเว็บ"
 _CHECKED_HEADERS = ("host", "origin", "x-toolkit-token")
+_FETCH_SITE = "sec-fetch-site"
+# เบราว์เซอร์บอกว่าคำขอมาจากเว็บอื่น (เช่น <img src=".../api/videos/...?refresh=1">) GET ของ /api
+# บางตัวมีผลข้างเคียง (probe ยูทูป เขียนประวัติ ทำภาพ) จึงปฏิเสธทุก method
+# ไม่มี header นี้ (curl, CLI, เบราว์เซอร์เก่า) หรือเป็น same-origin / none (พิมพ์ URL เอง) ผ่านได้
+_FOREIGN_FETCH_SITES = frozenset({"cross-site", "same-site"})
 WS_POLICY_VIOLATION = 1008
 
 
@@ -44,6 +49,10 @@ class LocalOnlyMiddleware:
             return 421
         if any(len(headers.get(name, [])) > 1 for name in _CHECKED_HEADERS):
             return 403
+        if scope["type"] == "http" and _is_api_path(scope.get("path", "")):
+            fetch_site = headers.get(_FETCH_SITE, [])
+            if len(fetch_site) > 1 or (fetch_site and fetch_site[0].strip().lower() in _FOREIGN_FETCH_SITES):
+                return 403
         origin = headers.get("origin", [None])[0]
         if scope["type"] == "websocket":
             return None if origin in self._origins else 403
@@ -56,11 +65,15 @@ class LocalOnlyMiddleware:
         return None
 
 
+def _is_api_path(path: str) -> bool:
+    return path == "/api" or path.startswith("/api/")
+
+
 def _collect_headers(raw: Iterable[tuple[bytes, bytes]]) -> dict[str, list[str]]:
     headers: dict[str, list[str]] = {}
     for key, value in raw:
         name = key.decode("latin-1").lower()
-        if name in _CHECKED_HEADERS:
+        if name in _CHECKED_HEADERS or name == _FETCH_SITE:
             headers.setdefault(name, []).append(value.decode("latin-1"))
     return headers
 

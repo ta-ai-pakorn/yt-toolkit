@@ -105,6 +105,8 @@ def yt_error_response(exc: YtError, subject: str) -> JSONResponse:
     """YtError -> error envelope ตามตารางรหัส ข้อความถึงผู้ใช้มาจาก MESSAGES (ไม่รู้จักใช้ของ E_UNKNOWN)"""
     status = STATUS_BY_CODE.get(exc.code, 500)
     unexpected = status == 500
+    # รหัสที่หน้าเว็บไม่รู้จักส่งเป็น E_UNKNOWN (log ยังเก็บรหัสเดิมไว้)
+    code = exc.code if exc.code in MESSAGES else "E_UNKNOWN"
     # error ที่คาดไว้ (คลิปส่วนตัว ไลฟ์ ฯลฯ) ไม่ต้องมี traceback ให้รก log
     log.warning(
         "ดึงข้อมูลคลิปไม่สำเร็จ %s (%s): %s",
@@ -113,7 +115,7 @@ def yt_error_response(exc: YtError, subject: str) -> JSONResponse:
         exc.detail,
         exc_info=exc if unexpected else None,
     )
-    return error_response(status, exc.code, exc.message, exc.detail or None)
+    return error_response(status, code, exc.message, exc.detail or None)
 
 
 def _maps_yt_errors(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -175,13 +177,19 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
     @_maps_yt_errors
     def storyboard(video_id: str) -> dict:
         index = storyboard_index(video_id)
+        # ภาพเฟรมตอบแบบ immutable จึงต่อ ?v=<เวลาแก้ไข index.json> ให้ URL เปลี่ยนเมื่อสร้างชุดใหม่
+        folder = cache_root / video_id / STORYBOARD_FOLDER
+        try:
+            query = f"?v={(folder / STORYBOARD_INDEX).stat().st_mtime_ns}"
+        except OSError:
+            query = ""
         return {
             "intervalMs": index["intervalMs"],
             "frames": [
                 {
                     "index": frame["index"],
                     "tMs": frame["tMs"],
-                    "url": f"/api/cache/{video_id}/{STORYBOARD_FOLDER}/{frame['file']}",
+                    "url": f"/api/cache/{video_id}/{STORYBOARD_FOLDER}/{frame['file']}{query}",
                 }
                 for frame in index["frames"]
             ],
@@ -257,7 +265,8 @@ def _cache_target(
     parts = safe_parts(file_path)
     if parts is None or not all(_CACHE_PART.fullmatch(part) for part in parts):
         return None
-    media_type = _CACHE_MEDIA_TYPES.get(PurePosixPath(parts[-1]).suffix.lower())
+    # นามสกุลต้องเป็นตัวพิมพ์เล็กเป๊ะ ๆ (แอพตั้งชื่อไฟล์เองเป็นตัวเล็กทั้งหมด)
+    media_type = _CACHE_MEDIA_TYPES.get(PurePosixPath(parts[-1]).suffix)
     if media_type is None:
         return None
     folder = cache_root / video_id
@@ -265,8 +274,13 @@ def _cache_target(
     try:
         if not target.is_file():
             return None
-        # กันลิงก์ (symlink/junction) ในโฟลเดอร์ cache พาออกไปนอกโฟลเดอร์ของคลิป
-        if not target.resolve(strict=True).is_relative_to(folder.resolve(strict=True)):
+        real_folder = folder.resolve(strict=True)
+        real_target = target.resolve(strict=True)
+        # NTFS ไม่สนตัวพิมพ์: AQZ-KE-BPKQ หรือ STORYBOARD ก็เปิดโฟลเดอร์จริงได้ ต้องเทียบชื่อจริงบนดิสก์
+        # และกันลิงก์ (symlink/junction) ในโฟลเดอร์ cache พาออกไปนอกโฟลเดอร์ของคลิป
+        if real_folder.name != video_id or not real_target.is_relative_to(real_folder):
+            return None
+        if real_target.relative_to(real_folder).parts != parts:
             return None
     except (OSError, ValueError):
         return None

@@ -17,6 +17,7 @@ log = logging.getLogger("yttoolkit")
 NOT_FOUND_MESSAGE = "ไม่พบสิ่งที่ขอ"
 BAD_REQUEST_MESSAGE = "ข้อมูลที่ส่งมาไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ"
 UNKNOWN_MESSAGE = MESSAGES["E_UNKNOWN"]
+VALIDATION_DETAIL_MAX = 500
 
 
 @functools.cache
@@ -70,7 +71,10 @@ async def _http_error(request: Request, exc: HTTPException) -> Response:
 
 
 async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-    return error_response(422, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, str(exc))
+    # ข้อความของ pydantic ยกค่าที่ส่งมาทั้งก้อน (เช่นข้อความยาว 20,000 ตัว) ตัดไว้ไม่ให้สะท้อนกลับยาว ๆ
+    # ซ่อนโฟลเดอร์ผู้ใช้ก่อนตัด ไม่งั้นตัดกลาง path แล้วชื่อผู้ใช้ครึ่งหนึ่งจะหลุดไป
+    detail = _redact_home(str(exc))[:VALIDATION_DETAIL_MAX]
+    return error_response(422, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, detail)
 
 
 async def _unhandled_error(request: Request, exc: Exception) -> JSONResponse:

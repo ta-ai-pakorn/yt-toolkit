@@ -135,7 +135,7 @@ W7 กล่องยืนยัน / toast / error: ซ้อนบนทุ�
 
 **กฎปุ่มหลัก:** "โหลด mp4" เป็นปุ่มหลักปุ่มเดียวของ W2 ปุ่มอื่นทั้งหมดเป็นปุ่มรองหรือปุ่มโปร่ง
 
-**เมื่อกดปุ่มโหลดใด ๆ:** สร้างงานเข้าคิวทันที → toast "เพิ่มเข้าคิวแล้ว" → แถบคิวแสดงงานนั้น (ไม่ย้ายหน้า)
+**เมื่อกดปุ่มโหลดใด ๆ:** สร้างงานเข้าคิวทันที → toast "เพิ่มเข้าคิวแล้ว" → แถบคิวแสดงงานนั้น (ไม่ย้ายหน้า) (ยกเว้น contact sheet และ zip ใน M2 ซึ่งโหลดผ่านเบราว์เซอร์ทันที)
 
 ### W3 เลือกคลิป (เพลย์ลิสต์ / หลายลิงก์)
 | ส่วน | คอมโพเนนต์ | พฤติกรรม |
@@ -339,6 +339,7 @@ queued ──► running ──► done
 
 - Base: `http://127.0.0.1:<port>/api` · รับส่ง JSON (UTF-8)
 - **Token:** เซิร์ฟเวอร์ใส่ token ลงใน `<meta name="yt-token">` ของ `index.html` ตอนเสิร์ฟ หน้าเว็บส่งกลับใน header `X-Toolkit-Token` ทุกคำขอที่ไม่ใช่ GET
+- **Sec-Fetch-Site:** คำขอ /api ที่ Sec-Fetch-Site เป็น cross-site หรือ same-site ถูกปฏิเสธ 403 (`E_FORBIDDEN`) ทุก method เพราะ GET บางตัวมีผลข้างเคียง (probe ยูทูป เขียนประวัติ ทำภาพ) · ไม่มี header นี้ หรือเป็น same-origin / none ผ่านได้
 - **รูปแบบ error:** `{"error": {"code": "E_...", "message": "<ข้อความภาษาไทย>", "detail": "<ข้อความเทคนิค>"}}`
 
 | Method | Path | Body / Query | ตอบกลับ |
@@ -347,7 +348,7 @@ queued ──► running ──► done
 | GET | `/health` | — | `{version, commit, tools:{ffmpeg, ytdlp, jsRuntime}, disk, output, network}` ทุกตัวเป็น `ToolStatus = {status: ok\|warn\|error, name, version, message, path}` (ใช้เวลาได้ถึง 5 วิเพราะเช็คเน็ต) |
 | POST | `/resolve` | `{text}` (ไม่เกิน 20,000 ตัวอักษร) | `{resolveId, items:[{input, kind: video\|playlist\|ambiguous\|invalid, videoId?, playlistId?, error?}]}` เรียงตามลำดับที่วาง · `error` มีเฉพาะแถว invalid = `{code:"E_INVALID_INPUT", message}` · `resolveId` ยังไม่เก็บลงฐานข้อมูล (W3 ใช้ใน M4) |
 | GET | `/videos/{id}` | `?refresh=1` | `VideoInfo` (ข้อ 6.2.1) · probe ใหม่ถ้าไม่มี cache หรือขอ refresh · id ผิดรูปแบบ → 422 `E_INVALID_INPUT` |
-| GET | `/videos/{id}/storyboard` | — | `{intervalMs, frames:[{index, tMs, url}]}` · `url` = `/api/cache/{id}/storyboard/f_NNNN.jpg` |
+| GET | `/videos/{id}/storyboard` | — | `{intervalMs, frames:[{index, tMs, url}]}` · `url` = `/api/cache/{id}/storyboard/f_NNNN.jpg?v=<เวลาที่สร้างชุดภาพ>` (ภาพชุดใหม่ได้ URL ใหม่) |
 | GET | `/videos/{id}/storyboard/contact-sheet.jpg` | — | ไฟล์ JPEG (Content-Disposition: attachment) ชื่อ `<ชื่อคลิป> - contact sheet.jpg` (ชื่อภาษาไทยส่งใน `filename*` ตาม RFC 5987 ชื่อสำรอง `contact-sheet.jpg`) |
 | GET | `/videos/{id}/storyboard/frames.zip` | — | ไฟล์ zip (Content-Disposition: attachment) ชื่อ `<ชื่อคลิป> - frames.zip` ข้างในเป็น `frame_HH-MM-SS.jpg` |
 | GET | `/videos/{id}/subtitles` | — | `{tracks:[{id, lang, name, group: owner\|original\|translated}], defaultTrackId?}` |
@@ -362,7 +363,7 @@ queued ──► running ──► done
 | POST | `/tools/ffmpeg/install` | — | `ToolStatus` ของ ffmpeg หลังติดตั้ง · ล้มเหลว → `E_TOOL_INSTALL_FAILED` |
 | GET | `/jobs/{id}/outputs/{n}` | — | ไฟล์ (Content-Disposition: attachment) |
 | POST | `/jobs/{id}/outputs/{n}/reveal` | — | `{ok:true}` เปิด Explorer/Finder |
-| GET | `/cache/{videoId}/{path}` | `?download=1` (ไม่บังคับ) | ไฟล์ภาพใน cache (ภาพเฟรม, ปก) เฉพาะที่อยู่ใต้ `data/cache/<videoId>/` · path ที่มี `..`, `\`, `:` หรือขึ้นต้นด้วย `/` → 404 (AC-SEC-04) · ภาพเฟรมมี `Cache-Control: public, max-age=86400, immutable` · `?download=1` → attachment ชื่อ `frame_HH-MM-SS.jpg` |
+| GET | `/cache/{videoId}/{path}` | `?download=1` (ไม่บังคับ) | ไฟล์ภาพใน cache (ภาพเฟรม, ปก) เฉพาะที่อยู่ใต้ `data/cache/<videoId>/` · path ที่มี `..`, `\`, `:` หรือขึ้นต้นด้วย `/` หรือตัวพิมพ์เล็ก/ใหญ่ไม่ตรงชื่อจริง → 404 (AC-SEC-04) · ภาพเฟรมมี `Cache-Control: public, max-age=86400, immutable` · `?download=1` → attachment ชื่อ `frame_HH-MM-SS.jpg` |
 | GET | `/history` | `?q=&limit=&offset=` (`limit` ค่าเริ่มต้น 20 สูงสุด 100) | `{items:[{videoId, title, thumbnailUrl, durationS, outputs:[kind], lastAt}], total}` |
 | GET | `/diagnostics` | `?jobId=` (ไม่บังคับ) | `{text}` รายงานแจ้งปัญหาแบบ Markdown ตามข้อ 7.1 |
 | GET | `/settings` | — | `Settings` |

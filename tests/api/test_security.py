@@ -24,6 +24,18 @@ def _client(extra_origins=()) -> TestClient:
     def post_ping():
         return {"ok": True}
 
+    @app.get("/api/ping")
+    def get_api_ping():
+        return {"ok": True}
+
+    @app.post("/api/ping")
+    def post_api_ping():
+        return {"ok": True}
+
+    @app.get("/api")
+    def get_api_root():
+        return {"ok": True}
+
     app.add_middleware(LocalOnlyMiddleware, port=PORT, token=TOKEN, extra_origins=extra_origins)
     return TestClient(app, base_url=BASE)
 
@@ -80,7 +92,7 @@ def test_post_with_non_ascii_token_rejected_cleanly():
         "headers": [
             (b"host", b"127.0.0.1:8787"),
             (b"origin", BASE.encode()),
-            (b"x-toolkit-token", "ไม่ใช่".encode("utf-8")),
+            (b"x-toolkit-token", "ไม่ใช่".encode()),
         ],
     }
     asyncio.run(LocalOnlyMiddleware(app, port=PORT, token=TOKEN)(scope, receive, send))
@@ -202,3 +214,71 @@ def test_duplicate_origin_rejected_even_on_get():
     sent, reached = _call_raw(scope)
     assert reached == []
     assert sent[0]["status"] == 403
+
+
+# ---------- Sec-Fetch-Site: เว็บอื่นยิง /api ผ่าน <img>/<form>/fetch ไม่ได้ ----------
+
+
+@pytest.mark.parametrize("value", ["cross-site", "same-site", "Cross-Site", "SAME-SITE"])
+def test_api_get_from_other_site_rejected(value):
+    resp = _client().get("/api/ping", headers={"sec-fetch-site": value})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "E_FORBIDDEN"
+
+
+@pytest.mark.parametrize("value", ["cross-site", "same-site"])
+def test_api_post_from_other_site_rejected_even_with_token(value):
+    headers = {"X-Toolkit-Token": TOKEN, "Origin": BASE, "sec-fetch-site": value}
+    assert _client().post("/api/ping", headers=headers).status_code == 403
+
+
+def test_api_root_from_other_site_rejected():
+    assert _client().get("/api", headers={"sec-fetch-site": "cross-site"}).status_code == 403
+
+
+@pytest.mark.parametrize("value", ["same-origin", "none"])
+def test_api_get_same_origin_or_typed_url_allowed(value):
+    assert _client().get("/api/ping", headers={"sec-fetch-site": value}).status_code == 200
+
+
+def test_api_get_without_sec_fetch_site_allowed():  # curl, CLI, เทส, เบราว์เซอร์เก่า
+    assert _client().get("/api/ping").status_code == 200
+
+
+def test_api_post_same_origin_with_token_allowed():
+    headers = {"X-Toolkit-Token": TOKEN, "Origin": BASE, "sec-fetch-site": "same-origin"}
+    assert _client().post("/api/ping", headers=headers).status_code == 200
+
+
+@pytest.mark.parametrize("value", ["cross-site", "same-site"])
+def test_non_api_path_ignores_sec_fetch_site(value):  # หน้าเว็บ/ไฟล์ static ไม่กระทบ
+    assert _client().get("/ping", headers={"sec-fetch-site": value}).status_code == 200
+
+
+def test_path_that_only_starts_with_api_is_not_api():
+    app = FastAPI()
+
+    @app.get("/apikey")
+    def apikey():
+        return {"ok": True}
+
+    app.add_middleware(LocalOnlyMiddleware, port=PORT, token=TOKEN)
+    client = TestClient(app, base_url=BASE)
+    assert client.get("/apikey", headers={"sec-fetch-site": "cross-site"}).status_code == 200
+
+
+def test_duplicate_sec_fetch_site_on_api_rejected():
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/ping",
+        "headers": [HOST, (b"sec-fetch-site", b"same-origin"), (b"sec-fetch-site", b"cross-site")],
+    }
+    sent, reached = _call_raw(scope)
+    assert reached == []
+    assert sent[0]["status"] == 403
+
+
+def test_raw_scope_without_path_still_works():
+    sent, reached = _call_raw({"type": "http", "method": "GET", "headers": [HOST]})
+    assert sent == [] and len(reached) == 1

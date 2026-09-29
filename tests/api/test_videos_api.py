@@ -276,7 +276,7 @@ def test_error_status_mapping(api, code, status):
     resp = api(BrokenExtractor(FIXTURES, code)).get(f"/api/videos/{BBB}")
     assert resp.status_code == status
     error = _error(resp)
-    assert error["code"] == code
+    assert error["code"] == (code if code in MESSAGES else "E_UNKNOWN")
     assert error["message"] == MESSAGES.get(code, MESSAGES["E_UNKNOWN"])
     assert str(Path.home()) not in error["detail"]  # detail ถูกซ่อนโฟลเดอร์ผู้ใช้
     assert error["detail"].startswith(f"ERROR: เทส {code} ที่ ~")
@@ -308,12 +308,33 @@ def test_storyboard(api):
     body = resp.json()
     assert body["intervalMs"] == 4961
     assert len(body["frames"]) == 128
+    version = (client.cache_root / BBB / "storyboard" / "index.json").stat().st_mtime_ns
     assert body["frames"][1] == {
         "index": 1,
         "tMs": 4961,
-        "url": f"/api/cache/{BBB}/storyboard/f_0001.jpg",
+        "url": f"/api/cache/{BBB}/storyboard/f_0001.jpg?v={version}",
     }
     assert set(body) == {"intervalMs", "frames"}
+
+
+def test_storyboard_version_changes_when_rebuilt(api):
+    client = api()
+    first = client.get(f"/api/videos/{BBB}/storyboard").json()["frames"][0]["url"]
+    folder = client.cache_root / BBB / "storyboard"
+    (folder / "f_0000.jpg").unlink()  # cache ไม่ครบ = สร้างใหม่ทั้งชุด
+    second = client.get(f"/api/videos/{BBB}/storyboard").json()["frames"][0]["url"]
+    assert first.split("?")[0] == second.split("?")[0]
+    assert first != second
+
+
+def test_versioned_frame_url_downloads_with_timecode(api):
+    client = api()
+    url = client.get(f"/api/videos/{BBB}/storyboard").json()["frames"][13]["url"]
+    assert "?v=" in url
+    resp = client.get(f"{url}&download=1")
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "public, max-age=86400, immutable"
+    assert resp.headers["content-disposition"] == 'attachment; filename="frame_00-01-04.jpg"'
 
 
 def test_storyboard_frame_urls_are_served(api):
@@ -643,3 +664,115 @@ def test_cache_foreign_host_rejected(api):  # AC-SEC-02
         f"/api/cache/{BBB}/storyboard/f_0000.jpg", headers={"host": "evil.example:8787"}
     )
     assert resp.status_code == 421
+
+
+def test_unknown_code_logged_with_original_code(api, caplog):
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        resp = api(BrokenExtractor(FIXTURES, "E_SOMETHING_NEW")).get(f"/api/videos/{BBB}")
+    assert _error(resp)["code"] == "E_UNKNOWN"
+    records = [r for r in caplog.records if "E_SOMETHING_NEW" in r.getMessage()]
+    assert records and records[0].exc_info is not None
+
+
+# ---------- เว็บอื่นยิง GET ที่มีผลข้างเคียงไม่ได้ ----------
+
+
+@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+def test_cross_site_get_does_not_probe(api, site):
+    client = api()
+    resp = client.get(f"/api/videos/{BBB}?refresh=1", headers={"sec-fetch-site": site})
+    assert resp.status_code == 403
+    assert _error(resp)["code"] == "E_FORBIDDEN"
+    assert client.fake.calls == []
+
+
+def test_cross_site_contact_sheet_rejected(api):
+    client = api()
+    resp = client.get(
+        f"/api/videos/{BBB}/storyboard/contact-sheet.jpg", headers={"sec-fetch-site": "cross-site"}
+    )
+    assert resp.status_code == 403
+    assert client.fake.calls == []
+
+
+def test_same_origin_get_allowed(api):
+    resp = api().get(f"/api/videos/{BBB}", headers={"sec-fetch-site": "same-origin"})
+    assert resp.status_code == 200
+
+
+# ---------- ตัวพิมพ์เล็ก/ใหญ่ใน /cache ต้องตรงเป๊ะ (NTFS ไม่สนตัวพิมพ์) ----------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"/api/cache/{BBB.upper()}/storyboard/f_0000.jpg",
+        f"/api/cache/{BBB.lower()}/storyboard/f_0000.jpg",
+        f"/api/cache/{BBB}/STORYBOARD/f_0000.jpg",
+        f"/api/cache/{BBB}/storyboard/F_0000.jpg",
+        f"/api/cache/{BBB}/storyboard/f_0000.JPG",
+        f"/api/cache/{BBB}/storyboard/f_0000.Jpg",
+    ],
+)
+def test_cache_requires_exact_case(api, path):
+    client = api()
+    _built(client)
+    resp = client.get(path)
+    assert resp.status_code == 404, path
+    assert _error(resp)["code"] == "E_NOT_FOUND"
+
+
+def test_cache_rejects_uppercase_extension_even_if_file_has_it(api):
+    client = api()
+    folder = client.cache_root / BBB
+    folder.mkdir(parents=True)
+    Image.new("RGB", (4, 4)).save(folder / "thumb.PNG", "PNG")
+    assert client.get(f"/api/cache/{BBB}/thumb.PNG").status_code == 404
+
+
+# ---------- ชื่อไฟล์: อักขระกลับทิศ/ขึ้นบรรทัด ----------
+
+
+def test_safe_title_strips_bidi_override_and_line_breaks():
+    from yttoolkit.api.videos import safe_title
+
+    assert safe_title("คลิป\u202egpj.exe") == "คลิปgpj.exe"
+    assert safe_title("บรรทัด1\r\nบรรทัด2\rสาม\nสี่") == "บรรทัด1 บรรทัด2 สาม สี่"
+
+
+# ---------- error อื่นที่ไม่ใช่ YtError ระหว่างทำภาพ ----------
+
+
+@pytest.mark.parametrize(
+    ("func", "path"),
+    [("contact_sheet", "contact-sheet.jpg"), ("frames_zip", "frames.zip")],
+)
+def test_unexpected_error_while_building_file_is_500(api, monkeypatch, func, path):
+    from fastapi.testclient import TestClient
+
+    from yttoolkit.api import videos as videos_api
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("ภาพพัง")
+
+    monkeypatch.setattr(videos_api, func, boom)
+    client = TestClient(api().app, base_url=BASE, raise_server_exceptions=False)
+    resp = client.get(f"/api/videos/{BBB}/storyboard/{path}")
+    assert resp.status_code == 500
+    assert resp.headers["content-type"].startswith("application/json")
+    error = _error(resp)
+    assert error["code"] == "E_UNKNOWN"
+    assert error["message"] == MESSAGES["E_UNKNOWN"]
+    assert "Traceback" not in resp.text
+    assert "content-disposition" not in resp.headers
+
+
+# ---------- 422 ไม่สะท้อนข้อความยาว ๆ กลับไป ----------
+
+
+def test_validation_detail_is_truncated(api):
+    resp = api().post("/api/resolve", json={"text": "ก" * 20001}, headers=AUTH)
+    assert resp.status_code == 422
+    detail = _error(resp)["detail"]
+    assert len(detail) <= 500
+    assert "ก" * 600 not in resp.text
