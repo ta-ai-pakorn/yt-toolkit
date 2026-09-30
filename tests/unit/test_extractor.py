@@ -207,6 +207,9 @@ _ALLOWED_TOP = {
     "chapters",
     "playlist_count",
     "formats",
+    "description",
+    "subtitles",
+    "automatic_captions",
 }
 _ALLOWED_FORMAT = {
     "format_id",
