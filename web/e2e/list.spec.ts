@@ -293,7 +293,7 @@ test.describe("D3 คลิปก่อนหน้า/ถัดไปที่ 
   test("ไปคลิปถัดไปแล้วเลื่อนขึ้นบนสุด", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 500 })
     await openFirst(page)
-    await page.getByRole("button", { name: /ดูทั้งหมด/ }).click()
+    await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(128)
     await page.evaluate(() => window.scrollTo(0, 400))
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(100)
     await sequence(page).getByRole("button", { name: "ถัดไป" }).evaluate((button: HTMLElement) => button.click())
@@ -343,7 +343,7 @@ test.describe("D3 คลิปก่อนหน้า/ถัดไปที่ 
       await page.emulateMedia({ colorScheme: scheme })
       await openFirst(page)
       await expect(sequence(page)).toBeVisible()
-      await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(12)
+      await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(128)
       await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
       expect(await seriousViolations(page)).toEqual([])
     })

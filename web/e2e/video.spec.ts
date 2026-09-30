@@ -10,6 +10,8 @@ const PRIVATE_MESSAGE = "คลิปนี้เป็นส่วนตัว 
 const BOT_MESSAGE = "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท รอสัก 10 นาทีแล้วค่อยลองใหม่"
 const NO_STORYBOARD_MESSAGE = "คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว ภาพคมจะใช้ได้ในเวอร์ชันถัดไป"
 const FRAME_LIST = "รายการภาพเฟรม"
+// ภาพเฟรมของ Big Buck Bunny ในชุดทดสอบ: แสดงครบทุกภาพตั้งแต่แรก (D7)
+const FRAME_COUNT = 128
 // ลิงก์เว็บอื่นยังเป็นแถวสีแดง (ข้อความธรรมดาที่ไม่มีลิงก์ถูกข้ามเงียบ ๆ ตั้งแต่ D1)
 const NOT_YOUTUBE = "https://vimeo.com/123"
 const MENU_ITEMS = ["คัดลอกภาพ", "โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้"]
@@ -19,7 +21,7 @@ const frameButton = (page: Page, time: string) => page.getByRole("button", { nam
 
 async function openBbb(page: Page) {
   await page.goto(`/v/${BBB}`)
-  await expect(frameItems(page)).toHaveCount(12)
+  await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
 }
 
 test.describe("W2 หัวคลิป", () => {
@@ -49,7 +51,7 @@ test.describe("W2 หัวคลิป", () => {
     await expect(page.getByText("กำลังโหลดภาพเฟรม")).toBeAttached()
     await expect(page.locator('[data-slot="skeleton"].aspect-video')).toHaveCount(7)
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
-    await expect(frameItems(page)).toHaveCount(12)
+    await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
   })
 
@@ -119,7 +121,7 @@ test.describe("W2 ลำดับการโหลดและความท�
     await page.waitForTimeout(700)
     expect(storyboardRequests).toEqual([])
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
-    await expect(frameItems(page)).toHaveCount(12)
+    await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
     expect(storyboardRequests.filter((url) => url.endsWith("/storyboard"))).toHaveLength(1)
   })
 
@@ -138,7 +140,7 @@ test.describe("W2 ลำดับการโหลดและความท�
     await expect(page.getByText("เน็ตหลุด ลองใหม่อีกครั้ง")).toBeVisible()
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
     await expect(page.locator('[data-slot="alert"]')).toHaveCount(0)
-    await expect(frameItems(page)).toHaveCount(12)
+    await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
   })
 
   test("หน้าพัง (ข้อมูลผิดรูป) แล้วเปลี่ยนไปคลิปอื่นในหน้าเดิม → กล่อง error ถูกล้าง แสดงคลิปใหม่ได้", async ({ page }) => {
@@ -160,7 +162,7 @@ test.describe("W2 ลำดับการโหลดและความท�
 })
 
 test.describe("W2 ภาพเฟรม", () => {
-  test("เห็น 12 ภาพก่อน · 'ดูทั้งหมด (128)' แสดงครบ 128 · 'ย่อ' กลับเป็น 12", async ({ page }) => {
+  test("D7: เห็นครบทั้ง 128 ภาพตั้งแต่แรก ไม่มีปุ่ม 'ดูทั้งหมด' หรือ 'ย่อ' · ภาพโหลดแบบ lazy", async ({ page }) => {
     await openBbb(page)
     await expect(page.getByRole("heading", { name: "ภาพเฟรม" })).toBeVisible()
     const first = frameItems(page).first().getByRole("img")
@@ -168,12 +170,20 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(first).toHaveAttribute("loading", "lazy")
     await expect(first).toHaveAttribute("width", "320")
     await expect(first).toHaveAttribute("height", "180")
+    await expect(page.getByRole("button", { name: /ดูทั้งหมด/ })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "ย่อ" })).toHaveCount(0)
+  })
 
-    await page.getByRole("button", { name: "ดูทั้งหมด (128)" }).click()
-    await expect(frameItems(page)).toHaveCount(128)
-    await expect(page.getByRole("button", { name: "ย่อ" })).toBeVisible()
-    await page.getByRole("button", { name: "ย่อ" }).click()
-    await expect(frameItems(page)).toHaveCount(12)
+  test("D7: ภาพสุดท้ายของคลิปยาว (00:10:3x) อยู่ในหน้าแล้วโดยไม่ต้องกดอะไร · ภาพที่อยู่ไกลจอใช้ content-visibility", async ({
+    page,
+  }) => {
+    await page.goto(`/v/${BBB}`)
+    await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
+    const last = frameItems(page).last().getByRole("img")
+    await expect(last).toBeAttached()
+    await expect(last).toHaveAttribute("alt", /ภาพเฟรมที่ 00:10:3\d/)
+    await expect(last).toHaveAttribute("loading", "lazy")
+    await expect(frameItems(page).last()).toHaveCSS("content-visibility", "auto")
   })
 
   test("ชี้เมาส์ที่ภาพ: ไม่มี hover card มีแค่วงขอบบาง ๆ กับเวลาบนภาพ", async ({ page }) => {
@@ -356,10 +366,8 @@ test.describe("W2 ภาพเฟรม", () => {
     expect(bytes.subarray(0, 2).toString("latin1")).toBe("PK")
   })
 
-  test("ตอนขยายทั้งหมด ภาพที่อยู่ไกลจอ (content-visibility) ยังโฟกัสด้วยคีย์บอร์ดและเปิดเมนูได้", async ({ page }) => {
+  test("ภาพที่อยู่ไกลจอ (content-visibility) ยังโฟกัสด้วยคีย์บอร์ดและเปิดเมนูได้", async ({ page }) => {
     await openBbb(page)
-    await page.getByRole("button", { name: "ดูทั้งหมด (128)" }).click()
-    await expect(frameItems(page)).toHaveCount(128)
     await expect(frameItems(page).first()).toHaveCSS("content-visibility", "auto")
     const last = page.getByRole("button", { name: /ภาพเฟรมที่ 00:10:3\d/ })
     await last.focus()
@@ -437,24 +445,23 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
     fail = false
     await alert.getByRole("button", { name: "ลองใหม่" }).click()
-    await expect(frameItems(page)).toHaveCount(12)
+    await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
   })
 })
 
 test.describe("W2 จอแคบ", () => {
   test.use({ viewport: { width: 390, height: 844 } })
 
-  test("grid 3 คอลัมน์ เห็น 2 แถว (6 ภาพ) แล้วกดดูทั้งหมด", async ({ page }) => {
+  test("grid 3 คอลัมน์ เห็นครบทุกภาพ ไม่ต้องกดดูทั้งหมด", async ({ page }) => {
     await page.goto(`/v/${BBB}`)
     await expect(frameItems(page).first()).toBeVisible()
     const columns = await page
       .getByRole("list", { name: FRAME_LIST })
       .evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length)
     expect(columns).toBe(3)
-    await expect(frameItems(page).locator("visible=true")).toHaveCount(6)
+    await expect(frameItems(page).locator("visible=true")).toHaveCount(FRAME_COUNT)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    await page.getByRole("button", { name: "ดูทั้งหมด (128)" }).click()
-    await expect(frameItems(page).locator("visible=true")).toHaveCount(128)
+    await expect(page.getByRole("button", { name: /ดูทั้งหมด/ })).toHaveCount(0)
   })
 })
 
@@ -468,10 +475,10 @@ test.describe("การเข้าถึง (axe)", () => {
       expect(await seriousViolations(page)).toEqual([])
     })
 
-    test(`หน้าผลลัพธ์ W2 ไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
+    test(`หน้าผลลัพธ์ W2 (ภาพเฟรมครบทุกภาพ) ไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: scheme })
       await page.goto(`/v/${BBB}`)
-      await expect(frameItems(page)).toHaveCount(12)
+      await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
       await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
       expect(await seriousViolations(page)).toEqual([])
     })
@@ -615,13 +622,13 @@ test.describe("W2 ภาพใหญ่ (lightbox)", () => {
     await expect(frameButton(page, "00:00:04")).toBeFocused()
   })
 
-  test("→ ไปภาพที่ซ่อนอยู่ (ยังไม่กดดูทั้งหมด) ได้ · ปิดแล้วโฟกัสกลับภาพที่กดเปิด", async ({ page }) => {
+  test("→ ไปภาพถัดไปที่ต้องเลื่อนจอถึงจะเห็นได้ · ปิดแล้วโฟกัสอยู่ที่ภาพนั้น", async ({ page }) => {
     await openBbb(page)
     await frameButton(page, "00:00:54").click()
     await page.keyboard.press("ArrowRight")
     await expect(lightbox(page)).toHaveAttribute("aria-label", /ภาพเฟรมที่ 00:00:59/)
     await page.keyboard.press("Escape")
-    await expect(frameButton(page, "00:00:54")).toBeFocused()
+    await expect(frameButton(page, "00:00:59")).toBeFocused()
   })
 
   for (const key of ["Enter", "Space"]) {
@@ -765,7 +772,7 @@ test.describe("W2 วางลิงก์ที่หน้าคลิป", ()
 
   test("วางลิงก์คลิปเดียว → ไปหน้าคลิปนั้น", async ({ page }) => {
     await page.goto(`/v/${BBB}`)
-    await expect(frameItems(page)).toHaveCount(12)
+    await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
     await pasteOnPage(page, `https://youtu.be/${ZOO}`)
     await expect(page).toHaveURL(new RegExp(`/v/${ZOO}$`))
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Me at the zoo")

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { ChevronDown, ChevronUp, Copy, Download, ImageIcon, ImageOff, Link2 } from "lucide-react"
+import { Copy, Download, ImageIcon, ImageOff, Link2 } from "lucide-react"
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { toast } from "sonner"
 
@@ -18,7 +18,6 @@ import { copyImage } from "@/lib/clipboard"
 import { downloadFile } from "@/lib/download"
 import { formatTimecode, youtubeLinkAt } from "@/lib/format"
 import type { StoryboardFrame } from "@/lib/types"
-import { cn } from "cn"
 
 import { errorMessage } from "./errors"
 import { FrameLightbox } from "./lightbox"
@@ -27,9 +26,7 @@ import { storyboardQuery } from "./queries"
 
 const t = th.frames
 
-/** grid 6 คอลัมน์ x 2 แถวแรก = 12 ภาพ (จอแคบ 3 คอลัมน์ x 2 แถว = 6 ภาพ ซ่อนด้วย CSS) */
-const COLLAPSED_COUNT = 12
-const NARROW_COUNT = 6
+/** grid 6 คอลัมน์ (จอแคบ 3 คอลัมน์) แสดงทุกภาพตั้งแต่แรก ไม่ต้องกด "ดูทั้งหมด" */
 const SKELETON_CELLS = 6
 const GRID = "grid grid-cols-3 gap-2 sm:grid-cols-6"
 
@@ -101,19 +98,18 @@ function focusFirstItem(itemRef: RefObject<HTMLElement | null>): () => void {
   return () => cancelAnimationFrame(frame)
 }
 
-// content-visibility: ภาพที่อยู่ไกลจอไม่ต้องเรนเดอร์จนกว่าจะเลื่อนใกล้ (ตอนขยาย 128 ภาพ) · ต้องเว้น padding รอบ li
+// content-visibility: ภาพที่อยู่ไกลจอไม่ต้องเรนเดอร์จนกว่าจะเลื่อนใกล้ (คลิปยาวมีภาพเป็นร้อย) · ต้องเว้น padding รอบ li
 // เพราะ content-visibility ตัดทุกอย่างที่ล้นกรอบ ไม่งั้นวงโฟกัสของปุ่มในภาพจะถูกตัด (margin ติดลบชดเชยให้ระยะห่างเท่าเดิม)
 const TILE = "group relative -m-[3px] p-[3px] [contain-intrinsic-size:auto_80px] [content-visibility:auto]"
 
 type FrameTileProps = {
   frame: StoryboardFrame
   videoId: string
-  hideOnNarrow: boolean
   onOpen: () => void
   buttonRef: (element: HTMLButtonElement | null) => void
 }
 
-function FrameTile({ frame, videoId, hideOnNarrow, onOpen, buttonRef }: FrameTileProps) {
+function FrameTile({ frame, videoId, onOpen, buttonRef }: FrameTileProps) {
   const time = formatTimecode(frame.tMs)
   const [menuOpen, setMenuOpen] = useState(false)
   const keyboardOpenRef = useRef(false)
@@ -150,7 +146,7 @@ function FrameTile({ frame, videoId, hideOnNarrow, onOpen, buttonRef }: FrameTil
 
   return (
     <ContextMenu onOpenChange={setMenuOpen}>
-      <ContextMenuTrigger render={<li className={cn(TILE, hideOnNarrow && "max-sm:hidden")} />}>
+      <ContextMenuTrigger render={<li className={TILE} />}>
         <button
           ref={buttonRef}
           type="button"
@@ -199,14 +195,10 @@ function FrameTile({ frame, videoId, hideOnNarrow, onOpen, buttonRef }: FrameTil
 }
 
 function FrameGrid({ frames, videoId }: { frames: StoryboardFrame[]; videoId: string }) {
-  const [expanded, setExpanded] = useState(false)
   // ภาพที่เปิดดูใหญ่อยู่ (ตำแหน่งใน frames) · null = ปิด
   const [viewing, setViewing] = useState<number | null>(null)
   const openerRef = useRef<number>(0)
   const buttons = useRef(new Map<number, HTMLButtonElement>())
-  const shown = expanded ? frames : frames.slice(0, COLLAPSED_COUNT)
-  // 12 ภาพหรือน้อยกว่าบนจอกว้างเห็นครบแล้ว ปุ่มจึงจำเป็นเฉพาะจอแคบ (ที่เห็นแค่ 6 ภาพ)
-  const toggleNeeded = frames.length > COLLAPSED_COUNT
 
   // ปิดภาพใหญ่แล้วโฟกัสกลับที่ภาพเฟรมที่ดูอยู่ล่าสุด (ถ้าภาพนั้นอยู่ในตารางและมองเห็นได้) ไม่งั้นกลับภาพที่กดเปิด
   function returnFocus(last: number): HTMLElement | null {
@@ -218,12 +210,11 @@ function FrameGrid({ frames, videoId }: { frames: StoryboardFrame[]; videoId: st
   return (
     <div className="flex flex-col gap-3">
       <ul className={GRID} aria-label={t.listLabel}>
-        {shown.map((frame, index) => (
+        {frames.map((frame, index) => (
           <FrameTile
             key={frame.index}
             frame={frame}
             videoId={videoId}
-            hideOnNarrow={!expanded && index >= NARROW_COUNT}
             onOpen={() => {
               openerRef.current = index
               setViewing(index)
@@ -235,18 +226,6 @@ function FrameGrid({ frames, videoId }: { frames: StoryboardFrame[]; videoId: st
           />
         ))}
       </ul>
-      {frames.length > NARROW_COUNT && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn("self-center", !toggleNeeded && "sm:hidden")}
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
-          {expanded ? t.collapse : fill(t.showAll, { n: frames.length })}
-        </Button>
-      )}
       <FrameLightbox frames={frames} index={viewing} onIndexChange={setViewing} returnFocus={returnFocus} />
     </div>
   )

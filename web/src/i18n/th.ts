@@ -89,8 +89,6 @@ export const th = {
     loadError: "โหลดภาพเฟรมไม่สำเร็จ",
     listLabel: "รายการภาพเฟรม",
     frameAlt: "ภาพเฟรมที่ {time}",
-    showAll: "ดูทั้งหมด ({n})",
-    collapse: "ย่อ",
     copyImage: "คัดลอกภาพ",
     imageCopied: "คัดลอกภาพแล้ว",
     copyImageFailed: "คัดลอกภาพไม่สำเร็จ ลองใช้ โหลดภาพนี้ แทน",

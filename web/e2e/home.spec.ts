@@ -923,7 +923,7 @@ test.describe("ปรับจากการเดินตามเส้น�
     await expect(heading).toContainText("Big Buck Bunny")
     await expect(heading).toBeFocused()
     // Tab ต่อไปถึงปุ่มในส่วนภาพเฟรมเลย ไม่ต้องย้อนผ่านเมนูบนหัว
-    await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(12)
+    await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(128)
     await page.keyboard.press("Tab")
     await expect(page.getByRole("button", { name: "ภาพรวมทุกเฟรม" })).toBeFocused()
   })
