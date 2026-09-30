@@ -5,6 +5,8 @@
 2. โหลด json3 แล้วแปลง ถ้าไฟล์เสีย ไม่มีข้อความ หรือไม่มีลิงก์ json3 ใช้ vtt แทน (AC-SUB-11)
 3. ลิงก์ซับที่ยูทูปเซ็นไว้หมดอายุได้ (~6-7 ชม.) โหลดพลาดด้วย E_NETWORK = probe ใหม่หนึ่งครั้ง
    แล้วลองอีกรอบเดียว (แบบเดียวกับ storyboard ใน M2) E_BOT_CHECK โยนต่อทันที
+4. ซับแปล (t.*) ที่ยูทูปตอบ 429 / E_BOT_CHECK = E_TRANSLATION_BLOCKED ไม่ใช่การขอยืนยันว่าไม่ใช่บอท
+   (ยูทูปปิดเฉพาะคำขอ tlang ซับอื่นยังโหลดได้) จึงไม่ใช้รหัสที่ M4 เอาไปพักทั้งคิว
 
 URL ที่โหลดมาจากผล probe เท่านั้น (fetch_subtitle ไม่มี allowlist) ห้ามรับ URL จากหน้าเว็บ
 ไม่ import yt_dlp เอง และไม่ import api/platform (PRD 6.6)
@@ -125,7 +127,7 @@ class SubtitleService:
         for url, parse in attempts:
             if url is None:
                 continue
-            data = self._fetch(url)
+            data = self._fetch_track(track, url)
             try:
                 parsed = parse(data)
             except SubParseError as exc:
@@ -134,6 +136,15 @@ class SubtitleService:
             if parsed.tokens:
                 return parsed, data
         raise _no_subtitles(f"แทร็ก {track.id} ไม่มีข้อความที่ใช้ได้")
+
+    def _fetch_track(self, track: Track, url: str) -> bytes:
+        """โหลดไฟล์ของแทร็ก ซับแปลที่โดน 429 / E_BOT_CHECK = E_TRANSLATION_BLOCKED (ข้อ 4 ด้านบน)"""
+        try:
+            return self._fetch(url)
+        except YtError as exc:
+            if exc.code == "E_BOT_CHECK" and track.group == "translated":
+                raise YtError("E_TRANSLATION_BLOCKED", exc.detail) from exc
+            raise
 
     # ---------- ไฟล์ ----------
 

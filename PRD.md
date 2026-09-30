@@ -477,7 +477,7 @@ queued ──► running ──► done
 | GET | `/videos/{id}/storyboard/contact-sheet.jpg` | — | ไฟล์ JPEG (Content-Disposition: attachment) ชื่อ `<ชื่อคลิป> - contact sheet.jpg` (ชื่อภาษาไทยส่งใน `filename*` ตาม RFC 5987 ชื่อสำรอง `contact-sheet.jpg`) |
 | GET | `/videos/{id}/storyboard/frames.zip` | — | ไฟล์ zip (Content-Disposition: attachment) ชื่อ `<ชื่อคลิป> - frames.zip` ข้างในเป็น `frame_HH-MM-SS.jpg` |
 | GET | `/videos/{id}/subtitles` | — | `{tracks:[{id, lang, name, group: owner\|original\|translated}], defaultTrackId?}` · `id` = `o.<key>` (ซับเจ้าของคลิป) / `a.<key>` (ซับอัตโนมัติภาษาต้นฉบับ) / `t.<key>` (ซับแปลอัตโนมัติ) · คลิปไม่มีซับ → `{tracks: []}` (200 ไม่ใช่ error) · ไม่มี `defaultTrackId` = ไม่เลือกให้เอง (AC-SUB-02) |
-| GET | `/videos/{id}/subtitles/{trackId}/tokens` | — | `{hasWordTiming, tokens:[{t, s, e}]}` (t=ข้อความ, s/e=ms) · trackId ผิดรูปแบบ ไม่มีในคลิป หรือแทร็กที่ไม่มีข้อความเลย → 404 `E_NO_SUBTITLES` |
+| GET | `/videos/{id}/subtitles/{trackId}/tokens` | — | `{hasWordTiming, tokens:[{t, s, e}]}` (t=ข้อความ, s/e=ms) · trackId ผิดรูปแบบ ไม่มีในคลิป หรือแทร็กที่ไม่มีข้อความเลย → 404 `E_NO_SUBTITLES` · ซับแปล (`t.*`) ที่ยูทูปตอบ 429 → 503 `E_TRANSLATION_BLOCKED` (ไฟล์ export ก็เช่นกัน) |
 | GET | `/videos/{id}/subtitles/{trackId}/export` | `?format=srt\|txt\|md&maxChars=&lines=&minMs=&maxMs=&mode=chars\|tokens&tokensPerCue=` | (M3) ไฟล์ซับ (Content-Disposition: attachment) ชื่อ `<ชื่อคลิป>.<lang>.<นามสกุล>` เช่น `ชื่อคลิป.th.srt` (ชื่อภาษาไทยส่งใน `filename*` ชื่อสำรอง `subtitles.<lang>.<นามสกุล>`) · UTF-8 ไม่มี BOM ขึ้นบรรทัด CRLF · Content-Type: srt `application/x-subrip`, txt `text/plain`, md `text/markdown` (ทั้งหมด `charset=utf-8`) · ค่าที่ไม่ส่งมา = preset กลาง · ค่าผิดช่วงตาม LIMITS, `minMs ≥ maxMs` หรือ `mode=tokens` ไม่มี `tokensPerCue` → 422 `E_BAD_REQUEST` · `tokensPerCue` ที่ส่งมาต้องอยู่ในช่วง 1-20 เสมอ แม้ `mode=chars` (เข้มกว่าสัญญาในแผน M3 ที่ให้ข้ามค่านี้ในโหมดตัวอักษร หน้าเว็บส่งค่านี้เฉพาะโหมด "นับเป็นคำ" จึงไม่กระทบผู้ใช้) · trackId ใช้ไม่ได้ → 404 `E_NO_SUBTITLES` |
 | GET | `/playlists/{id}` | `?v=<videoId>` (บังคับเมื่อ id ขึ้นต้น `RD` ยกเว้น `RDCLAK`) | `{title, total, truncated, entries:[{videoId, title, durationS?, thumbnailUrl}], isMix?}` สูงสุด 200 คลิป · **มิกซ์** (id ขึ้นต้น `RD`): ต้องมี `v` ที่ถูกรูปแบบ ไม่งั้น 422 `E_INVALID_INPUT` · ดึงจาก `https://www.youtube.com/watch?v=<v>&list=<id>` ด้วย `extract_flat` · สูงสุด 25 คลิป · `total` = จำนวนที่ได้มา (มิกซ์ไม่มีจำนวนจริง) · มี `isMix: true` · เพลย์ลิสต์ปกติไม่ใช้ `v` · `RDCLAK...` (เพลย์ลิสต์ของ YouTube Music) ใช้ทางเพลย์ลิสต์ปกติ · `v` ยาวเกิน 64 ตัว → 422 `E_INVALID_INPUT` (ไม่ใช่ `E_BAD_REQUEST`) |
 | POST | `/jobs` | `{items:[{videoId, kind, params}]}` | `{jobs:[Job]}` |
@@ -508,7 +508,7 @@ queued ──► running ──► done
 
 - **contact sheet และ zip ใน M2** ทำตอนขอแล้วส่งให้เบราว์เซอร์โหลดทันที · M4 ย้ายเข้าคิวเป็นงานชนิด `contact_sheet` / `frames_zip` และบันทึกลงโฟลเดอร์ผลลัพธ์
 - **ไฟล์ซับใน M3** (`/subtitles/{trackId}/export`) ทำตอนขอแล้วส่งให้เบราว์เซอร์โหลดทันที ลงโฟลเดอร์ Downloads ของเบราว์เซอร์ (BRD #49) · M4 ย้ายการโหลดซับเข้า `/jobs` เป็นงานชนิด `subtitle` และบันทึกลงโฟลเดอร์ผลลัพธ์
-- **HTTP status ของ error จากยูทูป:** `E_INVALID_INPUT`, `E_SETTINGS_INVALID`, `E_COOKIES_INVALID` 422 · `E_VIDEO_UNAVAILABLE`, `E_VIDEO_PRIVATE`, `E_NO_STORYBOARD`, `E_NO_SUBTITLES` 404 · `E_LIVE_NOT_READY`, `E_AGE_RESTRICTED`, `E_GEO_BLOCKED`, `E_COOKIES_UNAVAILABLE` 409 · `E_BOT_CHECK` 429 · `E_NETWORK` 502 · รหัสอื่น (`E_UNKNOWN`) 500
+- **HTTP status ของ error จากยูทูป:** `E_INVALID_INPUT`, `E_SETTINGS_INVALID`, `E_COOKIES_INVALID` 422 · `E_VIDEO_UNAVAILABLE`, `E_VIDEO_PRIVATE`, `E_NO_STORYBOARD`, `E_NO_SUBTITLES` 404 · `E_LIVE_NOT_READY`, `E_AGE_RESTRICTED`, `E_GEO_BLOCKED`, `E_COOKIES_UNAVAILABLE` 409 · `E_BOT_CHECK` 429 · `E_NETWORK` 502 · `E_TRANSLATION_BLOCKED` 503 · รหัสอื่น (`E_UNKNOWN`) 500
 
 #### 6.2.1 ชนิดข้อมูลหลัก
 ```ts
@@ -629,6 +629,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | `E_AGE_RESTRICTED` | คลิปนี้จำกัดอายุ ต้องล็อกอินถึงจะโหลดได้ ซึ่งเวอร์ชันนี้ยังไม่รองรับ | งานล้มเหลว · **ตั้งแต่ M5** (มีคุกกี้แล้ว) เปลี่ยนข้อความเป็น "คลิปนี้จำกัดอายุ ต้องใช้บัญชี YouTube ถึงจะโหลดได้ เปิดใช้ได้ที่ ตั้งค่า > ขั้นสูง" และถ้าเปิดคุกกี้ไว้ ลองใหม่ด้วยคุกกี้ 1 ครั้ง (FR-CK-7) |
 | `E_LIVE_NOT_READY` | คลิปนี้ยังถ่ายทอดสดอยู่หรือยังไม่เผยแพร่ ลองใหม่หลังจบไลฟ์ | งานล้มเหลว |
 | `E_NO_SUBTITLES` | คลิปนี้ไม่มีซับ | ไม่นับเป็น error ในหน้าจอ |
+| `E_TRANSLATION_BLOCKED` | ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน | (M3) ยูทูปตอบ 429 เฉพาะคำขอซับแปล (`t.*` ลิงก์ `tlang`) ไม่ใช่การขอยืนยันว่าไม่ใช่บอท จึง**ไม่**เบรกฉุกเฉินและไม่พักคิว · หน้าเว็บไม่มีปุ่มลองใหม่และไม่ยิงซ้ำเมื่อสลับแท็บ มีปุ่ม "ใช้ซับภาษาต้นฉบับ" (เมื่อคลิปมีแทร็กเริ่มต้น) · ซับของเจ้าของคลิปและซับภาษาต้นฉบับที่โดน 429 ยังเป็น `E_BOT_CHECK` |
 | `E_NO_STORYBOARD` | คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว ภาพคมจะใช้ได้ในเวอร์ชันถัดไป | แสดงปุ่มโหมดคม · **ตั้งแต่ M5** เปลี่ยนข้อความเป็น "คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว กด "ขอภาพคม" แทนได้" |
 | `E_FFMPEG_MISSING` | ยังไม่มีโปรแกรมแปลงไฟล์ (ffmpeg) กด "โหลดใหม่" ในหน้าตรวจสุขภาพ | ปิดฟีเจอร์ที่ต้องใช้ |
 | `E_JS_RUNTIME_MISSING` | บางคุณภาพอาจไม่แสดง เพราะเครื่องยังไม่มีตัวช่วยที่ yt-dlp ต้องใช้ | เตือนในหน้าตรวจสุขภาพ |
@@ -721,7 +722,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 - ซับแปลอัตโนมัติ `88o5Sk8_m1Y/tlang-en.json3` เป็นไฟล์สังเคราะห์ เพราะตอนเก็บ ยูทูปตอบ 429 เฉพาะคำขอซับแปล (`tlang`)
 - คลิปปลอม 1 ชั่วโมงสำหรับ AC-SUB-07 (`LONGTHAI1hr`) = ซับไทยของ `88o5Sk8_m1Y` (342 token ยาว 6 นาที) ต่อกัน 10 รอบ ได้ 3,420 token ยาวประมาณ 62 นาที
 
-**Network test ของซับ (M3):** `uv run pytest -m network -q tests/network/test_subtitles_network.py -s` ใช้คลิปในหัวข้อ `[subtitles]` ของ `tests/network_videos.toml` ตรวจว่าแทร็กของคลิปจริงตรงกับที่ fixture ปลอมคาดไว้ token ของ `th-orig` ทั้งแบบ json3 และ vtt ผ่าน AC-SUB-03/04 และลิงก์ซับแปลที่สร้างเองด้วย `tlang` ได้ภาษาอังกฤษจริง · อ่านจากยูทูปสด ๆ ไม่เก็บอะไรลงรีโป จึงใช้คลิป TED ได้
+**Network test ของซับ (M3):** `uv run pytest -m network -q tests/network/test_subtitles_network.py -s` ใช้คลิปในหัวข้อ `[subtitles]` ของ `tests/network_videos.toml` ตรวจว่าแทร็กของคลิปจริงตรงกับที่ fixture ปลอมคาดไว้ token ของ `th-orig` ทั้งแบบ json3 และ vtt ผ่าน AC-SUB-03/04 และลองลิงก์ซับแปลที่สร้างเองด้วย `tlang` · **ซับแปลยังไม่ได้ยืนยันกับยูทูปจริง:** ทุกครั้งที่ลองสด (2026-09-30 ถึง 2026-10-01) ยูทูปตอบ 429 เฉพาะคำขอ `tlang` (แอพแสดง `E_TRANSLATION_BLOCKED`) น่าจะต้องใช้ impersonation ของ yt-dlp (curl_cffi) หรือ PO token ดู `docs/m3-followups.md` · อ่านจากยูทูปสด ๆ ไม่เก็บอะไรลงรีโป จึงใช้คลิป TED ได้
 
 ---
 

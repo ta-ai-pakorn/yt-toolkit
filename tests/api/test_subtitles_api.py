@@ -15,7 +15,7 @@ from yttoolkit.core.db import Database
 from yttoolkit.core.extractor import FakeExtractor
 from yttoolkit.core.subtitles import SubtitleService
 from yttoolkit.core.videos import VideoService
-from yttoolkit.core.yterrors import MESSAGES
+from yttoolkit.core.yterrors import MESSAGES, YtError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 THAI = "88o5Sk8_m1Y"
@@ -175,6 +175,36 @@ def test_private_is_404(client, path):
     resp = client.get(path)
     assert resp.status_code == 404
     assert _error(resp)["code"] == "E_VIDEO_PRIVATE"
+
+
+def test_translated_track_blocked_is_503_not_bot_check(make_client, tmp_path):
+    db = Database(tmp_path / "blocked.db")
+    db.migrate()
+    fake = FakeExtractor(FIXTURES)
+    videos = VideoService(db, fake, now=lambda: datetime(2026, 9, 30, 12, tzinfo=UTC))
+
+    def fetch(url: str) -> bytes:
+        if "tlang=" in url:
+            raise YtError("E_BOT_CHECK", "HTTP Error 429: Too Many Requests")
+        return fake.fetch_subtitle(url)
+
+    cache_root = tmp_path / "cache"
+    subtitles = SubtitleService(videos, fetch, cache_root)
+    client = make_client(videos=videos, extractor=fake, cache_root=cache_root, subtitles=subtitles)
+    try:
+        for path in (
+            f"/api/videos/{THAI}/subtitles/t.en/tokens",
+            f"/api/videos/{THAI}/subtitles/t.en/export?format=srt&{MEDIUM}",
+        ):
+            resp = client.get(path)
+            assert resp.status_code == 503
+            error = _error(resp)
+            assert error["code"] == "E_TRANSLATION_BLOCKED"
+            assert error["message"] == MESSAGES["E_TRANSLATION_BLOCKED"]
+        # ซับภาษาต้นฉบับของคลิปเดียวกันยังโหลดได้ตามปกติ
+        assert client.get(f"/api/videos/{THAI}/subtitles/{TRACK}/tokens").status_code == 200
+    finally:
+        db.close()
 
 
 def test_bad_video_id_is_422(client):

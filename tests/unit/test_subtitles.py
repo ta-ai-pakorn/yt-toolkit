@@ -225,6 +225,44 @@ def test_tokens_bot_check_propagates_without_reprobe_or_fallback(make, tmp_path)
     assert not cache_file(tmp_path, THAI, TRACK).exists()
 
 
+def test_tokens_translated_track_bot_check_is_translation_blocked(make, tmp_path):
+    # ยูทูปตอบ 429 เฉพาะคำขอซับแปล (tlang): ไม่ใช่การขอยืนยันว่าไม่ใช่บอท จึงไม่ใช้ E_BOT_CHECK (M4 พักคิวด้วยรหัสนั้น)
+    service, fake, fetch, *_ = make(fail="E_BOT_CHECK", times=99)
+    service.tracks(THAI)
+    before = probes(fake)
+    with pytest.raises(YtError) as info:
+        service.tokens(THAI, "t.en")
+    assert info.value.code == "E_TRANSLATION_BLOCKED"
+    assert info.value.message == "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน"
+    assert isinstance(info.value.__cause__, YtError)
+    assert info.value.__cause__.code == "E_BOT_CHECK"
+    assert probes(fake) == before
+    assert len(fetch.urls) == 1
+    assert not cache_file(tmp_path, THAI, "t.en").exists()
+
+
+def test_export_translated_track_bot_check_is_translation_blocked(make):
+    service, *_ = make(fail="E_BOT_CHECK", times=99)
+    with pytest.raises(YtError) as info:
+        service.export(THAI, "t.en", "srt", PRESETS["medium"])
+    assert info.value.code == "E_TRANSLATION_BLOCKED"
+
+
+def test_tokens_owner_track_bot_check_stays_bot_check(make):
+    service, *_ = make(fail="E_BOT_CHECK", times=99)
+    with pytest.raises(YtError) as info:
+        service.tokens(ZOO, "o.en")
+    assert info.value.code == "E_BOT_CHECK"
+
+
+def test_tokens_translated_track_other_errors_keep_their_code(make):
+    service, _, fetch, *_ = make(fail="E_NETWORK", times=99)
+    with pytest.raises(YtError) as info:
+        service.tokens(THAI, "t.en")
+    assert info.value.code == "E_NETWORK"
+    assert len(fetch.urls) == 2  # ลิงก์หมดอายุ: probe ใหม่แล้วลองอีกรอบเดียวเหมือนแทร็กอื่น
+
+
 @pytest.mark.parametrize("track_id", ["o.th", "t.xx", "zz.bad", "a.th-orig\n", "", "a." + "x" * 65])
 def test_tokens_unknown_track(make, track_id):
     service, _, fetch, *_ = make()

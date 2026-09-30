@@ -91,6 +91,10 @@ def test_messages_are_verbatim_prd_copy() -> None:
         MESSAGES["E_NO_STORYBOARD"] == "คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว ภาพคมจะใช้ได้ในเวอร์ชันถัดไป"
     )
     assert MESSAGES["E_NETWORK"] == "เน็ตหลุด ลองใหม่อีกครั้ง"
+    assert (
+        MESSAGES["E_TRANSLATION_BLOCKED"]
+        == "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน"
+    )
     assert MESSAGES["E_UNKNOWN"] == "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล"
 
 
