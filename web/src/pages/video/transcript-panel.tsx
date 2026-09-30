@@ -128,20 +128,17 @@ function TranscriptLines({ cues, at, onPick }: LinesProps) {
       <p aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
         {searching && (visible.length > 0 ? fill(t.found, { n: visible.length }) : t.notFound)}
       </p>
-      {visible.length > 0 && (
-        <>
-          <p className="text-sm text-muted-foreground">{t.hint}</p>
-          <LineList
-            cues={cues}
-            lines={lines}
-            visible={visible}
-            needle={needle}
-            current={current}
-            revealKey={at}
-            onPick={onPick}
-          />
-        </>
-      )}
+      {visible.length > 0 && <p className="text-sm text-muted-foreground">{t.hint}</p>}
+      {/* อยู่ตลอดแม้ค้นไม่เจอ (ไม่วาดอะไร): จำได้ว่าเลื่อนไปบรรทัดของ at แล้ว จึงไม่แย่งโฟกัสจากช่องค้นหาเมื่อผลกลับมา */}
+      <LineList
+        cues={cues}
+        lines={lines}
+        visible={visible}
+        needle={needle}
+        current={current}
+        revealKey={at}
+        onPick={onPick}
+      />
     </div>
   )
 }

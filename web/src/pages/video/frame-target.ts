@@ -53,8 +53,8 @@ export function revealAndFocus(find: () => HTMLElement | null | undefined, onDon
 }
 
 /**
- * เลื่อนเฉพาะในกรอบเลื่อน (ScrollArea) ให้ element อยู่กลางกรอบ ไม่เลื่อนทั้งหน้า และไม่ย้ายโฟกัส
- * ใช้ตอนบรรทัดที่ไฮไลต์กลับมาให้เห็นอีกครั้ง (เช่นล้างคำค้น) ผู้ใช้ยังพิมพ์ต่อในช่องค้นหาได้
+ * เลื่อนกรอบเลื่อน (ScrollArea) ให้ element อยู่กลางกรอบ แล้วเลื่อนหน้าเท่าที่จำเป็นให้เห็น element (ไม่จัดกลางหน้า)
+ * ไม่ย้ายโฟกัส: ใช้ตอนบรรทัดที่ไฮไลต์กลับมาให้เห็นอีกครั้ง (เช่นล้างคำค้น) ผู้ใช้ยังพิมพ์ต่อในช่องค้นหาได้
  */
 export function centerInScrollArea(element: HTMLElement): void {
   const viewport = element.closest<HTMLElement>('[data-slot="scroll-area-viewport"]')
@@ -62,4 +62,6 @@ export function centerInScrollArea(element: HTMLElement): void {
   const box = element.getBoundingClientRect()
   const frame = viewport.getBoundingClientRect()
   viewport.scrollTop += box.top - frame.top - (frame.height - box.height) / 2
+  // กรอบรายการอาจล้นขอบล่างของจอ: nearest เลื่อนแค่หน้า (ในกรอบอยู่กลางแล้ว) ช่องค้นหาจึงยังอยู่ใกล้ ๆ
+  element.scrollIntoView({ block: "nearest" })
 }
