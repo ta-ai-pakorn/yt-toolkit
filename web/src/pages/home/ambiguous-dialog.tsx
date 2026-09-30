@@ -16,11 +16,13 @@ type Props = {
 // ปุ่มในกล่องนี้เป็น outline ทั้งคู่: ปุ่มสีเหลืองปุ่มเดียวของหน้าคือ "วิเคราะห์"
 export function AmbiguousDialog({ open, item, onOpenChange, onClip, onPlaylist }: Props) {
   const clipRef = useRef<HTMLButtonElement>(null)
+  // มิกซ์อัตโนมัติ (list=RD...) ถามเหมือนเพลย์ลิสต์ แต่บอกว่าได้แค่ 25 คลิปแรก
+  const mix = item?.isMix === true
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent initialFocus={clipRef} className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="leading-relaxed text-balance">{th.home.dialog.title}</DialogTitle>
+          <DialogTitle className="leading-relaxed text-balance">{mix ? th.home.dialog.mixTitle : th.home.dialog.title}</DialogTitle>
           {item && <DialogDescription className="font-mono text-xs break-all">{item.input}</DialogDescription>}
         </DialogHeader>
         <DialogFooter>
@@ -28,7 +30,7 @@ export function AmbiguousDialog({ open, item, onOpenChange, onClip, onPlaylist }
             {th.home.dialog.clipOnly}
           </Button>
           <Button variant="outline" onClick={() => item && onPlaylist(item)}>
-            {th.home.dialog.wholePlaylist}
+            {mix ? th.home.dialog.wholeMix : th.home.dialog.wholePlaylist}
           </Button>
         </DialogFooter>
       </DialogContent>

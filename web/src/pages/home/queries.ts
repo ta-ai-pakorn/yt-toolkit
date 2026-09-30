@@ -42,11 +42,15 @@ export function videoTitleQuery(videoId: string, botStop?: BotStop) {
   })
 }
 
-export function playlistQuery(playlistId: string, botStop?: BotStop) {
+/**
+ * ข้อมูลเพลย์ลิสต์สำหรับแถวในรายการผล W1
+ * มิกซ์อัตโนมัติ (id ขึ้นต้น RD) ต้องส่งคลิปตั้งต้น (`videoId`) ไปด้วย เพราะยูทูปให้ดึงมิกซ์จากลิงก์คลิปเท่านั้น
+ */
+export function playlistQuery(playlistId: string, botStop?: BotStop, videoId?: string) {
+  const path = videoId ? `/playlists/${playlistId}?v=${encodeURIComponent(videoId)}` : `/playlists/${playlistId}`
   return queryOptions({
-    queryKey: ["playlist", playlistId],
-    queryFn: ({ signal }) =>
-      playlistLimit(guarded(signal, botStop, () => api<PlaylistInfo>(`/playlists/${playlistId}`, { signal }))),
+    queryKey: videoId ? ["playlist", playlistId, videoId] : ["playlist", playlistId],
+    queryFn: ({ signal }) => playlistLimit(guarded(signal, botStop, () => api<PlaylistInfo>(path, { signal }))),
     // retry ปิด: ความผิดพลาดจากยูทูปมักไม่หายเอง ให้ผู้ใช้กด "ลองใหม่" เองจะเห็นผลเร็วกว่ารอลองซ้ำเบื้องหลัง
     retry: false,
     staleTime: 5 * 60_000,

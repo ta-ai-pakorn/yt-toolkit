@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
-import { CircleX, ListVideo } from "lucide-react"
+import { Check, CircleX, ListVideo, Trash2 } from "lucide-react"
 import { useState, type ReactNode } from "react"
 import { Link } from "react-router"
 
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import {
@@ -24,6 +25,7 @@ import {
   createBotStop,
   useBotStop,
   useBotStopped,
+  type BotStop,
 } from "./bot-stop"
 import {
   AUTO_TITLE_ROWS,
@@ -31,7 +33,9 @@ import {
   thumbnailUrl,
   videoTitleQuery,
 } from "./queries"
+import { useHomeState } from "./state"
 import { Thumbnail } from "./thumbnail"
+import { fromListState } from "./use-analyze"
 
 const t = th.home.results
 
@@ -48,6 +52,8 @@ type VideoRowProps = {
 
 function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
   const id = item.videoId ?? ""
+  // คลิปที่เปิดหน้า W2 ไปแล้ว (ทางไหนก็ได้) มีป้ายเล็ก ๆ ให้รู้ว่าดูไปแล้ว
+  const opened = useHomeState().opened.includes(id)
   const [requested, setRequested] = useState(false)
   const wantsTitle = autoTitle || requested
   const botStop = useBotStop() ?? undefined
@@ -95,6 +101,12 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
       <ItemContent>
         {name}
         {hint}
+        {opened && (
+          <Badge variant="outline" className="mt-0.5 text-muted-foreground">
+            <Check aria-hidden />
+            {t.opened}
+          </Badge>
+        )}
       </ItemContent>
       <ItemActions>
         {!wantsTitle && !title && (
@@ -120,11 +132,12 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
               if (!stopped) onPlaylist()
             }}
           >
-            {t.wholePlaylist}
+            {item.isMix ? t.wholeMix : t.wholePlaylist}
           </Button>
         )}
         <Link
           to={`/v/${id}`}
+          state={fromListState}
           aria-label={`${t.open} ${title ?? id}`}
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
@@ -158,11 +171,12 @@ function InvalidRow({ item }: { item: ResolveItem }) {
   )
 }
 
-function PlaylistRow({ playlistId }: { playlistId: string }) {
+/** `mixVideoId` = คลิปตั้งต้นของมิกซ์อัตโนมัติ (ยูทูปให้ดึงมิกซ์จากลิงก์คลิปเท่านั้น) */
+function PlaylistRow({ playlistId, mixVideoId }: { playlistId: string; mixVideoId?: string }) {
   const botStop = useBotStop() ?? undefined
   const stopped = useBotStopped()
   const playlist = useQuery({
-    ...playlistQuery(playlistId, botStop),
+    ...playlistQuery(playlistId, botStop, mixVideoId),
     enabled: !stopped,
   })
 
@@ -221,7 +235,7 @@ function PlaylistRow({ playlistId }: { playlistId: string }) {
     )
   }
 
-  const { title, total, truncated, entries } = playlist.data
+  const { title, total, truncated, entries, isMix } = playlist.data
   return (
     <Item role="listitem" variant="outline" size="sm">
       <ItemMedia variant="icon">
@@ -237,7 +251,14 @@ function PlaylistRow({ playlistId }: { playlistId: string }) {
           <ItemDescription>
             <span className="font-mono">{fill(t.clips, { n: total })}</span> ·{" "}
             {t.playlistLater}
-            {truncated && (
+            {/* มิกซ์: จำนวนที่บอกคือ 25 คลิปแรกอยู่แล้ว (กล่องถามบอกไว้) ไม่ต้องบอกว่าตัด */}
+            {isMix && (
+              <>
+                <br />
+                {t.mixNote}
+              </>
+            )}
+            {truncated && !isMix && (
               <>
                 <br />
                 {fill(t.truncated, { n: entries.length })}
@@ -251,48 +272,47 @@ function PlaylistRow({ playlistId }: { playlistId: string }) {
 }
 
 // ลิงก์ที่เป็นทั้งคลิปและเพลย์ลิสต์ปนอยู่ในรายการหลายบรรทัด: เริ่มที่คลิป แล้วให้ผู้ใช้กดขอทั้งเพลย์ลิสต์ได้เอง
-function AmbiguousRow({
-  item,
-  autoTitle,
-}: {
-  item: ResolveItem
-  autoTitle: boolean
-}) {
-  const [wholePlaylist, setWholePlaylist] = useState(false)
-  if (wholePlaylist && item.playlistId)
-    return <PlaylistRow playlistId={item.playlistId} />
-  return (
-    <VideoRow
-      item={item}
-      autoTitle={autoTitle}
-      onPlaylist={item.playlistId ? () => setWholePlaylist(true) : undefined}
-    />
-  )
-}
+// กดแล้วแถวกลายเป็นแถวเพลย์ลิสต์ถาวร (บันทึกลงรายการผล กลับมาจากหน้าคลิปก็ยังเป็นเพลย์ลิสต์)
+type RowProps = { item: ResolveItem; autoTitle: boolean; onWhole: () => void }
 
-function Row({ item, autoTitle }: { item: ResolveItem; autoTitle: boolean }) {
+function Row({ item, autoTitle, onWhole }: RowProps) {
   switch (item.kind) {
     case "video":
       return <VideoRow item={item} autoTitle={autoTitle} />
     case "playlist":
       return item.playlistId ? (
-        <PlaylistRow playlistId={item.playlistId} />
+        <PlaylistRow playlistId={item.playlistId} mixVideoId={item.isMix ? item.videoId : undefined} />
       ) : (
         <InvalidRow item={item} />
       )
     case "ambiguous":
-      return <AmbiguousRow item={item} autoTitle={autoTitle} />
+      return <VideoRow item={item} autoTitle={autoTitle} onPlaylist={item.playlistId ? onWhole : undefined} />
     default:
       return <InvalidRow item={item} />
   }
 }
 
+// เบรก E_BOT_CHECK ผูกกับรายการผลชุดหนึ่ง (listId) ไม่ใช่กับการแสดงผล: ไปหน้าคลิปแล้วกลับมา
+// รายการเดิมยังถูกเบรกอยู่ ไม่ยิงคำขอซ้ำ · วิเคราะห์ใหม่ = listId ใหม่ = เบรกใหม่
+let currentGate: { listId: string; gate: BotStop } | null = null
+function botStopFor(listId: string): BotStop {
+  if (currentGate?.listId !== listId) currentGate = { listId, gate: createBotStop() }
+  return currentGate.gate
+}
+
 const isClip = (item: ResolveItem) =>
   item.kind === "video" || item.kind === "ambiguous"
 
-export function ResultList({ items }: { items: ResolveItem[] }) {
-  // เบรก E_BOT_CHECK อยู่กับรายการผลนี้: กดวิเคราะห์ใหม่ = รายการใหม่ = ลองได้อีกครั้ง
-  const [botStop] = useState(createBotStop)
+type ResultListProps = {
+  items: ResolveItem[]
+  listId: string
+  /** แถว ambiguous ที่ผู้ใช้กด "ทั้งเพลย์ลิสต์" (ส่งตำแหน่งแถว) */
+  onWhole: (index: number) => void
+  onClear: () => void
+}
+
+export function ResultList({ items, listId, onWhole, onClear }: ResultListProps) {
+  const botStop = botStopFor(listId)
   // นับเฉพาะแถวที่เป็นคลิป: 10 แถวแรกของคลิปดึงชื่อเอง
   const autoTitle = items.map(
     (item, index) =>
@@ -305,12 +325,18 @@ export function ResultList({ items }: { items: ResolveItem[] }) {
         aria-labelledby="results-title"
         className="flex flex-col gap-2 text-left"
       >
-        <h2
-          id="results-title"
-          className="text-sm font-medium text-muted-foreground"
-        >
-          {t.title}
-        </h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2
+            id="results-title"
+            className="text-sm font-medium text-muted-foreground"
+          >
+            {t.title}
+          </h2>
+          <Button variant="ghost" size="sm" onClick={onClear}>
+            <Trash2 aria-hidden />
+            {t.clear}
+          </Button>
+        </div>
         {items.length === 0 ? (
           <Empty className="border">
             <EmptyHeader>
@@ -324,6 +350,7 @@ export function ResultList({ items }: { items: ResolveItem[] }) {
                 key={`${index}-${item.input}`}
                 item={item}
                 autoTitle={autoTitle[index]}
+                onWhole={() => onWhole(index)}
               />
             ))}
           </ItemGroup>

@@ -58,6 +58,8 @@ export type ResolveItem = {
   kind: ResolveKind
   videoId?: string
   playlistId?: string
+  /** ลิงก์คลิปที่มากับมิกซ์อัตโนมัติของยูทูป (list=RD...) มีเฉพาะตอนเป็น true */
+  isMix?: boolean
   error?: { code: string; message: string }
 }
 
@@ -79,6 +81,8 @@ export type PlaylistInfo = {
   total: number
   truncated: boolean
   entries: PlaylistEntry[]
+  /** มิกซ์อัตโนมัติ: ได้ไม่เกิน 25 คลิปแรก และ total = จำนวนที่ได้มา */
+  isMix?: true
 }
 
 export type HistoryItem = {

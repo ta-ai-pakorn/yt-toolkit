@@ -1,7 +1,5 @@
-import { useMutation } from "@tanstack/react-query"
 import { CircleX } from "lucide-react"
-import { useEffect, useEffectEvent, useRef, useState } from "react"
-import { useNavigate } from "react-router"
+import { useRef, useState } from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -9,71 +7,44 @@ import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui
 import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { fill, th } from "@/i18n/th"
-import { api } from "@/lib/api"
-import { looksLikeYoutube } from "@/lib/paste"
 import { pasteShortcut } from "@/lib/platform"
-import type { ResolveItem, ResolveResult } from "@/lib/types"
 
-import { AmbiguousDialog } from "./home/ambiguous-dialog"
 import { RecentSection } from "./home/recent"
 import { ResultList } from "./home/result-list"
+import { homeStore, useHomeState } from "./home/state"
+import { useAnalyze, useGlobalPaste } from "./home/use-analyze"
 
 export function HomePage() {
-  const navigate = useNavigate()
-  const [text, setText] = useState("")
-  const [results, setResults] = useState<ResolveItem[] | null>(null)
-  // เก็บ item ไว้แยกจากสถานะเปิด/ปิด เพื่อให้เนื้อหากล่องไม่หายตอนกำลังเล่นแอนิเมชันปิด
-  const [ambiguous, setAmbiguous] = useState<ResolveItem | null>(null)
-  const [dialogOpen, setDialogOpen] = useState(false)
+  // ข้อความและรายการผลอยู่ใน homeStore: ไปหน้าคลิปแล้วกลับมา หรือโหลดหน้าใหม่ ก็ยังอยู่ครบ
+  const { text, results, listId } = useHomeState()
+  const { analyze: run, pending, error, dialog } = useAnalyze()
   const inputRef = useRef<HTMLTextAreaElement>(null)
-
-  const resolve = useMutation({
-    mutationFn: (value: string) =>
-      api<ResolveResult>("/resolve", { method: "POST", body: JSON.stringify({ text: value }) }),
-    onMutate: () => {
-      setResults(null)
-      setDialogOpen(false)
-    },
-    onSuccess: ({ items }) => {
-      const only = items.length === 1 ? items[0] : null
-      if (only?.kind === "video" && only.videoId) {
-        void navigate(`/v/${only.videoId}`)
-      } else if (only?.kind === "ambiguous" && only.videoId && only.playlistId) {
-        setAmbiguous(only)
-        setDialogOpen(true)
-      } else {
-        setResults(items)
-      }
-    },
-  })
+  // ข้อความประกาศให้โปรแกรมอ่านหน้าจอหลังกด "ล้างรายการ"
+  const [announce, setAnnounce] = useState("")
 
   function analyze(value: string) {
-    if (resolve.isPending) return
+    if (pending) return
     if (!value.trim()) {
       inputRef.current?.focus()
       return
     }
-    resolve.mutate(value)
+    setAnnounce("")
+    run(value)
   }
 
-  // ตัวฟัง paste ผูกครั้งเดียว แต่ต้องอ่านสถานะล่าสุดเสมอ
-  const onGlobalPaste = useEffectEvent((event: ClipboardEvent) => {
-    // กำลังวิเคราะห์อยู่: ปล่อยให้เบราว์เซอร์ทำตามปกติ ห้ามทับข้อความในช่องหรือกลืนลิงก์ที่วางมา
-    if (resolve.isPending) return
-    const target = event.target as HTMLElement | null
-    if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable)) return
-    const pasted = event.clipboardData?.getData("text") ?? ""
-    if (!looksLikeYoutube(pasted)) return
-    event.preventDefault()
-    setText(pasted)
-    analyze(pasted)
-  })
+  useGlobalPaste(analyze, pending)
 
-  useEffect(() => {
-    const listener = (event: ClipboardEvent) => onGlobalPaste(event)
-    window.addEventListener("paste", listener)
-    return () => window.removeEventListener("paste", listener)
-  }, [])
+  function clearList() {
+    homeStore.clear()
+    setAnnounce(th.home.results.cleared)
+    // ปุ่มที่กดหายไปพร้อมรายการ: ส่งโฟกัสกลับช่องวางลิงก์ พร้อมวางลิงก์ใหม่ได้เลย
+    inputRef.current?.focus()
+  }
+
+  function wholePlaylist(index: number) {
+    if (!results) return
+    homeStore.set({ results: results.map((item, i) => (i === index ? { ...item, kind: "playlist" } : item)) })
+  }
 
   const [before, after] = th.home.pasteHint.split("{key}")
 
@@ -101,7 +72,7 @@ export function HomePage() {
             placeholder={th.home.placeholder}
             className="max-h-[calc(8lh+1rem)] min-h-24 overflow-y-auto"
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => homeStore.set({ text: event.target.value })}
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault()
@@ -113,41 +84,29 @@ export function HomePage() {
             {/* aria-disabled แทน disabled เพื่อให้โฟกัสยังอยู่ที่ปุ่ม (analyze() กันการกดซ้ำอยู่แล้ว) */}
             <Button
               type="submit"
-              aria-disabled={resolve.isPending}
+              aria-disabled={pending}
               className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
             >
-              {resolve.isPending && <Spinner />}
+              {pending && <Spinner />}
               {th.home.analyze}
             </Button>
           </InputGroupAddon>
         </InputGroup>
-        {resolve.isError && (
+        {error && (
           <Alert variant="destructive">
             <CircleX aria-hidden />
             <AlertTitle>{th.home.resolveFailed}</AlertTitle>
-            <AlertDescription>{resolve.error.message}</AlertDescription>
+            <AlertDescription>{error.message}</AlertDescription>
           </Alert>
         )}
       </form>
       <p role="status" className="sr-only">
-        {results ? fill(th.home.results.count, { n: results.length }) : ""}
+        {results ? fill(th.home.results.count, { n: results.length }) : announce}
       </p>
-      {results && <ResultList items={results} />}
+      {results && <ResultList items={results} listId={listId} onWhole={wholePlaylist} onClear={clearList} />}
       <RecentSection />
       <p className="text-center text-sm text-muted-foreground">{th.home.usage}</p>
-      <AmbiguousDialog
-        open={dialogOpen}
-        item={ambiguous}
-        onOpenChange={setDialogOpen}
-        onClip={(item) => {
-          setDialogOpen(false)
-          void navigate(`/v/${item.videoId}`)
-        }}
-        onPlaylist={(item) => {
-          setDialogOpen(false)
-          setResults([{ ...item, kind: "playlist" }])
-        }}
-      />
+      {dialog}
     </section>
   )
 }
