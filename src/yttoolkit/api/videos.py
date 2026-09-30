@@ -291,13 +291,22 @@ def _cache_target(
 
 
 def _exact_names(root: Path, names: tuple[str, ...]) -> bool:
-    """ทุกชื่อในสายต้องมีอยู่จริงบนดิสก์ด้วยตัวพิมพ์ตรงเป๊ะ (ดูจากรายชื่อในโฟลเดอร์ ไม่พึ่ง resolve)"""
+    """ทุกชื่อในสายต้องมีอยู่จริงบนดิสก์ด้วยตัวพิมพ์ตรงเป๊ะ (ดูจากชื่อในโฟลเดอร์ ไม่พึ่ง resolve)
+
+    แต่ละชื่อเทียบกับโฟลเดอร์แม่ของตัวเองเท่านั้น และหยุดอ่านทันทีที่เจอ
+    จึงไม่ต้องไล่รายชื่อคลิปทั้ง cache ทุกครั้งที่หน้าเว็บขอภาพเฟรม
+    """
     current = root
     for name in names:
-        if name not in os.listdir(current):
+        if not _has_exact_name(current, name):
             return False
         current = current / name
     return True
+
+
+def _has_exact_name(folder: Path, name: str) -> bool:
+    with os.scandir(folder) as entries:
+        return any(entry.name == name for entry in entries)
 
 
 def _frame_download_name(storyboard_dir: Path, file_name: str) -> str:

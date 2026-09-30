@@ -843,3 +843,73 @@ def test_contact_sheet_zip_and_info_work_offline_with_old_cache(make_client, tmp
         assert len(zipfile.ZipFile(io.BytesIO(zipped.content)).namelist()) == 128
     finally:
         db.close()
+
+
+# ---------- final review: เช็กตัวพิมพ์โดยดูแค่โฟลเดอร์แม่ของแต่ละชื่อ และหยุดทันทีที่เจอ ----------
+
+
+class _ScanSpy:
+    """แทน os.scandir: เรียงชื่อ (ผลเหมือนกันทุก OS) และนับว่าอ่านไปกี่ชื่อก่อนหยุด"""
+
+    def __init__(self, real, log: list) -> None:
+        self.real, self.log = real, log
+
+    def __call__(self, folder):
+        with self.real(folder) as it:
+            entries = sorted(it, key=lambda e: e.name)
+        record = {"folder": Path(folder), "read": 0, "total": len(entries)}
+        self.log.append(record)
+
+        class _It:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return None
+
+            def __iter__(self):
+                for entry in entries:
+                    record["read"] += 1
+                    yield entry
+
+        return _It()
+
+
+def test_cache_case_check_reads_only_each_parent_and_stops_at_the_match(api, monkeypatch):
+    import os
+
+    from yttoolkit.api import videos as videos_api
+
+    client = api()
+    folder = _built(client)
+    root = client.cache_root
+    for n in range(40):  # คลิปอื่นในเครื่อง (ชื่อเรียงหลัง BBB)
+        (root / f"zzzzzzz{n:04d}").mkdir()
+    scans: list = []
+    monkeypatch.setattr(videos_api.os, "scandir", _ScanSpy(os.scandir, scans))
+
+    def no_listdir(path):
+        raise AssertionError(f"ห้ามอ่านรายชื่อทั้งโฟลเดอร์: {path}")
+
+    monkeypatch.setattr(videos_api.os, "listdir", no_listdir)
+    resp = client.get(f"/api/cache/{BBB}/storyboard/f_0002.jpg")
+    assert resp.status_code == 200
+    assert [s["folder"] for s in scans] == [root, root / BBB, folder]  # แม่ของแต่ละชื่อ ครั้งเดียว
+    by_folder = {s["folder"]: s for s in scans}
+    assert by_folder[root]["read"] == 1 < by_folder[root]["total"]  # เจอแล้วหยุด ไม่ไล่ทั้ง cache
+    assert by_folder[folder]["read"] == 3 < by_folder[folder]["total"]  # f_0000, f_0001, f_0002
+
+
+def test_cache_case_check_rejects_miscased_file_after_full_scan(api, monkeypatch):
+    import os
+
+    from yttoolkit.api import videos as videos_api
+
+    client = api()
+    folder = _built(client)
+    scans: list = []
+    monkeypatch.setattr(videos_api.os, "scandir", _ScanSpy(os.scandir, scans))
+    assert client.get(f"/api/cache/{BBB}/storyboard/F_0002.jpg").status_code == 404
+    if scans:  # ดิสก์ที่สนตัวพิมพ์ (Linux) ไม่เจอไฟล์ตั้งแต่ is_file() จึงไม่ต้องอ่านโฟลเดอร์เลย
+        assert scans[-1]["folder"] == folder
+        assert scans[-1]["read"] == scans[-1]["total"]  # ไม่เจอชื่อตรงเป๊ะ จึงต้องอ่านครบ
