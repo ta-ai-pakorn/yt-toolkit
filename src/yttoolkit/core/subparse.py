@@ -49,9 +49,9 @@ _VTT_ENTITIES = {
     "amp": "&",
     "lt": "<",
     "gt": ">",
-    "nbsp": " ",
-    "lrm": "‎",
-    "rlm": "‏",
+    "nbsp": "\u00a0",
+    "lrm": "",  # direction marks are dropped, so they never form an invisible token
+    "rlm": "",
 }
 _VTT_MIN_CUE_MS = 50  # rolling vtt puts a 10 ms repeat cue between real cues
 
@@ -121,10 +121,13 @@ def _blocks_to_tokens(blocks: list[tuple[str, int, int]]) -> list[Token]:
     Each kept block is spread over [start, min(end, next kept block's start)]
     (never below start), so overlapping blocks cannot interleave their words
     in the final sort.
+
+    Blocks are first stably sorted by start, so events out of order in the
+    file are handled like the same events in order.
     """
     kept: list[tuple[str, int, int]] = []
     prev: tuple[str, int] | None = None  # (collapsed text, end) of the block before
-    for text, start, end in blocks:
+    for text, start, end in sorted(blocks, key=lambda b: b[1]):
         key = _collapse(text).strip(" ")
         if not key:
             continue
@@ -190,7 +193,7 @@ def parse_json3(data: bytes) -> ParsedTrack:
     """Parse YouTube's json3 subtitle format (see the json3 rules in the M3 plan, Task 7)."""
     try:
         doc = json.loads(data.decode("utf-8-sig"))
-    except (UnicodeDecodeError, ValueError) as exc:
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise SubParseError(f"json3: {exc}") from exc
     if not isinstance(doc, dict) or not isinstance(doc.get("events"), list):
         raise SubParseError("json3: no events list")
@@ -211,7 +214,7 @@ def parse_json3(data: bytes) -> ParsedTrack:
         start = _int_field(ev, "tStartMs")
         dur = _int_field(ev, "dDurationMs", 0)
         kept.append((start, start + dur, texts))
-        has_timing = has_timing or len(segs) >= 2 or any("tOffsetMs" in seg for seg in segs)
+        has_timing = has_timing or any("tOffsetMs" in seg for seg in segs)
 
     tokens: list[Token] = []
     if has_timing:
