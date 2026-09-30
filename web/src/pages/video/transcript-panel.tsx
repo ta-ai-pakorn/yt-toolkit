@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { CaptionsOff, Search, X } from "lucide-react"
-import { useRef, useState, type KeyboardEvent } from "react"
+import { useDeferredValue, useMemo, useRef, useState, type KeyboardEvent } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -17,7 +17,7 @@ import { useSubSettings } from "./subs-settings"
 import { SubtitleGate } from "./subtitle-gate"
 import { trackInEffect, trackLabel } from "./track-label"
 import { LineList } from "./transcript/line-list"
-import { searchLines } from "./transcript/search"
+import { prepareLines, searchNeedle, searchPrepared } from "./transcript/search"
 import { useCues } from "./use-cues"
 import { useVideoParams } from "./url-state"
 
@@ -112,8 +112,13 @@ type LinesProps = { cues: Cue[]; at: number | null; onPick: (cue: Cue) => void }
 /** ค้นหา + ผลค้นหา + รายการบรรทัด */
 function TranscriptLines({ cues, at, onPick }: LinesProps) {
   const [query, setQuery] = useState("")
-  const visible = searchLines(cues, query)
-  const searching = query.trim() !== ""
+  // ช่องค้นหาตอบสนองทันที ส่วนการกรองรายการ (คลิปยาวเป็นพันบรรทัด) ตามมาทีหลังได้โดยไม่หน่วงการพิมพ์
+  const deferredQuery = useDeferredValue(query)
+  // เตรียมข้อความสำหรับค้นหาครั้งเดียวต่อชุดบรรทัด (เปลี่ยนแทร็กหรือความยาวซับ) ไม่ใช่ทุกครั้งที่พิมพ์
+  const lines = useMemo(() => prepareLines(cues), [cues])
+  const visible = useMemo(() => searchPrepared(lines, deferredQuery), [lines, deferredQuery])
+  const needle = searchNeedle(deferredQuery)
+  const searching = needle !== ""
   const current = at === null ? -1 : cueIndexAt(cues, at)
 
   return (
@@ -126,7 +131,15 @@ function TranscriptLines({ cues, at, onPick }: LinesProps) {
       {visible.length > 0 && (
         <>
           <p className="text-sm text-muted-foreground">{t.hint}</p>
-          <LineList cues={cues} visible={visible} query={query} current={current} revealKey={at} onPick={onPick} />
+          <LineList
+            cues={cues}
+            lines={lines}
+            visible={visible}
+            needle={needle}
+            current={current}
+            revealKey={at}
+            onPick={onPick}
+          />
         </>
       )}
     </div>

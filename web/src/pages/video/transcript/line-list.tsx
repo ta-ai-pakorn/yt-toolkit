@@ -5,21 +5,27 @@ import { th } from "@/i18n/th"
 import { formatTimecode } from "@/lib/format"
 import type { Cue } from "@/lib/types"
 
-import { revealAndFocus } from "../frame-target"
-import { cueDisplayText, matchRanges } from "./search"
+import { centerInScrollArea, revealAndFocus } from "../frame-target"
+import { lineRanges, type PreparedLine } from "./search"
 
 const t = th.transcript
 
 // ความสูงสูงสุดของรายการ (เกินนี้เลื่อนในกรอบ) ต้องตั้งที่ viewport ของ ScrollArea เพราะตัวนั้นเป็นส่วนที่เลื่อนได้
 const AREA = "rounded-md border [&>[data-slot=scroll-area-viewport]]:max-h-[360px]"
 
-// บรรทัดที่มาจาก "ดูซับช่วงนี้" มีกรอบสีอำพัน 2px (สีเดียวกับกรอบภาพเฟรมที่เลือก BRD 10.7)
-const LINE =
-  "flex w-full items-baseline gap-3 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=true]:ring-2 aria-[current=true]:ring-primary"
+// คลิปยาวมีเป็นพันบรรทัด: บรรทัดที่อยู่นอกกรอบไม่ต้องวาดจนกว่าจะเลื่อนถึง (content-visibility)
+// content-visibility ตัดทุกอย่างที่ล้นกรอบ li จึงเว้น padding 3px ให้วงโฟกัสของปุ่มไม่ถูกตัด
+const ITEM = "p-[3px] [contain-intrinsic-size:auto_36px] [content-visibility:auto]"
 
-/** ข้อความของบรรทัด โดยครอบคำที่ตรงคำค้นด้วย <mark> */
-function Highlighted({ text, query }: { text: string; query: string }) {
-  const ranges = matchRanges(text, query)
+// บรรทัดของเวลาที่มาจาก "ดูซับช่วงนี้" = แถบซ้ายสีอำพันเข้ม (--accent-text ผ่าน 3:1 ทั้งสองธีม) + พื้นจาง
+// ต่างจากวงโฟกัส (วงรอบทั้งปุ่ม) จึงเห็นทั้งสองอย่างพร้อมกันได้โดยไม่สับสน
+const LINE =
+  "flex w-full items-baseline gap-3 rounded-sm border-l-2 border-transparent px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=true]:border-accent-text aria-[current=true]:bg-muted"
+
+/** ข้อความของบรรทัด โดยครอบคำที่ตรงคำค้นด้วย <mark> (คำนวณเฉพาะบรรทัดที่แสดง) */
+function Highlighted({ line, needle }: { line: PreparedLine; needle: string }) {
+  const ranges = lineRanges(line, needle)
+  const { text } = line
   if (ranges.length === 0) return <>{text}</>
   const parts = []
   let from = 0
@@ -38,9 +44,12 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 
 type Props = {
   cues: Cue[]
+  /** ข้อความที่เตรียมไว้ค้นหา ตำแหน่งเดียวกับ cues */
+  lines: PreparedLine[]
   /** ตำแหน่งของบรรทัดที่แสดง (ผลค้นหา) เรียงตามเวลา */
   visible: number[]
-  query: string
+  /** คำค้นหลังจัดรูป (searchNeedle) ใช้เน้นคำ */
+  needle: string
   /** บรรทัดของเวลาที่ส่งมาใน URL (at) · -1 = ไม่มี */
   current: number
   /** เวลาใน URL: เปลี่ยนค่าเมื่อไร เลื่อนไปบรรทัด current และโฟกัสหนึ่งครั้ง · null = ไม่มี */
@@ -48,32 +57,53 @@ type Props = {
   onPick: (cue: Cue) => void
 }
 
-/** รายการบรรทัดทรานสคริปต์: แต่ละบรรทัดเป็นปุ่ม เวลา HH:MM:SS + ข้อความ กดแล้วไปภาพเฟรมของช่วงนั้น */
-export function LineList({ cues, visible, query, current, revealKey, onPick }: Props) {
+/** รายการบรรทัดทรานสคริปต์: แต่ละบรรทัดเป็นปุ่มเดียว เวลา HH:MM:SS + ข้อความ กดแล้วไปภาพเฟรมของช่วงนั้น */
+export function LineList({ cues, lines, visible, needle, current, revealKey, onPick }: Props) {
   const buttons = useRef(new Map<number, HTMLButtonElement>())
   const revealed = useRef<number | null>(null)
+  // บรรทัดที่ไฮไลต์ถูกซ่อนด้วยคำค้นหลังเลื่อนไปหาแล้ว: กลับมาเห็นเมื่อไร เลื่อนกรอบไปหาอีกครั้ง
+  const wasHidden = useRef(false)
+  const shown = current >= 0 && visible.includes(current)
 
   useEffect(() => {
     if (revealKey === null) {
       revealed.current = null
+      wasHidden.current = false
       return
     }
-    if (revealed.current === revealKey || current < 0) return
-    return revealAndFocus(
-      () => buttons.current.get(current),
-      () => {
-        revealed.current = revealKey
-      },
-    )
-  }, [revealKey, current])
+    // ยังไม่อยู่ในรายการ (ถูกกรองด้วยคำค้น): รอจนกลับมา ค่อยเลื่อนไปหา
+    if (!shown) {
+      if (revealed.current === revealKey) wasHidden.current = true
+      return
+    }
+    // มาครั้งแรกด้วยเวลานี้: เลื่อนให้อยู่กลางจอและโฟกัส
+    if (revealed.current !== revealKey) {
+      return revealAndFocus(
+        () => buttons.current.get(current),
+        () => {
+          revealed.current = revealKey
+          wasHidden.current = false
+        },
+      )
+    }
+    // กลับมาเห็นหลังถูกกรอง (เช่นล้างคำค้น): เลื่อนเฉพาะกรอบ ไม่แย่งโฟกัสจากช่องค้นหา
+    if (wasHidden.current) {
+      const frame = requestAnimationFrame(() => {
+        wasHidden.current = false
+        const button = buttons.current.get(current)
+        if (button) centerInScrollArea(button)
+      })
+      return () => cancelAnimationFrame(frame)
+    }
+  }, [revealKey, current, shown])
 
   return (
     <ScrollArea className={AREA}>
-      <ul aria-label={t.linesLabel} className="flex flex-col gap-0.5 p-1.5">
+      <ul aria-label={t.linesLabel} className="flex flex-col p-1">
         {visible.map((index) => {
           const cue = cues[index]
           return (
-            <li key={`${cue.startMs}-${index}`}>
+            <li key={`${cue.startMs}-${index}`} className={ITEM}>
               <button
                 ref={(element) => {
                   if (element) buttons.current.set(index, element)
@@ -88,7 +118,7 @@ export function LineList({ cues, visible, query, current, revealKey, onPick }: P
                   {formatTimecode(cue.startMs)}
                 </span>
                 <span className="min-w-0">
-                  <Highlighted text={cueDisplayText(cue)} query={query} />
+                  <Highlighted line={lines[index]} needle={needle} />
                 </span>
               </button>
             </li>

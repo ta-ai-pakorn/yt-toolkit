@@ -106,8 +106,11 @@ function focusFirstItem(itemRef: RefObject<HTMLElement | null>): () => void {
 // เพราะ content-visibility ตัดทุกอย่างที่ล้นกรอบ ไม่งั้นวงโฟกัสของปุ่มในภาพจะถูกตัด (margin ติดลบชดเชยให้ระยะห่างเท่าเดิม)
 const TILE = "group relative -m-[3px] p-[3px] [contain-intrinsic-size:auto_80px] [content-visibility:auto]"
 
-// ภาพที่มาจากบรรทัดทรานสคริปต์ (?at=) มีกรอบสีอำพัน 2px (BRD 10.7 "ตัวที่เลือกมีกรอบ --accent 2px")
-const HIGHLIGHT = "data-highlighted:ring-2 data-highlighted:ring-primary"
+// ภาพที่มาจากบรรทัดทรานสคริปต์ (?at=): กรอบ 2px สีอำพันเข้ม (--accent-text ผ่าน 3:1 ทั้งสองธีม BRD 10.7) เว้นช่องจากภาพ 1px
+// ต่างจากวงโฟกัส (วงทึบ 3px ติดภาพ) และแสดงเฉพาะตอนไม่มีวงโฟกัส: ผู้ใช้คีย์บอร์ดเห็นวงโฟกัสเสมอ ไม่ถูกกรอบนี้บัง
+// ใช้ outline ไม่ใช่ ring: ช่องว่าง 1px + กรอบ 2px = 3px พอดีกับ padding ของ li (content-visibility ตัดส่วนที่ล้น)
+const HIGHLIGHT =
+  "not-focus-visible:data-highlighted:outline-solid not-focus-visible:data-highlighted:outline-2 not-focus-visible:data-highlighted:outline-offset-1 not-focus-visible:data-highlighted:outline-accent-text"
 
 type FrameTileProps = {
   frame: StoryboardFrame
@@ -162,6 +165,7 @@ function FrameTile({ frame, videoId, highlighted, onOpen, onViewSubs, buttonRef 
           type="button"
           aria-haspopup="dialog"
           data-highlighted={highlighted ? "" : undefined}
+          aria-current={highlighted ? "true" : undefined}
           onClick={onOpen}
           onKeyDown={onKeyDown}
           className={`block w-full cursor-zoom-in rounded-md outline-none hover:ring-2 hover:ring-ring/40 focus-visible:ring-3 focus-visible:ring-ring ${HIGHLIGHT}`}
