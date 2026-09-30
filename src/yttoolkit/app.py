@@ -40,6 +40,7 @@ class AppContext:
     videos: VideoService | None = None
     extractor: Extractor | None = None
     cache_root: Path | None = None
+    fake: bool = False  # โหมดข้อมูลปลอม (serve + YT_TOOLKIT_FAKE=1) หน้าตรวจสุขภาพจะบอกไว้
 
 
 def create_app(ctx: AppContext) -> FastAPI:

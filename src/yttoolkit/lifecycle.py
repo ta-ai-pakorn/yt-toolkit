@@ -129,13 +129,13 @@ def warm_up_in_background(extractor: Extractor) -> threading.Thread | None:
     return thread
 
 
-def open_services(paths: Paths) -> tuple[Database, VideoService, Extractor]:
+def open_services(paths: Paths, fake: bool = False) -> tuple[Database, VideoService, Extractor]:
     """เปิดฐานข้อมูล (สร้างตารางถ้ายังไม่มี) ล้าง cache เก่า และเลือก extractor
 
-    YT_TOOLKIT_FAKE=1 = ใช้ข้อมูลทดสอบใน tests/fixtures แทนยูทูปจริง (ใช้กับ E2E)
+    fake=True = ใช้ข้อมูลทดสอบใน tests/fixtures แทนยูทูปจริง (serve ส่งมาเมื่อ YT_TOOLKIT_FAKE=1 ใช้กับ E2E)
     ล้าง cache ไม่สำเร็จแค่บันทึก log แล้วเปิดโปรแกรมต่อ ส่วนฐานข้อมูลเปิดไม่ได้จะโยนต่อ
     """
-    if env_flag("YT_TOOLKIT_FAKE", False):
+    if fake:
         log.warning("โหมดข้อมูลปลอม (YT_TOOLKIT_FAKE): ใช้ข้อมูลทดสอบใน tests/fixtures ไม่ต่อยูทูปจริง")
         extractor: Extractor = FakeExtractor(CODE_ROOT / "tests" / "fixtures")
     else:
@@ -185,9 +185,10 @@ def run_app(
     open_browser: bool,
     auto_ffmpeg: bool,
     extra_origins: Iterable[str] = (),
+    fake: bool = False,
 ) -> int:
     try:
-        db, videos, extractor = open_services(paths)
+        db, videos, extractor = open_services(paths, fake=fake)
     except Exception:
         log.exception("เปิดฐานข้อมูลไม่สำเร็จ (%s)", paths.db)
         return 1
@@ -203,6 +204,7 @@ def run_app(
             db=db,
             videos=videos,
             extractor=extractor,
+            fake=fake,
         )
     finally:
         close_extractor(extractor)
@@ -232,6 +234,7 @@ def _run_server(
     db: Database,
     videos: VideoService,
     extractor: Extractor,
+    fake: bool = False,
 ) -> int:
     token = runstate.new_token()
     stop_event = threading.Event()
@@ -256,6 +259,7 @@ def _run_server(
         videos=videos,
         extractor=extractor,
         cache_root=paths.cache,
+        fake=fake,
     )
     server = Server(ctx)
     server.start()
@@ -347,6 +351,9 @@ def start(
     except LockFileError as error:  # เปิดไฟล์ lock ไม่ได้ ไม่ใช่มีคนถือ lock รอไปก็ไม่หาย
         log.error("เปิดโปรแกรมไม่สำเร็จ: %s", error)
         return 1
+    if env_flag("YT_TOOLKIT_FAKE", False):
+        # โปรแกรมที่พนักงานเปิดจาก start.bat ต้องใช้ยูทูปจริงเสมอ ตัวแปรที่ค้างในเครื่องจะได้ไม่ทำให้เห็นข้อมูลปลอม
+        log.warning("ไม่สนใจ YT_TOOLKIT_FAKE ตอน start (ใช้ได้กับ serve เท่านั้น)")
     try:
         # ถือ lock อยู่ แปลว่าไม่มีอินสแตนซ์อื่นรัน app.json ที่เหลืออยู่จึงเป็นของเก่า
         runstate.clear(paths.app_json)
@@ -357,13 +364,14 @@ def start(
             with_tray=env_flag("YT_TOOLKIT_TRAY", True),
             open_browser=env_flag("YT_TOOLKIT_OPEN_BROWSER", True),
             auto_ffmpeg=True,
+            fake=False,
         )
     finally:
         plat.release_lock(lock)
 
 
 def serve(port: int | None = None, dev: bool = False) -> int:
-    """รันแบบไม่มี tray และไม่เปิดเบราว์เซอร์ ใช้ตอนพัฒนา เทส และ E2E"""
+    """รันแบบไม่มี tray และไม่เปิดเบราว์เซอร์ ใช้ตอนพัฒนา เทส และ E2E (อ่าน YT_TOOLKIT_FAKE ที่นี่ที่เดียว)"""
     paths = default_paths()
     plat = current()
     paths.ensure()
@@ -387,6 +395,7 @@ def serve(port: int | None = None, dev: bool = False) -> int:
             open_browser=False,
             auto_ffmpeg=False,
             extra_origins=DEV_ORIGINS if dev else (),
+            fake=env_flag("YT_TOOLKIT_FAKE", False),
         )
     finally:
         plat.release_lock(lock)

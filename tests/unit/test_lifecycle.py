@@ -706,7 +706,7 @@ def test_stop_says_closed_when_app_json_vanishes_after_failed_request(paths, fak
 # ---------- บริการของ M2 (ฐานข้อมูล, extractor, โหมดข้อมูลปลอม) ----------
 
 
-def _run_capturing_ctx(paths, fake_platform, monkeypatch, ready: bool = True):
+def _run_capturing_ctx(paths, fake_platform, monkeypatch, ready: bool = True, **extra):
     """รัน run_app โดยให้เซิร์ฟเวอร์ปลอมสั่งปิดทันทีที่เริ่ม คืน (exit code, ctx)"""
     captured = []
     server = FakeServer(ready=ready)
@@ -717,7 +717,7 @@ def _run_capturing_ctx(paths, fake_platform, monkeypatch, ready: bool = True):
         return server
 
     monkeypatch.setattr(lifecycle, "Server", make_server)
-    code = lifecycle.run_app(**_run_app_kwargs(paths, fake_platform))
+    code = lifecycle.run_app(**_run_app_kwargs(paths, fake_platform), **extra)
     return code, captured[0]
 
 
@@ -735,10 +735,10 @@ def test_run_app_fake_mode_uses_fixture_extractor(paths, fake_platform, monkeypa
     from yttoolkit.config import CODE_ROOT
     from yttoolkit.core.extractor import FakeExtractor
 
-    monkeypatch.setenv("YT_TOOLKIT_FAKE", "1")
     with caplog.at_level(logging.WARNING, logger="yttoolkit"):
-        code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+        code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, fake=True)
     assert code == 0
+    assert ctx.fake is True
     assert isinstance(ctx.extractor, FakeExtractor)
     assert ctx.extractor.root == CODE_ROOT / "tests" / "fixtures"
     assert ctx.videos is not None and ctx.cache_root == paths.cache
@@ -796,7 +796,7 @@ def test_run_app_starts_even_if_purge_fails(paths, fake_platform, monkeypatch, c
 
 
 def test_run_app_fails_cleanly_when_db_cannot_open(paths, fake_platform, monkeypatch, caplog):
-    def broken_services(paths):
+    def broken_services(paths, **kwargs):
         raise RuntimeError("ฐานข้อมูลเป็นเวอร์ชัน 9 ใหม่กว่าโปรแกรมนี้")
 
     monkeypatch.setattr(lifecycle, "open_services", broken_services)
@@ -948,8 +948,7 @@ def test_run_app_closes_db_even_if_extractor_close_fails(paths, fake_platform, m
 
 
 def test_run_app_accepts_extractor_without_close(paths, fake_platform, monkeypatch):
-    monkeypatch.setenv("YT_TOOLKIT_FAKE", "1")
-    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, fake=True)
     assert code == 0
     assert not hasattr(ctx.extractor, "close")
 
@@ -1045,3 +1044,58 @@ def test_run_app_does_not_start_periodic_purge_when_server_fails(paths, fake_pla
     code, _ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, ready=False)
     assert code == 1
     assert started == []
+
+
+# ---------- final review: YT_TOOLKIT_FAKE ใช้ได้กับ serve เท่านั้น ----------
+
+
+def _capture_run_app(monkeypatch):
+    seen = {}
+
+    def fake_run_app(**kwargs):
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(lifecycle, "run_app", fake_run_app)
+    return seen
+
+
+def test_start_ignores_fake_env(paths, fake_platform, monkeypatch, caplog):
+    monkeypatch.setenv("YT_TOOLKIT_FAKE", "1")
+    seen = _capture_run_app(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        assert lifecycle.start(paths, fake_platform, sleep=lambda s: None) == 0
+    assert seen["fake"] is False  # โปรแกรมที่พนักงานเปิดจาก start.bat ใช้ยูทูปจริงเสมอ
+    assert "YT_TOOLKIT_FAKE" in caplog.text
+
+
+def test_start_without_fake_env_says_nothing(paths, fake_platform, monkeypatch, caplog):
+    monkeypatch.delenv("YT_TOOLKIT_FAKE", raising=False)
+    seen = _capture_run_app(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        assert lifecycle.start(paths, fake_platform, sleep=lambda s: None) == 0
+    assert seen["fake"] is False
+    assert "YT_TOOLKIT_FAKE" not in caplog.text
+
+
+@pytest.mark.parametrize(("env", "expected"), [("1", True), ("0", False), (None, False)])
+def test_serve_honours_fake_env(paths, fake_platform, monkeypatch, env, expected):
+    if env is None:
+        monkeypatch.delenv("YT_TOOLKIT_FAKE", raising=False)
+    else:
+        monkeypatch.setenv("YT_TOOLKIT_FAKE", env)
+    monkeypatch.setattr(lifecycle, "default_paths", lambda: paths)
+    monkeypatch.setattr(lifecycle, "current", lambda: fake_platform)
+    seen = _capture_run_app(monkeypatch)
+    assert lifecycle.serve(port=9000) == 0
+    assert seen["fake"] is expected
+
+
+def test_run_app_ignores_fake_env_unless_asked(paths, fake_platform, monkeypatch):
+    from yttoolkit.core.extractor import YtDlpExtractor
+
+    monkeypatch.setenv("YT_TOOLKIT_FAKE", "1")
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    assert code == 0
+    assert ctx.fake is False
+    assert isinstance(ctx.extractor, YtDlpExtractor)

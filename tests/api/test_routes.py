@@ -95,3 +95,11 @@ def test_install_ffmpeg_unexpected_error_uses_envelope(make_client, monkeypatch)
     assert resp.status_code == 502
     assert resp.json()["error"]["code"] == "E_TOOL_INSTALL_FAILED"
     assert resp.json()["error"]["detail"] == "file is in use"
+
+
+def test_health_marks_fake_mode_only_when_on(make_client):  # final review: โหมดข้อมูลปลอมต้องเห็นได้
+    fake = {"tools": {}, "disk": {}, "output": {}, "network": {}}
+    normal = make_client(health=lambda: fake).get("/api/health").json()
+    assert "mode" not in normal
+    marked = make_client(health=lambda: fake, fake=True).get("/api/health").json()
+    assert marked["mode"] == "fake"

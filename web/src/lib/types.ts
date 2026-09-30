@@ -15,6 +15,7 @@ export type Health = {
   disk: ToolStatus
   output: ToolStatus
   network: ToolStatus
+  mode?: "fake" // มีเฉพาะตอน backend รันโหมดข้อมูลปลอม (serve + YT_TOOLKIT_FAKE=1)
 }
 
 export type VideoFormat = {

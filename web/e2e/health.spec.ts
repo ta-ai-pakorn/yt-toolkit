@@ -12,6 +12,25 @@ test("ตัวช่วยของ yt-dlp เป็น deno", async ({ page })
   await expect(page.getByTestId("tool-jsRuntime")).toContainText("deno", { timeout: 15_000 })
 })
 
+test("โหมดข้อมูลปลอม (E2E รัน serve + YT_TOOLKIT_FAKE=1) → หน้าตรวจสุขภาพบอกไว้", async ({ page }) => {
+  await page.goto("/settings/health")
+  const banner = page.getByTestId("fake-mode")
+  await expect(banner).toContainText("โหมดข้อมูลปลอม", { timeout: 15_000 })
+  await expect(banner).toHaveAttribute("role", "status")
+})
+
+test("ไม่ใช่โหมดข้อมูลปลอม → ไม่มีแถบบอก", async ({ page }) => {
+  await page.route("**/api/health", async (route) => {
+    const response = await route.fetch()
+    const body = await response.json()
+    delete body.mode
+    await route.fulfill({ response, json: body })
+  })
+  await page.goto("/settings/health")
+  await expect(page.getByTestId("tool-ffmpeg")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId("fake-mode")).toHaveCount(0)
+})
+
 test("แท็บเกี่ยวกับแสดงเวอร์ชัน", async ({ page }) => {
   await page.goto("/settings/about")
   await expect(page.getByText(/\d+\.\d+\.\d+/)).toBeVisible()

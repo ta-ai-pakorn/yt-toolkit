@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { CircleAlert, CircleCheck, CircleX, Power, RefreshCw } from "lucide-react"
+import { CircleAlert, CircleCheck, CircleX, FlaskConical, Power, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -101,6 +101,13 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
 
   return (
     <div className="flex flex-col gap-4">
+      {health.data.mode === "fake" && (
+        <Alert role="status" data-testid="fake-mode">
+          <FlaskConical aria-hidden />
+          <AlertTitle>{th.health.fakeMode.title}</AlertTitle>
+          <AlertDescription>{th.health.fakeMode.description}</AlertDescription>
+        </Alert>
+      )}
       <ItemGroup className="gap-2">
         {rows(health.data).map(([key, tool]) => {
           const Icon = ICON[tool.status]

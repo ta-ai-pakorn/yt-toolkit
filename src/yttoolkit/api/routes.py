@@ -36,13 +36,16 @@ def build_router(ctx: AppContext) -> APIRouter:
 
     @router.get("/health")
     def health() -> dict:
-        return {"version": ctx.version, "commit": ctx.commit, **_health()}
+        body = {"version": ctx.version, "commit": ctx.commit, **_health()}
+        if ctx.fake:  # มีเฉพาะตอนโหมดข้อมูลปลอม หน้าเว็บจะแสดงแถบบอกไว้
+            body["mode"] = "fake"
+        return body
 
     @router.post("/tools/ffmpeg/install", response_model=None)
     def install_ffmpeg() -> dict | JSONResponse:
         try:
             tools.install_ffmpeg(ctx.paths, ctx.plat)
-        except Exception as error:  # noqa: BLE001 (ทุกความผิดพลาดต้องกลับไปเป็น error envelope ไม่ใช่ 500 ดิบ)
+        except Exception as error:  # ทุกความผิดพลาดต้องกลับไปเป็น error envelope ไม่ใช่ 500 ดิบ
             log.exception("โหลด ffmpeg จากปุ่มในหน้าเว็บไม่สำเร็จ")
             return error_response(
                 502,
