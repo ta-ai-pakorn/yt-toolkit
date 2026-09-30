@@ -736,6 +736,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pythainlp"
+version = "5.3.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/64/2a6f498cd05b15960e036c543d2efdfd9f2dddf784aaa491d980e2a7eddc/pythainlp-5.3.8.tar.gz", hash = "sha256:ef8cd131421b3f80a1262c63ce3391ccdfb155a60453051b09e6b5fdf1e62c0a", size = 19309864, upload-time = "2026-09-24T18:41:20.237Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c6/21/eec2b16a7e4f1ffb9577c62ef786e1eaad315ce2320c642835d11610b2de/pythainlp-5.3.8-py3-none-any.whl", hash = "sha256:7f4367782d250afa936f65a1c151129fb80c316c3b3dbaa08923de04705b53b3", size = 19852536, upload-time = "2026-09-24T18:41:17.248Z" },
+]
+
+[[package]]
 name = "python-dotenv"
 version = "1.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -856,6 +868,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a3/26/b09b8010994eccc3c09092e6b34058f36a460eea2d4c3e8b910c695975a0/typing_inspection-0.4.4.tar.gz", hash = "sha256:547274fa6b0a561ccf549cc9524b999a578e737d015d8709d021f9d0d13bea47", size = 76928, upload-time = "2026-08-12T12:37:25.997Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl", hash = "sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147", size = 14750, upload-time = "2026-08-12T12:37:24.648Z" },
+]
+
+[[package]]
+name = "tzdata"
+version = "2026.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/31/3d74fa778a63b98b7374323befcc0be5ab3bd94afd4096a0124e7379152c/tzdata-2026.4.tar.gz", hash = "sha256:f1b8bd365d8d210c55353f4d7f8d6d8561c0ba50d704b700d195a9424bba0d79", size = 199350, upload-time = "2026-09-12T12:56:03.251Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/bc/8737e8d54cf51106118039b83f485a4783112fab49ea9d044b234978a46e/tzdata-2026.4-py2.py3-none-any.whl", hash = "sha256:c2169a8b0a7a5e9674da5a135ccdfb2b3e671b333ed9fed17b41f73c34476e81", size = 347494, upload-time = "2026-09-12T12:56:01.67Z" },
 ]
 
 [[package]]
@@ -1105,6 +1126,7 @@ dependencies = [
     { name = "httpx" },
     { name = "pillow" },
     { name = "pystray" },
+    { name = "pythainlp" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "yt-dlp", extra = ["default"] },
 ]
@@ -1122,6 +1144,7 @@ requires-dist = [
     { name = "httpx" },
     { name = "pillow" },
     { name = "pystray" },
+    { name = "pythainlp", specifier = ">=5.3.8" },
     { name = "uvicorn", extras = ["standard"] },
     { name = "yt-dlp", extras = ["default"] },
 ]
