@@ -99,12 +99,15 @@ async function expectHighlightedFrameNear(page: Page, at: number) {
   await expect(highlighted).toBeFocused()
   await expect(highlighted).toBeInViewport()
   await expect(highlighted).toHaveAttribute("aria-current", "true")
-  // กรอบไฮไลต์ (outline) หรือวงโฟกัส (box-shadow) อย่างใดอย่างหนึ่งต้องเห็นอยู่ ขึ้นกับว่าเบราว์เซอร์ถือว่าโฟกัสจากคีย์บอร์ดไหม
-  const marked = await highlighted.evaluate((element) => {
-    const style = getComputedStyle(element)
-    return style.outlineStyle !== "none" || style.boxShadow !== "none"
-  })
-  expect(marked).toBe(true)
+  // มาด้วยการคลิกเมาส์ (ไม่ใช่วงโฟกัสจากคีย์บอร์ด): ต้องเห็นกรอบไฮไลต์ = outline ทึบ 2px เว้นช่อง 1px สี --accent-text
+  await expect(highlighted).toHaveCSS("outline-style", "solid")
+  await expect(highlighted).toHaveCSS("outline-width", "2px")
+  await expect(highlighted).toHaveCSS("outline-offset", "1px")
+  const colors = await highlighted.evaluate((element) => ({
+    outline: getComputedStyle(element).outlineColor,
+    accent: getComputedStyle(document.documentElement).getPropertyValue("--accent-text").trim(),
+  }))
+  expect(colors.outline).toBe(hexToRgb(colors.accent))
   const timeOf = (alt: string | null) => toMs(/\d{2}:\d{2}:\d{2}/.exec(alt ?? "")?.[0] ?? "")
   const chosen = timeOf(await highlighted.locator("img").getAttribute("alt"))
   const all = (await frameList(page).locator("img").evaluateAll((imgs) => imgs.map((img) => img.getAttribute("alt")))).map(
@@ -113,6 +116,12 @@ async function expectHighlightedFrameNear(page: Page, at: number) {
   // เป็นภาพที่ใกล้ at ที่สุดในทุกภาพ (เวลาหลังภาพสุดท้าย = ภาพสุดท้าย) · timecode ตัดเศษวินาทีทิ้ง จึงเผื่อ 1 วินาที
   const best = Math.min(...all.map((t) => Math.abs(t - at)))
   expect(Math.abs(chosen - at)).toBeLessThanOrEqual(best + 1000)
+}
+
+/** "#9a6200" → "rgb(154, 98, 0)" (รูปแบบที่ getComputedStyle คืนมา) */
+function hexToRgb(hex: string): string {
+  const n = Number.parseInt(hex.replace("#", ""), 16)
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
 }
 
 function atFromUrl(page: Page): number {
@@ -189,6 +198,52 @@ test.describe("M3 ทรานสคริปต์ → ภาพเฟรม", 
     await lineItems(page).last().getByRole("button").click()
     await expect(page).toHaveURL(/\?at=\d+$/)
     await expectHighlightedFrameNear(page, atFromUrl(page))
+  })
+})
+
+test.describe("M3 ทรานสคริปต์: บรรทัดของเวลา at ระหว่างค้นหา", () => {
+  // เวลากลางคลิป: บรรทัดนี้อยู่ลึกในรายการ (ต้องเลื่อนกรอบถึงจะเห็น) และไม่มีคำว่า กรุงเทพ
+  const DEEP_AT = 200_000
+
+  test("ค้นไม่เจอแล้วลบตัวอักษรจนเจออีกครั้ง → โฟกัสยังอยู่ที่ช่องค้นหา ไม่ถูกดึงไปที่บรรทัด", async ({ page }) => {
+    await mockThai(page)
+    await page.goto(`/v/${THAI}?tab=transcript&at=${DEEP_AT}`)
+    await expect(currentLine(page)).toBeFocused()
+    await searchBox(page).click()
+    await page.keyboard.type("กรุงเทพz")
+    await expect(page.getByText("ไม่พบคำนี้ในทรานสคริปต์")).toBeVisible()
+    await page.keyboard.press("Backspace")
+    await expect(page.getByText(/^พบ \d+ บรรทัด$/)).toBeVisible()
+    await expect(searchBox(page)).toBeFocused()
+    // รอให้เฟรมถัดไปผ่าน (ถ้าจะแย่งโฟกัสก็เกิดตอนนั้น) แล้วตรวจอีกครั้ง
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await expect(searchBox(page)).toBeFocused()
+    await expect(searchBox(page)).toHaveValue("กรุงเทพ")
+  })
+
+  test("ล้างคำค้น → บรรทัดของเวลา at กลับมาอยู่กลางกรอบรายการ โดยโฟกัสยังอยู่ที่ช่องค้นหา (M5)", async ({ page }) => {
+    await mockThai(page)
+    await page.goto(`/v/${THAI}?tab=transcript&at=${DEEP_AT}`)
+    await expect(currentLine(page)).toBeFocused()
+    await expect(currentLine(page)).toBeInViewport()
+
+    await searchBox(page).fill("กรุงเทพ")
+    await expect(page.getByText(/^พบ \d+ บรรทัด$/)).toBeVisible()
+    // บรรทัดของ at ไม่มีคำนี้ จึงถูกซ่อนระหว่างค้นหา (และรายการที่สั้นลงเลื่อนกลับไปบนสุด)
+    await expect(currentLine(page)).toHaveCount(0)
+
+    await page.getByRole("button", { name: "ล้างคำค้น" }).click()
+    await expect(currentLine(page)).toHaveCount(1)
+    await expect(currentLine(page)).toBeInViewport()
+    await expect(searchBox(page)).toBeFocused()
+    const offCenter = await currentLine(page).evaluate((line) => {
+      const viewport = line.closest('[data-slot="scroll-area-viewport"]')
+      if (!viewport) return Infinity
+      const box = line.getBoundingClientRect()
+      const frame = viewport.getBoundingClientRect()
+      return Math.abs(box.top + box.height / 2 - (frame.top + frame.height / 2))
+    })
+    expect(offCenter).toBeLessThan(40)
   })
 })
 

@@ -57,7 +57,10 @@ type Props = {
   onPick: (cue: Cue) => void
 }
 
-/** รายการบรรทัดทรานสคริปต์: แต่ละบรรทัดเป็นปุ่มเดียว เวลา HH:MM:SS + ข้อความ กดแล้วไปภาพเฟรมของช่วงนั้น */
+/**
+ * รายการบรรทัดทรานสคริปต์: แต่ละบรรทัดเป็นปุ่มเดียว เวลา HH:MM:SS + ข้อความ กดแล้วไปภาพเฟรมของช่วงนั้น
+ * ต้องเรนเดอร์ไว้ตลอด (ผลค้นหาว่างก็คืน null) เพราะจำไว้ว่าเลื่อนไปหาบรรทัดของ at แล้วหรือยัง
+ */
 export function LineList({ cues, lines, visible, needle, current, revealKey, onPick }: Props) {
   const buttons = useRef(new Map<number, HTMLButtonElement>())
   const revealed = useRef<number | null>(null)
@@ -96,6 +99,9 @@ export function LineList({ cues, lines, visible, needle, current, revealKey, onP
       return () => cancelAnimationFrame(frame)
     }
   }, [revealKey, current, shown])
+
+  // ค้นไม่เจอ: ไม่วาดรายการ แต่ตัวนี้ยังอยู่ (สถานะการเลื่อนไปหาบรรทัดข้างบนไม่หาย)
+  if (visible.length === 0) return null
 
   return (
     <ScrollArea className={AREA}>
