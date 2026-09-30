@@ -910,6 +910,7 @@ def test_cache_case_check_rejects_miscased_file_after_full_scan(api, monkeypatch
     scans: list = []
     monkeypatch.setattr(videos_api.os, "scandir", _ScanSpy(os.scandir, scans))
     assert client.get(f"/api/cache/{BBB}/storyboard/F_0002.jpg").status_code == 404
-    if scans:  # ดิสก์ที่สนตัวพิมพ์ (Linux) ไม่เจอไฟล์ตั้งแต่ is_file() จึงไม่ต้องอ่านโฟลเดอร์เลย
+    # ดิสก์ที่สนตัวพิมพ์ (Linux) ไม่เจอไฟล์ตั้งแต่ is_file() จึงไม่ต้องอ่านโฟลเดอร์เลย
+    if (folder / "F_0002.jpg").is_file():  # ดิสก์ไม่สนตัวพิมพ์ (Windows/macOS) ต้องไล่ดูชื่อจริง
         assert scans[-1]["folder"] == folder
         assert scans[-1]["read"] == scans[-1]["total"]  # ไม่เจอชื่อตรงเป๊ะ จึงต้องอ่านครบ
