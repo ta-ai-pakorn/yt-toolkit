@@ -10,6 +10,14 @@ from yttoolkit.core import tools
 from yttoolkit.runstate import RunInfo
 
 
+@pytest.fixture(autouse=True)
+def _restore_pythainlp_env(monkeypatch):
+    """open_services ตั้ง PYTHAINLP_DATA ให้ชี้โฟลเดอร์ชั่วคราวของเทส คืนค่าเดิมหลังจบทุกเทส"""
+    for name in ("PYTHAINLP_DATA", "PYTHAINLP_DATA_DIR"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+
+
 class FakeResponse:
     def __init__(self, status_code: int, body: dict | None = None):
         self.status_code = status_code
@@ -919,7 +927,7 @@ def _services_with(extractor, paths):
     def fake_open_services(p, *args, **kwargs):
         db = Database(paths.db)
         db.migrate()
-        return db, VideoService(db, extractor), extractor
+        return db, VideoService(db, extractor), extractor, None
 
     return fake_open_services
 
