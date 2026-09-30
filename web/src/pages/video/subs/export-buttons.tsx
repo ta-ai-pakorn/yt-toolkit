@@ -53,17 +53,21 @@ type Props = {
   options: SubOptions
   /** คำของแทร็กนี้ (ยังโหลดไม่เสร็จ = ปุ่มคัดลอกกดไม่ได้) */
   tokens: readonly SubToken[] | undefined
+  /** แทร็กนี้อ่านแล้วไม่มีข้อความ (E_NO_SUBTITLES): โหลดไปก็ได้ error จึงกดไม่ได้ทุกปุ่ม */
+  noText: boolean
 }
 
 /**
  * ปุ่มโหลดไฟล์ซับ .srt / .txt / .md (ปุ่มรอง เบราว์เซอร์โหลดลงเครื่องทันที) และปุ่ม "คัดลอกข้อความ"
- * ระหว่างเตรียมไฟล์ปุ่มที่กดมีวงหมุน และทุกปุ่มโหลดกดซ้ำไม่ได้ (แต่ยังโฟกัสได้ ลำดับ Tab ไม่กระโดด)
+ * ยังไม่มีแทร็ก หรือแทร็กไม่มีข้อความ = กดไม่ได้ทุกปุ่ม · ระหว่างเตรียมไฟล์ปุ่มที่กดมีวงหมุน และทุกปุ่มโหลดกดซ้ำไม่ได้ (แต่ยังโฟกัสได้ ลำดับ Tab ไม่กระโดด)
  */
-export function ExportButtons({ videoId, track, options, tokens }: Props) {
+export function ExportButtons({ videoId, track, options, tokens, noText }: Props) {
   const [busy, setBusy] = useState<SubExportFormat | null>(null)
 
+  const unavailable = !track || noText
+
   async function download(format: SubExportFormat) {
-    if (!track || busy !== null) return
+    if (!track || noText || busy !== null) return
     setBusy(format)
     try {
       await downloadWithToast(exportPath(videoId, track.id, format, options), `subtitles.${track.lang}.${format}`)
@@ -80,7 +84,7 @@ export function ExportButtons({ videoId, track, options, tokens }: Props) {
             key={format}
             variant="secondary"
             className={TOUCH}
-            disabled={!track || busy !== null}
+            disabled={unavailable || busy !== null}
             focusableWhenDisabled
             onClick={() => void download(format)}
           >
@@ -92,7 +96,7 @@ export function ExportButtons({ videoId, track, options, tokens }: Props) {
       <Button
         variant="ghost"
         className={TOUCH}
-        disabled={!track || !tokens}
+        disabled={unavailable || !tokens}
         focusableWhenDisabled
         onClick={() => {
           if (tokens) void copyTranscript(tokens)

@@ -1,6 +1,6 @@
 import type { UseQueryResult } from "@tanstack/react-query"
 import { CaptionsOff } from "lucide-react"
-import { useId } from "react"
+import { useEffect, useId, useRef, useState, type RefObject } from "react"
 
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -44,6 +44,25 @@ function NoTokens() {
 }
 
 /**
+ * กล่องเลื่อนแนวนอนกว้างไม่พอกับเนื้อหาหรือไม่ (ตรวจใหม่เมื่อกล่องหรือเนื้อหาเปลี่ยนขนาด)
+ * ใช้ตัดสินว่ากล่องต้องเป็นจุด Tab ไหม: เลื่อนได้ต้องเลื่อนด้วยคีย์บอร์ดได้ ไม่ต้องเลื่อนก็ไม่ต้องเป็นจุด Tab เพิ่ม
+ */
+function useOverflowX(box: RefObject<HTMLElement | null>, content: RefObject<HTMLElement | null>): boolean {
+  const [overflowing, setOverflowing] = useState(false)
+  useEffect(() => {
+    const element = box.current
+    if (!element || typeof ResizeObserver === "undefined") return
+    const check = () => setOverflowing(element.scrollWidth > element.clientWidth)
+    const observer = new ResizeObserver(check)
+    observer.observe(element)
+    if (content.current) observer.observe(content.current)
+    check()
+    return () => observer.disconnect()
+  }, [box, content])
+  return overflowing
+}
+
+/**
  * ตัวอย่าง 5 ซับแรก + สรุปทั้งแทร็ก: ข้อความและการขึ้นบรรทัดตรงกับที่ตัวสร้างซับให้มาทุกตัว
  * (ไม่ตัดคำหรือขึ้นบรรทัดเพิ่มเอง บรรทัดที่ยาวกว่ากล่องเลื่อนดูแนวนอนได้) จะได้เห็นแบบเดียวกับในไฟล์ .srt
  */
@@ -52,6 +71,9 @@ function PreviewBody({ data, options }: { data: SubTokens; options: SubOptions }
   // options มาจาก useSubSettings ตรง ๆ (ก้อนเดิมระหว่าง render) ซับจึงสร้างใหม่เฉพาะเมื่อค่าเปลี่ยนจริง
   const cues = useCues(data.tokens, options)
   const stats = cueStats(cues)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLOListElement>(null)
+  const overflowing = useOverflowX(boxRef, listRef)
 
   return (
     <section aria-labelledby={titleId} className="flex flex-col gap-2">
@@ -59,13 +81,12 @@ function PreviewBody({ data, options }: { data: SubTokens; options: SubOptions }
         {t.previewTitle}
       </h3>
       <div
-        // บรรทัดซับไม่ถูกตัดขึ้นบรรทัดใหม่: จอแคบเลื่อนแนวนอนได้ จึงต้องรับโฟกัสได้ด้วย (เลื่อนด้วยคีย์บอร์ด)
-        tabIndex={0}
-        role="group"
-        aria-labelledby={titleId}
+        ref={boxRef}
+        // บรรทัดซับไม่ถูกตัดขึ้นบรรทัดใหม่: จอแคบเลื่อนแนวนอนได้ และเฉพาะตอนเลื่อนได้จึงรับโฟกัส (เลื่อนด้วยคีย์บอร์ด)
+        tabIndex={overflowing ? 0 : undefined}
         className="overflow-x-auto rounded-lg border bg-muted/30 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
       >
-        <ol className="flex w-max min-w-full flex-col divide-y">
+        <ol ref={listRef} className="flex w-max min-w-full flex-col divide-y">
           {cues.slice(0, PREVIEW_CUES).map((cue, index) => (
             <li key={index} data-slot="cue" className="flex flex-col gap-0.5 px-3 py-2">
               <span className="font-mono text-xs text-muted-foreground">

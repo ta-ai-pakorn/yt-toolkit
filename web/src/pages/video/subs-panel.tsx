@@ -4,6 +4,7 @@ import { useId } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { th } from "@/i18n/th"
+import { ApiError } from "@/lib/api"
 import type { SubtitleTracks, VideoInfo } from "@/lib/types"
 
 import { videoQuery } from "./queries"
@@ -26,6 +27,7 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
   const track = trackInEffect(data, trackId)
   const settings = useSubSettings()
   const tokens = useQuery(tokensQuery(videoId, track?.id))
+  const noText = tokens.error instanceof ApiError && tokens.error.code === "E_NO_SUBTITLES"
   // อ่านข้อมูลคลิปจาก cache เท่านั้น (หน้า W2 โหลดไว้แล้ว) ไม่สร้างคำขอใหม่ ซึ่งจะนับว่าเปิดคลิปซ้ำ
   const video = useQueryClient().getQueryData<VideoInfo>(videoQuery(videoId).queryKey)
   const originalLang = originalLanguage(data.tracks, video?.audio)
@@ -55,7 +57,13 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
               <SubsPreview query={tokens} options={settings.options} />
             </>
           )}
-          <ExportButtons videoId={videoId} track={track} options={settings.options} tokens={tokens.data?.tokens} />
+          <ExportButtons
+            videoId={videoId}
+            track={track}
+            options={settings.options}
+            tokens={tokens.data?.tokens}
+            noText={noText}
+          />
         </CardContent>
       </Card>
     </section>
