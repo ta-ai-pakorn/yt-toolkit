@@ -20,6 +20,12 @@ import { fill, th } from "@/i18n/th"
 import type { ResolveItem } from "@/lib/types"
 
 import {
+  BotStopContext,
+  createBotStop,
+  useBotStop,
+  useBotStopped,
+} from "./bot-stop"
+import {
   AUTO_TITLE_ROWS,
   playlistQuery,
   thumbnailUrl,
@@ -28,6 +34,10 @@ import {
 import { Thumbnail } from "./thumbnail"
 
 const t = th.home.results
+
+// aria-disabled แทน disabled เพื่อให้โฟกัสยังอยู่ที่ปุ่ม (ตัวจัดการคลิกกันการกดเองอยู่แล้ว)
+const ariaDisabledClass =
+  "aria-disabled:pointer-events-none aria-disabled:opacity-50"
 
 type VideoRowProps = {
   item: ResolveItem
@@ -40,7 +50,13 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
   const id = item.videoId ?? ""
   const [requested, setRequested] = useState(false)
   const wantsTitle = autoTitle || requested
-  const video = useQuery({ ...videoTitleQuery(id), enabled: wantsTitle })
+  const botStop = useBotStop() ?? undefined
+  // ยูทูปขอให้ยืนยันว่าไม่ใช่บอท: ทั้งรายการหยุดดึงชื่อ (คำขอที่รออยู่ก็ไม่ออก)
+  const stopped = useBotStopped()
+  const video = useQuery({
+    ...videoTitleQuery(id, botStop),
+    enabled: wantsTitle && !stopped,
+  })
   const title = video.data?.title
 
   let name: ReactNode
@@ -48,6 +64,9 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
   if (title) {
     name = <ItemTitle className="line-clamp-2 w-auto">{title}</ItemTitle>
     hint = <ItemDescription className="font-mono text-xs">{id}</ItemDescription>
+  } else if (stopped) {
+    name = <ItemTitle className="font-mono">{id}</ItemTitle>
+    hint = <ItemDescription className="text-xs">{t.botStopped}</ItemDescription>
   } else if (video.isError) {
     name = <ItemTitle className="font-mono">{id}</ItemTitle>
     hint = (
@@ -68,7 +87,7 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
       role="listitem"
       variant="outline"
       size="sm"
-      aria-busy={wantsTitle && video.isFetching && !title}
+      aria-busy={wantsTitle && video.isFetching && !title && !stopped}
     >
       <ItemMedia>
         <Thumbnail src={thumbnailUrl(id)} className="w-24" />
@@ -79,12 +98,28 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
       </ItemContent>
       <ItemActions>
         {!wantsTitle && !title && (
-          <Button variant="ghost" size="sm" onClick={() => setRequested(true)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-disabled={stopped}
+            className={ariaDisabledClass}
+            onClick={() => {
+              if (!stopped) setRequested(true)
+            }}
+          >
             {t.showTitle}
           </Button>
         )}
         {onPlaylist && (
-          <Button variant="outline" size="sm" onClick={onPlaylist}>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-disabled={stopped}
+            className={ariaDisabledClass}
+            onClick={() => {
+              if (!stopped) onPlaylist()
+            }}
+          >
             {t.wholePlaylist}
           </Button>
         )}
@@ -124,7 +159,27 @@ function InvalidRow({ item }: { item: ResolveItem }) {
 }
 
 function PlaylistRow({ playlistId }: { playlistId: string }) {
-  const playlist = useQuery(playlistQuery(playlistId))
+  const botStop = useBotStop() ?? undefined
+  const stopped = useBotStopped()
+  const playlist = useQuery({
+    ...playlistQuery(playlistId, botStop),
+    enabled: !stopped,
+  })
+
+  // ยังไม่มีข้อมูลเพลย์ลิสต์ตอนที่รายการถูกเบรก: แทนที่โครงรอ/ข้อความผิดพลาด (ไม่มีปุ่มลองใหม่ เพราะต้องรอ)
+  if (stopped && !playlist.data) {
+    return (
+      <Item role="listitem" variant="outline" size="sm">
+        <ItemMedia variant="icon">
+          <ListVideo aria-hidden className="text-muted-foreground" />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle className="font-mono">{playlistId}</ItemTitle>
+          <ItemDescription className="text-xs">{t.botStopped}</ItemDescription>
+        </ItemContent>
+      </Item>
+    )
+  }
 
   if (playlist.isPending) {
     return (
@@ -236,6 +291,8 @@ const isClip = (item: ResolveItem) =>
   item.kind === "video" || item.kind === "ambiguous"
 
 export function ResultList({ items }: { items: ResolveItem[] }) {
+  // เบรก E_BOT_CHECK อยู่กับรายการผลนี้: กดวิเคราะห์ใหม่ = รายการใหม่ = ลองได้อีกครั้ง
+  const [botStop] = useState(createBotStop)
   // นับเฉพาะแถวที่เป็นคลิป: 10 แถวแรกของคลิปดึงชื่อเอง
   const autoTitle = items.map(
     (item, index) =>
@@ -243,33 +300,35 @@ export function ResultList({ items }: { items: ResolveItem[] }) {
       items.slice(0, index).filter(isClip).length < AUTO_TITLE_ROWS
   )
   return (
-    <section
-      aria-labelledby="results-title"
-      className="flex flex-col gap-2 text-left"
-    >
-      <h2
-        id="results-title"
-        className="text-sm font-medium text-muted-foreground"
+    <BotStopContext value={botStop}>
+      <section
+        aria-labelledby="results-title"
+        className="flex flex-col gap-2 text-left"
       >
-        {t.title}
-      </h2>
-      {items.length === 0 ? (
-        <Empty className="border">
-          <EmptyHeader>
-            <EmptyTitle>{t.none}</EmptyTitle>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <ItemGroup className="gap-2">
-          {items.map((item, index) => (
-            <Row
-              key={`${index}-${item.input}`}
-              item={item}
-              autoTitle={autoTitle[index]}
-            />
-          ))}
-        </ItemGroup>
-      )}
-    </section>
+        <h2
+          id="results-title"
+          className="text-sm font-medium text-muted-foreground"
+        >
+          {t.title}
+        </h2>
+        {items.length === 0 ? (
+          <Empty className="border">
+            <EmptyHeader>
+              <EmptyTitle>{t.none}</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <ItemGroup className="gap-2">
+            {items.map((item, index) => (
+              <Row
+                key={`${index}-${item.input}`}
+                item={item}
+                autoTitle={autoTitle[index]}
+              />
+            ))}
+          </ItemGroup>
+        )}
+      </section>
+    </BotStopContext>
   )
 }

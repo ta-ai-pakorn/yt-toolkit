@@ -499,6 +499,70 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     await expect(rows.filter({ hasText: "รายการทดสอบ" })).toHaveCount(6, { timeout: 10_000 })
     expect(peak).toBe(3)
   })
+
+  const BOT_MESSAGE = "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท รอสัก 10 นาทีแล้วค่อยลองใหม่"
+  const BOT_NOTE = "หยุดดึงชื่อชั่วคราว ยูทูปขอให้ยืนยันว่าไม่ใช่บอท"
+  const botCheckBody = { error: { code: "E_BOT_CHECK", message: BOT_MESSAGE, detail: null } }
+
+  test("E_BOT_CHECK ตอนดึงชื่อ → หยุดยิงคำขอที่เหลือ แถวที่เหลือแสดงรหัสกับหมายเหตุ ปุ่ม 'แสดงชื่อ' ปิด · วิเคราะห์ใหม่ลองได้อีกครั้ง", async ({
+    page,
+  }) => {
+    const ids = clipIds(12)
+    const peeks: string[] = []
+    await page.route("**/api/videos/*", async (route) => {
+      peeks.push(new URL(route.request().url()).pathname.split("/").pop() ?? "")
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      await route.fulfill({ status: 429, json: botCheckBody })
+    })
+    await page.goto("/")
+    await page.getByRole("textbox").fill(ids.join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const rows = page.locator(RESULT_ROWS)
+    await expect(rows).toHaveCount(12)
+    // ทุกแถวที่ยังไม่มีชื่อ = รหัส + หมายเหตุเล็ก ๆ (ไม่มีโครงรอค้าง ไม่มีข้อความ error ดิบ)
+    for (let i = 0; i < 12; i += 1) {
+      await expect(rows.nth(i)).toContainText(ids[i])
+      await expect(rows.nth(i)).toContainText(BOT_NOTE)
+      await expect(rows.nth(i).getByRole("link", { name: /เปิดดู/ })).toHaveAttribute("href", `/v/${ids[i]}`)
+    }
+    await expect(page.locator(`${RESULT_ROWS} [data-slot=skeleton]`)).toHaveCount(0)
+    // ออกไปได้แค่ชุดแรก (ครั้งละ 3) ก่อนเบรก ที่เหลือ (ตั้งแต่แถวที่ 4) ไม่ถูกยิงเลย
+    await page.waitForTimeout(600)
+    expect(peeks.sort()).toEqual(ids.slice(0, 3))
+    // ปุ่ม "แสดงชื่อ" ของแถวที่ 11-12 ปิดด้วย aria-disabled และกดแล้วไม่มีคำขอใหม่
+    const showTitle = page.getByRole("button", { name: "แสดงชื่อ" })
+    await expect(showTitle).toHaveCount(2)
+    await expect(showTitle.first()).toHaveAttribute("aria-disabled", "true")
+    await expect(showTitle.last()).toHaveAttribute("aria-disabled", "true")
+    await showTitle.first().click({ force: true })
+    await page.waitForTimeout(300)
+    expect(peeks).toHaveLength(3)
+
+    // กดวิเคราะห์ใหม่ = รายการใหม่ ลองยิงได้อีกครั้ง
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await expect.poll(() => peeks.length).toBeGreaterThan(3)
+  })
+
+  test("E_BOT_CHECK ตอนดึงเพลย์ลิสต์ → เพลย์ลิสต์ที่รอคิวไม่ถูกยิง และแสดงหมายเหตุ (ไม่มีปุ่มลองใหม่)", async ({
+    page,
+  }) => {
+    const requests: string[] = []
+    await page.route("**/api/playlists/*", async (route) => {
+      requests.push(route.request().url())
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      await route.fulfill({ status: 429, json: botCheckBody })
+    })
+    await page.goto("/")
+    const lines = Array.from({ length: 5 }, (_, i) => `https://www.youtube.com/playlist?list=PLtest00000${i}`)
+    await page.getByRole("textbox").fill(lines.join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const rows = page.locator(RESULT_ROWS)
+    await expect(rows).toHaveCount(5)
+    await expect(rows.filter({ hasText: BOT_NOTE })).toHaveCount(5)
+    await expect(page.getByRole("button", { name: "ลองใหม่" })).toHaveCount(0)
+    await page.waitForTimeout(500)
+    expect(requests).toHaveLength(3)
+  })
 })
 
 test.describe("W1 การวาง การเข้าถึง และข้อผิดพลาด", () => {

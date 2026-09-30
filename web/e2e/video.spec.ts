@@ -7,7 +7,8 @@ const ZOO = "jNQXAC9IVRw"
 const UPCOMING = "UPCOMINGLV1"
 const PRIVATE = "PRIVATEVID1"
 const PRIVATE_MESSAGE = "คลิปนี้เป็นส่วนตัว เจ้าของต้องเปิดเป็นสาธารณะก่อน"
-const NO_STORYBOARD_MESSAGE = 'คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว กด "ขอภาพคม" แทนได้'
+const BOT_MESSAGE = "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท รอสัก 10 นาทีแล้วค่อยลองใหม่"
+const NO_STORYBOARD_MESSAGE = "คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว ภาพคมจะใช้ได้ในเวอร์ชันถัดไป"
 const FRAME_LIST = "รายการภาพเฟรม"
 const MENU_ITEMS = ["โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้"]
 
@@ -58,6 +59,22 @@ test.describe("W2 หัวคลิป", () => {
     await expect(alert.getByRole("button", { name: "ลองใหม่" })).toHaveCount(0)
     await expect(alert.getByRole("link", { name: "กลับหน้าแรก" })).toHaveAttribute("href", "/")
     await expect(page.getByRole("heading", { name: "ภาพเฟรม" })).toHaveCount(0)
+  })
+
+  test("E_BOT_CHECK: Alert ข้อความรอ 10 นาที ไม่มีปุ่มลองใหม่ (M2 ยังไม่มีคิวพัก) แต่กลับหน้าแรกได้", async ({ page }) => {
+    await page.route(`**/api/videos/${BBB}`, (route) =>
+      route.fulfill({
+        status: 429,
+        json: { error: { code: "E_BOT_CHECK", message: BOT_MESSAGE, detail: null } },
+      }),
+    )
+    await page.goto(`/v/${BBB}`)
+    const alert = page.getByRole("alert")
+    await expect(alert).toContainText("เปิดข้อมูลคลิปไม่สำเร็จ")
+    await expect(alert).toContainText(BOT_MESSAGE)
+    await expect(alert.getByRole("button", { name: "ลองใหม่" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "ลองใหม่" })).toHaveCount(0)
+    await expect(alert.getByRole("link", { name: "กลับหน้าแรก" })).toHaveAttribute("href", "/")
   })
 
   test("ไลฟ์ที่ยังไม่เริ่ม: ไม่มีปุ่มลองใหม่", async ({ page }) => {

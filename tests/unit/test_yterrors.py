@@ -83,11 +83,13 @@ def test_messages_cover_every_classifier_code() -> None:
 
 
 def test_messages_are_verbatim_prd_copy() -> None:
-    assert MESSAGES["E_BOT_CHECK"] == "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท พักคิวไว้ 10 นาทีก่อนนะ"
+    assert MESSAGES["E_BOT_CHECK"] == "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท รอสัก 10 นาทีแล้วค่อยลองใหม่"
     assert (
         MESSAGES["E_LIVE_NOT_READY"] == "คลิปนี้ยังถ่ายทอดสดอยู่หรือยังไม่เผยแพร่ ลองใหม่หลังจบไลฟ์"
     )
-    assert MESSAGES["E_NO_STORYBOARD"] == 'คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว กด "ขอภาพคม" แทนได้'
+    assert (
+        MESSAGES["E_NO_STORYBOARD"] == "คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว ภาพคมจะใช้ได้ในเวอร์ชันถัดไป"
+    )
     assert MESSAGES["E_NETWORK"] == "เน็ตหลุด ลองใหม่อีกครั้ง"
     assert MESSAGES["E_UNKNOWN"] == "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล"
 

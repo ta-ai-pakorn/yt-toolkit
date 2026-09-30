@@ -7,14 +7,21 @@ import { canRetry, errorMessage } from "./errors"
 const err = (code: string) => new ApiError(400, code, "ข้อความ", null, null)
 
 describe("canRetry", () => {
-  it.each(["E_LIVE_NOT_READY", "E_VIDEO_PRIVATE", "E_VIDEO_UNAVAILABLE", "E_GEO_BLOCKED", "E_AGE_RESTRICTED"])(
+  it.each([
+    "E_LIVE_NOT_READY",
+    "E_VIDEO_PRIVATE",
+    "E_VIDEO_UNAVAILABLE",
+    "E_GEO_BLOCKED",
+    "E_AGE_RESTRICTED",
+    "E_BOT_CHECK",
+  ])(
     "%s ลองใหม่ไม่ช่วย ซ่อนปุ่ม",
     (code) => {
       expect(canRetry(err(code))).toBe(false)
     },
   )
 
-  it.each(["E_NETWORK", "E_OFFLINE", "E_BOT_CHECK", "E_UNKNOWN", "E_ไม่รู้จัก"])("%s ยังให้ลองใหม่", (code) => {
+  it.each(["E_NETWORK", "E_OFFLINE", "E_UNKNOWN", "E_ไม่รู้จัก"])("%s ยังให้ลองใหม่", (code) => {
     expect(canRetry(err(code))).toBe(true)
   })
 
