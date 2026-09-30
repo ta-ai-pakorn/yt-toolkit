@@ -32,7 +32,11 @@
 
 ---
 
-## Owner decisions needed (ถามพิธก่อนเริ่ม Wave 1)
+## Owner decisions (ANSWERED 2026-09-30)
+
+**พิธตอบ 2026-09-30: ตามที่แนะนำทั้งหมด ยกเว้น Q9 = ข** (controller แนะนำ: ซับ TED เป็น CC BY-NC-ND บริษัทใช้เสี่ยงเรื่องเงื่อนไขห้ามใช้เชิงพาณิชย์ จึงใช้ fixture ที่เขียนเอง `OWNERTHSUB1`) → Q1 ก · Q2 ก · Q3 ก · Q4 ก · Q5 ก · Q6 ก · Q7 ก · Q8 ก · Q9 ข · planner defaults ใช้ทั้งหมด · Network test ยังเปิดคลิป TED จริงได้ (ไม่ได้เก็บอะไรลงรีโป)
+
+### Questions as asked
 
 แต่ละข้อมีคำตอบที่แนะนำไว้ ถ้าพิธตอบ "ตามที่แนะนำ" ทั้งหมด แผนนี้ใช้ได้เลยโดยไม่ต้องแก้ controller บันทึกคำตอบลงในหัวข้อนี้ก่อนเริ่ม Wave 1 และ Task 15 ย้ายไปลงบันทึกการตัดสินใจใน BRD
 
@@ -520,7 +524,7 @@ If Q1 = ข, T5 still writes the whole block; the unused `download*` keys are re
 |---|---|
 | `tests/fixtures/probe/88o5Sk8_m1Y.json` | Real probe, trimmed like M2, plus `description` and caption dicts (see T1) |
 | `tests/fixtures/probe/8lpOfyoxcvU.json` | Real probe (two `-orig` tracks, Thai original audio) |
-| `tests/fixtures/probe/iG9CE55wbtY.json` | Real probe (Q9 = ก): owner `th`, `en` + auto `en-orig` only |
+| `tests/fixtures/probe/OWNERTHSUB1.json` | Synthetic (Q9 = ข): an English-language clip (`language: "en"`, English title "Owner Thai subtitle test", `duration: 240`) with owner `th`, `en` (json3 + vtt) + auto `en-orig`; no storyboard formats |
 | `tests/fixtures/probe/aqz-KE-bpKQ.json`, `jNQXAC9IVRw.json` | Existing; T1 adds `description`, `subtitles`, `automatic_captions` |
 | `tests/fixtures/probe/LONGTHAI1hr.json` | Synthetic, 3720 s, a 1 h Thai perf clip (json3 URL has `?repeat=10`) |
 | `tests/fixtures/probe/VTTFALLBAK1.json` | Synthetic: the json3 URL points at `broken.json3`, the vtt at the real 88o5 vtt |
@@ -528,7 +532,8 @@ If Q1 = ข, T5 still writes the whole block; the unused `download*` keys are re
 | `tests/fixtures/subs/88o5Sk8_m1Y/th-orig.json3`, `th-orig.vtt`, `tlang-en.json3` | Real Thai ASR (CC BY) + one translation |
 | `tests/fixtures/subs/8lpOfyoxcvU/en-US-orig.json3`, `th-orig.json3` | Real English ASR (dub) + Thai ASR (CC BY) |
 | `tests/fixtures/subs/jNQXAC9IVRw/en.json3`, `en.vtt`, `de.json3` | Real owner subtitles, no word timing |
-| `tests/fixtures/subs/iG9CE55wbtY/th.json3` | Real Thai owner subtitles, events with `tStartMs < 180000` only (Q9 = ก; if ข, T1 writes a hand-made `th.json3` of 20 Thai sentences instead, same path) |
+| `tests/fixtures/subs/OWNERTHSUB1/th.json3`, `en.json3` | Hand-written (Q9 = ข) in the exact shape of real YouTube owner json3 (one seg per event, no word timing, `wpWinPosId`/`wsWinStyleId` fields like `jNQXAC9IVRw/en.json3`): 20 Thai sentences written by us, including one event with an embedded `
+` line break, one sentence ≥ 110 characters, a translator-credit line ("แปลโดย ทีมทดสอบ"), and a gap ≥ 3 s; `en.json3` = the matching 20 English sentences |
 | `tests/fixtures/subs/VTTFALLBAK1/broken.json3` | The literal text `{"events": [` (truncated JSON) |
 | `tests/fixtures/storyboard/88o5Sk8_m1Y/M*.jpg` | Real sb0 grids (CC BY), so the transcript→frame E2E has frames |
 | `tests/fixtures/subs/builder-cases.json` | T4: hand-checked builder cases |
@@ -575,17 +580,17 @@ If Q1 = ข, T5 still writes the whole block; the unused `download*` keys are re
 - Consumes: `YtDlpExtractor().probe(id)` (existing) for probes, and `yt_dlp.YoutubeDL({"quiet": True}).urlopen(url).read()` for subtitle bytes. This is allowed in a scratch script; it mirrors what T3 will implement.
 - Produces: the C10 files, with the fake URL scheme.
 
-- [ ] **Step 1: Write the capture script in the scratchpad.** For each real clip (`88o5Sk8_m1Y`, `8lpOfyoxcvU`, `jNQXAC9IVRw`, `aqz-KE-bpKQ`, and `iG9CE55wbtY` if Q9 = ก):
+- [ ] **Step 1: Write the capture script in the scratchpad.** For each real clip (`88o5Sk8_m1Y`, `8lpOfyoxcvU`, `jNQXAC9IVRw`, `aqz-KE-bpKQ`):
   1. Probe it with `YtDlpExtractor().probe`.
   2. Keep the M2 field set listed in `tests/fixtures/README.md`, plus `description`, `subtitles` and `automatic_captions`.
   3. Inside `subtitles`/`automatic_captions`, keep per key only the entries with `ext` in `json3`/`vtt`, plus any `protocol: m3u8_native` entries (jNQ has them; keep them, rewritten to `https://fake.invalid/hls/<id>/<key>.m3u8`, so T8 can prove they are ignored).
   4. Keep entry fields `ext, url, name, protocol` (when present).
   5. Rewrite every timedtext URL to `https://fake.invalid/subs/<id>/<key>.<ext>`, keeping `?tlang=<code>` when the real URL had one.
   6. Limit translated auto keys to `en, ja, fr, ko, zh-Hans` (whichever exist).
-  7. For `iG9CE55wbtY`, keep owner keys `th`, `en` and auto `en-orig` only.
+  7. (Q9 = ข) No TED capture. `OWNERTHSUB1` is written by hand in Step 3; before writing it, look at the real owner json3 of `jNQXAC9IVRw` (and, read-only in the scratchpad, any real owner Thai json3) so the hand-made file copies the real field shape. Nothing from a third-party clip is committed.
   8. Rewrite storyboard fragment URLs exactly as M2 did (`https://fake.invalid/storyboard/<id>/M<n>.jpg` for sb0; other sb formats get `/sbN/` paths).
 - [ ] **Step 2: Download the subtitle files listed in C10** with the real (pre-rewrite) URLs, byte for byte:
-  - For `iG9CE55wbtY/th.json3`: load the JSON, keep `events` with `tStartMs < 180000`, and dump with `ensure_ascii=False, separators=(",", ":")`.
+  - (Q9 = ข) `OWNERTHSUB1/th.json3` and `en.json3` are hand-written in Step 3, not downloaded.
   - For `88o5Sk8_m1Y/tlang-en.json3`: take the json3 entry of auto key `en`, which has `tlang=en`.
   - Download the 88o5 sb0 grids to `tests/fixtures/storyboard/88o5Sk8_m1Y/M<n>.jpg`, the same way M2 captured BBB.
 - [ ] **Step 3: Write the synthetic probes** (same trimmed shape; `live_status: "not_live"`; no storyboard formats; `channel: "ชุดทดสอบ"`):
@@ -596,6 +601,7 @@ If Q1 = ข, T5 still writes the whole block; the unused `download*` keys are re
   | `VTTFALLBAK1.json` | `id: "VTTFALLBAK1"`, `duration: 372`. Auto `th-orig`: json3 → `https://fake.invalid/subs/VTTFALLBAK1/broken.json3`, vtt → `https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.vtt`. |
   | `NOORIGSUB01.json` | `id: "NOORIGSUB01"`, `duration: 372`, no `subtitles`. Auto: `yue` = `[{ext: json3, url: "https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.json3"}]`; `en` and `th` = json3 entries whose URL ends in `?tlang=en` / `?tlang=th` on the same base. |
   | `subs/VTTFALLBAK1/broken.json3` | `{"events": [` |
+| `OWNERTHSUB1.json` + `subs/OWNERTHSUB1/{th,en}.json3` | Q9 = ข, hand-written. See C10 for the exact contents. Owner `th`/`en` json3 entries use URLs `https://fake.invalid/subs/OWNERTHSUB1/<key>.json3`, and auto `en-orig` points at `…/en.json3`. |
 
 - [ ] **Step 4: Check the fixtures.** Run `uv run pytest -q -W error`: M2 tests must still pass, because the fixtures only gain fields. Also check:
   - `python -c` load every probe JSON;
@@ -604,7 +610,7 @@ If Q1 = ข, T5 still writes the whole block; the unused `download*` keys are re
   - every file is LF or binary as downloaded (vtt from YouTube is LF; do not convert).
 - [ ] **Step 5: Update `tests/fixtures/README.md`.** Add sections `subs/`, the new probes and the new storyboard folder:
   - capture date, yt-dlp version, the URL rewrite rules, the trimming rules, `tlang`, `repeat` and `broken.json3`;
-  - licenses: 88o5Sk8_m1Y and 8lpOfyoxcvU are CC BY (channel names from the probe, with links); "Me at the zoo" stays as before; TED `iG9CE55wbtY` © TED, CC BY-NC-ND 4.0, 3-minute excerpt, test-only, private repo (Q9 = ก).
+  - licenses: 88o5Sk8_m1Y and 8lpOfyoxcvU are CC BY (channel names from the probe, with links); "Me at the zoo" stays as before; `OWNERTHSUB1` is synthetic, written by the project (no third-party text); TED clip not stored. Old: test-only, private repo (Q9 = ก).
 - [ ] **Step 6: Commit.**
 ```bash
 git add tests/fixtures
@@ -917,7 +923,7 @@ Optionally a case also carries `"md": {"title", "videoId", "chapters": [{"startM
   - **AC-SUB-04 (parser half):** `"".join(t.t for t in tokens).replace(" ", "")` equals the concatenation of every kept seg's normalized text with spaces removed.
   - **English `8lpOfyoxcvU/en-US-orig.json3`:** tokens keep their leading spaces (`" the"`), and `cue_text` of the first 5 tokens reads as English words separated by single spaces.
   - **Owner `jNQXAC9IVRw/en.json3`:** `has_word_timing` false, the first token is `"All"`, and the tokens of block 2 start with a space.
-  - **Owner Thai `iG9CE55wbtY/th.json3`:**
+  - **Owner Thai `OWNERTHSUB1/th.json3` (hand-written):**
     - rejoined text (spaces removed) equals the source (spaces removed);
     - no token boundary falls inside a newmm word: compare with `split_words` over each block;
     - the times are monotonic within each block, and the first and last tokens of each block hit the block start and end.
@@ -967,7 +973,7 @@ def find_track(trimmed: dict, track_id: str) -> Track | None
     - `t.en` has json3 URL `https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.json3?tlang=en`.
   - **`8lpOfyoxcvU`:** the original group has `en-US-orig` and `th-orig`; `original_language` = `th` (audio original); default = `a.th-orig`, not `a.en-US-orig`.
   - **`jNQXAC9IVRw`:** owner `o.en` and `o.de`; the HLS auto entries are ignored, so there is no original or translated group; default = `o.en`.
-  - **`iG9CE55wbtY`** (Q9 = ก): owner `th` and `en`, and original `en-orig`. With `prefer="th"` the default is `o.th`; with `prefer=None` it is `o.en` (Q8).
+  - **`OWNERTHSUB1`** (Q9 = ข, synthetic English clip): owner `th` and `en`, and original `en-orig`. With `prefer="th"` the default is `o.th`; with `prefer=None` it is `o.en` (Q8).
   - **`NOORIGSUB01` (AC-SUB-02):** the original group is `[a.yue]`, translated is `[t.en, t.th]`, and the default is `None`, so the payload has no `defaultTrackId`.
   - **`aqz-KE-bpKQ`:** `{"tracks": []}`.
   - **Synthetic:** `live_chat` dropped; a key whose entries are all `srv3` dropped; a mixed key (`th` with one tlang and one non-tlang entry) + `th-orig` → `th` dropped.
