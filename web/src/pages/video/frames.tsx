@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Copy, Download, ImageIcon, ImageOff, Link2 } from "lucide-react"
+import { Captions, Copy, Download, ImageIcon, ImageOff, Link2 } from "lucide-react"
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { toast } from "sonner"
 
@@ -20,9 +20,13 @@ import { formatTimecode, youtubeLinkAt } from "@/lib/format"
 import type { StoryboardFrame } from "@/lib/types"
 
 import { errorMessage } from "./errors"
+import { nearestFrameIndex, revealAndFocus } from "./frame-target"
 import { FrameLightbox } from "./lightbox"
 import { LoadError } from "./load-error"
 import { storyboardQuery } from "./queries"
+import { subtitlesQuery } from "./subs-queries"
+import { trackInEffect } from "./track-label"
+import { useVideoParams } from "./url-state"
 
 const t = th.frames
 
@@ -102,14 +106,20 @@ function focusFirstItem(itemRef: RefObject<HTMLElement | null>): () => void {
 // เพราะ content-visibility ตัดทุกอย่างที่ล้นกรอบ ไม่งั้นวงโฟกัสของปุ่มในภาพจะถูกตัด (margin ติดลบชดเชยให้ระยะห่างเท่าเดิม)
 const TILE = "group relative -m-[3px] p-[3px] [contain-intrinsic-size:auto_80px] [content-visibility:auto]"
 
+// ภาพที่มาจากบรรทัดทรานสคริปต์ (?at=) มีกรอบสีอำพัน 2px (BRD 10.7 "ตัวที่เลือกมีกรอบ --accent 2px")
+const HIGHLIGHT = "data-highlighted:ring-2 data-highlighted:ring-primary"
+
 type FrameTileProps = {
   frame: StoryboardFrame
   videoId: string
+  highlighted: boolean
   onOpen: () => void
+  /** "ดูซับช่วงนี้" · undefined = คลิปไม่มีซับหรือยังไม่มีแทร็กที่ใช้อยู่ (ไม่มีรายการนี้ในเมนู เมนูเหมือน M2) */
+  onViewSubs?: () => void
   buttonRef: (element: HTMLButtonElement | null) => void
 }
 
-function FrameTile({ frame, videoId, onOpen, buttonRef }: FrameTileProps) {
+function FrameTile({ frame, videoId, highlighted, onOpen, onViewSubs, buttonRef }: FrameTileProps) {
   const time = formatTimecode(frame.tMs)
   const [menuOpen, setMenuOpen] = useState(false)
   const keyboardOpenRef = useRef(false)
@@ -151,9 +161,10 @@ function FrameTile({ frame, videoId, onOpen, buttonRef }: FrameTileProps) {
           ref={buttonRef}
           type="button"
           aria-haspopup="dialog"
+          data-highlighted={highlighted ? "" : undefined}
           onClick={onOpen}
           onKeyDown={onKeyDown}
-          className="block w-full cursor-zoom-in rounded-md outline-none hover:ring-2 hover:ring-ring/40 focus-visible:ring-3 focus-visible:ring-ring"
+          className={`block w-full cursor-zoom-in rounded-md outline-none hover:ring-2 hover:ring-ring/40 focus-visible:ring-3 focus-visible:ring-ring ${HIGHLIGHT}`}
         >
           <AspectRatio ratio={16 / 9} className="overflow-hidden rounded-md bg-muted">
             <img
@@ -189,16 +200,47 @@ function FrameTile({ frame, videoId, onOpen, buttonRef }: FrameTileProps) {
           <Link2 aria-hidden />
           {t.copyLink}
         </ContextMenuItem>
+        {onViewSubs && (
+          <ContextMenuItem onClick={onViewSubs}>
+            <Captions aria-hidden />
+            {t.viewSubs}
+          </ContextMenuItem>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   )
 }
 
-function FrameGrid({ frames, videoId }: { frames: StoryboardFrame[]; videoId: string }) {
+type FrameGridProps = {
+  frames: StoryboardFrame[]
+  videoId: string
+  /** เวลาใน URL (?at=) · null = ไม่มีภาพที่ไฮไลต์ */
+  at: number | null
+  onViewSubs?: (tMs: number) => void
+}
+
+function FrameGrid({ frames, videoId, at, onViewSubs }: FrameGridProps) {
   // ภาพที่เปิดดูใหญ่อยู่ (ตำแหน่งใน frames) · null = ปิด
   const [viewing, setViewing] = useState<number | null>(null)
   const openerRef = useRef<number>(0)
   const buttons = useRef(new Map<number, HTMLButtonElement>())
+  // ภาพของเวลาใน URL: เลื่อนมาให้เห็นตรงกลางและโฟกัสครั้งเดียวต่อค่า at (เลือกภาพอื่นต่อได้โดยไม่ถูกดึงกลับ)
+  const highlighted = at === null ? -1 : nearestFrameIndex(frames, at)
+  const revealed = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (at === null) {
+      revealed.current = null
+      return
+    }
+    if (revealed.current === at || highlighted < 0) return
+    return revealAndFocus(
+      () => buttons.current.get(highlighted),
+      () => {
+        revealed.current = at
+      },
+    )
+  }, [at, highlighted])
 
   // ปิดภาพใหญ่แล้วโฟกัสกลับที่ภาพเฟรมที่ดูอยู่ล่าสุด (ถ้าภาพนั้นอยู่ในตารางและมองเห็นได้) ไม่งั้นกลับภาพที่กดเปิด
   function returnFocus(last: number): HTMLElement | null {
@@ -215,6 +257,8 @@ function FrameGrid({ frames, videoId }: { frames: StoryboardFrame[]; videoId: st
             key={frame.index}
             frame={frame}
             videoId={videoId}
+            highlighted={index === highlighted}
+            onViewSubs={onViewSubs && (() => onViewSubs(frame.tMs))}
             onOpen={() => {
               openerRef.current = index
               setViewing(index)
@@ -315,6 +359,13 @@ function BulkDownloads({ videoId }: { videoId: string }) {
 /** ส่วน "ภาพเฟรม" ของ W2 · เริ่มโหลด storyboard เมื่อ `enabled` (หลังข้อมูลคลิปมาแล้ว) */
 export function FramesSection({ videoId, enabled }: { videoId: string; enabled: boolean }) {
   const storyboard = useQuery(storyboardQuery(videoId, enabled))
+  // รายการแทร็กซับ (cache เดียวกับป้ายแทร็กที่หัวคลิป) ใช้ตัดสินว่าเมนูภาพเฟรมมี "ดูซับช่วงนี้" ไหม
+  const subtitles = useQuery(subtitlesQuery(videoId, enabled))
+  const { trackId, at, update } = useVideoParams()
+  const hasTrack =
+    subtitles.isSuccess && subtitles.data.tracks.length > 0 && trackInEffect(subtitles.data, trackId) !== null
+  // Q6 = ก: ไปแท็บทรานสคริปต์ที่บรรทัดของเวลานั้น (patch เดียว เพราะ update อ่าน URL ตอนสร้าง)
+  const onViewSubs = hasTrack ? (tMs: number) => update({ tab: "transcript", at: tMs }) : undefined
   const frames = storyboard.data?.frames ?? []
   const noStoryboard =
     (storyboard.isError && storyboard.error instanceof ApiError && storyboard.error.code === "E_NO_STORYBOARD") ||
@@ -324,7 +375,7 @@ export function FramesSection({ videoId, enabled }: { videoId: string; enabled: 
   if (noStoryboard) body = <NoStoryboard />
   else if (storyboard.isError) {
     body = <LoadError title={t.loadError} error={storyboard.error} onRetry={() => void storyboard.refetch()} />
-  } else if (storyboard.isSuccess) body = <FrameGrid frames={frames} videoId={videoId} />
+  } else if (storyboard.isSuccess) body = <FrameGrid frames={frames} videoId={videoId} at={at} onViewSubs={onViewSubs} />
   else body = <FrameSkeleton />
 
   return (
