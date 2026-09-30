@@ -70,20 +70,21 @@ CRLF = "\r\n"
 
 _SPACE_RUN = re.compile(" {2,}")
 # ชุดเดียวกับ \s ของ JavaScript (และสิ่งที่ String.prototype.trim ตัด) ไม่ใช้ \s ของ Python
-# เพราะ Python นับ \x1c-\x1f และ \x85 เป็นช่องว่างแต่ไม่นับ ﻿ ซึ่งจะทำให้ผลไม่ตรงกับฝั่ง TS
-_JS_WS = "\t\n\v\f\r    -     　﻿"
+# เพราะ Python นับ \x1c-\x1f และ \x85 เป็นช่องว่างแต่ไม่นับ U+FEFF ซึ่งจะทำให้ผลไม่ตรงกับฝั่ง TS
+# (raw string: ตัว re แปลง \uXXXX เอง ในไฟล์จึงไม่มีตัวอักษรล่องหน)
+_JS_WS = r"\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 _WS_RUN = re.compile(f"[{_JS_WS}]+")
 _WS_EDGE = re.compile(f"^[{_JS_WS}]+|[{_JS_WS}]+$")
 
 
-def _is_thai_mark(ch: str) -> bool:
-    # สระบน สระล่าง วรรณยุกต์ และเครื่องหมายที่ไม่กินที่ (Q7 = ก)
-    return ch == "ั" or "ิ" <= ch <= "ฺ" or "็" <= ch <= "๎"
+# สระบน สระล่าง วรรณยุกต์ และเครื่องหมายที่ไม่กินที่ (Q7 = ก): U+0E31, U+0E34-0E3A, U+0E47-0E4E
+# (ตรงกับตัวอักษรหมวด Mn ในช่วงภาษาไทยพอดี) ใช้ regex เพราะเร็วกว่าไล่ทีละตัวมาก
+_THAI_MARKS = re.compile(r"[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]")
 
 
 def display_len(text: str) -> int:
     """ความยาวตามที่ตาเห็น: นับ code point ยกเว้นสระบน/ล่างและวรรณยุกต์ไทย ("ที่" = 1, "น้ำ" = 2)"""
-    return sum(1 for ch in text if not _is_thai_mark(ch))
+    return len(text) - len(_THAI_MARKS.findall(text))
 
 
 def cue_text(tokens: Sequence[Token]) -> str:
@@ -145,22 +146,73 @@ def _draft(tokens: list[Token]) -> _Draft:
     return _Draft(tokens, tokens[0].s, tokens[-1].e)
 
 
+def _line_len(tokens: Sequence[Token]) -> int:
+    return display_len(cue_text(tokens))
+
+
+def _splits(tokens: Sequence[Token], cap: float) -> list[tuple[int, int, int]]:
+    """จุดแบ่ง 2 บรรทัดที่ใช้ได้: (k, ยาวบรรทัดบน, ยาวบรรทัดล่าง) ที่ทั้งสองบรรทัด <= cap"""
+    out: list[tuple[int, int, int]] = []
+    for k in range(1, len(tokens)):
+        left = _line_len(tokens[:k])
+        if left > cap:
+            break  # บรรทัดบนยาวขึ้นเรื่อย ๆ เมื่อ k โต ที่เหลือใช้ไม่ได้แน่นอน (แค่ทางลัด ผลเท่าเดิม)
+        right = _line_len(tokens[k:])
+        if right <= cap:
+            out.append((k, left, right))
+    return out
+
+
+def _fits(tokens: Sequence[Token], opts: SubOptions, cap: float) -> bool:
+    """ซับที่มี token >= 2 ตัว "พอดี" เมื่อทุกบรรทัดยาวไม่เกิน cap (เจ้าของสั่ง: ห้ามบรรทัดไหนเกิน maxChars)
+
+    1 บรรทัด: ทั้งก้อน <= cap / 2 บรรทัด: ทั้งก้อน <= cap หรือมีจุดแบ่งที่ทั้งสองบรรทัด <= cap
+    token เดียวไม่ต้องตรวจ: หั่นกลางคำไม่ได้ (FR-SUB-9) แต่ก็ไม่มีคำอื่นมาต่อได้เหมือนกัน
+    """
+    if len(tokens) < 2:
+        return True
+    if _line_len(tokens) <= cap:
+        return True
+    return opts.lines == 2 and _has_split(tokens, cap)
+
+
+def _has_split(tokens: Sequence[Token], cap: float) -> bool:
+    """เหมือน bool(_splits(tokens, cap)) แต่เร็วกว่า (ข้อความยาว 1 ชม. ใช้ตรงนี้หลายหมื่นครั้ง)
+
+    ยาวบรรทัดบนไม่ลดลงเมื่อ k โต และบรรทัดล่างไม่เพิ่มขึ้น จึงหา k ที่น้อยที่สุดที่บรรทัดล่าง <= cap
+    ด้วย binary search แล้วดูว่าบรรทัดบนที่ k นั้นยัง <= cap ไหม ผลตรงกับการไล่ทุก k
+    """
+    lo, hi = 1, len(tokens) - 1
+    if _line_len(tokens[hi:]) > cap:
+        return False
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if _line_len(tokens[mid:]) <= cap:
+            hi = mid
+        else:
+            lo = mid + 1
+    return _line_len(tokens[:lo]) <= cap
+
+
 def _lines(tokens: list[Token], opts: SubOptions) -> tuple[str, ...]:
     text = cue_text(tokens)
-    if opts.lines == 2 and display_len(text) > opts.max_chars and len(tokens) >= 2:
-        best_k, best_diff = 1, -1
-        for k in range(1, len(tokens)):
-            diff = abs(display_len(cue_text(tokens[:k])) - display_len(cue_text(tokens[k:])))
-            if best_diff < 0 or diff < best_diff:  # เท่ากันให้ k ที่น้อยกว่า
-                best_k, best_diff = k, diff
+    if opts.lines == 2 and len(tokens) >= 2 and display_len(text) > opts.max_chars:
+        # ทุกซับที่มาถึงตรงนี้ผ่าน _fits แล้ว จึงมีจุดแบ่งที่ใช้ได้อย่างน้อย 1 จุดเสมอ
+        cands = _splits(tokens, opts.max_chars * MERGE_LIMIT_FACTOR)
+        best_k, best_diff = cands[0][0], abs(cands[0][1] - cands[0][2])
+        for k, left, right in cands[1:]:
+            if abs(left - right) < best_diff:  # เท่ากันให้ k ที่น้อยกว่า
+                best_k, best_diff = k, abs(left - right)
         return (cue_text(tokens[:best_k]), cue_text(tokens[best_k:]))
     # token เดียวที่ยาวเกินขีดจำกัดก็อยู่ทั้งก้อน ไม่หั่นกลางคำ (FR-SUB-9)
     return (text,)
 
 
 def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
-    """C6 ขั้น 1-4: จับกลุ่ม, เวลาขั้นต่ำ (ยืด/รวม), กันเวลาทับ, แบ่งบรรทัด"""
-    limit = opts.max_chars * opts.lines
+    """C6 ขั้น 1-4: จับกลุ่ม, เวลาขั้นต่ำ (ยืด/รวม), กันเวลาทับ, แบ่งบรรทัด
+
+    mode "tokens" แต่ไม่มี tokens_per_cue = ValueError (TS: throw)
+    """
     tokens_mode = opts.mode == "tokens"
     if tokens_mode and not opts.tokens_per_cue:
         raise ValueError("tokens mode needs tokens_per_cue")
@@ -172,7 +224,7 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
     for tok in tokens:
         if cur:
             close = (
-                display_len(cue_text([*cur, tok])) > limit
+                not _fits([*cur, tok], opts, opts.max_chars)
                 or tok.s - cur[-1].e >= GAP_SPLIT_MS
                 or tok.e - cur[0].s > opts.max_ms
                 or (tokens_mode and len(cur) >= per_cue)
@@ -195,7 +247,7 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
             if c.end_ms - c.start_ms < opts.min_ms and nxt is not None:
                 merged = c.tokens + nxt.tokens
                 if (
-                    display_len(cue_text(merged)) <= limit * MERGE_LIMIT_FACTOR
+                    _fits(merged, opts, opts.max_chars * MERGE_LIMIT_FACTOR)
                     and nxt.end_ms - c.start_ms <= opts.max_ms
                     and (not tokens_mode or len(merged) <= per_cue)
                 ):

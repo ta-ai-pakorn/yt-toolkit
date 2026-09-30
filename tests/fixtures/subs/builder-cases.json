@@ -201,6 +201,67 @@
       "txt": "Short enough for a single line\r\n\r\nPneumonoultramicroscopicsilicovolcanoconiosis\r\n"
     },
     {
+      "name": "two-lines-per-line-cap",
+      "options": {"maxChars": 42, "lines": 2, "minMs": 1500, "maxMs": 7000, "mode": "chars"},
+      "tokens": [
+        {"t": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "s": 0, "e": 1000},
+        {"t": " BB", "s": 1000, "e": 1500},
+        {"t": " CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", "s": 1500, "e": 2500}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1500, "lines": ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "BB"]},
+        {"startMs": 1500, "endMs": 3000, "lines": ["CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,500\r\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\nBB\r\n\r\n2\r\n00:00:01,500 --> 00:00:03,000\r\nCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\r\n",
+      "txt": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BB CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\r\n"
+    },
+    {
+      "name": "two-lines-thai-no-space",
+      "options": {"maxChars": 42, "lines": 2, "minMs": 1500, "maxMs": 7000, "mode": "chars"},
+      "tokens": [
+        {"t": "วันนี้เรามาเรียนภาษาไทย", "s": 0, "e": 1500},
+        {"t": "ด้วยกันที่โรงเรียนใกล้บ้านเรา", "s": 1500, "e": 3500},
+        {"t": "ครับ", "s": 3500, "e": 3800},
+        {"t": "ทุกคนสนุกมากและได้ความรู้", "s": 3800, "e": 5500},
+        {"t": "แล้วพบกันใหม่สัปดาห์หน้านะ", "s": 5500, "e": 6800}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 5500, "lines": ["วันนี้เรามาเรียนภาษาไทยด้วยกันที่โรงเรียนใกล้บ้านเรา", "ครับทุกคนสนุกมากและได้ความรู้"]},
+        {"startMs": 5500, "endMs": 7000, "lines": ["แล้วพบกันใหม่สัปดาห์หน้านะ"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:05,500\r\nวันนี้เรามาเรียนภาษาไทยด้วยกันที่โรงเรียนใกล้บ้านเรา\r\nครับทุกคนสนุกมากและได้ความรู้\r\n\r\n2\r\n00:00:05,500 --> 00:00:07,000\r\nแล้วพบกันใหม่สัปดาห์หน้านะ\r\n",
+      "txt": "วันนี้เรามาเรียนภาษาไทยด้วยกันที่โรงเรียนใกล้บ้านเราครับทุกคนสนุกมากและได้ความรู้แล้วพบกันใหม่สัปดาห์หน้านะ\r\n"
+    },
+    {
+      "name": "two-lines-long-token-alone",
+      "options": {"maxChars": 42, "lines": 2, "minMs": 1500, "maxMs": 7000, "mode": "chars"},
+      "tokens": [
+        {"t": "Pneumonoultramicroscopicsilicovolcanoconiosis", "s": 0, "e": 2000},
+        {"t": " ok", "s": 2000, "e": 2600}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 2000, "lines": ["Pneumonoultramicroscopicsilicovolcanoconiosis"]},
+        {"startMs": 2000, "endMs": 3500, "lines": ["ok"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:02,000\r\nPneumonoultramicroscopicsilicovolcanoconiosis\r\n\r\n2\r\n00:00:02,000 --> 00:00:03,500\r\nok\r\n",
+      "txt": "Pneumonoultramicroscopicsilicovolcanoconiosis ok\r\n"
+    },
+    {
+      "name": "two-lines-merge-refused-per-line",
+      "options": {"maxChars": 42, "lines": 2, "minMs": 1500, "maxMs": 7000, "mode": "chars"},
+      "tokens": [
+        {"t": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", "s": 0, "e": 100},
+        {"t": " YYYYYYYYYYYYYYYYYYYY", "s": 1100, "e": 1600},
+        {"t": " ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", "s": 1600, "e": 2600}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1100, "lines": ["XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"]},
+        {"startMs": 1100, "endMs": 2600, "lines": ["YYYYYYYYYYYYYYYYYYYY", "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,100\r\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\r\n\r\n2\r\n00:00:01,100 --> 00:00:02,600\r\nYYYYYYYYYYYYYYYYYYYY\r\nZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ\r\n",
+      "txt": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX YYYYYYYYYYYYYYYYYYYY ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ\r\n"
+    },
+    {
       "name": "whitespace-collapse",
       "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
       "tokens": [

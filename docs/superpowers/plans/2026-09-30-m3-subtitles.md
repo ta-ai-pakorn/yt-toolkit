@@ -329,19 +329,37 @@ LIMITS = { maxChars: [10, 60], lines: [1, 2], minMs: [300, 3000] /*step 100*/,
 - Tokens are sorted by `s`, with `e >= s` and `e <= next.s`.
 - Every `t` contains at least one non-space character.
 - The only whitespace in any `t` is ASCII space `U+0020`.
+- **Zero-duration cues** (`startMs == endMs`) can only come from zero-length tokens (`e == s`): a cue ends up zero-length only when all its tokens have `s == e == startMs`, the next cue starts at that same ms, and the merge is refused.
+  - Real tokens should have `e > s`, but C6 does not rely on it and the builder tolerates `e == s`.
+  - T7's integer time spreading (a zero-length total → all tokens at `start`, or `dur` < token count) can produce `e == s`, so T7 should not claim otherwise.
 
 **Helpers**
-- `displayLen(text)` counts code points **except** Thai non-spacing marks: U+0E31, U+0E34–U+0E3A and U+0E47–U+0E4E (Q7 = ก). Under Q7 = ข it counts all code points.
-- `cueText(tokens)` = the concatenation of `t`, with every run of spaces collapsed to one space (`/ {2,}/g` → `" "`), then trimmed of spaces at both ends.
-- `limit = maxChars * lines`.
+- `displayLen(text)` counts **code points** except the Thai non-spacing marks U+0E31, U+0E34–U+0E3A and U+0E47–U+0E4E (Q7 = ก). Under Q7 = ข it would count all code points.
+  - This set is exactly the Unicode `Mn` characters of the Thai block.
+  - Examples: `"ที่"` = 1, `"น้ำ"` = 2 (SARA AM U+0E33 is a spacing vowel and counts), `"ดี"` = 1, `"กัน"` = 2, `"😀"` = 1.
+  - (The Task 4 brief's "`ดี` = 2" is a typo. The `thai-display-len` case outcome is the same either way.)
+  - **TS:** iterate with `for…of` or `Array.from(text)` and never use `.length`, which counts UTF-16 units. T9 adds its own unit assertion `displayLen("😀") === 1`, since no shared case has an astral character.
+- `cueText(tokens)` = the concatenation of `t`, with every run of 2+ **U+0020** spaces collapsed to one (`/ {2,}/g` → `" "`), then trimmed of **U+0020 only** at both ends. Use Python `.strip(" ")`, and never JS `.trim()` here.
+- `lineLen(toks) = displayLen(cueText(toks))`. It never decreases as tokens are appended (or prepended), because `cueText` of a prefix is a prefix of `cueText` of the whole.
 - `MERGE_LIMIT_FACTOR = 1.0` (Q3 = ก; 1.2 if Q3 = ข).
+- **`fits(toks, cap)`** (owner ruling 2026-09-30: **no line may ever exceed maxChars**). It replaces the old whole-cue `limit = maxChars * lines` check:
+  ```
+  fits(toks, cap):
+      if len(toks) < 2:            return True    # one token is never cut (FR-SUB-9)
+      if lineLen(toks) <= cap:     return True    # fits on one line
+      return lines == 2 and some k in 1..n-1 has lineLen(toks[:k]) <= cap and lineLen(toks[k:]) <= cap
+  ```
+  - **Exemption for a token longer than maxChars (T4 choice, stricter than "single-token lines are exempt"):** only a cue made of that single token may exceed maxChars. A long token never shares a cue with a neighbour, even at `lines == 2`. So `WORD45 + " ok"` at the long preset gives two cues, not `[WORD45, "ok"]` (case `two-lines-long-token-alone`). This matches `lines == 1` and the `single-long-token` case.
+  - "Some k" may be found by any method. Python uses a binary search on the monotonic `lineLen` (`_has_split`, unit-tested against a full scan).
+- **Case options bypass validation:** `buildCues` does no range checks, and shared cases may sit outside LIMITS (`thai-display-len` uses `maxChars: 3`). Case runners build options directly, never through `options_from_dict` or a clamp.
+- **Tokens mode without `tokensPerCue`:** `buildCues` raises `ValueError` (Python) or throws (TS). This is the only validation it does.
 
-**1. Greedy grouping**
+**1. Greedy grouping** (tokens mode still applies **all** close rules, the char/line rule included)
 ```
 cues = []; cur = []
 for tok in tokens:
     if cur:
-        close = displayLen(cueText(cur + [tok])) > limit
+        close = not fits(cur + [tok], maxChars)
              or tok.s - cur[-1].e >= 1000
              or tok.e - cur[0].s > maxMs
              or (mode == "tokens" and len(cur) >= tokensPerCue)
@@ -361,7 +379,7 @@ while i < len(cues):
         c.endMs = min(want, nxt.startMs) if nxt else want
         if c.endMs - c.startMs < minMs and nxt is not None:
             merged = c.tokens + nxt.tokens
-            if (displayLen(cueText(merged)) <= limit * MERGE_LIMIT_FACTOR
+            if (fits(merged, maxChars * MERGE_LIMIT_FACTOR)
                     and nxt.endMs - c.startMs <= maxMs
                     and (mode != "tokens" or len(merged) <= tokensPerCue)):
                 cues[i:i+2] = [Cue(merged, startMs=c.startMs, endMs=nxt.endMs)]
@@ -372,15 +390,20 @@ while i < len(cues):
 **3. Safety clamp:** for each cue except the last, `endMs = min(endMs, next.startMs)`.
 
 **4. Lines**
-- If `lines == 2`, `displayLen(text) > maxChars` and the cue has ≥ 2 tokens: split at the token boundary k (1..n−1) that minimises `|displayLen(cueText(tok[:k])) − displayLen(cueText(tok[k:]))|`. Ties go to the smaller k. The result is `lines = [cueText(tok[:k]), cueText(tok[k:])]`.
+- If `lines == 2`, `displayLen(text) > maxChars` and the cue has ≥ 2 tokens, split at a token boundary k.
+  - **Candidates:** the valid splits only, i.e. every k in 1..n−1 with `lineLen(tok[:k]) <= maxChars * MERGE_LIMIT_FACTOR` and `lineLen(tok[k:]) <= maxChars * MERGE_LIMIT_FACTOR`. Every multi-token cue passed `fits`, so there is always at least one candidate.
+  - **Choice:** the k that minimises `|lineLen(tok[:k]) − lineLen(tok[k:])|`. **Ties go to the smaller k.**
+  - **Result:** `lines = [cueText(tok[:k]), cueText(tok[k:])]`.
+  - The two line lengths always sum to `T` or `T − 1`, where `T = lineLen(tokens)`. So when any valid split exists, the most balanced split overall is valid too. The filter never changes the pick, but it is kept for clarity.
 - Otherwise `lines = [cueText(tokens)]`.
-- A single token longer than the limit stays whole (FR-SUB-9).
+- A single token longer than maxChars stays whole in a cue of its own (FR-SUB-9).
+- **Shared cases for this rule:** `two-lines-per-line-cap`, `two-lines-thai-no-space`, `two-lines-long-token-alone`, `two-lines-merge-refused-per-line`. The pre-ruling algorithm fails all four.
 
 **Outputs**
 - **`toSrt(cues)`:**
   - Each block is `f"{n}\r\n{ts(start)} --> {ts(end)}\r\n" + "\r\n".join(lines) + "\r\n"`, with n starting at 1.
   - Blocks are joined with `"\r\n"`. No cues → `""`.
-  - `ts(ms)` = `HH:MM:SS,mmm`: zero-padded, hours at least 2 digits, floor division.
+  - `ts(ms)` = `HH:MM:SS,mmm`: zero-padded, floor division. Hours are **at least** 2 digits and may be more (`100:00:00,005`).
 - **`toTxt(tokens)`:**
   - Paragraphs split where `tok.s − prev.e >= 2000`.
   - Each paragraph is `cueText(paragraph tokens)`.
@@ -388,14 +411,27 @@ while i < len(cues):
 - **`toMd(tokens, {title, videoId, chapters:[{startMs, title}]})`:** build a list of lines, then join with `"\r\n"` + a trailing `"\r\n"`.
   - Line 1: `"# " + collapse(title)`, then `""`, then `f"https://www.youtube.com/watch?v={videoId}"`.
   - **Sections:**
-    - With chapters (sorted by `startMs`), a token belongs to the last chapter with `startMs <= tok.s` (tokens before the first chapter go to the first chapter).
+    - With chapters, sort them by `startMs` with a **stable** sort, so equal starts keep their input order.
+      - A token belongs to the **last** chapter in that order with `startMs <= tok.s`, so among equal starts the later one wins.
+      - Tokens before the first chapter go to the first chapter.
+    - A chapter section's heading time is **the chapter's own `startMs`**, not its first token's time. For example, `[00:10]` even when a token at 0 ms was pulled in (case `md-chapters`).
     - Without chapters, a token goes to section `floor(tok.s / 120000)`, whose start is `index * 120000`.
     - Empty sections are skipped.
   - For each section, append:
     - `""`, then `f"## [{mdTime(start)}] {collapse(chapterTitle)}"` (without chapters just `f"## [{mdTime(start)}]"`), then `""`;
-    - then the section's paragraphs (same 2 s rule), separated by `""`.
-  - `mdTime(ms)` = `mm:ss` when `ms < 3_600_000`, else `h:mm:ss`, with no leading zero on hours.
-  - `collapse(x)` = replace every `\s+` with one space and trim; for titles only.
+      - A chapter title that collapses to `""` keeps the trailing space (`"## [00:10] "`), because this is literally the f-string.
+    - then the section's paragraphs, separated by `""`.
+      - Paragraphs use the same 2 s rule but are computed **per section**, so a section boundary always starts a new paragraph even with a 0 ms gap.
+      - `.txt` does not have this rule and keeps such tokens in one paragraph (case `md-two-minute-sections`).
+  - `mdTime(ms)`:
+    - Seconds are floored: `total = floor(ms / 1000)`.
+    - The result is `mm:ss` (minutes always 2 digits) when `ms < 3_600_000`, else `h:mm:ss`.
+    - Hours are **never padded** and may exceed 2 digits (`1:00:00`, `100:00:00`).
+  - `collapse(x)`: replace every run of **JavaScript `\s`** characters with one space, then trim the same set. It is used for titles only.
+    - The set: TAB, LF, VT, FF, CR, U+0020, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000, U+FEFF.
+    - TS: `/\s+/g` plus `.trim()` (exactly this set).
+    - Python must **not** use `\s`: it adds U+001C–U+001F and U+0085 but lacks U+FEFF. Instead it uses an explicit class written with `\uXXXX` escapes, never literal invisible characters in source.
+    - Case `whitespace-collapse` puts a U+FEFF between two title words to lock this.
 - **`cueStats(cues)` (TS only, for the preview):** `{count, avgChars: one decimal of the mean displayLen(lines.join(" ")), underOneSecond: count of endMs − startMs < 1000}`.
 
 ### C7. Parser output (`core/subparse.py`, T7)
