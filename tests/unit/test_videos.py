@@ -12,7 +12,7 @@ import pytest
 
 from yttoolkit.core.db import PEEK_SENTINEL, Database, purge_stale_cache
 from yttoolkit.core.extractor import FakeExtractor
-from yttoolkit.core.videos import VideoService, to_video_info
+from yttoolkit.core.videos import PROBE_VERSION, VideoService, to_video_info, trim_probe
 from yttoolkit.core.yterrors import YtError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -122,13 +122,25 @@ def test_maps_basic_fields_of_bbb() -> None:
     assert info["chapters"] == []
     assert info["hasStoryboard"] is True
     assert info["isLive"] is False
+    assert info["description"] == load(BBB)["description"]
+    assert info["description"].startswith("UHD High Frame rate version")
+
+
+def test_description_is_kept_raw_and_omitted_when_blank() -> None:
+    raw = {"id": BBB, "title": "t", "description": "  line one\n\nline two  "}
+    assert to_video_info(raw)["description"] == "  line one\n\nline two  "
+    for blank in ("", "  \n\t ", None, 0):
+        raw["description"] = blank
+        assert "description" not in to_video_info(raw)
+    del raw["description"]
+    assert "description" not in to_video_info(raw)
 
 
 def test_output_has_exactly_the_prd_keys() -> None:
     info = to_video_info(load(BBB))
     assert set(info) == {
         "videoId", "title", "channel", "durationS", "publishedAt", "thumbnailUrl",
-        "chapters", "video", "audio", "hasStoryboard", "isLive",
+        "chapters", "video", "audio", "hasStoryboard", "isLive", "description",
     }  # fmt: skip
     assert set(info["video"][0]) <= {
         "formatId",
@@ -745,13 +757,101 @@ def test_trim_drops_urls_and_unused_fields_but_keeps_storyboard(db: Database) ->
     VideoService(db, stub).get(BBB)  # type: ignore[arg-type]
     stored = db.execute("SELECT probe_json FROM videos")[0]["probe_json"]
     assert "googlevideo" not in stored
-    assert (
-        "long text" not in stored
-        and "timedtext" not in stored
-        and "User-Agent" not in stored
-    )
+    assert "timedtext" not in stored and "User-Agent" not in stored
+    assert json.loads(stored)["description"] == raw["description"]
     assert len(stored) < len(json.dumps(raw)) / 2
     assert '"fragments"' in stored
+
+
+def test_trim_probe_adds_probe_version_description_and_captions() -> None:
+    data = trim_probe(load("88o5Sk8_m1Y"))
+    assert PROBE_VERSION == 2
+    assert data["probeVersion"] == 2
+    assert data["description"] == load("88o5Sk8_m1Y")["description"]
+    assert set(data["captions"]) == {"owner", "original", "translated", "translateFrom"}
+    assert [o["key"] for o in data["captions"]["original"]] == ["th-orig"]
+    assert "subtitles" not in data and "automatic_captions" not in data
+    bbb = trim_probe(load(BBB))
+    assert bbb["captions"] == {
+        "owner": [],
+        "original": [],
+        "translated": [],
+        "translateFrom": None,
+    }
+
+
+def test_trim_probe_omits_blank_description() -> None:
+    raw = load(BBB)
+    raw["description"] = "   \n  "
+    assert "description" not in trim_probe(raw)
+
+
+def test_stored_probe_json_has_probe_version_and_captions(
+    svc: VideoService, db: Database
+) -> None:
+    svc.get(ZOO)
+    data = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
+    assert data["probeVersion"] == PROBE_VERSION
+    assert [o["key"] for o in data["captions"]["owner"]] == ["en", "de"]
+
+
+def _make_old_row(db: Database, video_id: str) -> dict:
+    """แถวแบบ M2: ไม่มี probeVersion และ captions"""
+    data = json.loads(
+        db.execute("SELECT probe_json FROM videos WHERE video_id = ?", (video_id,))[0][
+            "probe_json"
+        ]
+    )
+    data.pop("probeVersion")
+    data.pop("captions")
+    db.execute(
+        "UPDATE videos SET probe_json = ? WHERE video_id = ?",
+        (json.dumps(data, ensure_ascii=False), video_id),
+    )
+    return data
+
+
+def test_row_without_probe_version_is_stale_and_reprobed(
+    svc: VideoService, ext: CountingExtractor, db: Database
+) -> None:
+    svc.get(BBB)
+    _make_old_row(db, BBB)
+    assert svc.get(BBB)["videoId"] == BBB  # ยังไม่ถึง 24 ชม. แต่ probe ใหม่
+    assert ext.count["probe"] == 2
+    data = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
+    assert data["probeVersion"] == PROBE_VERSION and "captions" in data
+    svc.get(BBB)
+    assert ext.count["probe"] == 2  # เขียนทับแล้ว ใช้ cache ได้ตามปกติ
+
+
+def test_row_with_other_probe_version_is_stale(
+    svc: VideoService, ext: CountingExtractor, db: Database
+) -> None:
+    svc.get(BBB)
+    data = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
+    data["probeVersion"] = PROBE_VERSION + 1
+    db.execute("UPDATE videos SET probe_json = ?", (json.dumps(data),))
+    svc.get(BBB)
+    assert ext.count["probe"] == 2
+
+
+def test_row_without_probe_version_is_still_the_offline_fallback(
+    svc: VideoService, ext: CountingExtractor, db: Database
+) -> None:
+    first = svc.get(BBB)
+    _make_old_row(db, BBB)
+    _go_offline(ext)
+    assert svc.get(BBB) == first  # ยังไม่หมด 24 ชม. ก็ probe ใหม่ พลาดแล้วใช้แถวเดิม
+    assert ext.count["probe"] == 2
+
+
+def test_row_without_probe_version_offline_with_peek(
+    svc: VideoService, ext: CountingExtractor, db: Database
+) -> None:
+    svc.get(BBB)
+    _make_old_row(db, BBB)
+    _go_offline(ext, "E_BOT_CHECK")
+    assert svc.get(BBB, peek=True)["videoId"] == BBB
 
 
 def test_trimmed_raw_maps_to_the_same_video_info(svc: VideoService) -> None:

@@ -22,6 +22,9 @@ from .yterrors import YtError
 log = logging.getLogger("yttoolkit")
 
 CACHE_TTL = timedelta(hours=24)
+# รุ่นของรูปแบบ probe_json ที่เก็บไว้ แถวรุ่นอื่น (เช่น M2 ที่ยังไม่มี captions) นับว่าเก่า -> probe ใหม่
+# แต่ยังใช้เป็นข้อมูลสำรองตอนออฟไลน์ได้ (_stored_hit)
+PROBE_VERSION = 2
 # probe ใหม่พลาดด้วยรหัสเหล่านี้ (ไม่มีเน็ต / ยูทูปให้รอก่อน) แต่มีข้อมูลเดิมในเครื่อง = ใช้ข้อมูลเดิมไปก่อน
 STALE_OK_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK"})
 # นาฬิกาเครื่องเลื่อนถอยได้ไม่เกินนี้ยังถือว่า probe ล่าสุดยังใหม่
@@ -101,6 +104,14 @@ def _published_at(raw: dict) -> str | None:
         except (OverflowError, OSError, ValueError):
             return None
     return None
+
+
+def _description(raw: dict) -> str | None:
+    """คำอธิบายคลิปแบบดิบ (ไม่ตัดช่องว่าง) หรือ None ถ้าว่าง/มีแต่ช่องว่าง"""
+    value = raw.get("description")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value
 
 
 def _chapters(raw: dict) -> list[dict]:
@@ -251,12 +262,21 @@ def to_video_info(raw: dict) -> dict:
     info["audio"] = _audio_formats(formats)
     info["hasStoryboard"] = any(_is_storyboard(f) for f in formats)
     info["isLive"] = raw.get("live_status") == "is_live"
+    description = _description(raw)
+    if description is not None:
+        info["description"] = description
     return info
 
 
 def trim_probe(raw: dict) -> dict:
     """ตัดข้อมูลดิบให้เหลือที่งานถัดไปต้องใช้: ฟิลด์ของ VideoInfo, format วิดีโอ/เสียงล้วน
-    และ storyboard (พร้อม fragments/rows/columns/fps/width/height) ไม่เก็บ URL ตรงของสื่อ"""
+    และ storyboard (พร้อม fragments/rows/columns/fps/width/height) ไม่เก็บ URL ตรงของสื่อ
+
+    เพิ่ม probeVersion, description (ถ้ามี) และ captions (กลุ่มซับตาม tracks.trim_captions)
+    """
+    # import ในฟังก์ชัน: tracks import _audio_formats จากโมดูลนี้ (กัน import วนตอนโหลดโมดูล)
+    from .tracks import trim_captions
+
     formats: list[dict] = []
     for fmt in raw.get("formats") or []:
         if not isinstance(fmt, dict):
@@ -271,7 +291,8 @@ def trim_probe(raw: dict) -> dict:
             formats.append(kept)
         elif fmt.get("vcodec") == "none" or fmt.get("acodec") in (None, "none"):
             formats.append({k: fmt[k] for k in _MEDIA_FIELDS if fmt.get(k) is not None})
-    trimmed: dict[str, Any] = {
+    trimmed: dict[str, Any] = {"probeVersion": PROBE_VERSION}
+    trimmed |= {
         key: raw[key]
         for key in (
             "id",
@@ -292,6 +313,10 @@ def trim_probe(raw: dict) -> dict:
         if isinstance(c, dict)
     ]
     trimmed["formats"] = formats
+    description = _description(raw)
+    if description is not None:
+        trimmed["description"] = description
+    trimmed["captions"] = trim_captions(raw)
     return trimmed
 
 
@@ -455,7 +480,10 @@ class VideoService:
             # อายุติดลบเกิน CLOCK_SKEW = นาฬิกาถอยหลังมาก ถือว่าเก่า
             if not -CLOCK_SKEW <= age < CACHE_TTL:
                 return None
-            return to_video_info(json.loads(rows[0]["probe_json"]))
+            data = json.loads(rows[0]["probe_json"])
+            if data.get("probeVersion") != PROBE_VERSION:
+                return None  # แถวรุ่นเก่า (เช่น M2 ไม่มี captions): probe ใหม่แล้วเขียนทับ
+            return to_video_info(data)
         except (ValueError, TypeError, AttributeError, KeyError):
             return None  # แถวเสีย: probe ใหม่แล้วเขียนทับ
 
