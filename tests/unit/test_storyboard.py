@@ -646,3 +646,130 @@ def test_cache_index_with_unsafe_file_name_is_a_miss(tmp_path: Path) -> None:
     index_path.write_text(json.dumps(data), encoding="utf-8")
     build(VID, make_raw(make_sb([36])), tmp_path, fetch)
     assert len(calls) == 2
+
+
+# ---------- ระยะช่องวัดจากแผ่นจริง (final review: sb width คลาดไป 1 px ในคลิปยาว) ----------
+
+# คลิปยาวจริง (TKmGU77INaM): yt-dlp บอกช่อง 159x90 ในกริด 5x5 แต่แผ่นจริง 800x450 ขอบช่องอยู่ที่ 160/320/...
+REAL_W, REAL_H = 160, 90
+PALETTE_25 = [
+    (40 + (i % 5) * 50, 40 + (i // 5) * 50, 255 - (i % 5) * 45) for i in range(25)
+]
+
+
+def make_real_grid(cells: int, rows: int = 5, columns: int = 5) -> bytes:
+    """กริดสีล้วนช่องละ 160x90 (PNG ไม่มีสีเพี้ยน) แผ่นท้ายกว้าง/สูงเท่าที่ใช้จริงเหมือนยูทูป"""
+    per_row = min(cells, columns)
+    used_rows = min(-(-cells // columns), rows)
+    image = Image.new("RGB", (per_row * REAL_W, used_rows * REAL_H), (0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    for cell in range(cells):
+        x, y = (cell % columns) * REAL_W, (cell // columns) * REAL_H
+        draw.rectangle((x, y, x + REAL_W - 1, y + REAL_H - 1), fill=PALETTE_25[cell])
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
+def make_long_sb(fragment_durations: list[float], width: int = 159) -> dict:
+    return make_sb(
+        fragment_durations, fps=0.1, width=width, height=REAL_H, rows=5, columns=5
+    )
+
+
+def assert_no_bleed(
+    path: Path, colour: tuple[int, int, int], size: tuple[int, int]
+) -> None:
+    """ทั้งสี่ขอบของเฟรมต้องเป็นสีของช่องตัวเอง (ไม่มีแถบของช่องข้าง ๆ ติดมา)"""
+    with Image.open(path) as image:
+        w, h = image.size
+        for x, y in ((0, h // 2), (1, h // 2), (w - 1, h // 2), (w - 2, h // 2),
+                     (w // 2, 0), (w // 2, h - 1)):  # fmt: skip
+            assert close(image.getpixel((x, y)), colour, tol=30), (path.name, x, y)
+        assert image.size == size
+
+
+def test_pitch_comes_from_grid_when_format_width_is_one_px_off(tmp_path: Path) -> None:
+    sb = make_long_sb([250])  # 25 ช่องเต็มแผ่น
+    fetch = fetch_from({"https://x.invalid/M0.jpg": make_real_grid(25)})
+    index = build(VID, make_raw(sb, duration=250), tmp_path, fetch)
+    assert len(index["frames"]) == 25
+    for frame in index["frames"]:
+        assert_no_bleed(
+            tmp_path / "storyboard" / frame["file"],
+            PALETTE_25[frame["index"]],
+            (REAL_W, REAL_H),
+        )
+
+
+def test_partial_last_grid_uses_pitch_measured_on_full_grid(tmp_path: Path) -> None:
+    # แผ่นท้ายมี 2 ช่อง (320x90): 320 // 5 ใช้ไม่ได้ ต้องใช้ระยะ 160 ที่วัดจากแผ่นเต็ม ไม่ใช่ 159 ของ format
+    sb = make_long_sb([250, 20])
+    fetch = fetch_from(
+        {
+            "https://x.invalid/M0.jpg": make_real_grid(25),
+            "https://x.invalid/M1.jpg": make_real_grid(2),
+        }
+    )
+    index = build(VID, make_raw(sb, duration=270), tmp_path, fetch)
+    assert len(index["frames"]) == 27
+    for frame, cell in zip(index["frames"][25:], (0, 1), strict=True):
+        assert_no_bleed(
+            tmp_path / "storyboard" / frame["file"], PALETTE_25[cell], (REAL_W, REAL_H)
+        )
+
+
+def test_partial_grid_listed_first_still_uses_full_grid_pitch(tmp_path: Path) -> None:
+    # ลำดับที่ worker ทำเสร็จไม่แน่นอน: แผ่นบางส่วนต้องรอระยะจากแผ่นเต็มเสมอ แม้แผ่นเต็มจะโหลดเสร็จทีหลัง
+    sb = make_long_sb([250, 20])
+    full, partial = make_real_grid(25), make_real_grid(2)
+    started = threading.Event()
+
+    def fetch(url: str) -> bytes:
+        if url.endswith("M0.jpg"):
+            started.wait(2)  # ให้แผ่นท้ายเสร็จก่อน
+            time.sleep(0.05)
+            return full
+        started.set()
+        return partial
+
+    build(VID, make_raw(sb, duration=270), tmp_path, fetch)
+    assert_no_bleed(
+        tmp_path / "storyboard" / "f_0026.jpg", PALETTE_25[1], (REAL_W, REAL_H)
+    )
+
+
+def test_partial_only_storyboard_falls_back_to_format_size(tmp_path: Path) -> None:
+    # ไม่มีแผ่นเต็มให้วัด: ใช้ขนาดช่องของ format ตามเดิม
+    sb = make_long_sb([20])
+    fetch = fetch_from({"https://x.invalid/M0.jpg": make_real_grid(2)})
+    index = build(VID, make_raw(sb, duration=20), tmp_path, fetch)
+    assert len(index["frames"]) == 2
+    with Image.open(tmp_path / "storyboard" / "f_0000.jpg") as image:
+        assert image.size == (159, REAL_H)
+
+
+def test_pitch_ignores_grid_far_from_format_size(tmp_path: Path) -> None:
+    # แผ่นใหญ่ผิดปกติ (ต่างเกิน 2 px) ไม่เชื่อแผ่น ใช้ขนาดของ format
+    sb = make_long_sb([250], width=150)
+    fetch = fetch_from({"https://x.invalid/M0.jpg": make_real_grid(25)})
+    build(VID, make_raw(sb, duration=250), tmp_path, fetch)
+    with Image.open(tmp_path / "storyboard" / "f_0000.jpg") as image:
+        assert image.size == (150, REAL_H)
+
+
+def test_full_width_partial_height_grid_measures_width_only(tmp_path: Path) -> None:
+    # แผ่นท้าย 7 ช่อง = 2 แถว (800x180): วัดความกว้างได้จากแผ่นเอง ความสูงเอาจากแผ่นเต็ม
+    sb = make_long_sb([250, 70])
+    fetch = fetch_from(
+        {
+            "https://x.invalid/M0.jpg": make_real_grid(25),
+            "https://x.invalid/M1.jpg": make_real_grid(7),
+        }
+    )
+    index = build(VID, make_raw(sb, duration=320), tmp_path, fetch)
+    assert len(index["frames"]) == 32
+    for frame, cell in zip(index["frames"][25:], range(7), strict=True):
+        assert_no_bleed(
+            tmp_path / "storyboard" / frame["file"], PALETTE_25[cell], (REAL_W, REAL_H)
+        )

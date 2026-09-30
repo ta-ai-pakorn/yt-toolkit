@@ -14,7 +14,7 @@ import shutil
 import threading
 import uuid
 from collections.abc import Callable
-from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -152,27 +152,99 @@ def _open_grid(data: bytes, url: str) -> Image.Image:
     return grid
 
 
+# yt-dlp บอกขนาดช่องคลาดได้ (คลิปยาว 1 ชม.: บอก 159x90 แต่แผ่นจริง 800x450 ขอบช่องอยู่ที่ 160/320/...)
+# ถ้าตัดตาม 159 ช่องที่ k จะเลื่อนซ้ายไป k px จนมีแถบของช่องข้าง ๆ ติดมา จึงวัดระยะช่องจากแผ่นจริง
+# เมื่อผลหารต่างจากขนาดของ format ไม่เกินนี้ (ต่างมากกว่านี้ = แผ่นไม่เต็ม หรือแผ่นแปลก ใช้ขนาดของ format)
+PITCH_TOLERANCE = 2
+
+
+@dataclass(frozen=True)
+class _Pitch:
+    x: int | None  # None = วัดจากแผ่นนี้ไม่ได้ (เช่น แผ่นท้ายที่มีไม่ครบแถว)
+    y: int | None
+
+    @property
+    def full(self) -> bool:
+        return self.x is not None and self.y is not None
+
+
+def _measure(grid: Image.Image, sb: dict) -> _Pitch:
+    def axis(size: int, count: int, expected: int) -> int | None:
+        pitch = size // count
+        return pitch if abs(pitch - expected) <= PITCH_TOLERANCE else None
+
+    return _Pitch(
+        axis(grid.width, int(sb["columns"]), int(sb["width"])),
+        axis(grid.height, int(sb["rows"]), int(sb["height"])),
+    )
+
+
+def _crop_cells(
+    grid: Image.Image,
+    sb: dict,
+    specs: list[FrameSpec],
+    pitch: tuple[int, int],
+    url: str,
+    out_dir: Path,
+) -> None:
+    width, height = pitch
+    columns = int(sb["columns"])
+    for spec in specs:
+        left = (spec.cell % columns) * width
+        top = (spec.cell // columns) * height
+        if left + width > grid.width or top + height > grid.height:
+            raise YtError(
+                "E_NETWORK",
+                f"แผ่นภาพเล็กกว่าที่ควร ({grid.width}x{grid.height}): {url}",
+            )
+        cell = grid.crop((left, top, left + width, top + height)).convert("RGB")
+        cell.save(out_dir / _file_name(spec.index), "JPEG", quality=JPEG_QUALITY)
+
+
 def _crop_fragment(
     sb: dict,
     fragment_no: int,
     specs: list[FrameSpec],
     fetch: Fetch,
     out_dir: Path,
-) -> None:
+) -> tuple[_Pitch, Image.Image | None]:
+    """โหลดแผ่นแล้วตัดทันทีถ้าวัดระยะช่องได้ครบทั้งสองแกน (แผ่นเต็ม)
+
+    แผ่นที่ไม่เต็ม (มักเป็นแผ่นท้าย) คืนภาพกลับไปให้ผู้เรียกตัดทีหลัง ด้วยระยะที่วัดจากแผ่นเต็มของ storyboard เดียวกัน
+    """
     url = sb["fragments"][fragment_no]["url"]
     grid = _open_grid(fetch(url), url)
-    width, height, columns = int(sb["width"]), int(sb["height"]), int(sb["columns"])
+    pitch = _measure(grid, sb)
+    if pitch.x is None or pitch.y is None:
+        return pitch, grid
     with grid:
-        for spec in specs:
-            left = (spec.cell % columns) * width
-            top = (spec.cell // columns) * height
-            if left + width > grid.width or top + height > grid.height:
-                raise YtError(
-                    "E_NETWORK",
-                    f"แผ่นภาพเล็กกว่าที่ควร ({grid.width}x{grid.height}): {url}",
-                )
-            cell = grid.crop((left, top, left + width, top + height)).convert("RGB")
-            cell.save(out_dir / _file_name(spec.index), "JPEG", quality=JPEG_QUALITY)
+        _crop_cells(grid, sb, specs, (pitch.x, pitch.y), url, out_dir)
+    return pitch, None
+
+
+def _crop_partial_grids(
+    sb: dict,
+    by_fragment: dict[int, list[FrameSpec]],
+    results: dict[int, tuple[_Pitch, Image.Image | None]],
+    out_dir: Path,
+) -> None:
+    """ตัดแผ่นที่ไม่เต็ม: แกนที่วัดจากแผ่นเองได้ใช้ค่านั้น ไม่งั้นใช้ระยะจากแผ่นเต็มแผ่นแรก
+    ถ้าไม่มีแผ่นเต็มเลย (คลิปสั้นที่มีแผ่นเดียว) ใช้ขนาดช่องของ format"""
+    full = next((p for _, (p, _grid) in sorted(results.items()) if p.full), None)
+    for no, (pitch, grid) in sorted(results.items()):
+        if grid is None:
+            continue
+        width = pitch.x or (full.x if full else None) or int(sb["width"])
+        height = pitch.y or (full.y if full else None) or int(sb["height"])
+        with grid:
+            _crop_cells(
+                grid,
+                sb,
+                by_fragment[no],
+                (width, height),
+                sb["fragments"][no]["url"],
+                out_dir,
+            )
 
 
 def _file_name(index: int) -> str:
@@ -186,20 +258,29 @@ def _build_into(
     for spec in frames:
         by_fragment.setdefault(spec.fragment, []).append(spec)
     executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
+    futures: dict[int, Future[tuple[_Pitch, Image.Image | None]]] = {}
     try:
-        futures = [
-            executor.submit(_crop_fragment, sb, no, specs, fetch, out_dir)
+        futures = {
+            no: executor.submit(_crop_fragment, sb, no, specs, fetch, out_dir)
             for no, specs in by_fragment.items()
-        ]
+        }
         # พลาดแผ่นเดียวก็หยุดทั้งงาน: ไม่รอแผ่นที่เหลือ (finally จะยกเลิกแผ่นที่ยังไม่เริ่ม)
-        done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+        done, _ = wait(futures.values(), return_when=FIRST_EXCEPTION)
         for future in done:
             error = future.exception()
             if error is not None:
                 raise error
+        _crop_partial_grids(
+            sb, by_fragment, {n: f.result() for n, f in futures.items()}, out_dir
+        )
     finally:
         # รอให้ worker ที่ทำอยู่หยุดก่อน ไม่งั้นลบโฟลเดอร์ชั่วคราวไม่ได้/มีไฟล์งอกใหม่
         executor.shutdown(wait=True, cancel_futures=True)
+        for future in futures.values():  # ปิดภาพแผ่นไม่เต็มที่ค้างอยู่ (กรณีงานล้มกลางทาง)
+            if future.done() and not future.cancelled() and future.exception() is None:
+                leftover = future.result()[1]
+                if leftover is not None:
+                    leftover.close()
     index = {
         "intervalMs": interval_ms(sb),
         "frames": [
