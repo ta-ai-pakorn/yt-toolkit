@@ -9,6 +9,9 @@ import type { VideoInfo } from "@/lib/types"
 
 const t = th.video
 
+// จอแคบ (มือถือ) ปุ่มสูง 44 px ให้นิ้วกดได้ง่าย
+const BUTTON = "max-sm:h-11"
+
 /** เขียนข้อความลงคลิปบอร์ดตามตัวอักษรทุกตัว (ไม่ตัดช่องว่างหรือบรรทัดว่าง) แล้วแจ้งด้วย toast */
 async function copyText(text: string): Promise<void> {
   try {
@@ -32,13 +35,13 @@ export function CopyInfo({ video }: { video: VideoInfo }) {
   return (
     <ButtonGroup aria-label={t.copyGroup} className="-ml-2.5 flex-wrap">
       {hasChapters && (
-        <Button variant="ghost" onClick={() => void copyText(formatChapters(video.chapters))}>
+        <Button variant="ghost" className={BUTTON} onClick={() => void copyText(formatChapters(video.chapters))}>
           <ListVideo aria-hidden />
           {t.copyChapters}
         </Button>
       )}
       {hasDescription && (
-        <Button variant="ghost" onClick={() => void copyText(description)}>
+        <Button variant="ghost" className={BUTTON} onClick={() => void copyText(description)}>
           <FileText aria-hidden />
           {t.copyDescription}
         </Button>

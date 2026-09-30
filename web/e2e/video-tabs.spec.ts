@@ -125,7 +125,37 @@ test.describe("W2 แถบแท็บ", () => {
   })
 })
 
+test.describe("W2 แถบแท็บ คีย์บอร์ด", () => {
+  test("กด Tab หนึ่งครั้งจากแท็บภาพเฟรม → ไปปุ่มแรกของภาพเฟรม (แผงไม่เป็นจุด Tab เพิ่ม)", async ({ page }) => {
+    await page.goto(`/v/${BBB}`)
+    await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
+    await tab(page, "ภาพเฟรม").focus()
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "โหลดภาพรวมเฟรม" })).toBeFocused()
+  })
+
+  test("แผงแท็บซับรับโฟกัสด้วย Tab แล้วเห็นวงโฟกัส", async ({ page }) => {
+    // แผงว่าง (ไม่มีปุ่มข้างใน) จึงเป็นจุด Tab ของตัวเอง: จำลองรายการแทร็กว่าง ไม่ขึ้นกับ API ซับ
+    await page.route(`**/api/videos/${BBB}/subtitles`, (route) => route.fulfill({ json: { tracks: [] } }))
+    await page.goto(`/v/${BBB}?tab=subs`)
+    await expect(page.getByText(NO_SUBS)).toBeVisible()
+    await tab(page, "ซับ").focus()
+    await page.keyboard.press("Tab")
+    const panel = page.getByRole("tabpanel")
+    await expect(panel).toBeFocused()
+    await expect(panel).not.toHaveCSS("box-shadow", "none")
+  })
+})
+
 test.describe("W2 ปุ่มคัดลอกที่หัวคลิป", () => {
+  test("จอแคบ 360 px: ปุ่มคัดลอกสูงอย่างน้อย 44 px", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 })
+    await page.goto(`/v/${ZOO}`)
+    await expect(page.getByRole("button", { name: "คัดลอก chapter" })).toBeVisible()
+    const box = await page.getByRole("button", { name: "คัดลอก chapter" }).boundingBox()
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44)
+  })
+
   test("AC-PROBE-03: 'คัดลอก chapter' ได้บรรทัด HH:MM:SS ชื่อตอน ครบ 3 ตอน และขึ้น toast", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"])
     const chapters = probeFixture(ZOO).chapters ?? []
