@@ -42,11 +42,16 @@ function expected(file: string): string {
 }
 
 describe("golden files found", () => {
-  it("globs are not silently empty", () => {
-    // 5 ชื่อ x (3 srt + txt + md) + custom-tokens = 26
-    expect(golden.size).toBeGreaterThanOrEqual(16)
-    expect(tokenDocs.size).toBe(NAMES.length)
-    for (const name of NAMES) expect(tokenDocs.has(name)).toBe(true)
+  it("finds exactly the expected golden and token files", () => {
+    // 5 ชื่อ x (3 srt + txt + md) + custom-tokens = 26 ไฟล์ ขาดหรือเกินแม้ไฟล์เดียวต้องแดง
+    const names: string[] = [`th-asr.custom-tokens.srt`]
+    for (const name of NAMES) {
+      for (const preset of PRESET_NAMES) names.push(`${name}.${preset}.srt`)
+      names.push(`${name}.txt`, `${name}.md`)
+    }
+    expect([...golden.keys()].sort()).toEqual(names.sort())
+    expect(golden.size).toBe(26)
+    expect([...tokenDocs.keys()].sort()).toEqual([...NAMES].sort())
   })
 
   it("keeps CRLF and no BOM in the raw golden text", () => {

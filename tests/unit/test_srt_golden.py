@@ -31,6 +31,7 @@ SUBS = Path(__file__).resolve().parents[1] / "fixtures" / "subs"
 TOKENS_DIR = SUBS / "tokens"
 GOLDEN_DIR = SUBS / "golden"
 UPDATE = os.environ.get("YT_UPDATE_GOLDEN") == "1"
+_REGENERATED = False  # True เมื่อรอบนี้เขียน golden ใหม่ ทำให้เทสสุดท้ายของไฟล์ล้มเหลวโดยตั้งใจ
 
 # jNQXAC9IVRw มี chapter จริง 3 อัน (probe/jNQXAC9IVRw.json) ใช้กับ en-owner ตัวเดียว
 _JNQ_CHAPTERS = [
@@ -102,10 +103,13 @@ def _write_json(path: Path, doc: dict) -> None:
 
 @pytest.fixture(scope="module", autouse=True)
 def _update_goldens(tmp_path_factory):
-    """YT_UPDATE_GOLDEN=1: เขียน token และ golden ใหม่ทั้งหมดก่อนเทสรัน (เทสจึงต้องผ่านเสมอหลังเขียน)"""
+    """YT_UPDATE_GOLDEN=1: เขียน token และ golden ใหม่ก่อนเทสรัน ห้ามใช้เมื่อมี CI และรอบนั้นจบแดงเสมอ (ดู test_zz_...)"""
+    global _REGENERATED
     if not UPDATE:
         yield
         return
+    if os.environ.get("CI"):
+        pytest.fail("YT_UPDATE_GOLDEN=1 is refused when CI is set: goldens are never regenerated in CI", pytrace=False)
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv(tf.DATA_ENV, str(tmp_path_factory.mktemp("pythainlp-data")))
         TOKENS_DIR.mkdir(parents=True, exist_ok=True)
@@ -116,6 +120,7 @@ def _update_goldens(tmp_path_factory):
             tokens = [Token(**t) for t in doc["tokens"]]
             for filename, text in outputs(name, tokens, doc["md"]).items():
                 (GOLDEN_DIR / filename).write_bytes(text.encode("utf-8"))
+        _REGENERATED = True
         yield
 
 
@@ -152,3 +157,8 @@ def test_custom_options_differ_from_presets():
     tokens = list(parse_case("th-asr").tokens)
     custom = to_srt(build_cues(tokens, CUSTOM_OPTS))
     assert all(custom != to_srt(build_cues(tokens, opts)) for opts in PRESETS.values())
+
+
+def test_zz_goldens_were_not_regenerated():
+    """ต้องอยู่ท้ายไฟล์: รอบที่เขียน golden เองเทสอื่นผ่านเพราะเทียบกับไฟล์ที่เพิ่งเขียน จึงต้องจบแดงเสมอ"""
+    assert not _REGENERATED, "goldens regenerated, review git diff and re-run without YT_UPDATE_GOLDEN"
