@@ -12,6 +12,7 @@ dependencies = [
     "httpx",
     "pillow",
     "pystray",
+    "pythainlp>=5.3.8",
     "uvicorn[standard]",
     "yt-dlp[default]",
 ]
