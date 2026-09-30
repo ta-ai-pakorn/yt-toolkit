@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { PRESETS } from "@/lib/sub-options"
-import { loadSubSettings, saveSubSettings, SUB_SETTINGS_KEY, type SubSettings } from "./subs-settings"
+import {
+  createSubSettingsStore,
+  loadSubSettings,
+  saveSubSettings,
+  SUB_SETTINGS_KEY,
+  type SubSettings,
+} from "./subs-settings"
 
 const store = (value: string | null) => ({ getItem: vi.fn(() => value) })
 const medium: SubSettings = { preset: "medium", options: PRESETS.medium }
@@ -81,5 +87,70 @@ describe("saveSubSettings", () => {
     }
     expect(() => saveSubSettings(boom, medium)).not.toThrow()
     expect(() => saveSubSettings(null, medium)).not.toThrow()
+  })
+})
+
+/** localStorage ปลอมในหน่วยความจำ (ใช้แค่ getItem/setItem) */
+function memoryStorage(initial: Record<string, string> = {}): Storage {
+  const data = new Map(Object.entries(initial))
+  return {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => void data.set(key, value),
+  } as unknown as Storage
+}
+
+const custom = { maxChars: 18, lines: 2 as const, minMs: 900, maxMs: 4000, mode: "chars" as const }
+
+describe("createSubSettingsStore", () => {
+  it("storage ถูกบล็อก: ค่าที่ปรับเองอยู่ในหน่วยความจำ ทุกคนที่อ่าน (แท็บซับ + ทรานสคริปต์) ได้ก้อนเดียวกัน", () => {
+    const store = createSubSettingsStore(() => null)
+    expect(store.get()).toEqual(medium)
+    store.setCustom(custom)
+    // เปิดแท็บทรานสคริปต์ทีหลัง (อ่านใหม่) ยังได้ค่าที่ปรับเอง ไม่ถอยกลับเป็นกลาง
+    expect(store.get()).toEqual({ preset: "custom", options: custom })
+    expect(store.get()).toBe(store.get())
+  })
+
+  it("แจ้งผู้ฟังทุกคนเมื่อค่าเปลี่ยน · ถอนการฟังแล้วไม่ได้รับแจ้ง · ค่าใหม่เป็นก้อนใหม่", () => {
+    const store = createSubSettingsStore(() => null)
+    const first = vi.fn()
+    const second = vi.fn()
+    const off = store.subscribe(first)
+    store.subscribe(second)
+    const before = store.get()
+    store.choosePreset("short")
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(second).toHaveBeenCalledTimes(1)
+    expect(store.get()).not.toBe(before)
+    expect(store.get()).toEqual({ preset: "short", options: PRESETS.short })
+    off()
+    store.choosePreset("long")
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(second).toHaveBeenCalledTimes(2)
+  })
+
+  it("อ่านค่าที่จำไว้ครั้งแรก และเขียนลง storage เมื่อเปลี่ยน", () => {
+    const storage = memoryStorage({ [SUB_SETTINGS_KEY]: '{"v":1,"preset":"long"}' })
+    const store = createSubSettingsStore(() => storage)
+    expect(store.get()).toEqual({ preset: "long", options: PRESETS.long })
+    store.setCustom(custom)
+    expect(loadSubSettings(storage)).toEqual({ preset: "custom", options: custom })
+  })
+
+  it("reload: อ่านค่าที่อีกแท็บของเบราว์เซอร์เขียนไว้ · storage ใช้ไม่ได้ = คงค่าในหน่วยความจำ", () => {
+    const storage = memoryStorage()
+    const store = createSubSettingsStore(() => storage)
+    expect(store.get()).toEqual(medium)
+    storage.setItem(SUB_SETTINGS_KEY, '{"v":1,"preset":"short"}')
+    const listener = vi.fn()
+    store.subscribe(listener)
+    store.reload()
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(store.get()).toEqual({ preset: "short", options: PRESETS.short })
+
+    const blocked = createSubSettingsStore(() => null)
+    blocked.setCustom(custom)
+    blocked.reload()
+    expect(blocked.get()).toEqual({ preset: "custom", options: custom })
   })
 })
