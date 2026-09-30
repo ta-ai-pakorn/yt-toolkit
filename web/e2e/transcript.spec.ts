@@ -176,6 +176,8 @@ test.describe("M3 ทรานสคริปต์ → ภาพเฟรม", 
     await expect(page).toHaveURL(new RegExp(`/v/${THAI}$`))
     await tab(page, "ทรานสคริปต์").click()
     await searchBox(page).fill("กรุงเทพ")
+    // คำค้นใช้ useDeferredValue: รอให้รายการกรองเสร็จ (บรรทัดแรกมีคำที่ไฮไลต์) ก่อนอ่านเวลา
+    await expect(lineItems(page).first().locator("mark").first()).toBeVisible()
     const first = lineItems(page).first().getByRole("button")
     const time = (await first.locator(".font-mono").textContent()) ?? ""
     await first.click()
