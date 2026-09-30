@@ -880,3 +880,37 @@ test.describe("W1 จำรายการที่วางไว้", () => {
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before)
   })
 })
+
+test.describe("ปรับจากการเดินตามเส้นทางผู้ใช้", () => {
+  test("แถวคลิปในรายการผล: คลิกที่ชื่อหรือภาพปกก็เปิดคลิปได้ (ไม่ต้องเล็งปุ่มเล็ก) และปุ่มอื่นในแถวยังกดแยกได้", async ({ page }) => {
+    await page.goto("/")
+    await page.getByRole("textbox").fill([AMBIGUOUS_URL, `https://youtu.be/${ZOO}`].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const rows = page.locator(RESULT_ROWS)
+    await expect(rows.nth(1)).toContainText("Me at the zoo")
+    // ปุ่ม "ทั้งเพลย์ลิสต์" ในแถวแรกยังกดได้ ไม่โดนลิงก์ทับ
+    await rows.first().getByRole("button", { name: "ทั้งเพลย์ลิสต์" }).click()
+    await expect(rows.first()).toContainText(PLAYLIST_TITLE)
+    await expect(page).toHaveURL(/\/$/)
+    // คลิกที่ชื่อคลิป (ตำแหน่งข้อความชื่อในแถว) = เปิดคลิป
+    const row = (await rows.nth(1).boundingBox())!
+    const title = (await rows.nth(1).getByText("Me at the zoo").boundingBox())!
+    await rows.nth(1).click({ position: { x: title.x - row.x + 10, y: title.y - row.y + title.height / 2 } })
+    await expect(page).toHaveURL(new RegExp(`/v/${ZOO}$`))
+  })
+
+  test("เปิดหน้าคลิปด้วยคีย์บอร์ด (Enter ที่ 'เปิดดู') → โฟกัสไปที่ชื่อคลิป ไม่หลุดไปที่ body", async ({ page }) => {
+    await page.goto("/")
+    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await page.getByRole("link", { name: /เปิดดู/ }).focus()
+    await page.keyboard.press("Enter")
+    const heading = page.getByRole("heading", { level: 1 })
+    await expect(heading).toContainText("Big Buck Bunny")
+    await expect(heading).toBeFocused()
+    // Tab ต่อไปถึงปุ่มในส่วนภาพเฟรมเลย ไม่ต้องย้อนผ่านเมนูบนหัว
+    await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(12)
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "Contact sheet" })).toBeFocused()
+  })
+})

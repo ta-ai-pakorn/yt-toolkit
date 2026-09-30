@@ -19,6 +19,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { fill, th } from "@/i18n/th"
 import type { ResolveItem } from "@/lib/types"
+import { cn } from "cn"
 
 import {
   BotStopContext,
@@ -39,9 +40,8 @@ import { fromListState } from "./use-analyze"
 
 const t = th.home.results
 
-// aria-disabled แทน disabled เพื่อให้โฟกัสยังอยู่ที่ปุ่ม (ตัวจัดการคลิกกันการกดเองอยู่แล้ว)
-const ariaDisabledClass =
-  "aria-disabled:pointer-events-none aria-disabled:opacity-50"
+// ปุ่มในแถวใช้ aria-disabled แทน disabled เพื่อให้โฟกัสยังอยู่ที่ปุ่ม (ตัวจัดการคลิกกันการกดเองอยู่แล้ว
+// และปุ่มจางลงเองจากสไตล์ของปุ่ม) · ไม่ใส่ pointer-events-none เพราะคลิกจะทะลุไปโดนลิงก์ "เปิดดู" ที่คลุมทั้งแถว
 
 type VideoRowProps = {
   item: ResolveItem
@@ -89,10 +89,13 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
   }
 
   return (
+    // ทั้งแถวกดเปิดคลิปได้ (ลิงก์ "เปิดดู" ขยายพื้นที่กดคลุมทั้งแถว) แต่ยังเป็นจุด Tab เดียว
+    // ปุ่มอื่นในแถวอยู่ชั้นบน (relative z-10) จึงกดแยกได้ตามปกติ
     <Item
       role="listitem"
       variant="outline"
       size="sm"
+      className="relative has-[a[data-row-link]:hover]:bg-muted/50"
       aria-busy={wantsTitle && video.isFetching && !title && !stopped}
     >
       <ItemMedia>
@@ -114,7 +117,7 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
             variant="ghost"
             size="sm"
             aria-disabled={stopped}
-            className={ariaDisabledClass}
+            className="relative z-10"
             onClick={() => {
               if (!stopped) setRequested(true)
             }}
@@ -127,7 +130,7 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
             variant="outline"
             size="sm"
             aria-disabled={stopped}
-            className={ariaDisabledClass}
+            className="relative z-10"
             onClick={() => {
               if (!stopped) onPlaylist()
             }}
@@ -139,7 +142,13 @@ function VideoRow({ item, autoTitle, onPlaylist }: VideoRowProps) {
           to={`/v/${id}`}
           state={fromListState}
           aria-label={`${t.open} ${title ?? id}`}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
+          data-row-link=""
+          className={cn(
+            buttonVariants({ variant: "outline", size: "sm" }),
+            // ปุ่มปกติยุบลง 1px ตอนกด (translate) ซึ่งทำให้พื้นที่กดที่คลุมทั้งแถวหดเหลือแค่ปุ่มกลางคลิก
+            // เมาส์ปล่อยนอกปุ่มจึงไม่นับเป็นคลิก: ปิดการยุบสำหรับลิงก์นี้
+            "after:absolute after:inset-0 after:rounded-lg after:content-[''] active:translate-none!",
+          )}
         >
           {t.open}
         </Link>

@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { AspectRatio } from "@/components/ui/aspect-ratio"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -301,16 +301,24 @@ function BulkDownloads({ videoId }: { videoId: string }) {
 
   return (
     <ButtonGroup aria-label={t.downloadGroup}>
-      <Button
-        variant="secondary"
-        size="sm"
-        disabled={busy !== null}
-        focusableWhenDisabled
-        onClick={() => void run("sheet", "contact-sheet.jpg", "contact-sheet.jpg")}
-      >
-        {busy === "sheet" && <Spinner aria-hidden />}
-        {t.contactSheet}
-      </Button>
+      {/* "Contact sheet" เป็นคำเฉพาะ: ชี้แล้วมีคำอธิบายภาษาไทย */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy !== null}
+              focusableWhenDisabled
+              onClick={() => void run("sheet", "contact-sheet.jpg", "contact-sheet.jpg")}
+            />
+          }
+        >
+          {busy === "sheet" && <Spinner aria-hidden />}
+          {t.contactSheet}
+        </TooltipTrigger>
+        <TooltipContent>{t.contactSheetHint}</TooltipContent>
+      </Tooltip>
       <Button
         variant="secondary"
         size="sm"
@@ -349,6 +357,11 @@ export function FramesSection({ videoId, enabled }: { videoId: string; enabled: 
               {t.title}
             </h2>
           </CardTitle>
+          {/* บอกว่าภาพเฟรมทำอะไรได้บ้าง (คลิกดูใหญ่ / คลิกขวาคัดลอก-โหลด) คนที่ไม่รู้ว่าคลิกขวาได้จะได้เจอ */}
+          {storyboard.isSuccess && frames.length > 0 && (
+            // จอแคบ: ลงไปอยู่ใต้ปุ่มโหลดเต็มความกว้าง ไม่ถูกบีบข้างปุ่ม
+            <CardDescription className="col-span-2 sm:col-span-1">{t.hint}</CardDescription>
+          )}
           {storyboard.isSuccess && frames.length > 0 && (
             <CardAction>
               <BulkDownloads videoId={videoId} />

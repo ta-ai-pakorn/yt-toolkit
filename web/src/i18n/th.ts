@@ -89,6 +89,8 @@ export const th = {
     copied: "คัดลอกแล้ว",
     copyFailed: "คัดลอกไม่สำเร็จ ลองอีกครั้ง",
     contactSheet: "Contact sheet",
+    contactSheetHint: "ภาพเดียวที่รวมทุกเฟรม พร้อมเวลาใต้แต่ละภาพ",
+    hint: "คลิกภาพเพื่อดูภาพใหญ่ · คลิกขวาหรือกด Shift+F10 เพื่อคัดลอกหรือโหลดภาพ",
     zip: "โหลดทั้งหมด (.zip)",
     downloadGroup: "โหลดภาพเฟรมทั้งชุด",
     preparing: "กำลังเตรียมไฟล์…",

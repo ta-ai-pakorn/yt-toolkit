@@ -789,3 +789,22 @@ test.describe("การเข้าถึงตอนเปิดภาพใ�
     })
   }
 })
+
+test.describe("W2 บอกวิธีใช้ภาพเฟรม", () => {
+  test("มีคำแนะนำใต้หัว 'ภาพเฟรม' ว่าคลิกดูใหญ่ และคลิกขวา/Shift+F10 เพื่อคัดลอกหรือโหลด", async ({ page }) => {
+    await openBbb(page)
+    await expect(page.getByText("คลิกภาพเพื่อดูภาพใหญ่ · คลิกขวาหรือกด Shift+F10 เพื่อคัดลอกหรือโหลดภาพ")).toBeVisible()
+  })
+
+  test("คลิปที่ไม่มีภาพเฟรม ไม่มีคำแนะนำนี้", async ({ page }) => {
+    await page.goto(`/v/${ZOO}`)
+    await expect(page.getByText(NO_STORYBOARD_MESSAGE)).toBeVisible()
+    await expect(page.getByText(/คลิกภาพเพื่อดูภาพใหญ่/)).toHaveCount(0)
+  })
+
+  test("ชี้ที่ปุ่ม Contact sheet เห็นคำอธิบายภาษาไทย", async ({ page }) => {
+    await openBbb(page)
+    await page.getByRole("button", { name: "Contact sheet" }).hover()
+    await expect(page.locator('[data-slot="tooltip-content"]')).toHaveText("ภาพเดียวที่รวมทุกเฟรม พร้อมเวลาใต้แต่ละภาพ")
+  })
+})
