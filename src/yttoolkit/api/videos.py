@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import os
 import re
 import unicodedata
 import uuid
@@ -279,13 +280,24 @@ def _cache_target(
         real_target = target.resolve(strict=True)
         # NTFS ไม่สนตัวพิมพ์: AQZ-KE-BPKQ หรือ STORYBOARD ก็เปิดโฟลเดอร์จริงได้ ต้องเทียบชื่อจริงบนดิสก์
         # และกันลิงก์ (symlink/junction) ในโฟลเดอร์ cache พาออกไปนอกโฟลเดอร์ของคลิป
-        if real_folder.name != video_id or not real_target.is_relative_to(real_folder):
+        if not real_target.is_relative_to(real_folder):
             return None
-        if real_target.relative_to(real_folder).parts != parts:
+        # macOS (APFS) ก็ไม่สนตัวพิมพ์เช่นกัน แต่ resolve() ไม่แก้ตัวพิมพ์ให้ จึงเทียบกับชื่อที่ listdir คืนมาจริง
+        if not _exact_names(cache_root, (video_id, *parts)):
             return None
     except (OSError, ValueError):
         return None
     return target, parts, media_type
+
+
+def _exact_names(root: Path, names: tuple[str, ...]) -> bool:
+    """ทุกชื่อในสายต้องมีอยู่จริงบนดิสก์ด้วยตัวพิมพ์ตรงเป๊ะ (ดูจากรายชื่อในโฟลเดอร์ ไม่พึ่ง resolve)"""
+    current = root
+    for name in names:
+        if name not in os.listdir(current):
+            return False
+        current = current / name
+    return True
 
 
 def _frame_download_name(storyboard_dir: Path, file_name: str) -> str:
