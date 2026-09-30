@@ -405,7 +405,7 @@ queued ──► running ──► done
 | Method | Path | Body / Query | ตอบกลับ |
 |---|---|---|---|
 | GET | `/ping` | — | `{ok:true, pid}` ตอบทันที ใช้เช็คว่าแอพยังทำงานอยู่ (ไฟล์เปิด/ปิดโปรแกรมและ dev server ใช้ตัวนี้) |
-| GET | `/health` | — | `{version, commit, tools:{ffmpeg, ytdlp, jsRuntime}, disk, output, network, cookies}` (`cookies` มาใน M5 บอกแค่สถานะและแหล่ง ไม่มีค่าคุกกี้) ทุกตัวเป็น `ToolStatus = {status: ok\|warn\|error, name, version, message, path}` (ใช้เวลาได้ถึง 5 วิเพราะเช็คเน็ต) |
+| GET | `/health` | — | `{version, commit, tools:{ffmpeg, ytdlp, jsRuntime}, disk, output, network, cookies, mode?}` (`cookies` มาใน M5 บอกแค่สถานะและแหล่ง ไม่มีค่าคุกกี้ · `mode: "fake"` มีเฉพาะโหมดข้อมูลปลอม) ทุกตัวเป็น `ToolStatus = {status: ok\|warn\|error, name, version, message, path}` (ใช้เวลาได้ถึง 5 วิเพราะเช็คเน็ต) |
 | POST | `/resolve` | `{text}` (ไม่เกิน 20,000 ตัวอักษร) | `{resolveId, items:[{input, kind: video\|playlist\|ambiguous\|invalid, videoId?, playlistId?, error?}]}` เรียงตามลำดับที่วาง · `error` มีเฉพาะแถว invalid = `{code:"E_INVALID_INPUT", message}` · `resolveId` ยังไม่เก็บลงฐานข้อมูล (W3 ใช้ใน M4) |
 | GET | `/videos/{id}` | `?refresh=1` · `?peek=1` | `VideoInfo` (ข้อ 6.2.1) · probe ใหม่ถ้าไม่มี cache หรือขอ refresh · `peek=1` = ขอแค่ข้อมูล (ชื่อในรายการผล W1) ใช้ probe และ cache 24 ชม. เดียวกัน แต่ไม่นับว่าเปิดคลิป: ไม่อัปเดต `opened_at` จึงไม่ขึ้น `/history` · id ผิดรูปแบบ → 422 `E_INVALID_INPUT` |
 | GET | `/videos/{id}/storyboard` | — | `{intervalMs, frames:[{index, tMs, url}]}` · `url` = `/api/cache/{id}/storyboard/f_NNNN.jpg?v=<เวลาที่สร้างชุดภาพ>` (ภาพชุดใหม่ได้ URL ใหม่) |
@@ -546,7 +546,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 ### 6.6 โครงสร้างฝั่ง backend
 ตาม BRD ข้อ 8 · เพิ่มกฎ:
 - `core/` ห้าม import `api/` หรือ `platform/` โดยตรง ให้รับของที่ต้องใช้ผ่านพารามิเตอร์
-- โหมด `YT_TOOLKIT_FAKE=1`: แทน yt-dlp และ ffmpeg ด้วยตัวปลอมที่อ่านจาก `tests/fixtures/` ใช้กับ E2E และการพัฒนาหน้าเว็บโดยไม่ต้องต่อเน็ต
+- โหมด `YT_TOOLKIT_FAKE=1`: แทน yt-dlp และ ffmpeg ด้วยตัวปลอมที่อ่านจาก `tests/fixtures/` ใช้กับ E2E และการพัฒนาหน้าเว็บโดยไม่ต้องต่อเน็ต อ่านเฉพาะตอน `serve` (`start` ใช้ยูทูปจริงเสมอ) และ `/health` ตอบ `mode: "fake"` เพิ่มให้หน้าตรวจสุขภาพแสดงแถบ "โหมดข้อมูลปลอม"
 
 ---
 
