@@ -49,6 +49,8 @@ def test_cases_file_shape() -> None:
         "single-long-token", "min-extend-adjacent", "min-merge", "merge-refused-over-limit",
         "two-lines-middle", "two-lines-fits-one", "whitespace-collapse", "over-one-hour", "empty",
         "txt-paragraphs", "md-chapters", "md-two-minute-sections",
+        "two-lines-per-line-cap", "two-lines-thai-no-space", "two-lines-long-token-alone",
+        "two-lines-merge-refused-per-line",
     ):
         assert required in names
     raw = (FIXTURES / "subs" / "builder-cases.json").read_bytes()
@@ -254,7 +256,6 @@ SRT_BLOCK = re.compile(r"(\d+)\r\n(\d{2,}):(\d\d):(\d\d),(\d{3}) --> (\d{2,}):(\
 
 def _check(tokens: list[Token], opts: SubOptions) -> None:
     cues = build_cues(tokens, opts)
-    limit = opts.max_chars * opts.lines
     groups = _partition(tokens, cues)
 
     for c, g in zip(cues, groups, strict=True):
@@ -262,8 +263,10 @@ def _check(tokens: list[Token], opts: SubOptions) -> None:
         assert c.end_ms >= g[-1].e
         assert 1 <= len(c.lines) <= opts.lines
         assert all(line and line == line.strip(" ") and "  " not in line for line in c.lines)
+        # owner ruling: no line ever exceeds maxChars; only a cue that is one single token is exempt
+        # (FR-SUB-9: never cut inside a word). Stricter than "single-token lines exempt".
         if len(g) > 1:
-            assert all(display_len(line) <= limit for line in c.lines)
+            assert all(display_len(line) <= opts.max_chars for line in c.lines), (c, opts)
             if opts.mode == "tokens":
                 assert len(g) <= opts.tokens_per_cue
         if len(c.lines) == 2:
@@ -308,6 +311,36 @@ def test_properties_md_crlf() -> None:
         assert out.endswith("\r\n") and not out.endswith("\r\n\r\n")
         body = [line for line in out.split("\r\n")[4:] if line and not line.startswith("## [")]
         assert _no_space("".join(body)) == _no_space("".join(t.t for t in tokens))
+
+
+def test_two_line_fit_rule_and_balanced_split() -> None:
+    toks = [Token("a" * 10, 0, 100), Token(" " + "b" * 10, 100, 200), Token(" " + "c" * 14, 200, 300)]
+    opts = SubOptions(max_chars=20, lines=2, min_ms=300, max_ms=5000)
+    # greedy: "a b" = 21 > 20 needs a split (10|10 ok); "a b c" = 36: k=1 10|25 bad, k=2 21|14 bad -> close
+    assert [c.lines for c in build_cues(toks, opts)] == [("a" * 10, "b" * 10), ("c" * 14,)]
+    long_opts = SubOptions(max_chars=25, lines=2, min_ms=300, max_ms=5000)
+    # "a b c" = 36 > 25: k=1 10|25 ok, k=2 21|14 ok -> most balanced = k=2
+    assert [c.lines for c in build_cues(toks, long_opts)] == [("a" * 10 + " " + "b" * 10, "c" * 14)]
+
+
+def test_has_split_matches_full_scan() -> None:
+    # _has_split is a binary-search shortcut; it must agree with scanning every k (C6 says "some k")
+    rng = random.Random(3)
+    for _ in range(2000):
+        toks = [Token(rng.choice(["", " ", "  "]) + rng.choice(WORDS[:16]) + rng.choice(["", " "]), 0, 0)
+                for _ in range(rng.randint(2, 12))]
+        cap = rng.randint(1, 60)
+        naive = [
+            k for k in range(1, len(toks))
+            if display_len(cue_text(toks[:k])) <= cap and display_len(cue_text(toks[k:])) <= cap
+        ]
+        assert [k for k, _, _ in srt_builder._splits(toks, cap)] == naive
+        assert srt_builder._has_split(toks, cap) == bool(naive)
+
+
+def test_build_cues_tokens_mode_without_count_raises() -> None:
+    with pytest.raises(ValueError):
+        build_cues([Token("a", 0, 1)], SubOptions(max_chars=25, lines=1, min_ms=300, max_ms=5000, mode="tokens"))
 
 
 def test_single_token_longer_than_limit_stays_whole() -> None:
