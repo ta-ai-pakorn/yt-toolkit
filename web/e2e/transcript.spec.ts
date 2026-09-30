@@ -22,7 +22,6 @@ const MENU_WITH_SUBS = [...M2_MENU, "ดูซับช่วงนี้"]
 // ภาพเฟรมของคลิปนี้ห่างกัน 4895 ms: ภาพที่ใกล้ 10 วินาทีที่สุดคือ 9790 ms (00:00:09)
 const FRAME_NEAR_10S = "00:00:09"
 const FRAME_NEAR_10S_MS = 9790
-const HALF_INTERVAL_MS = Math.ceil(4895 / 2)
 
 type Json3 = { events: { tStartMs: number; dDurationMs?: number; aAppend?: number; segs?: { utf8: string; tOffsetMs?: number }[] }[] }
 type Token = { t: string; s: number; e: number }
@@ -106,10 +105,14 @@ async function expectHighlightedFrameNear(page: Page, at: number) {
     return style.outlineStyle !== "none" || style.boxShadow !== "none"
   })
   expect(marked).toBe(true)
-  const alt = (await highlighted.locator("img").getAttribute("alt")) ?? ""
-  const time = /\d{2}:\d{2}:\d{2}/.exec(alt)?.[0] ?? ""
-  // ห่างจาก at ไม่เกินครึ่งช่วงห่างของภาพ · timecode ตัดเศษวินาทีทิ้ง จึงเผื่อเพิ่มอีก 1 วินาที
-  expect(Math.abs(toMs(time) - at)).toBeLessThanOrEqual(HALF_INTERVAL_MS + 1000)
+  const timeOf = (alt: string | null) => toMs(/\d{2}:\d{2}:\d{2}/.exec(alt ?? "")?.[0] ?? "")
+  const chosen = timeOf(await highlighted.locator("img").getAttribute("alt"))
+  const all = (await frameList(page).locator("img").evaluateAll((imgs) => imgs.map((img) => img.getAttribute("alt")))).map(
+    timeOf,
+  )
+  // เป็นภาพที่ใกล้ at ที่สุดในทุกภาพ (เวลาหลังภาพสุดท้าย = ภาพสุดท้าย) · timecode ตัดเศษวินาทีทิ้ง จึงเผื่อ 1 วินาที
+  const best = Math.min(...all.map((t) => Math.abs(t - at)))
+  expect(Math.abs(chosen - at)).toBeLessThanOrEqual(best + 1000)
 }
 
 function atFromUrl(page: Page): number {
