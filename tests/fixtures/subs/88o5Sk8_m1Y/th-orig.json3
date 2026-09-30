@@ -1,0 +1,2527 @@
+{
+  "wireMagic": "pb3",
+  "pens": [ {
+  
+  } ],
+  "wsWinStyles": [ {
+  
+  }, {
+    "mhModeHint": 2,
+    "juJustifCode": 0,
+    "sdScrollDir": 3
+  } ],
+  "wpWinPositions": [ {
+  
+  }, {
+    "apPoint": 6,
+    "ahHorPos": 20,
+    "avVerPos": 100,
+    "rcRows": 2,
+    "ccCols": 40
+  } ],
+  "events": [ {
+    "tStartMs": 0,
+    "dDurationMs": 373520,
+    "id": 1,
+    "wpWinPosId": 1,
+    "wsWinStyleId": 1
+  }, {
+    "tStartMs": 120,
+    "dDurationMs": 14599,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "สวัสดี",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ครับ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เรา",
+      "tOffsetMs": 2000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชื่อ",
+      "tOffsetMs": 2279,
+      "acAsrConf": 0
+    }, {
+      "utf8": "อารชี่",
+      "tOffsetMs": 3159,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เป็น",
+      "tOffsetMs": 4159,
+      "acAsrConf": 0
+    }, {
+      "utf8": "คน",
+      "tOffsetMs": 4880,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไทย",
+      "tOffsetMs": 5560,
+      "acAsrConf": 0
+    }, {
+      "utf8": "มา",
+      "tOffsetMs": 6560,
+      "acAsrConf": 0
+    }, {
+      "utf8": "จาก",
+      "tOffsetMs": 6840,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 9150,
+    "dDurationMs": 5569,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 9160,
+    "dDurationMs": 9000,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กรุงเทพฯ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เช้า",
+      "tOffsetMs": 1320,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตื่น",
+      "tOffsetMs": 1880,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ประมาณ",
+      "tOffsetMs": 2439,
+      "acAsrConf": 0
+    }, {
+      "utf8": " 7:00 ",
+      "tOffsetMs": 3240,
+      "acAsrConf": 0
+    }, {
+      "utf8": "น.",
+      "tOffsetMs": 3519,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 14709,
+    "dDurationMs": 3451,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 14719,
+    "dDurationMs": 6081,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กิน",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ผลไม้",
+      "tOffsetMs": 601,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กับ",
+      "tOffsetMs": 1400,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 18150,
+    "dDurationMs": 2650,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 18160,
+    "dDurationMs": 8119,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กาแฟ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไป",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ออก",
+      "tOffsetMs": 1199,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กำลัง",
+      "tOffsetMs": 1360,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 20790,
+    "dDurationMs": 5489,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 20800,
+    "dDurationMs": 9399,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กาย",
+      "acAsrConf": 0
+    }, {
+      "utf8": "อาบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "น้ำ",
+      "tOffsetMs": 1559,
+      "acAsrConf": 0
+    }, {
+      "utf8": "และ",
+      "tOffsetMs": 2559,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เริ่ม",
+      "tOffsetMs": 3479,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ทำ",
+      "tOffsetMs": 3760,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 26269,
+    "dDurationMs": 3930,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 26279,
+    "dDurationMs": 11921,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "งาน",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กลาง",
+      "tOffsetMs": 1361,
+      "acAsrConf": 0
+    }, {
+      "utf8": "วัน",
+      "tOffsetMs": 1601,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 2281,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ทำ",
+      "tOffsetMs": 3080,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 30189,
+    "dDurationMs": 8011,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 30199,
+    "dDurationMs": 16121,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "อาหาร",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 1040,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เย็น",
+      "tOffsetMs": 2040,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 2921,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ออก",
+      "tOffsetMs": 3761,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไป",
+      "tOffsetMs": 4081,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เดิน",
+      "tOffsetMs": 4360,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เล่น",
+      "tOffsetMs": 4641,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ที่",
+      "tOffsetMs": 5520,
+      "acAsrConf": 0
+    }, {
+      "utf8": "สวน",
+      "tOffsetMs": 6200,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 38190,
+    "dDurationMs": 8130,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 38200,
+    "dDurationMs": 14519,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "สาธารณะ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "เอ่อ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 2000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เรียน",
+      "tOffsetMs": 2320,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ภาษา",
+      "tOffsetMs": 3039,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 4039,
+      "acAsrConf": 0
+    }, {
+      "utf8": "นี้",
+      "tOffsetMs": 4480,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เรียน",
+      "tOffsetMs": 5480,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ภาษา",
+      "tOffsetMs": 6240,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 46310,
+    "dDurationMs": 6409,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 46320,
+    "dDurationMs": 8520,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "สเปน",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ดู",
+      "tOffsetMs": 1759,
+      "acAsrConf": 0
+    }, {
+      "utf8": "หนัง",
+      "tOffsetMs": 1960,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 2840,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ดู",
+      "tOffsetMs": 3120,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ซีรียส",
+      "tOffsetMs": 3759,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 4759,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ฟัง",
+      "tOffsetMs": 5200,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 52709,
+    "dDurationMs": 2131,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 52719,
+    "dDurationMs": 5561,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เพลง",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "อ่าน",
+      "tOffsetMs": 1241,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 54830,
+    "dDurationMs": 3450,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 54840,
+    "dDurationMs": 5519,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "หนังสือ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เล่น",
+      "tOffsetMs": 1719,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 58270,
+    "dDurationMs": 2089,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 58280,
+    "dDurationMs": 8400,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กีตาร์",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เล่น",
+      "tOffsetMs": 1239,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 60349,
+    "dDurationMs": 6331,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 60359,
+    "dDurationMs": 7641,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เกม",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ช่วง",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "นี้",
+      "tOffsetMs": 1401,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เล่น",
+      "tOffsetMs": 2200,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เกม",
+      "tOffsetMs": 3041,
+      "acAsrConf": 0
+    }, {
+      "utf8": " Pokemon ",
+      "tOffsetMs": 4041,
+      "acAsrConf": 0
+    }, {
+      "utf8": " Unite ",
+      "tOffsetMs": 4601,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กับ",
+      "tOffsetMs": 5601,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 66670,
+    "dDurationMs": 1330,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 66680,
+    "dDurationMs": 7920,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " Mobile ",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 67990,
+    "dDurationMs": 6610,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 68000,
+    "dDurationMs": 11119,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " Legends ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "เอ่อ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไม่",
+      "tOffsetMs": 1560,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1759,
+      "acAsrConf": 0
+    }, {
+      "utf8": "อากาศ",
+      "tOffsetMs": 2000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ร้อน",
+      "tOffsetMs": 2479,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไม่",
+      "tOffsetMs": 3479,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 4159,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ฝน",
+      "tOffsetMs": 5159,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 74590,
+    "dDurationMs": 4529,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 74600,
+    "dDurationMs": 4519,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ตก",
+      "acAsrConf": 0
+    }, {
+      "utf8": "แล้ว",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ก็",
+      "tOffsetMs": 1240,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไม่",
+      "tOffsetMs": 1720,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1960,
+      "acAsrConf": 0
+    }, {
+      "utf8": "มะเขือ",
+      "tOffsetMs": 2159,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 80630,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 80640,
+    "dDurationMs": 5080,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เทศ",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 82310,
+    "dDurationMs": 3410,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 82320,
+    "dDurationMs": 5080,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ชื่อ",
+      "acAsrConf": 0
+    }, {
+      "utf8": " name ",
+      "tOffsetMs": 1320,
+      "acAsrConf": 0
+    }, {
+      "utf8": "คน",
+      "tOffsetMs": 2320,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 85710,
+    "dDurationMs": 1690,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 85720,
+    "dDurationMs": 3439,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ไทย",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 87390,
+    "dDurationMs": 1769,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 87400,
+    "dDurationMs": 3800,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " person ",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 89149,
+    "dDurationMs": 2051,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 89159,
+    "dDurationMs": 4361,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กรุงเทพฯ",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 91190,
+    "dDurationMs": 2330,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 91200,
+    "dDurationMs": 4080,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " Bangkok ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 93510,
+    "dDurationMs": 1770,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 93520,
+    "dDurationMs": 3480,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เช้า",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 95270,
+    "dDurationMs": 1730,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 95280,
+    "dDurationMs": 3519,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " morning ",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 96990,
+    "dDurationMs": 1809,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 97000,
+    "dDurationMs": 4040,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ตื่น",
+      "acAsrConf": 0
+    }, {
+      "utf8": " wake ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 98789,
+    "dDurationMs": 2251,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 98799,
+    "dDurationMs": 4241,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " up ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ผลไม้",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 101030,
+    "dDurationMs": 2010,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 101040,
+    "dDurationMs": 4320,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ไม้",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 103030,
+    "dDurationMs": 2330,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 103040,
+    "dDurationMs": 4399,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " fruit ",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 105350,
+    "dDurationMs": 2089,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 105360,
+    "dDurationMs": 5160,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กาแฟ",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 107429,
+    "dDurationMs": 3091,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 107439,
+    "dDurationMs": 5121,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " Coffee ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ออก",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กำลัง",
+      "tOffsetMs": 1481,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 110510,
+    "dDurationMs": 2050,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 110520,
+    "dDurationMs": 4440,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กาย",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 112550,
+    "dDurationMs": 2410,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 112560,
+    "dDurationMs": 5760,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " Exercise ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "อาบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 114950,
+    "dDurationMs": 3370,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 114960,
+    "dDurationMs": 3360,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "น้ำ",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Take ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": " a ",
+      "tOffsetMs": 1199,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 122270,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 122280,
+    "dDurationMs": 4920,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " shower ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "เริ่ม",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ทำ",
+      "tOffsetMs": 1360,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 124709,
+    "dDurationMs": 2491,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 124719,
+    "dDurationMs": 5761,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "งาน",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Start ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 127190,
+    "dDurationMs": 3290,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 127200,
+    "dDurationMs": 5320,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " working ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กลาง",
+      "tOffsetMs": 1559,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 130470,
+    "dDurationMs": 2050,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 130480,
+    "dDurationMs": 4360,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "วัน",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 132510,
+    "dDurationMs": 2330,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 132520,
+    "dDurationMs": 4120,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " noon ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ทำ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 134830,
+    "dDurationMs": 1810,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 134840,
+    "dDurationMs": 3920,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "อาหาร",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 136630,
+    "dDurationMs": 2130,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 136640,
+    "dDurationMs": 4800,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " cook ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 138750,
+    "dDurationMs": 2690,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 138760,
+    "dDurationMs": 4800,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เย็น",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 141430,
+    "dDurationMs": 2130,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 141440,
+    "dDurationMs": 4879,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " evening ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "เดิน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 143550,
+    "dDurationMs": 2769,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 143560,
+    "dDurationMs": 5280,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เล่น",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Take ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": " a ",
+      "tOffsetMs": 1200,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 146309,
+    "dDurationMs": 2531,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 146319,
+    "dDurationMs": 4041,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " walk ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "สวน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 148830,
+    "dDurationMs": 1530,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 148840,
+    "dDurationMs": 4000,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "สาธารณะ",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 150350,
+    "dDurationMs": 2490,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 150360,
+    "dDurationMs": 6120,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " Park ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "เรียน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 152830,
+    "dDurationMs": 3650,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 152840,
+    "dDurationMs": 6280,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ภาษา",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Learn ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": " a ",
+      "tOffsetMs": 1240,
+      "acAsrConf": 0
+    }, {
+      "utf8": " language ",
+      "tOffsetMs": 1399,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 156470,
+    "dDurationMs": 2650,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 156480,
+    "dDurationMs": 2640,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ภาษา",
+      "acAsrConf": 0
+    }, {
+      "utf8": "สเปน",
+      "tOffsetMs": 360,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 160710,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 160720,
+    "dDurationMs": 5400,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " Spanish ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ดู",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 162670,
+    "dDurationMs": 3450,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 162680,
+    "dDurationMs": 3440,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "หนัง",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Watch ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": " a ",
+      "tOffsetMs": 1279,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 168750,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 168760,
+    "dDurationMs": 5320,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " movie ",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Do ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 171390,
+    "dDurationMs": 2690,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 171400,
+    "dDurationMs": 5440,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " series ",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Watch ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 174070,
+    "dDurationMs": 2770,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 174080,
+    "dDurationMs": 6000,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " series ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ฟัง",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 176830,
+    "dDurationMs": 3250,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 176840,
+    "dDurationMs": 6000,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เพลง",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Listen ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": " to ",
+      "tOffsetMs": 1360,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 180070,
+    "dDurationMs": 2770,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 180080,
+    "dDurationMs": 5040,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " music ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ร้อง",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 182830,
+    "dDurationMs": 2290,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 182840,
+    "dDurationMs": 4600,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เพลง",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 185110,
+    "dDurationMs": 2330,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 185120,
+    "dDurationMs": 4440,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "สิ่ง",
+      "acAsrConf": 0
+    }, {
+      "utf8": "เล่น",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 187430,
+    "dDurationMs": 2130,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 187440,
+    "dDurationMs": 4760,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เกม",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Play ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 189550,
+    "dDurationMs": 2650,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 189560,
+    "dDurationMs": 5000,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เกม",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ช่วง",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 192190,
+    "dDurationMs": 2370,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 192200,
+    "dDurationMs": 4720,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "นี้",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 194550,
+    "dDurationMs": 2370,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 194560,
+    "dDurationMs": 5520,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " recently ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "อากาศ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 196910,
+    "dDurationMs": 3170,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 196920,
+    "dDurationMs": 7000,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ร้อน",
+      "acAsrConf": 0
+    }, {
+      "utf8": " hot ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 200070,
+    "dDurationMs": 3850,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 200080,
+    "dDurationMs": 6280,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " weather ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ฝน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตก",
+      "tOffsetMs": 1760,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 203910,
+    "dDurationMs": 2450,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 203920,
+    "dDurationMs": 3820,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " raining ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "มะเขือ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 206350,
+    "dDurationMs": 1390,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 206360,
+    "dDurationMs": 4459,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เทศ",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Tomato ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 207730,
+    "dDurationMs": 3089,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 207740,
+    "dDurationMs": 3079,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "[เพลง]"
+    } ]
+  }, {
+    "tStartMs": 218509,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 218519,
+    "dDurationMs": 14601,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "สวัสดี",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ครับ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เรา",
+      "tOffsetMs": 2000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชื่อ",
+      "tOffsetMs": 2280,
+      "acAsrConf": 0
+    }, {
+      "utf8": "อารชี่",
+      "tOffsetMs": 3161,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เป็น",
+      "tOffsetMs": 4161,
+      "acAsrConf": 0
+    }, {
+      "utf8": "คน",
+      "tOffsetMs": 4881,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไทย",
+      "tOffsetMs": 5561,
+      "acAsrConf": 0
+    }, {
+      "utf8": "มา",
+      "tOffsetMs": 6561,
+      "acAsrConf": 0
+    }, {
+      "utf8": "จาก",
+      "tOffsetMs": 6841,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 227550,
+    "dDurationMs": 5570,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 227560,
+    "dDurationMs": 9000,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กรุงเทพฯ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เช้า",
+      "tOffsetMs": 1319,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตื่น",
+      "tOffsetMs": 1879,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ประมาณ",
+      "tOffsetMs": 2440,
+      "acAsrConf": 0
+    }, {
+      "utf8": " 7:00 ",
+      "tOffsetMs": 3239,
+      "acAsrConf": 0
+    }, {
+      "utf8": "น.",
+      "tOffsetMs": 3520,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 233110,
+    "dDurationMs": 3450,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 233120,
+    "dDurationMs": 6080,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กิน",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ผลไม้",
+      "tOffsetMs": 600,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กับ",
+      "tOffsetMs": 1399,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 236550,
+    "dDurationMs": 2650,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 236560,
+    "dDurationMs": 8120,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กาแฟ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไป",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ออก",
+      "tOffsetMs": 1200,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กำลัง",
+      "tOffsetMs": 1360,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 239190,
+    "dDurationMs": 5490,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 239200,
+    "dDurationMs": 9399,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กาย",
+      "acAsrConf": 0
+    }, {
+      "utf8": "อาบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "น้ำ",
+      "tOffsetMs": 1560,
+      "acAsrConf": 0
+    }, {
+      "utf8": "และ",
+      "tOffsetMs": 2560,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เริ่ม",
+      "tOffsetMs": 3480,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ทำ",
+      "tOffsetMs": 3759,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 244670,
+    "dDurationMs": 3929,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 244680,
+    "dDurationMs": 11920,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "งาน",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กลาง",
+      "tOffsetMs": 1360,
+      "acAsrConf": 0
+    }, {
+      "utf8": "วัน",
+      "tOffsetMs": 1600,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 2279,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ทำ",
+      "tOffsetMs": 3080,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 248589,
+    "dDurationMs": 8011,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 248599,
+    "dDurationMs": 16121,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "อาหาร",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 1041,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เย็น",
+      "tOffsetMs": 2041,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 2920,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ออก",
+      "tOffsetMs": 3761,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไป",
+      "tOffsetMs": 4081,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เดิน",
+      "tOffsetMs": 4360,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เล่น",
+      "tOffsetMs": 4640,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ที่",
+      "tOffsetMs": 5521,
+      "acAsrConf": 0
+    }, {
+      "utf8": "สวน",
+      "tOffsetMs": 6200,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 256590,
+    "dDurationMs": 8130,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 256600,
+    "dDurationMs": 14520,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "สาธารณะ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "เอ่อ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 2000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เรียน",
+      "tOffsetMs": 2319,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ภาษา",
+      "tOffsetMs": 3039,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 4039,
+      "acAsrConf": 0
+    }, {
+      "utf8": "นี้",
+      "tOffsetMs": 4479,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เรียน",
+      "tOffsetMs": 5479,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ภาษา",
+      "tOffsetMs": 6240,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 264710,
+    "dDurationMs": 6410,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 264720,
+    "dDurationMs": 8520,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "สเปน",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ดู",
+      "tOffsetMs": 1759,
+      "acAsrConf": 0
+    }, {
+      "utf8": "หนัง",
+      "tOffsetMs": 1960,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 2840,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ดู",
+      "tOffsetMs": 3120,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ซีรียส",
+      "tOffsetMs": 3759,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 4759,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ฟัง",
+      "tOffsetMs": 5199,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 271110,
+    "dDurationMs": 2130,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 271120,
+    "dDurationMs": 5560,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เพลง",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "อ่าน",
+      "tOffsetMs": 1240,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 273230,
+    "dDurationMs": 3450,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 273240,
+    "dDurationMs": 5519,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "หนังสือ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เล่น",
+      "tOffsetMs": 1720,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 276670,
+    "dDurationMs": 2089,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 276680,
+    "dDurationMs": 8400,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "กีตาร์",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เล่น",
+      "tOffsetMs": 1239,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 278749,
+    "dDurationMs": 6331,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 278759,
+    "dDurationMs": 7641,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เกม",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ช่วง",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "นี้",
+      "tOffsetMs": 1401,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เล่น",
+      "tOffsetMs": 2201,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เกม",
+      "tOffsetMs": 3041,
+      "acAsrConf": 0
+    }, {
+      "utf8": " Pokemon ",
+      "tOffsetMs": 4041,
+      "acAsrConf": 0
+    }, {
+      "utf8": " Unite ",
+      "tOffsetMs": 4601,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กับ",
+      "tOffsetMs": 5601,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 285070,
+    "dDurationMs": 1330,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 285080,
+    "dDurationMs": 7920,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " Mobile ",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 286390,
+    "dDurationMs": 6610,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 286400,
+    "dDurationMs": 11120,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " Legends ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "เอ่อ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไม่",
+      "tOffsetMs": 1560,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1760,
+      "acAsrConf": 0
+    }, {
+      "utf8": "อากาศ",
+      "tOffsetMs": 2000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ร้อน",
+      "tOffsetMs": 2480,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไม่",
+      "tOffsetMs": 3480,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 4160,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ฝน",
+      "tOffsetMs": 5160,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 292990,
+    "dDurationMs": 4530,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 293000,
+    "dDurationMs": 4520,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ตก",
+      "acAsrConf": 0
+    }, {
+      "utf8": "แล้ว",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ก็",
+      "tOffsetMs": 1240,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไม่",
+      "tOffsetMs": 1720,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 1960,
+      "acAsrConf": 0
+    }, {
+      "utf8": "มะเขือ",
+      "tOffsetMs": 2160,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 301870,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 301880,
+    "dDurationMs": 5840,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เทศ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "อาชี",
+      "tOffsetMs": 1319,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ทำ",
+      "tOffsetMs": 2319,
+      "acAsrConf": 0
+    }, {
+      "utf8": "อะไร",
+      "tOffsetMs": 2800,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ตอน",
+      "tOffsetMs": 3599,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 309950,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 309960,
+    "dDurationMs": 7480,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เย็น",
+      "acAsrConf": 0
+    }, {
+      "utf8": "เดิน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เล่น",
+      "tOffsetMs": 1280,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ที่",
+      "tOffsetMs": 1600,
+      "acAsrConf": 0
+    }, {
+      "utf8": "สวน",
+      "tOffsetMs": 1840,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 313909,
+    "dDurationMs": 3531,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 313919,
+    "dDurationMs": 3521,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "สาธารณะ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ดู",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "serีรies",
+      "tOffsetMs": 1280,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 324550,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 324560,
+    "dDurationMs": 5120,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "อาชีพ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "เรียน",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ภาษา",
+      "tOffsetMs": 1800,
+      "acAsrConf": 0
+    }, {
+      "utf8": "อะไร",
+      "tOffsetMs": 2120,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 329830,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 329840,
+    "dDurationMs": 6199,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ภาษา",
+      "acAsrConf": 0
+    }, {
+      "utf8": "สเปน",
+      "tOffsetMs": 199,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 332830,
+    "dDurationMs": 3209,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 332840,
+    "dDurationMs": 3199,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ภาษา",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไทย",
+      "tOffsetMs": 199,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 340309,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 340319,
+    "dDurationMs": 2241,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ภาษา",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 343390,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 343400,
+    "dDurationMs": 5880,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "สเปน",
+      "acAsrConf": 0
+    }, {
+      "utf8": "อช",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ที่",
+      "tOffsetMs": 1480,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 2079,
+      "acAsrConf": 0
+    }, {
+      "utf8": "กิน",
+      "tOffsetMs": 2440,
+      "acAsrConf": 0
+    }, {
+      "utf8": "มะเขือ",
+      "tOffsetMs": 2880,
+      "acAsrConf": 0
+    }, {
+      "utf8": "เทศ",
+      "tOffsetMs": 3480,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 349629,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 349639,
+    "dDurationMs": 5881,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "มย",
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 352230,
+    "dDurationMs": 3290,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 352240,
+    "dDurationMs": 3280,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ชอบ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไม่",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 358950,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 358960,
+    "dDurationMs": 8040,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ชอบ",
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไม่",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 361189,
+    "dDurationMs": 5811,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 361199,
+    "dDurationMs": 8881,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ชอบ",
+      "acAsrConf": 0
+    }, {
+      "utf8": " I ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": " don't ",
+      "tOffsetMs": 1440,
+      "acAsrConf": 0
+    }, {
+      "utf8": " like ",
+      "tOffsetMs": 1761,
+      "acAsrConf": 0
+    }, {
+      "utf8": " it. ",
+      "tOffsetMs": 2081,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ไม่",
+      "tOffsetMs": 3041,
+      "acAsrConf": 0
+    }, {
+      "utf8": "ชอบ",
+      "tOffsetMs": 3321,
+      "acAsrConf": 0
+    }, {
+      "utf8": "มะเขือ",
+      "tOffsetMs": 3641,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 366990,
+    "dDurationMs": 3090,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 367000,
+    "dDurationMs": 6520,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "เทศ",
+      "acAsrConf": 0
+    }, {
+      "utf8": " Speak ",
+      "tOffsetMs": 1000,
+      "acAsrConf": 0
+    }, {
+      "utf8": " with ",
+      "tOffsetMs": 1560,
+      "acAsrConf": 0
+    }, {
+      "utf8": " fun ",
+      "tOffsetMs": 1880,
+      "acAsrConf": 0
+    }, {
+      "utf8": " and ",
+      "tOffsetMs": 2240,
+      "acAsrConf": 0
+    }, {
+      "utf8": " don't ",
+      "tOffsetMs": 2440,
+      "acAsrConf": 0
+    }, {
+      "utf8": " stress ",
+      "tOffsetMs": 2720,
+      "acAsrConf": 0
+    } ]
+  }, {
+    "tStartMs": 370070,
+    "dDurationMs": 3450,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 370080,
+    "dDurationMs": 3440,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": " if ",
+      "acAsrConf": 0
+    }, {
+      "utf8": " you ",
+      "tOffsetMs": 119,
+      "acAsrConf": 0
+    }, {
+      "utf8": " get ",
+      "tOffsetMs": 239,
+      "acAsrConf": 0
+    }, {
+      "utf8": " it ",
+      "tOffsetMs": 399,
+      "acAsrConf": 0
+    }, {
+      "utf8": " wrong. ",
+      "tOffsetMs": 600,
+      "acAsrConf": 0
+    } ]
+  } ]
+}

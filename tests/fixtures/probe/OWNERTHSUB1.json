@@ -1,0 +1,60 @@
+{
+ "id": "OWNERTHSUB1",
+ "title": "Owner Thai subtitle test",
+ "channel": "ชุดทดสอบ",
+ "uploader": "ชุดทดสอบ",
+ "duration": 240,
+ "upload_date": "20260930",
+ "timestamp": 1790740800,
+ "live_status": "not_live",
+ "availability": "public",
+ "thumbnail": "https://fake.invalid/thumb/OWNERTHSUB1.jpg",
+ "chapters": null,
+ "description": "Synthetic clip: an English video with owner-uploaded Thai and English subtitles.",
+ "subtitles": {
+  "th": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/OWNERTHSUB1/th.json3",
+    "name": "Thai"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://fake.invalid/subs/OWNERTHSUB1/th.vtt",
+    "name": "Thai"
+   }
+  ],
+  "en": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/OWNERTHSUB1/en.json3",
+    "name": "English"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://fake.invalid/subs/OWNERTHSUB1/en.vtt",
+    "name": "English"
+   }
+  ]
+ },
+ "automatic_captions": {
+  "en-orig": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/OWNERTHSUB1/en.json3",
+    "name": "English (Original)"
+   }
+  ]
+ },
+ "formats": [
+  {
+   "format_id": "140",
+   "format_note": "English original (default), medium",
+   "ext": "m4a",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2",
+   "language": "en",
+   "language_preference": 10
+  }
+ ]
+}
