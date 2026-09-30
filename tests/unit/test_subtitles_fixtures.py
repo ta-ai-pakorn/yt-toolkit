@@ -90,6 +90,8 @@ def _assert_no_repeats(cues: list[Cue]) -> None:
             assert text != prev_text, f"cue {i + 1} repeats cue {i}"
             # บรรทัดใดบรรทัดหนึ่งเท่ากับซับก่อนหน้าทั้งซับ = ซ้อนแบบ rolling caption
             assert prev_text not in cue.lines, f"cue {i + 1} contains the whole previous cue as a line"
+            # ซับ 2 บรรทัดที่ซ้อนกับซับก่อนหน้าทีละบรรทัด (rolling caption) ก็ต้องไม่มี
+            assert not set(prev.lines) & set(cue.lines), f"cue {i + 1} shares a line with cue {i}"
         prev = cue
 
 
@@ -122,9 +124,11 @@ def test_ac_sub_04_no_text_lost_or_duplicated(name, preset):
 # ---------- AC-SUB-05: บรรทัดไม่เกินขีดจำกัด และซับสั้นถูกยืดจนชนซับถัดไป ----------
 
 
+@pytest.mark.parametrize("preset", PRESET_NAMES)
 @pytest.mark.parametrize("name", ALL_NAMES)
-def test_ac_sub_05_medium_line_length_and_min_duration(name):
-    opts = PRESETS["medium"]
+def test_ac_sub_05_line_length_and_min_duration(name, preset):
+    # กฎของเจ้าของ: ทุกบรรทัดของซับที่มีมากกว่า 1 token ไม่เกิน maxChars ทุก preset (short 1 บรรทัด, long 2 บรรทัด)
+    opts = PRESETS[preset]
     tokens = parsed(name).tokens
     cues = build_cues(tokens, opts)
     counts = cue_token_counts(tokens, cues)
