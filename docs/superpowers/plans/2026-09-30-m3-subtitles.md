@@ -1336,7 +1336,7 @@ const golden = import.meta.glob("../../../tests/fixtures/subs/golden/*", { query
     2. Focus the maxChars slider thumb.
     3. In `page.evaluate`, install a `MutationObserver` on the stats element that resolves with `performance.now()` on the first change.
     4. Record `t0 = performance.now()` inside the same evaluate right before `thumb.dispatchEvent(new KeyboardEvent("keydown", {key: "ArrowRight", bubbles: true}))`.
-    5. Assert `t1 − t0 ≤ 200`. Take the median of 5 presses. Also assert the token count behind the page is ≥ 4000 (this checks the 1 h fixture is really 1 h).
+    5. Assert `t1 − t0 ≤ 200`. Take the median of 5 presses. Also assert the token count behind the page is ≥ 3400 and the last token ends at ≥ 3,600,000 ms (this checks the 1 h fixture is really 1 h). `LONGTHAI1hr` tiles the 342 tokens of 88o5 10 times, so it has 3420 tokens and runs about 62 minutes. (This line said "≥ 4000" before T15; that number was wrong.)
   - axe: no serious/critical issues on `?tab=subs` for 88o5, with "ปรับเอง" open and the translated dialog open, in both themes.
 - [ ] **Step 3: Implement** the components.
 - [ ] **Step 4: Run** `npm run typecheck && npm run lint && npm test`. Expected: PASS.
