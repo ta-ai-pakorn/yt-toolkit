@@ -343,7 +343,8 @@ function PlaylistRow({ playlistId, mixVideoId }: { playlistId: string; mixVideoI
         )}
       </ItemContent>
       {entries.length > 0 && (
-        <ItemActions>
+        // จอแคบ: ปุ่มลงไปอยู่บรรทัดใต้ชื่อเพลย์ลิสต์ ข้อความในแถวจะได้ไม่ถูกบีบจนตัดหาย
+        <ItemActions className="max-sm:basis-full max-sm:pl-10">
           <Button
             variant="ghost"
             size="sm"
