@@ -824,3 +824,78 @@ def test_open_services_closes_db_when_migrate_fails(paths, monkeypatch):
     with pytest.raises(RuntimeError, match="migrate พัง"):
         lifecycle.open_services(paths)
     assert len(closed) == 1
+
+
+# ---------- final review: warm-up yt-dlp ตอนเปิดแอพ ----------
+
+
+class _WarmExtractor:
+    def __init__(self, error: BaseException | None = None) -> None:
+        self.error = error
+        self.calls = 0
+
+    def warm_up(self) -> None:
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+
+
+def test_warm_up_runs_in_a_daemon_thread():
+    extractor = _WarmExtractor()
+    thread = lifecycle.warm_up_in_background(extractor)
+    assert thread is not None and thread.daemon
+    thread.join(5)
+    assert extractor.calls == 1
+
+
+@pytest.mark.parametrize("error", [ImportError("No module named 'yt_dlp'"), RuntimeError("พัง")])
+def test_warm_up_failure_is_logged_never_raised(error, caplog):
+    extractor = _WarmExtractor(error)
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        thread = lifecycle.warm_up_in_background(extractor)
+        thread.join(5)  # -W error: exception ที่หลุดจาก thread จะทำให้เทสล้ม
+    assert extractor.calls == 1
+    assert "เตรียม yt-dlp ล่วงหน้าไม่สำเร็จ" in caplog.text
+
+
+def test_warm_up_skipped_for_extractor_without_warm_up():
+    from yttoolkit.config import CODE_ROOT
+    from yttoolkit.core.extractor import FakeExtractor
+
+    assert lifecycle.warm_up_in_background(FakeExtractor(CODE_ROOT / "tests" / "fixtures")) is None
+
+
+def test_run_app_warms_up_extractor_after_server_is_ready(paths, fake_platform, monkeypatch):
+    warmed = []
+    monkeypatch.setattr(lifecycle, "warm_up_in_background", warmed.append)
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    assert code == 0
+    assert warmed == [ctx.extractor]
+
+
+def test_run_app_does_not_warm_up_when_server_fails(paths, fake_platform, monkeypatch):
+    warmed = []
+    monkeypatch.setattr(lifecycle, "warm_up_in_background", warmed.append)
+    code, _ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, ready=False)
+    assert code == 1
+    assert warmed == []
+
+
+def test_run_app_starts_even_if_warm_up_import_fails(paths, fake_platform, monkeypatch, caplog):
+    import sys
+
+    monkeypatch.delenv("YT_TOOLKIT_FAKE", raising=False)
+    monkeypatch.setitem(sys.modules, "yt_dlp", None)  # import yt_dlp ล้ม
+    threads = []
+    original = lifecycle.warm_up_in_background
+
+    def tracking(extractor):
+        threads.append(original(extractor))
+        return threads[-1]
+
+    monkeypatch.setattr(lifecycle, "warm_up_in_background", tracking)
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        code, _ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+        threads[0].join(5)
+    assert code == 0
+    assert "เตรียม yt-dlp ล่วงหน้าไม่สำเร็จ" in caplog.text

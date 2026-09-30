@@ -108,6 +108,26 @@ def ensure_ffmpeg(paths: Paths, plat: Platform) -> None:
         log.exception("ติดตั้ง ffmpeg อัตโนมัติไม่สำเร็จ")
 
 
+def warm_up_in_background(extractor: Extractor) -> threading.Thread | None:
+    """เตรียม extractor ล่วงหน้าใน daemon thread (ตัวจริง = import yt-dlp) ตัวที่ไม่มี warm_up (โหมดข้อมูลปลอม) ข้าม
+
+    พลาดแค่บันทึก log ห้ามทำให้เปิดโปรแกรมไม่ได้ ลิงก์แรกจะ import เองตามปกติ
+    """
+    warm_up = getattr(extractor, "warm_up", None)
+    if not callable(warm_up):
+        return None
+
+    def run() -> None:
+        try:
+            warm_up()
+        except Exception:
+            log.warning("เตรียม yt-dlp ล่วงหน้าไม่สำเร็จ (ลิงก์แรกจะช้ากว่าปกติเล็กน้อย)", exc_info=True)
+
+    thread = threading.Thread(target=run, name="ytdlp-warmup", daemon=True)
+    thread.start()
+    return thread
+
+
 def open_services(paths: Paths) -> tuple[Database, VideoService, Extractor]:
     """เปิดฐานข้อมูล (สร้างตารางถ้ายังไม่มี) ล้าง cache เก่า และเลือก extractor
 
@@ -215,6 +235,7 @@ def _run_server(
     runstate.write(
         paths.app_json, runstate.RunInfo(port=port, pid=os.getpid(), token=token, started_at=runstate.now_iso())
     )
+    warm_up_in_background(extractor)
     if auto_ffmpeg:
         threading.Thread(target=ensure_ffmpeg, args=(paths, plat), name="ffmpeg-setup", daemon=True).start()
     url = base_url(port)

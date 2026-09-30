@@ -112,6 +112,17 @@ class YtDlpExtractor:
         info["entries"] = list(info.get("entries") or [])[: limit + 1]
         return info
 
+    def warm_up(self) -> None:
+        """import yt-dlp และตัวดึงของยูทูปไว้ก่อน (ครั้งแรกใช้เวลาเกือบ 1 วินาที) ไม่ต่อเน็ต
+
+        แอพเรียกใน thread แยกหลังเซิร์ฟเวอร์พร้อม ลิงก์แรกที่ผู้ใช้วางจะได้ไม่ต้องรอ import
+        import ไม่ได้ก็โยนต่อ (ผู้เรียกบันทึก log เอง) ตอน probe จริงจะแจ้ง error ตามปกติ
+        """
+        import yt_dlp
+
+        with yt_dlp.YoutubeDL({**_PROBE_OPTS, "logger": _YtDlpLogger()}) as ydl:
+            ydl.get_info_extractor("Youtube")
+
     def fetch(self, url: str) -> bytes:
         try:
             response = httpx.get(url, timeout=10, follow_redirects=True)

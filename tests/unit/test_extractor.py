@@ -578,3 +578,31 @@ def test_extractor_does_not_import_api_or_platform() -> None:
         text,
         re.MULTILINE,
     )
+
+
+# ---------- warm-up (final review: import yt-dlp ตั้งแต่เปิดแอพ ลิงก์แรกจะได้ไม่ต้องรอ) ----------
+
+
+def test_warm_up_loads_yt_dlp_and_the_youtube_extractor(
+    ydl: type[FakeYDL], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    looked_up: list[str] = []
+    monkeypatch.setattr(
+        FakeYDL, "get_info_extractor", lambda self, key: looked_up.append(key), raising=False
+    )
+    YtDlpExtractor().warm_up()
+    assert looked_up == ["Youtube"]
+    assert ydl.instances[0].params["quiet"] is True  # ใช้ตัวเลือกเดียวกับ probe (ไม่พิมพ์ลงจอ)
+    assert all(not i.urls for i in ydl.instances)  # ไม่ดึงข้อมูลจากเน็ต
+
+
+def test_warm_up_raises_when_yt_dlp_cannot_be_imported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "yt_dlp", None)
+    with pytest.raises(ImportError):
+        YtDlpExtractor().warm_up()
+
+
+def test_fake_extractor_has_no_warm_up(fake: FakeExtractor) -> None:
+    assert not hasattr(fake, "warm_up")  # โหมดข้อมูลปลอมไม่ต้อง import yt-dlp
