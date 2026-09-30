@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 
 test("หน้าแรก W1 แสดงหัวข้อ ช่องวางลิงก์ และปุ่มหลักปุ่มเดียว", async ({ page }) => {
   await page.goto("/")
@@ -193,13 +193,15 @@ test.describe("W1 วิเคราะห์ลิงก์", () => {
     await expect(rows.nth(2)).toContainText("แสดงแค่ 200 คลิปแรก")
   })
 
-  test("รายการผล: กด Tab จากปุ่มวิเคราะห์ไปถึงลิงก์ 'เปิดดู' ได้ แล้วกด Enter เข้าหน้าคลิป", async ({ page }) => {
+  test("รายการผล: กด Tab จากปุ่มวิเคราะห์ผ่าน 'ล้างรายการ' ไปถึงลิงก์ 'เปิดดู' ได้ แล้วกด Enter เข้าหน้าคลิป", async ({ page }) => {
     await page.goto("/")
     await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, "ไม่ใช่ลิงก์"].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     const link = page.getByRole("link", { name: /เปิดดู/ })
     await expect(link).toBeVisible()
     await page.getByRole("button", { name: "วิเคราะห์" }).focus()
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "ล้างรายการ" })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(link).toBeFocused()
     await page.keyboard.press("Enter")
@@ -279,7 +281,7 @@ test.describe("W1 ล่าสุด", () => {
   test("เปิดคลิปแล้วกลับหน้าแรก → ขึ้นในรายการล่าสุด พร้อมชื่อ ความยาว และลิงก์", async ({ page }) => {
     await page.goto(`/v/${ZOO}`)
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Me at the zoo")
-    await page.getByRole("link", { name: "หน้าแรก" }).click()
+    await page.getByRole("banner").getByRole("link", { name: "หน้าแรก" }).click()
     const section = page.locator("section[aria-labelledby=recent-title]")
     await expect(section.getByRole("heading", { name: "ล่าสุด" })).toBeVisible()
     const item = section.getByRole("link", { name: /Me at the zoo/ })
@@ -683,5 +685,198 @@ test.describe("ธีมตั้งก่อนหน้าโหลดเส�
     await page.goto("/")
     await expect(page.locator("html")).toHaveClass("light")
     expect(await page.evaluate(readColorScheme)).toBe("light")
+  })
+})
+
+const MIX_ID = "RDaqz-KE-bpKQ"
+const MIX_URL = `${BBB_URL}&list=${MIX_ID}&start_radio=1`
+const MIX_DIALOG = "ลิงก์นี้เป็นมิกซ์อัตโนมัติของยูทูป จะเอาแค่คลิปนี้ หรือ 25 คลิปแรกของมิกซ์?"
+const MIX_NOTE = "มิกซ์อัตโนมัติ แต่ละคนอาจได้รายการไม่เหมือนกัน"
+
+test.describe("W1 ลิงก์มิกซ์ (list=RD...)", () => {
+  test("ลิงก์มิกซ์ → กล่องถามแบบมิกซ์ · 'ทั้งมิกซ์ (25 คลิปแรก)' แสดงแถวมิกซ์ 25 คลิปพร้อมหมายเหตุ", async ({ page }) => {
+    const playlistUrls: string[] = []
+    page.on("request", (request) => {
+      if (request.url().includes("/api/playlists/")) playlistUrls.push(request.url())
+    })
+    await page.goto("/")
+    await page.getByRole("textbox").fill(MIX_URL)
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog).toContainText(MIX_DIALOG)
+    await expect(dialog.getByRole("button")).toHaveText(["คลิปนี้", "ทั้งมิกซ์ (25 คลิปแรก)", "ปิด"])
+    await dialog.getByRole("button", { name: "ทั้งมิกซ์ (25 คลิปแรก)" }).click()
+    const rows = page.locator(RESULT_ROWS)
+    await expect(rows).toHaveCount(1)
+    await expect(rows).toContainText("มิกซ์ - Big Buck Bunny")
+    await expect(rows).toContainText("25 คลิป")
+    await expect(rows).toContainText(MIX_NOTE)
+    await expect(rows).not.toContainText("แสดงแค่")
+    expect(playlistUrls.map((url) => new URL(url).pathname + new URL(url).search)).toEqual([
+      `/api/playlists/${MIX_ID}?v=${BBB}`,
+    ])
+  })
+
+  test("ลิงก์มิกซ์ → 'คลิปนี้' ไปหน้าคลิป", async ({ page }) => {
+    await page.goto("/")
+    await page.getByRole("textbox").fill(MIX_URL)
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await page.getByRole("dialog").getByRole("button", { name: "คลิปนี้" }).click()
+    await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
+  })
+
+  test("ลิงก์มิกซ์ปนในหลายบรรทัด → แถวคลิปมีปุ่ม 'ทั้งมิกซ์ (25 คลิปแรก)' กดแล้วเป็นแถวมิกซ์", async ({ page }) => {
+    await page.goto("/")
+    await page.getByRole("textbox").fill([MIX_URL, `https://youtu.be/${ZOO}`].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const rows = page.locator(RESULT_ROWS)
+    await expect(rows).toHaveCount(2)
+    await rows.first().getByRole("button", { name: "ทั้งมิกซ์ (25 คลิปแรก)" }).click()
+    await expect(rows.first()).toContainText("มิกซ์ - Big Buck Bunny")
+    await expect(rows.first()).toContainText(MIX_NOTE)
+  })
+})
+
+const THREE_LINKS = [`https://youtu.be/${BBB}`, `https://youtu.be/${ZOO}`, PLAYLIST_URL].join("\n")
+const OPENED = "เปิดดูแล้ว"
+
+async function pasteThree(page: Page) {
+  await page.goto("/")
+  await page.getByRole("textbox").fill(THREE_LINKS)
+  await page.getByRole("button", { name: "วิเคราะห์" }).click()
+  const rows = page.locator(RESULT_ROWS)
+  await expect(rows).toHaveCount(3)
+  await expect(rows.nth(1)).toContainText("Me at the zoo")
+  return rows
+}
+
+async function expectListIntact(page: Page, openedRow: number) {
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole("textbox")).toHaveValue(THREE_LINKS)
+  const rows = page.locator(RESULT_ROWS)
+  await expect(rows).toHaveCount(3)
+  await expect(rows.nth(0)).toContainText("Big Buck Bunny")
+  await expect(rows.nth(1)).toContainText("Me at the zoo")
+  await expect(rows.nth(2)).toContainText(PLAYLIST_TITLE)
+  for (let i = 0; i < 3; i++) {
+    if (i === openedRow) await expect(rows.nth(i)).toContainText(OPENED)
+    else await expect(rows.nth(i)).not.toContainText(OPENED)
+  }
+}
+
+test.describe("W1 จำรายการที่วางไว้", () => {
+  test("วาง 3 ลิงก์ เปิดหนึ่งคลิป แล้วกดย้อนกลับของเบราว์เซอร์ → ข้อความ รายการ และป้าย 'เปิดดูแล้ว' อยู่ครบ", async ({ page }) => {
+    const rows = await pasteThree(page)
+    let resolves = 0
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/resolve")) resolves += 1
+    })
+    await rows.nth(1).getByRole("link", { name: /เปิดดู/ }).click()
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Me at the zoo")
+    await page.goBack()
+    await expectListIntact(page, 1)
+    // กลับมาแล้วไม่เรียก /resolve ใหม่
+    expect(resolves).toBe(0)
+  })
+
+  test("breadcrumb 'รายการที่วาง (3 ลิงก์)' พากลับรายการเดิม", async ({ page }) => {
+    const rows = await pasteThree(page)
+    await rows.nth(0).getByRole("link", { name: /เปิดดู/ }).click()
+    const crumbs = page.getByRole("navigation", { name: "ตำแหน่งของหน้านี้" })
+    await expect(crumbs.locator('[data-slot="breadcrumb-item"]')).toHaveText([
+      "หน้าแรก",
+      "รายการที่วาง (3 ลิงก์)",
+      /^Big Buck Bunny/,
+    ])
+    await expect(crumbs.locator('[aria-current="page"]')).toContainText("Big Buck Bunny")
+    await crumbs.getByRole("link", { name: "รายการที่วาง (3 ลิงก์)" }).click()
+    await expectListIntact(page, 0)
+  })
+
+  test("breadcrumb 'หน้าแรก' ก็เห็นรายการเดิม", async ({ page }) => {
+    const rows = await pasteThree(page)
+    await rows.nth(0).getByRole("link", { name: /เปิดดู/ }).click()
+    await page.getByRole("navigation", { name: "ตำแหน่งของหน้านี้" }).getByRole("link", { name: "หน้าแรก" }).click()
+    await expectListIntact(page, 0)
+  })
+
+  test("โหลดหน้าใหม่ (F5) ในแท็บเดิม → รายการยังอยู่ โดยไม่เรียก /resolve ใหม่", async ({ page }) => {
+    const rows = await pasteThree(page)
+    await rows.nth(1).getByRole("link", { name: /เปิดดู/ }).click()
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Me at the zoo")
+    await page.goBack()
+    let resolves = 0
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/resolve")) resolves += 1
+    })
+    await page.reload()
+    await expectListIntact(page, 1)
+    // W2 ที่โหลดใหม่ก็ยังรู้ว่ามาจากรายการ
+    await page.goForward()
+    await expect(page.getByRole("navigation", { name: "ตำแหน่งของหน้านี้" })).toContainText("รายการที่วาง (3 ลิงก์)")
+    expect(resolves).toBe(0)
+  })
+
+  test("'ล้างรายการ' ล้างข้อความ รายการ และสิ่งที่จำไว้ · โฟกัสกลับช่องวางลิงก์", async ({ page }) => {
+    const rows = await pasteThree(page)
+    await rows.nth(1).getByRole("link", { name: /เปิดดู/ }).click()
+    await page.goBack()
+    await page.getByRole("button", { name: "ล้างรายการ" }).click()
+    await expect(page.getByRole("textbox")).toHaveValue("")
+    await expect(page.getByRole("textbox")).toBeFocused()
+    await expect(page.locator(RESULT_ROWS)).toHaveCount(0)
+    await expect(page.getByRole("heading", { name: "ผลการวิเคราะห์" })).toHaveCount(0)
+    await expect(page.getByRole("status").filter({ hasText: "ล้างรายการแล้ว" })).toBeAttached()
+    await page.reload()
+    await expect(page.getByRole("textbox")).toHaveValue("")
+    await expect(page.locator(RESULT_ROWS)).toHaveCount(0)
+  })
+
+  test("กด 'ทั้งเพลย์ลิสต์' ในแถวแล้วไปหน้าคลิปอื่นแล้วกลับมา → แถวนั้นยังเป็นเพลย์ลิสต์", async ({ page }) => {
+    await page.goto("/")
+    await page.getByRole("textbox").fill([AMBIGUOUS_URL, `https://youtu.be/${ZOO}`].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const rows = page.locator(RESULT_ROWS)
+    await rows.first().getByRole("button", { name: "ทั้งเพลย์ลิสต์" }).click()
+    await expect(rows.first()).toContainText(PLAYLIST_TITLE)
+    await rows.nth(1).getByRole("link", { name: /เปิดดู/ }).click()
+    await page.goBack()
+    await expect(rows.first()).toContainText(PLAYLIST_TITLE)
+  })
+
+  test("sessionStorage ใช้ไม่ได้ → ยังใช้งานได้ปกติ และสลับหน้าแล้วรายการยังอยู่", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "sessionStorage", {
+        get() {
+          throw new Error("SecurityError")
+        },
+      })
+    })
+    const rows = await pasteThree(page)
+    await rows.nth(1).getByRole("link", { name: /เปิดดู/ }).click()
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Me at the zoo")
+    await page.getByRole("navigation", { name: "ตำแหน่งของหน้านี้" }).getByRole("link", { name: /รายการที่วาง/ }).click()
+    await expectListIntact(page, 1)
+  })
+
+  test("ย้อนกลับมาหน้าแรกแล้วกลับไปตำแหน่งเลื่อนเดิม", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 500 })
+    await page.goto("/")
+    const ids = clipIds(12)
+    await page.getByRole("textbox").fill(ids.join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    const target = page.locator(RESULT_ROWS).nth(10)
+    await target.scrollIntoViewIfNeeded()
+    const before = await page.evaluate(() => window.scrollY)
+    expect(before).toBeGreaterThan(200)
+    await target.getByRole("link", { name: /เปิดดู/ }).click()
+    await expect(page).toHaveURL(new RegExp(`/v/${ids[10]}$`))
+    await page.getByRole("navigation", { name: "ตำแหน่งของหน้านี้" }).getByRole("link", { name: /รายการที่วาง/ }).click()
+    await expect(page).toHaveURL(/\/$/)
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before)
+
+    await target.getByRole("link", { name: /เปิดดู/ }).click()
+    await page.goBack()
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before)
   })
 })
