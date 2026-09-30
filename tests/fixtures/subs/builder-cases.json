@@ -1,0 +1,354 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "english-char-limit",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "Hello", "s": 0, "e": 400},
+        {"t": " world", "s": 400, "e": 900},
+        {"t": " this", "s": 900, "e": 1300},
+        {"t": " is", "s": 1300, "e": 1500},
+        {"t": " a", "s": 1500, "e": 1600},
+        {"t": " test", "s": 1600, "e": 2000},
+        {"t": " of", "s": 2000, "e": 2200},
+        {"t": " subs", "s": 2200, "e": 2600}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1600, "lines": ["Hello world this is a"]},
+        {"startMs": 1600, "endMs": 2800, "lines": ["test of subs"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,600\r\nHello world this is a\r\n\r\n2\r\n00:00:01,600 --> 00:00:02,800\r\ntest of subs\r\n",
+      "txt": "Hello world this is a test of subs\r\n"
+    },
+    {
+      "name": "thai-display-len",
+      "options": {"maxChars": 3, "lines": 1, "minMs": 300, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "ที่", "s": 0, "e": 500},
+        {"t": "น้ำ", "s": 500, "e": 1000},
+        {"t": "ดี", "s": 1000, "e": 1500}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1000, "lines": ["ที่น้ำ"]},
+        {"startMs": 1000, "endMs": 1500, "lines": ["ดี"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,000\r\nที่น้ำ\r\n\r\n2\r\n00:00:01,000 --> 00:00:01,500\r\nดี\r\n",
+      "txt": "ที่น้ำดี\r\n"
+    },
+    {
+      "name": "silence-gap",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "a", "s": 0, "e": 500},
+        {"t": " b", "s": 1500, "e": 2000},
+        {"t": " c", "s": 2999, "e": 3100}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1200, "lines": ["a"]},
+        {"startMs": 1500, "endMs": 3100, "lines": ["b c"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,200\r\na\r\n\r\n2\r\n00:00:01,500 --> 00:00:03,100\r\nb c\r\n",
+      "txt": "a b c\r\n"
+    },
+    {
+      "name": "max-duration",
+      "options": {"maxChars": 60, "lines": 1, "minMs": 300, "maxMs": 3000, "mode": "chars"},
+      "tokens": [
+        {"t": "one", "s": 0, "e": 1000},
+        {"t": " two", "s": 1000, "e": 2000},
+        {"t": " three", "s": 2000, "e": 3000},
+        {"t": " four", "s": 3000, "e": 4000},
+        {"t": " five", "s": 4000, "e": 5000}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 3000, "lines": ["one two three"]},
+        {"startMs": 3000, "endMs": 5000, "lines": ["four five"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:03,000\r\none two three\r\n\r\n2\r\n00:00:03,000 --> 00:00:05,000\r\nfour five\r\n",
+      "txt": "one two three four five\r\n"
+    },
+    {
+      "name": "tokens-mode",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "tokens", "tokensPerCue": 3},
+      "tokens": [
+        {"t": "a", "s": 0, "e": 300},
+        {"t": " b", "s": 300, "e": 600},
+        {"t": " c", "s": 600, "e": 900},
+        {"t": " d", "s": 900, "e": 1200},
+        {"t": " e", "s": 1200, "e": 1500},
+        {"t": " f", "s": 1500, "e": 1800},
+        {"t": " g", "s": 1800, "e": 2100}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 900, "lines": ["a b c"]},
+        {"startMs": 900, "endMs": 1800, "lines": ["d e f"]},
+        {"startMs": 1800, "endMs": 3000, "lines": ["g"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,900\r\na b c\r\n\r\n2\r\n00:00:00,900 --> 00:00:01,800\r\nd e f\r\n\r\n3\r\n00:00:01,800 --> 00:00:03,000\r\ng\r\n",
+      "txt": "a b c d e f g\r\n"
+    },
+    {
+      "name": "single-long-token",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "Hi", "s": 0, "e": 1500},
+        {"t": " 0123456789012345678901234567890123456789", "s": 1500, "e": 4000},
+        {"t": " there", "s": 4000, "e": 5500}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1500, "lines": ["Hi"]},
+        {"startMs": 1500, "endMs": 4000, "lines": ["0123456789012345678901234567890123456789"]},
+        {"startMs": 4000, "endMs": 5500, "lines": ["there"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,500\r\nHi\r\n\r\n2\r\n00:00:01,500 --> 00:00:04,000\r\n0123456789012345678901234567890123456789\r\n\r\n3\r\n00:00:04,000 --> 00:00:05,500\r\nthere\r\n",
+      "txt": "Hi 0123456789012345678901234567890123456789 there\r\n"
+    },
+    {
+      "name": "min-extend-adjacent",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "Good", "s": 0, "e": 200},
+        {"t": " morning", "s": 200, "e": 500},
+        {"t": " everyone", "s": 500, "e": 800},
+        {"t": " welcome", "s": 1000, "e": 1300},
+        {"t": " back", "s": 1300, "e": 1700},
+        {"t": " again", "s": 1700, "e": 2400}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1000, "lines": ["Good morning everyone"]},
+        {"startMs": 1000, "endMs": 2400, "lines": ["welcome back again"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,000\r\nGood morning everyone\r\n\r\n2\r\n00:00:01,000 --> 00:00:02,400\r\nwelcome back again\r\n",
+      "txt": "Good morning everyone welcome back again\r\n"
+    },
+    {
+      "name": "min-merge",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "Yes", "s": 0, "e": 100},
+        {"t": " I", "s": 1100, "e": 1300},
+        {"t": " agree", "s": 1300, "e": 1800},
+        {"t": " Oh", "s": 5000, "e": 5100},
+        {"t": " no", "s": 6100, "e": 6150}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1800, "lines": ["Yes I agree"]},
+        {"startMs": 5000, "endMs": 6200, "lines": ["Oh no"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,800\r\nYes I agree\r\n\r\n2\r\n00:00:05,000 --> 00:00:06,200\r\nOh no\r\n",
+      "txt": "Yes I agree\r\n\r\nOh no\r\n"
+    },
+    {
+      "name": "merge-refused-over-limit",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "Hello", "s": 0, "e": 100},
+        {"t": " wonderful", "s": 1100, "e": 1500},
+        {"t": " huge", "s": 1500, "e": 1800},
+        {"t": " world", "s": 1800, "e": 2400}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1100, "lines": ["Hello"]},
+        {"startMs": 1100, "endMs": 2400, "lines": ["wonderful huge world"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,100\r\nHello\r\n\r\n2\r\n00:00:01,100 --> 00:00:02,400\r\nwonderful huge world\r\n",
+      "txt": "Hello wonderful huge world\r\n"
+    },
+    {
+      "name": "two-lines-middle",
+      "options": {"maxChars": 42, "lines": 2, "minMs": 1500, "maxMs": 7000, "mode": "chars"},
+      "tokens": [
+        {"t": "Seven", "s": 0, "e": 400},
+        {"t": " quick", "s": 400, "e": 800},
+        {"t": " brown", "s": 800, "e": 1200},
+        {"t": " cats", "s": 1200, "e": 1600},
+        {"t": " jump", "s": 1600, "e": 2000},
+        {"t": " over", "s": 2000, "e": 2400},
+        {"t": " sleeping", "s": 2400, "e": 2800},
+        {"t": " hamsters", "s": 2800, "e": 3200},
+        {"t": " Absolutely", "s": 5000, "e": 5500},
+        {"t": " extraordinary", "s": 5500, "e": 6200},
+        {"t": " results", "s": 6200, "e": 6600},
+        {"t": " for", "s": 6600, "e": 6800},
+        {"t": " us", "s": 6800, "e": 7000},
+        {"t": " today", "s": 7000, "e": 7600}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 3200, "lines": ["Seven quick brown cats", "jump over sleeping hamsters"]},
+        {"startMs": 5000, "endMs": 7600, "lines": ["Absolutely extraordinary", "results for us today"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:03,200\r\nSeven quick brown cats\r\njump over sleeping hamsters\r\n\r\n2\r\n00:00:05,000 --> 00:00:07,600\r\nAbsolutely extraordinary\r\nresults for us today\r\n",
+      "txt": "Seven quick brown cats jump over sleeping hamsters Absolutely extraordinary results for us today\r\n"
+    },
+    {
+      "name": "two-lines-fits-one",
+      "options": {"maxChars": 42, "lines": 2, "minMs": 1500, "maxMs": 7000, "mode": "chars"},
+      "tokens": [
+        {"t": "Short", "s": 0, "e": 300},
+        {"t": " enough", "s": 300, "e": 700},
+        {"t": " for", "s": 700, "e": 900},
+        {"t": " a", "s": 900, "e": 1000},
+        {"t": " single", "s": 1000, "e": 1400},
+        {"t": " line", "s": 1400, "e": 1800},
+        {"t": " Pneumonoultramicroscopicsilicovolcanoconiosis", "s": 5000, "e": 6000}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1800, "lines": ["Short enough for a single line"]},
+        {"startMs": 5000, "endMs": 6500, "lines": ["Pneumonoultramicroscopicsilicovolcanoconiosis"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,800\r\nShort enough for a single line\r\n\r\n2\r\n00:00:05,000 --> 00:00:06,500\r\nPneumonoultramicroscopicsilicovolcanoconiosis\r\n",
+      "txt": "Short enough for a single line\r\n\r\nPneumonoultramicroscopicsilicovolcanoconiosis\r\n"
+    },
+    {
+      "name": "whitespace-collapse",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "  Hello  ", "s": 0, "e": 500},
+        {"t": "  big   world ", "s": 500, "e": 1500},
+        {"t": " again  ", "s": 1500, "e": 2500}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 2500, "lines": ["Hello big world again"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:02,500\r\nHello big world again\r\n",
+      "txt": "Hello big world again\r\n",
+      "md": {
+        "title": "\ufeff  My\u00a0\ufeffvideo\ttitle\n \u3000",
+        "videoId": "abc123DEF45",
+        "chapters": [],
+        "out": "# My video title\r\n\r\nhttps://www.youtube.com/watch?v=abc123DEF45\r\n\r\n## [00:00]\r\n\r\nHello big world again\r\n"
+      }
+    },
+    {
+      "name": "over-one-hour",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "one", "s": 3723004, "e": 3724504},
+        {"t": " two", "s": 3726004, "e": 3727504},
+        {"t": " three", "s": 3729004, "e": 3730504},
+        {"t": " four", "s": 3732004, "e": 3733504},
+        {"t": " five", "s": 3735004, "e": 3736504},
+        {"t": " six", "s": 3738004, "e": 3739504},
+        {"t": " seven", "s": 3741004, "e": 3742504},
+        {"t": " eight", "s": 3744004, "e": 3745504},
+        {"t": " nine", "s": 3747004, "e": 3748504},
+        {"t": " ten", "s": 3750004, "e": 3751504},
+        {"t": " eleven", "s": 3753004, "e": 3754504},
+        {"t": " twelve", "s": 360000005, "e": 360001505}
+      ],
+      "cues": [
+        {"startMs": 3723004, "endMs": 3724504, "lines": ["one"]},
+        {"startMs": 3726004, "endMs": 3727504, "lines": ["two"]},
+        {"startMs": 3729004, "endMs": 3730504, "lines": ["three"]},
+        {"startMs": 3732004, "endMs": 3733504, "lines": ["four"]},
+        {"startMs": 3735004, "endMs": 3736504, "lines": ["five"]},
+        {"startMs": 3738004, "endMs": 3739504, "lines": ["six"]},
+        {"startMs": 3741004, "endMs": 3742504, "lines": ["seven"]},
+        {"startMs": 3744004, "endMs": 3745504, "lines": ["eight"]},
+        {"startMs": 3747004, "endMs": 3748504, "lines": ["nine"]},
+        {"startMs": 3750004, "endMs": 3751504, "lines": ["ten"]},
+        {"startMs": 3753004, "endMs": 3754504, "lines": ["eleven"]},
+        {"startMs": 360000005, "endMs": 360001505, "lines": ["twelve"]}
+      ],
+      "srt": "1\r\n01:02:03,004 --> 01:02:04,504\r\none\r\n\r\n2\r\n01:02:06,004 --> 01:02:07,504\r\ntwo\r\n\r\n3\r\n01:02:09,004 --> 01:02:10,504\r\nthree\r\n\r\n4\r\n01:02:12,004 --> 01:02:13,504\r\nfour\r\n\r\n5\r\n01:02:15,004 --> 01:02:16,504\r\nfive\r\n\r\n6\r\n01:02:18,004 --> 01:02:19,504\r\nsix\r\n\r\n7\r\n01:02:21,004 --> 01:02:22,504\r\nseven\r\n\r\n8\r\n01:02:24,004 --> 01:02:25,504\r\neight\r\n\r\n9\r\n01:02:27,004 --> 01:02:28,504\r\nnine\r\n\r\n10\r\n01:02:30,004 --> 01:02:31,504\r\nten\r\n\r\n11\r\n01:02:33,004 --> 01:02:34,504\r\neleven\r\n\r\n12\r\n100:00:00,005 --> 100:00:01,505\r\ntwelve\r\n",
+      "txt": "one two three four five six seven eight nine ten eleven\r\n\r\ntwelve\r\n",
+      "md": {
+        "title": "Over one hour",
+        "videoId": "jNQXAC9IVRw",
+        "chapters": [],
+        "out": "# Over one hour\r\n\r\nhttps://www.youtube.com/watch?v=jNQXAC9IVRw\r\n\r\n## [1:02:00]\r\n\r\none two three four five six seven eight nine ten eleven\r\n\r\n## [100:00:00]\r\n\r\ntwelve\r\n"
+      }
+    },
+    {
+      "name": "empty",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [],
+      "cues": [],
+      "srt": "",
+      "txt": "",
+      "md": {
+        "title": "Empty",
+        "videoId": "aqz-KE-bpKQ",
+        "chapters": [],
+        "out": "# Empty\r\n\r\nhttps://www.youtube.com/watch?v=aqz-KE-bpKQ\r\n"
+      }
+    },
+    {
+      "name": "txt-paragraphs",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "First", "s": 0, "e": 500},
+        {"t": " part", "s": 500, "e": 1000},
+        {"t": " Second", "s": 3000, "e": 3500},
+        {"t": " still", "s": 5499, "e": 6000}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1200, "lines": ["First part"]},
+        {"startMs": 3000, "endMs": 4200, "lines": ["Second"]},
+        {"startMs": 5499, "endMs": 6699, "lines": ["still"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,200\r\nFirst part\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,200\r\nSecond\r\n\r\n3\r\n00:00:05,499 --> 00:00:06,699\r\nstill\r\n",
+      "txt": "First part\r\n\r\nSecond still\r\n"
+    },
+    {
+      "name": "md-chapters",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "Before", "s": 0, "e": 500},
+        {"t": " intro", "s": 10000, "e": 10500},
+        {"t": " main", "s": 90000, "e": 90400},
+        {"t": " stuff", "s": 90400, "e": 91000},
+        {"t": " more", "s": 93000, "e": 93500},
+        {"t": " bye", "s": 3600000, "e": 3601000}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1200, "lines": ["Before"]},
+        {"startMs": 10000, "endMs": 11200, "lines": ["intro"]},
+        {"startMs": 90000, "endMs": 91200, "lines": ["main stuff"]},
+        {"startMs": 93000, "endMs": 94200, "lines": ["more"]},
+        {"startMs": 3600000, "endMs": 3601200, "lines": ["bye"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,200\r\nBefore\r\n\r\n2\r\n00:00:10,000 --> 00:00:11,200\r\nintro\r\n\r\n3\r\n00:01:30,000 --> 00:01:31,200\r\nmain stuff\r\n\r\n4\r\n00:01:33,000 --> 00:01:34,200\r\nmore\r\n\r\n5\r\n01:00:00,000 --> 01:00:01,200\r\nbye\r\n",
+      "txt": "Before\r\n\r\nintro\r\n\r\nmain stuff\r\n\r\nmore\r\n\r\nbye\r\n",
+      "md": {
+        "title": "Chapters demo",
+        "videoId": "88o5Sk8_m1Y",
+        "chapters": [
+          {"startMs": 3600000, "title": "  Ending\tpart "},
+          {"startMs": 10000, "title": "Intro"},
+          {"startMs": 60000, "title": "Empty middle"},
+          {"startMs": 90000, "title": "Main  topic"}
+        ],
+        "out": "# Chapters demo\r\n\r\nhttps://www.youtube.com/watch?v=88o5Sk8_m1Y\r\n\r\n## [00:10] Intro\r\n\r\nBefore\r\n\r\nintro\r\n\r\n## [01:30] Main topic\r\n\r\nmain stuff\r\n\r\nmore\r\n\r\n## [1:00:00] Ending part\r\n\r\nbye\r\n"
+      }
+    },
+    {
+      "name": "md-two-minute-sections",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "tokens": [
+        {"t": "Start", "s": 0, "e": 800},
+        {"t": " again", "s": 2800, "e": 3000},
+        {"t": " still", "s": 119999, "e": 120000},
+        {"t": " next", "s": 120000, "e": 120500},
+        {"t": " later", "s": 360000, "e": 361000},
+        {"t": " hour", "s": 3605000, "e": 3606000}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 1200, "lines": ["Start"]},
+        {"startMs": 2800, "endMs": 4000, "lines": ["again"]},
+        {"startMs": 119999, "endMs": 121199, "lines": ["still next"]},
+        {"startMs": 360000, "endMs": 361200, "lines": ["later"]},
+        {"startMs": 3605000, "endMs": 3606200, "lines": ["hour"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,200\r\nStart\r\n\r\n2\r\n00:00:02,800 --> 00:00:04,000\r\nagain\r\n\r\n3\r\n00:01:59,999 --> 00:02:01,199\r\nstill next\r\n\r\n4\r\n00:06:00,000 --> 00:06:01,200\r\nlater\r\n\r\n5\r\n01:00:05,000 --> 01:00:06,200\r\nhour\r\n",
+      "txt": "Start\r\n\r\nagain\r\n\r\nstill next\r\n\r\nlater\r\n\r\nhour\r\n",
+      "md": {
+        "title": "Two minute sections",
+        "videoId": "88o5Sk8_m1Y",
+        "chapters": [],
+        "out": "# Two minute sections\r\n\r\nhttps://www.youtube.com/watch?v=88o5Sk8_m1Y\r\n\r\n## [00:00]\r\n\r\nStart\r\n\r\nagain\r\n\r\nstill\r\n\r\n## [02:00]\r\n\r\nnext\r\n\r\n## [06:00]\r\n\r\nlater\r\n\r\n## [1:00:00]\r\n\r\nhour\r\n"
+      }
+    }
+  ]
+}
