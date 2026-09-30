@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 from collections.abc import Callable
@@ -18,7 +19,11 @@ from .extractor import Extractor
 from .inputs import PLAYLIST_ID, VIDEO_ID
 from .yterrors import YtError
 
+log = logging.getLogger("yttoolkit")
+
 CACHE_TTL = timedelta(hours=24)
+# probe ใหม่พลาดด้วยรหัสเหล่านี้ (ไม่มีเน็ต / ยูทูปให้รอก่อน) แต่มีข้อมูลเดิมในเครื่อง = ใช้ข้อมูลเดิมไปก่อน
+STALE_OK_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK"})
 # นาฬิกาเครื่องเลื่อนถอยได้ไม่เกินนี้ยังถือว่า probe ล่าสุดยังใหม่
 CLOCK_SKEW = timedelta(minutes=5)
 PLAYLIST_LIMIT = 200
@@ -338,6 +343,9 @@ class VideoService:
 
         เรียกซ้อนกันด้วย id เดียวกัน (เช่น กดเปิดคลิปเดิมสองแท็บ) จะ probe ครั้งเดียว:
         คนที่มาทีหลังรอคิว แล้วอ่าน cache ที่คนแรกเพิ่งเขียนแทนการ probe ซ้ำ
+
+        cache หมดอายุแล้ว probe ใหม่พลาดด้วย E_NETWORK/E_BOT_CHECK แต่มีข้อมูลเดิม = คืนข้อมูลเดิม
+        (บันทึก warning ไม่แตะ probed_at) ยกเว้น refresh=True ที่โยน error ต่อเสมอ
         """
         self._check_video_id(video_id)
         if not refresh:
@@ -354,13 +362,46 @@ class VideoService:
                 info = self._cached_hit(video_id, peek)
                 if info is not None:
                     return info
-            return self._probe_and_store(video_id, peek)
+            try:
+                return self._probe_and_store(video_id, peek)
+            except YtError as exc:
+                # cache หมดอายุแต่ไม่มีเน็ต: คืนข้อมูลเดิม (หน้า W2, contact sheet, zip ใช้ต่อได้)
+                # ไม่แตะ probed_at รอบหน้าจึง probe ใหม่เมื่อเน็ตกลับมา
+                # refresh=True = ผู้เรียกรู้ว่าของเดิมใช้ไม่ได้แล้ว (ลิงก์ storyboard หมดอายุ) จึงโยนต่อ
+                if refresh or exc.code not in STALE_OK_CODES:
+                    raise
+                info = self._stored_hit(video_id, peek)
+                if info is None:
+                    raise
+                log.warning(
+                    "probe คลิป %s ใหม่ไม่สำเร็จ (%s) ใช้ข้อมูลเดิมที่เก่ากว่า 24 ชม. ไปก่อน: %s",
+                    video_id,
+                    exc.code,
+                    exc.detail,
+                )
+                return info
         finally:
             lock.release()
 
     def _cached_hit(self, video_id: str, peek: bool = False) -> dict | None:
         moment, stamp = self._stamp()
         info = self._cached_info(video_id, moment)
+        if info is not None and not peek:
+            self._db.execute(
+                "UPDATE videos SET opened_at = ? WHERE video_id = ?", (stamp, video_id)
+            )
+        return info
+
+    def _stored_hit(self, video_id: str, peek: bool = False) -> dict | None:
+        """ข้อมูลที่เก็บไว้โดยไม่ดูอายุ (แถวเสีย/ไม่มี = None) นับว่าเปิดคลิปเหมือน _cached_hit"""
+        _, stamp = self._stamp()
+        rows = self._db.execute(
+            "SELECT probe_json FROM videos WHERE video_id = ?", (video_id,)
+        )
+        try:
+            info = to_video_info(json.loads(rows[0]["probe_json"])) if rows else None
+        except (ValueError, TypeError, AttributeError, KeyError):
+            info = None
         if info is not None and not peek:
             self._db.execute(
                 "UPDATE videos SET opened_at = ? WHERE video_id = ?", (stamp, video_id)

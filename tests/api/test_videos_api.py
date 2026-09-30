@@ -801,3 +801,45 @@ def test_validation_detail_is_truncated(api):
     detail = _error(resp)["detail"]
     assert len(detail) <= 500
     assert "ก" * 600 not in resp.text
+
+
+# ---------- final review: ไม่มีเน็ต + cache เก่ากว่า 24 ชม. ----------
+
+
+class OfflineSwitch(FakeExtractor):
+    """ออนไลน์ตามปกติจนกว่าจะตั้ง offline = True แล้ว probe/fetch ทุกครั้งเป็น E_NETWORK"""
+
+    offline = False
+
+    def probe(self, video_id: str) -> dict:
+        if self.offline:
+            self.calls.append(("probe", video_id))
+            raise YtError("E_NETWORK", "ERROR: Unable to download API page: getaddrinfo failed")
+        return super().probe(video_id)
+
+    def fetch(self, url: str) -> bytes:
+        if self.offline:
+            raise YtError("E_NETWORK", "offline")
+        return super().fetch(url)
+
+
+def test_contact_sheet_zip_and_info_work_offline_with_old_cache(make_client, tmp_path):
+    now = [datetime(2026, 9, 29, 12, tzinfo=UTC)]
+    db = Database(tmp_path / "offline.db")
+    db.migrate()
+    try:
+        fake = OfflineSwitch(FIXTURES)
+        videos = VideoService(db, fake, now=lambda: now[0])
+        client = make_client(db=db, videos=videos, extractor=fake, cache_root=tmp_path / "cache")
+        assert client.get(f"/api/videos/{BBB}/storyboard").status_code == 200  # ออนไลน์ สร้าง cache
+        now[0] = datetime(2026, 10, 1, 12, tzinfo=UTC)  # ผ่านไป 2 วัน
+        fake.offline = True
+        info = client.get(f"/api/videos/{BBB}")
+        assert info.status_code == 200 and info.json()["videoId"] == BBB
+        sheet = client.get(f"/api/videos/{BBB}/storyboard/contact-sheet.jpg")
+        assert sheet.status_code == 200 and sheet.headers["content-type"] == "image/jpeg"
+        zipped = client.get(f"/api/videos/{BBB}/storyboard/frames.zip")
+        assert zipped.status_code == 200
+        assert len(zipfile.ZipFile(io.BytesIO(zipped.content)).namelist()) == 128
+    finally:
+        db.close()

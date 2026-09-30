@@ -1132,3 +1132,104 @@ def test_concurrent_peek_and_open_probe_once_and_end_up_in_recent(
     )
     assert slow.count["probe"] == 1
     assert [i["videoId"] for i in service.recent(10)[0]] == [BBB]
+
+
+# ---------- final review: ไม่มีเน็ตแต่ cache เก่ากว่า 24 ชม. ใช้ข้อมูลเดิมไปก่อน ----------
+
+
+def _go_offline(ext: CountingExtractor, code: str = "E_NETWORK") -> None:
+    def down(video_id: str) -> dict:
+        ext.count["probe"] += 1
+        raise YtError(code, f"ERROR: {code} (offline)")
+
+    ext.probe = down  # type: ignore[method-assign]
+
+
+@pytest.mark.parametrize("code", ["E_NETWORK", "E_BOT_CHECK"])
+def test_stale_cache_is_used_when_reprobe_fails_offline(
+    svc: VideoService,
+    ext: CountingExtractor,
+    clock: Clock,
+    db: Database,
+    code: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    first = svc.get(BBB)
+    clock.advance(hours=30)
+    _go_offline(ext, code)
+    with caplog.at_level("WARNING", logger="yttoolkit"):
+        assert svc.get(BBB) == first
+    assert ext.count["probe"] == 2  # ลอง probe ใหม่ก่อนจริง ๆ
+    row = db.execute("SELECT probed_at, opened_at FROM videos WHERE video_id = ?", (BBB,))[0]
+    assert row["probed_at"] == stamp(T0)  # ไม่นับว่า probe ใหม่แล้ว
+    assert row["opened_at"] == stamp(T0 + timedelta(hours=30))  # แต่นับว่าเปิดคลิป
+    assert code in caplog.text and BBB in caplog.text
+
+
+def test_stale_fallback_retries_probe_next_time(
+    svc: VideoService, ext: CountingExtractor, clock: Clock
+) -> None:
+    svc.get(BBB)
+    clock.advance(hours=30)
+    online_probe = ext.probe
+    _go_offline(ext)
+    svc.get(BBB)
+    ext.probe = online_probe  # type: ignore[method-assign]
+    svc.get(BBB)
+    assert ext.count["probe"] == 3  # probed_at ไม่ขยับ รอบถัดไปจึง probe ใหม่เมื่อเน็ตกลับมา
+
+
+def test_stale_fallback_with_peek_keeps_opened_at(
+    svc: VideoService, ext: CountingExtractor, clock: Clock, db: Database
+) -> None:
+    svc.get(BBB)
+    clock.advance(hours=30)
+    _go_offline(ext)
+    assert svc.get(BBB, peek=True)["videoId"] == BBB
+    row = db.execute("SELECT opened_at FROM videos WHERE video_id = ?", (BBB,))[0]
+    assert row["opened_at"] == stamp(T0)
+
+
+@pytest.mark.parametrize("code", ["E_VIDEO_UNAVAILABLE", "E_VIDEO_PRIVATE", "E_UNKNOWN"])
+def test_other_errors_are_not_hidden_by_stale_cache(
+    svc: VideoService, ext: CountingExtractor, clock: Clock, code: str
+) -> None:
+    svc.get(BBB)
+    clock.advance(hours=30)
+    _go_offline(ext, code)
+    with pytest.raises(YtError) as exc:
+        svc.get(BBB)
+    assert exc.value.code == code
+
+
+def test_offline_without_stored_row_still_raises(
+    svc: VideoService, ext: CountingExtractor
+) -> None:
+    _go_offline(ext)
+    with pytest.raises(YtError) as exc:
+        svc.get(BBB)
+    assert exc.value.code == "E_NETWORK"
+
+
+def test_offline_with_corrupt_stored_row_raises(
+    svc: VideoService, ext: CountingExtractor, clock: Clock, db: Database
+) -> None:
+    svc.get(BBB)
+    db.execute("UPDATE videos SET probe_json = 'not json'")
+    clock.advance(hours=30)
+    _go_offline(ext)
+    with pytest.raises(YtError) as exc:
+        svc.get(BBB)
+    assert exc.value.code == "E_NETWORK"
+
+
+def test_explicit_refresh_offline_still_raises(
+    svc: VideoService, ext: CountingExtractor, clock: Clock
+) -> None:
+    # refresh=True = ผู้เรียกรู้ว่าข้อมูลเดิมใช้ไม่ได้แล้ว (เช่น ลิงก์ storyboard หมดอายุ) ห้ามคืนของเดิม
+    svc.get(BBB)
+    clock.advance(hours=30)
+    _go_offline(ext)
+    with pytest.raises(YtError) as exc:
+        svc.get(BBB, refresh=True)
+    assert exc.value.code == "E_NETWORK"
