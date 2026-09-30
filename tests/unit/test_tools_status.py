@@ -261,3 +261,54 @@ def test_run_version_survives_undecodable_output(tmp_path, fake_platform):  # fi
     assert line is not None
     assert line.startswith("odd ") and line.endswith(" 1.0")
     assert "�" in line
+
+
+# ---------- PRD 6.6: core/ ไม่ import api หรือ platform ตอนรันจริง (final review) ----------
+
+
+def _runtime_imports(path):
+    """ชื่อโมดูลที่ import ตอนรันจริง (ไม่นับที่อยู่ใน if TYPE_CHECKING:) แปลง import แบบจุดเป็นชื่อเต็ม"""
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    skip: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and "TYPE_CHECKING" in ast.unparse(node.test):
+            skip.update(id(child) for stmt in node.body for child in ast.walk(stmt))
+    names = []
+    for node in ast.walk(tree):
+        if id(node) in skip:
+            continue
+        if isinstance(node, ast.Import):
+            names += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:  # from ..platform import X ใน yttoolkit/core/*.py = yttoolkit.platform
+                base = ["yttoolkit", "core"][: 2 - (node.level - 1)]
+                names.append(".".join([*base, *([node.module] if node.module else [])]))
+            else:
+                names.append(node.module or "")
+    return names
+
+
+def test_runtime_import_helper_resolves_relative_and_skips_type_checking(tmp_path):
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "from typing import TYPE_CHECKING\n"
+        "from ..platform import Platform\n"
+        "from .db import Database\n"
+        "if TYPE_CHECKING:\n"
+        "    from ..api import errors\n",
+        encoding="utf-8",
+    )
+    assert _runtime_imports(sample) == ["typing", "yttoolkit.platform", "yttoolkit.core.db"]
+
+
+def test_core_does_not_import_api_or_platform_at_runtime():
+    core = Path(tools.__file__).parent
+    offenders = {
+        path.name: name
+        for path in sorted(core.glob("*.py"))
+        for name in _runtime_imports(path)
+        if name.split(".")[:2] in (["yttoolkit", "api"], ["yttoolkit", "platform"])
+    }
+    assert offenders == {}

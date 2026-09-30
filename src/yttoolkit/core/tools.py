@@ -17,12 +17,14 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 
 from ..config import Paths, env_flag
-from ..platform import Platform
+
+if TYPE_CHECKING:  # ใช้แค่เป็นชนิดของพารามิเตอร์ ผู้เรียกส่ง Platform เข้ามา (core ไม่ import platform, PRD 6.6)
+    from ..platform import Platform
 
 Status = Literal["ok", "warn", "error"]
 
