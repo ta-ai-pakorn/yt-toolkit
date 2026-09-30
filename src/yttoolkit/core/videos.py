@@ -528,7 +528,8 @@ class VideoService:
         if mix:
             if not video_id or not VIDEO_ID.fullmatch(video_id):
                 raise YtError(
-                    "E_INVALID_INPUT", f"มิกซ์ {playlist_id!r} ต้องมีคลิปตั้งต้นที่ถูกรูปแบบ: {video_id!r}"
+                    "E_INVALID_INPUT",
+                    f"มิกซ์ {playlist_id!r} ต้องมีคลิปตั้งต้นที่ถูกรูปแบบ: {video_id!r}",
                 )
             limit = MIX_LIMIT
             info = self._extractor.playlist(playlist_id, limit, video_id=video_id)

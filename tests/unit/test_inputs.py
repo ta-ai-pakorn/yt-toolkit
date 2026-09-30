@@ -404,7 +404,10 @@ def mix(line: str, mix_id: str = f"RD{VID}") -> InputItem:
     ("line", "mix_id"),
     [
         # ลิงก์ที่ยูทูปให้ตอนกดเล่น "มิกซ์" (มักมี start_radio=1 ต่อท้าย)
-        (f"https://www.youtube.com/watch?v={VID}&list=RD{VID}&start_radio=1", f"RD{VID}"),
+        (
+            f"https://www.youtube.com/watch?v={VID}&list=RD{VID}&start_radio=1",
+            f"RD{VID}",
+        ),
         (f"https://www.youtube.com/watch?v={VID}&list=RD{VID}&index=2", f"RD{VID}"),
         (
             f"https://www.youtube.com/watch?v={VID}&pp=ygUFbXVzaWM%3D&list=RDMM{VID}&start_radio=1",
