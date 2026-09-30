@@ -13,6 +13,12 @@ const TABS: readonly VideoTab[] = ["frames", "subs", "transcript"]
 
 const isTab = (value: unknown): value is VideoTab => TABS.some((tab) => tab === value)
 
+// แท็บที่ไม่ได้เลือก: สีตัวอักษรแบบ muted ผ่านเกณฑ์ contrast บนพื้น bg-muted ทั้งธีมสว่างและมืด (สีของแท็บที่เลือกคงเดิม)
+const TRIGGER = "h-11 flex-none shrink-0 px-4 text-muted-foreground"
+
+// แผงของแท็บรับโฟกัสได้ (Base UI ตั้ง tabIndex 0) จึงต้องมีวงโฟกัสให้เห็น แบบเดียวกับ breadcrumb
+const PANEL = "rounded-md pt-2 focus-visible:ring-3 focus-visible:ring-ring/50"
+
 type Props = { videoId: string; enabled: boolean }
 
 /**
@@ -34,18 +40,19 @@ export function VideoTabs({ videoId, enabled }: Props) {
         className="w-full flex-nowrap justify-start overflow-x-auto group-data-horizontal/tabs:h-auto"
       >
         {TABS.map((value) => (
-          <TabsTrigger key={value} value={value} className="h-11 flex-none shrink-0 px-4">
+          <TabsTrigger key={value} value={value} className={TRIGGER}>
             {t[value]}
           </TabsTrigger>
         ))}
       </TabsList>
-      <TabsContent value="frames" className="pt-2">
+      {/* แท็บภาพเฟรมเริ่มด้วยปุ่มโหลดและภาพที่โฟกัสได้อยู่แล้ว: ไม่ให้แผงเป็นจุด Tab เพิ่ม (ลำดับ Tab เหมือน M2) */}
+      <TabsContent value="frames" tabIndex={-1} className={PANEL}>
         <FramesSection videoId={videoId} enabled={enabled} />
       </TabsContent>
-      <TabsContent value="subs" className="pt-2">
+      <TabsContent value="subs" className={PANEL}>
         <SubsPanel videoId={videoId} enabled={enabled} />
       </TabsContent>
-      <TabsContent value="transcript" className="pt-2">
+      <TabsContent value="transcript" className={PANEL}>
         <TranscriptPanel videoId={videoId} enabled={enabled} />
       </TabsContent>
     </Tabs>
