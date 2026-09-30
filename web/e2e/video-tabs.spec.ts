@@ -31,6 +31,33 @@ const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: t
 const frameItems = (page: Page) => page.getByRole("list", { name: FRAME_LIST }).getByRole("listitem")
 const readClipboard = (page: Page) => page.evaluate(() => navigator.clipboard.readText())
 
+/**
+ * จดข้อความที่หน้าเว็บส่งให้ navigator.clipboard.writeText ตามตัวอักษร แล้วส่งต่อให้คลิปบอร์ดจริง
+ * คลิปบอร์ดของ Windows แปลง LF เป็น CRLF เอง ข้อความที่อ่านกลับจึงไม่ตรงไบต์กับที่แอปเขียน
+ * เทียบไบต์ตรง ๆ ที่ข้อความที่แอปส่ง ส่วนข้อความที่อ่านกลับเทียบหลังแปลง CRLF เป็น LF (ยืนยันว่าลงคลิปบอร์ดจริง)
+ */
+async function recordClipboardWrites(page: Page) {
+  await page.addInitScript(() => {
+    const clipboard = navigator.clipboard
+    const original = clipboard.writeText.bind(clipboard)
+    const written: string[] = []
+    Object.defineProperty(window, "__clipboardWrites", { value: written })
+    Object.defineProperty(clipboard, "writeText", {
+      value: (text: string) => {
+        written.push(text)
+        return original(text)
+      },
+    })
+  })
+}
+
+const lastWrite = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites.at(-1))
+
+const toLf = (text: string) => text.replaceAll("\r\n", "\n")
+
+const readClipboardLf = async (page: Page) => toLf(await readClipboard(page))
+
 test.describe("W2 แถบแท็บ", () => {
   test("มี 3 แท็บตามลำดับ · เริ่มที่ภาพเฟรมพร้อมภาพครบ 128 ภาพ", async ({ page }) => {
     await page.goto(`/v/${BBB}`)
@@ -160,11 +187,12 @@ test.describe("W2 ปุ่มคัดลอกที่หัวคลิป",
     await context.grantPermissions(["clipboard-read", "clipboard-write"])
     const chapters = probeFixture(ZOO).chapters ?? []
     expect(chapters).toHaveLength(3)
+    await recordClipboardWrites(page)
     await page.goto(`/v/${ZOO}`)
     const group = page.getByRole("group", { name: "คัดลอกข้อมูลคลิป" })
     await group.getByRole("button", { name: "คัดลอก chapter" }).click()
     await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
-    const text = await readClipboard(page)
+    const text = (await lastWrite(page)) ?? ""
     const lines = text.split("\n")
     expect(lines).toHaveLength(3)
     for (const line of lines) expect(line).toMatch(/^\d{2}:\d{2}:\d{2} \S/)
@@ -176,7 +204,9 @@ test.describe("W2 ปุ่มคัดลอกที่หัวคลิป",
         return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)} ${chapter.title}`
       })
       .join("\n")
+    // แอปเขียน LF ตรงตัว (AC-PROBE-03)
     expect(text).toBe(expected)
+    expect(await readClipboardLf(page)).toBe(expected)
   })
 
   test("คลิปไม่มี chapter ไม่มีปุ่ม 'คัดลอก chapter'", async ({ page }) => {
@@ -189,13 +219,15 @@ test.describe("W2 ปุ่มคัดลอกที่หัวคลิป",
     await context.grantPermissions(["clipboard-read", "clipboard-write"])
     const { description } = probeFixture(BBB)
     expect(typeof description).toBe("string")
+    await recordClipboardWrites(page)
     await page.goto(`/v/${BBB}`)
     await page
       .getByRole("group", { name: "คัดลอกข้อมูลคลิป" })
       .getByRole("button", { name: "คัดลอกคำอธิบาย" })
       .click()
     await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
-    expect(await readClipboard(page)).toBe(description)
+    expect(await lastWrite(page)).toBe(description)
+    expect(await readClipboardLf(page)).toBe(toLf(String(description)))
   })
 
   test("คัดลอกไม่ได้ (เบราว์เซอร์ไม่ให้เขียนคลิปบอร์ด) → toast error", async ({ page }) => {
