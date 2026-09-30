@@ -22,16 +22,17 @@ type Props = {
   fallback: string
   /** มาจากรายการผลของ W1: จำนวนลิงก์ในรายการ · undefined = ไม่ได้มาจากรายการ */
   listCount: number | undefined
+  className?: string
 }
 
 /**
  * breadcrumb ของ W2: หน้าแรก › (รายการที่วาง (N ลิงก์) ›) ชื่อคลิป
  * "รายการที่วาง" = ย้อนกลับไปหน้าแรกแบบปุ่ม back (รายการ ข้อความ และตำแหน่งเลื่อนอยู่ครบ)
  */
-export function VideoCrumbs({ title, fallback, listCount }: Props) {
+export function VideoCrumbs({ title, fallback, listCount, className }: Props) {
   const navigate = useNavigate()
   return (
-    <Breadcrumb>
+    <Breadcrumb className={className}>
       <BreadcrumbList>
         <BreadcrumbItem>
           <BreadcrumbLink className={CRUMB} render={<Link to="/" />}>

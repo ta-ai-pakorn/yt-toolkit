@@ -24,6 +24,17 @@ describe("looksLikeYoutube", () => {
     expect(looksLikeYoutube(text)).toBe(true)
   })
 
+  it.each([
+    "1. https://youtu.be/aqz-KE-bpKQ",
+    "• https://youtu.be/aqz-KE-bpKQ",
+    "ดูอันนี้https://youtu.be/aqz-KE-bpKQ",
+    "ดูคลิปนี้ youtu.be/aqz-KE-bpKQ นะ",
+    "สวัสดีครับ\n2. https://www.youtube.com/watch?v=jNQXAC9IVRw ขอบคุณครับ",
+    "(https://www.youtube.com/playlist?list=PLfakeplaylist250)",
+  ])("ลิงก์ในข้อความจากแชต: รับ %j", (text) => {
+    expect(looksLikeYoutube(text)).toBe(true)
+  })
+
   it("หลายบรรทัด: มีบรรทัดไหนเป็นลิงก์ยูทูปก็รับ", () => {
     expect(looksLikeYoutube("https://youtu.be/aqz-KE-bpKQ\r\nอะไรสักอย่าง\r\nhttps://youtu.be/jNQXAC9IVRw")).toBe(true)
     expect(looksLikeYoutube("รายชื่อคลิป\nhttps://youtu.be/aqz-KE-bpKQ")).toBe(true)
@@ -45,6 +56,9 @@ describe("looksLikeYoutube", () => {
     "development",
     "information",
     "abc def ghij",
+    "ดูคำว่า youtube.com/watch ในประโยค",
+    "https://drive.google.com/youtube.com/watch?v=aqz-KE-bpKQ",
+    "me@youtube.com/watch?v=aqz-KE-bpKQ",
   ])("ไม่รับ %j", (text) => {
     expect(looksLikeYoutube(text)).toBe(false)
   })

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
-import { Check, CircleX, ListVideo, Trash2 } from "lucide-react"
-import { useState, type ReactNode } from "react"
+import { Check, ChevronDown, ChevronUp, CircleX, ListVideo, Trash2 } from "lucide-react"
+import { useId, useState, type ReactNode } from "react"
 import { Link } from "react-router"
 
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/item"
 import { Skeleton } from "@/components/ui/skeleton"
 import { fill, th } from "@/i18n/th"
-import type { ResolveItem } from "@/lib/types"
+import { formatDuration } from "@/lib/format"
+import type { PlaylistEntry, ResolveItem } from "@/lib/types"
 import { cn } from "cn"
 
 import {
@@ -34,9 +35,9 @@ import {
   thumbnailUrl,
   videoTitleQuery,
 } from "./queries"
-import { useHomeState } from "./state"
+import { homeStore, playlistKey, useHomeState } from "./state"
 import { Thumbnail } from "./thumbnail"
-import { fromListState } from "./use-analyze"
+import { fromListState, fromPlaylistState } from "./use-analyze"
 
 const t = th.home.results
 
@@ -180,10 +181,74 @@ function InvalidRow({ item }: { item: ResolveItem }) {
   )
 }
 
+/** รายชื่อคลิปที่กางใต้แถวเพลย์ลิสต์ แสดงทีละ 50 คลิป */
+const CLIPS_PAGE = 50
+
+type PlaylistClipsProps = {
+  title: string
+  entries: PlaylistEntry[]
+  shown: number
+  playlistId: string
+  mixVideoId?: string
+}
+
+/**
+ * คลิปในเพลย์ลิสต์/มิกซ์ (ข้อมูลเดียวกับแถว ไม่ขอใหม่): ภาพปกจากรหัสคลิป ชื่อ ความยาว
+ * แต่ละคลิปเป็นลิงก์ไปหน้าคลิป (ยังไม่นับว่าเปิดจนกว่าจะกด เหมือนแถวในรายการผล) · ยาวก็แสดงเพิ่มทีละ 50
+ */
+function PlaylistClips({ title, entries, shown, playlistId, mixVideoId }: PlaylistClipsProps) {
+  const opened = useHomeState().opened
+  const state = fromPlaylistState(playlistId, mixVideoId)
+  const key = playlistKey(playlistId, mixVideoId)
+  return (
+    <>
+      <ol aria-label={fill(t.clipsLabel, { title })} className="flex flex-col gap-0.5 border-t pt-2">
+        {entries.slice(0, shown).map((entry, index) => (
+          <li key={`${index}-${entry.videoId}`}>
+            <Link
+              to={`/v/${entry.videoId}`}
+              state={state}
+              className="flex min-h-11 items-center gap-3 rounded-md p-1.5 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              <Thumbnail src={thumbnailUrl(entry.videoId)} className="w-16" />
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="line-clamp-2">{entry.title || entry.videoId}</span>
+                {entry.durationS !== undefined && (
+                  <span className="font-mono text-xs text-muted-foreground">{formatDuration(entry.durationS)}</span>
+                )}
+              </span>
+              {opened.includes(entry.videoId) && (
+                <Badge variant="outline" className="text-muted-foreground">
+                  <Check aria-hidden />
+                  {t.opened}
+                </Badge>
+              )}
+            </Link>
+          </li>
+        ))}
+      </ol>
+      {shown < entries.length && (
+        <div className="flex items-center gap-3 pt-1">
+          <Button variant="ghost" size="sm" onClick={() => homeStore.setExpanded(key, shown + CLIPS_PAGE)}>
+            {t.showMore}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            {fill(t.shownCount, { shown: Math.min(shown, entries.length), n: entries.length })}
+          </span>
+        </div>
+      )}
+    </>
+  )
+}
+
 /** `mixVideoId` = คลิปตั้งต้นของมิกซ์อัตโนมัติ (ยูทูปให้ดึงมิกซ์จากลิงก์คลิปเท่านั้น) */
 function PlaylistRow({ playlistId, mixVideoId }: { playlistId: string; mixVideoId?: string }) {
   const botStop = useBotStop() ?? undefined
   const stopped = useBotStopped()
+  const panelId = useId()
+  const key = playlistKey(playlistId, mixVideoId)
+  // กาง/พับ และจำนวนที่แสดง อยู่ใน homeStore: เปิดคลิปแล้วกลับมา หรือโหลดหน้าใหม่ ก็ยังกางอยู่
+  const shown = useHomeState().expanded[key] ?? 0
   const playlist = useQuery({
     ...playlistQuery(playlistId, botStop, mixVideoId),
     enabled: !stopped,
@@ -245,6 +310,7 @@ function PlaylistRow({ playlistId, mixVideoId }: { playlistId: string; mixVideoI
   }
 
   const { title, total, truncated, entries, isMix } = playlist.data
+  const expanded = shown > 0 && entries.length > 0
   return (
     <Item role="listitem" variant="outline" size="sm">
       <ItemMedia variant="icon">
@@ -276,6 +342,33 @@ function PlaylistRow({ playlistId, mixVideoId }: { playlistId: string; mixVideoI
           </ItemDescription>
         )}
       </ItemContent>
+      {entries.length > 0 && (
+        <ItemActions>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={expanded}
+            aria-controls={panelId}
+            className="relative z-10"
+            onClick={() => homeStore.setExpanded(key, expanded ? 0 : CLIPS_PAGE)}
+          >
+            {expanded ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
+            {expanded ? t.hideClips : t.showClips}
+          </Button>
+        </ItemActions>
+      )}
+      {/* กล่องรายชื่ออยู่ในหน้าเสมอ (aria-controls ชี้ได้) แต่มีรายการเฉพาะตอนกาง */}
+      <div id={panelId} hidden={!expanded} className="basis-full">
+        {expanded && (
+          <PlaylistClips
+            title={title || t.playlistUntitled}
+            entries={entries}
+            shown={shown}
+            playlistId={playlistId}
+            mixVideoId={mixVideoId}
+          />
+        )}
+      </div>
     </Item>
   )
 }
@@ -318,9 +411,11 @@ type ResultListProps = {
   /** แถว ambiguous ที่ผู้ใช้กด "ทั้งเพลย์ลิสต์" (ส่งตำแหน่งแถว) */
   onWhole: (index: number) => void
   onClear: () => void
+  /** ตอนวิเคราะห์มีข้อความที่ไม่ใช่ลิงก์ถูกข้าม */
+  skipped?: boolean
 }
 
-export function ResultList({ items, listId, onWhole, onClear }: ResultListProps) {
+export function ResultList({ items, listId, onWhole, onClear, skipped = false }: ResultListProps) {
   const botStop = botStopFor(listId)
   // นับเฉพาะแถวที่เป็นคลิป: 10 แถวแรกของคลิปดึงชื่อเอง
   const autoTitle = items.map(
@@ -364,6 +459,8 @@ export function ResultList({ items, listId, onWhole, onClear }: ResultListProps)
             ))}
           </ItemGroup>
         )}
+        {/* ข้อความทักทาย/ขอบคุณที่วางมาพร้อมลิงก์ถูกข้าม: บอกเบา ๆ ไม่ใช่ error */}
+        {skipped && items.length > 0 && <p className="text-xs text-muted-foreground">{t.skipped}</p>}
       </section>
     </BotStopContext>
   )

@@ -17,10 +17,20 @@ export type HomeState = {
   listId: string
   /** videoId ที่เปิดหน้า W2 แล้ว */
   opened: string[]
+  /** ตอนวิเคราะห์มีข้อความที่ไม่ใช่ลิงก์ถูกข้าม (คำทักทายจากแชต ฯลฯ) — แสดงบรรทัดจาง ๆ ใต้รายการ */
+  skipped: boolean
+  /** แถวเพลย์ลิสต์/มิกซ์ที่กางรายชื่อคลิปอยู่: playlistKey → จำนวนคลิปที่แสดง */
+  expanded: Record<string, number>
 }
 
-export const EMPTY_HOME: HomeState = { text: "", results: null, listId: "", opened: [] }
+export const EMPTY_HOME: HomeState = { text: "", results: null, listId: "", opened: [], skipped: false, expanded: {} }
 export const HOME_STORAGE_KEY = "yt-toolkit.home"
+/** รุ่นของรูปแบบข้อมูลที่เก็บ: เปลี่ยนรูปแบบเมื่อไรเพิ่มเลขนี้ ข้อมูลรุ่นอื่นถูกทิ้ง (เริ่มใหม่ว่าง ๆ) */
+export const HOME_STATE_VERSION = 1
+
+/** คีย์ของแถวเพลย์ลิสต์ใน `expanded` · มิกซ์ขึ้นกับคลิปตั้งต้นด้วย */
+export const playlistKey = (playlistId: string, mixVideoId?: string) =>
+  mixVideoId ? `${playlistId}:${mixVideoId}` : playlistId
 
 const KINDS: readonly ResolveKind[] = ["video", "playlist", "ambiguous", "invalid"]
 const MAX_OPENED = 500
@@ -42,7 +52,19 @@ function parseItem(value: unknown): ResolveItem | null {
   return value as ResolveItem
 }
 
-/** อ่านสถานะที่บันทึกไว้ · ข้อมูลเสียหรือรูปร่างผิด = สถานะเริ่มต้น (แถวผลที่ผิดรูปถูกทิ้งทีละแถว) */
+function parseExpanded(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {}
+  const out: Record<string, number> = {}
+  for (const [key, shown] of Object.entries(value)) {
+    if (typeof shown === "number" && Number.isInteger(shown) && shown > 0) out[key] = shown
+  }
+  return out
+}
+
+/**
+ * อ่านสถานะที่บันทึกไว้ · ข้อมูลเสีย รูปร่างผิด หรือคนละรุ่น (`v`) = สถานะเริ่มต้น
+ * (แถวผลที่ผิดรูปถูกทิ้งทีละแถว)
+ */
 export function parseHomeState(raw: string | null): HomeState {
   if (!raw) return EMPTY_HOME
   let data: unknown
@@ -51,20 +73,34 @@ export function parseHomeState(raw: string | null): HomeState {
   } catch {
     return EMPTY_HOME
   }
-  if (!isRecord(data) || typeof data.text !== "string") return EMPTY_HOME
+  if (!isRecord(data) || data.v !== HOME_STATE_VERSION || typeof data.text !== "string") return EMPTY_HOME
   const results = Array.isArray(data.results)
     ? data.results.map(parseItem).filter((item): item is ResolveItem => item !== null)
     : null
   const opened = Array.isArray(data.opened)
     ? data.opened.filter((id): id is string => typeof id === "string").slice(-MAX_OPENED)
     : []
-  return { text: data.text, results, listId: typeof data.listId === "string" ? data.listId : "", opened }
+  return {
+    text: data.text,
+    results,
+    listId: typeof data.listId === "string" ? data.listId : "",
+    opened,
+    skipped: data.skipped === true,
+    expanded: parseExpanded(data.expanded),
+  }
+}
+
+/** รูปที่เขียนลง storage (มีเลขรุ่นกำกับ) */
+export function serializeHomeState(state: HomeState): string {
+  return JSON.stringify({ v: HOME_STATE_VERSION, ...state })
 }
 
 export type HomeStore = {
   get(): HomeState
   set(patch: Partial<HomeState>): void
   markOpened(videoId: string): void
+  /** กาง (shown = จำนวนคลิปที่แสดง) หรือพับ (shown = 0) รายชื่อคลิปของแถวเพลย์ลิสต์ */
+  setExpanded(key: string, shown: number): void
   clear(): void
   subscribe(listener: () => void): () => void
 }
@@ -91,6 +127,14 @@ export function createHomeStore(getStorage: () => Pick<Storage, "getItem" | "set
         raw = null
       }
       state = parseHomeState(raw)
+      // ของเก่าที่อ่านไม่ได้ (เสียหรือคนละรุ่น) ทิ้งไปเลย ไม่ค้างอยู่ใน storage
+      if (raw !== null && state === EMPTY_HOME) {
+        try {
+          storage()?.removeItem(HOME_STORAGE_KEY)
+        } catch {
+          // ลบไม่ได้ก็ไม่เป็นไร เขียนครั้งหน้าจะทับเอง
+        }
+      }
     }
     return state
   }
@@ -100,7 +144,7 @@ export function createHomeStore(getStorage: () => Pick<Storage, "getItem" | "set
     try {
       const target = storage()
       if (next === EMPTY_HOME) target?.removeItem(HOME_STORAGE_KEY)
-      else target?.setItem(HOME_STORAGE_KEY, JSON.stringify(next))
+      else target?.setItem(HOME_STORAGE_KEY, serializeHomeState(next))
     } catch {
       // เก็บในหน่วยความจำอย่างเดียวก็พอ: ไปหน้าอื่นแล้วกลับมายังเห็นเหมือนเดิม แค่โหลดหน้าใหม่แล้วหาย
     }
@@ -116,6 +160,13 @@ export function createHomeStore(getStorage: () => Pick<Storage, "getItem" | "set
       const now = current()
       if (now.opened.includes(videoId)) return
       commit({ ...now, opened: [...now.opened, videoId].slice(-MAX_OPENED) })
+    },
+    setExpanded(key, shown) {
+      const now = current()
+      const expanded = { ...now.expanded }
+      if (shown > 0) expanded[key] = shown
+      else delete expanded[key]
+      commit({ ...now, expanded })
     },
     clear() {
       commit(EMPTY_HOME)

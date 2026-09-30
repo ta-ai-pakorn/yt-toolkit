@@ -301,7 +301,7 @@ function BulkDownloads({ videoId }: { videoId: string }) {
 
   return (
     <ButtonGroup aria-label={t.downloadGroup}>
-      {/* "Contact sheet" เป็นคำเฉพาะ: ชี้แล้วมีคำอธิบายภาษาไทย */}
+      {/* "ภาพรวมทุกเฟรม" (contact sheet): ชี้แล้วมีคำอธิบายว่าได้ไฟล์แบบไหน */}
       <Tooltip>
         <TooltipTrigger
           render={

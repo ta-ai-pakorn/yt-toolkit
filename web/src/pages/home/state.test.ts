@@ -2,7 +2,15 @@ import { describe, expect, it, vi } from "vitest"
 
 import type { ResolveItem } from "@/lib/types"
 
-import { EMPTY_HOME, HOME_STORAGE_KEY, createHomeStore, parseHomeState } from "./state"
+import {
+  EMPTY_HOME,
+  HOME_STATE_VERSION,
+  HOME_STORAGE_KEY,
+  createHomeStore,
+  parseHomeState,
+  playlistKey,
+  serializeHomeState,
+} from "./state"
 
 class MemoryStorage {
   data = new Map<string, string>()
@@ -33,16 +41,53 @@ const bad: ResolveItem = {
 
 describe("parseHomeState", () => {
   it("อ่านสถานะที่บันทึกไว้กลับมาครบ", () => {
-    const state = { text: "a\nb", results: [clip, mix, bad], listId: "abc", opened: ["aqz-KE-bpKQ"] }
-    expect(parseHomeState(JSON.stringify(state))).toEqual(state)
+    const state = {
+      text: "a\nb",
+      results: [clip, mix, bad],
+      listId: "abc",
+      opened: ["aqz-KE-bpKQ"],
+      skipped: true,
+      expanded: { PLfakeplaylist250: 100, [playlistKey("RDaqz-KE-bpKQ", "aqz-KE-bpKQ")]: 50 },
+    }
+    expect(parseHomeState(serializeHomeState(state))).toEqual(state)
   })
 
-  it.each([null, "", "{", "[]", "42", "null", '{"text": 5}'])("ข้อมูลว่างหรือเสีย (%s) ได้สถานะเริ่มต้น", (raw) => {
-    expect(parseHomeState(raw)).toEqual(EMPTY_HOME)
+  it("ข้อมูลที่เขียนลง storage มีเลขรุ่นกำกับ", () => {
+    expect(JSON.parse(serializeHomeState(EMPTY_HOME)).v).toBe(HOME_STATE_VERSION)
+  })
+
+  it.each([null, "", "{", "[]", "42", "null", '{"text": 5}', '{"v": 1, "text": 5}'])(
+    "ข้อมูลว่างหรือเสีย (%s) ได้สถานะเริ่มต้น",
+    (raw) => {
+      expect(parseHomeState(raw)).toEqual(EMPTY_HOME)
+    }
+  )
+
+  it.each([
+    ["ไม่มีเลขรุ่น (ของรอบก่อน)", { text: "x", results: [clip], listId: "l", opened: [] }],
+    ["คนละรุ่น", { v: HOME_STATE_VERSION + 1, text: "x", results: [clip], listId: "l", opened: [] }],
+    ["เลขรุ่นเป็นข้อความ", { v: String(HOME_STATE_VERSION), text: "x", results: [clip] }],
+  ])("%s → ทิ้งแล้วเริ่มใหม่ว่าง ๆ", (_name, data) => {
+    expect(parseHomeState(JSON.stringify(data))).toEqual(EMPTY_HOME)
+  })
+
+  it("expanded ที่ผิดรูปถูกทิ้งทีละคีย์ · skipped ต้องเป็น true เท่านั้น", () => {
+    const raw = JSON.stringify({
+      v: HOME_STATE_VERSION,
+      text: "x",
+      results: [],
+      expanded: { a: 50, b: 0, c: -1, d: 1.5, e: "50", f: null },
+      skipped: "yes",
+    })
+    const state = parseHomeState(raw)
+    expect(state.expanded).toEqual({ a: 50 })
+    expect(state.skipped).toBe(false)
+    expect(parseHomeState(JSON.stringify({ v: HOME_STATE_VERSION, text: "x", expanded: [1] })).expanded).toEqual({})
   })
 
   it("ทิ้งแถวผลที่รูปร่างผิด แต่เก็บแถวที่ถูกไว้", () => {
     const raw = JSON.stringify({
+      v: HOME_STATE_VERSION,
       text: "x",
       results: [clip, { kind: "video" }, { input: "y", kind: "weird" }, "str", null, { ...clip, videoId: 7 }],
       listId: "l",
@@ -54,7 +99,7 @@ describe("parseHomeState", () => {
   })
 
   it("results ที่ไม่ใช่ array = ยังไม่ได้วิเคราะห์ (null)", () => {
-    expect(parseHomeState(JSON.stringify({ text: "x", results: "nope" })).results).toBeNull()
+    expect(parseHomeState(JSON.stringify({ v: HOME_STATE_VERSION, text: "x", results: "nope" })).results).toBeNull()
     expect(parseHomeState(JSON.stringify({ text: "x", results: null })).results).toBeNull()
   })
 })
@@ -62,10 +107,31 @@ describe("parseHomeState", () => {
 describe("createHomeStore", () => {
   it("เริ่มจากสิ่งที่อยู่ใน sessionStorage (โหลดหน้าใหม่ในแท็บเดิม)", () => {
     const storage = new MemoryStorage()
-    storage.setItem(HOME_STORAGE_KEY, JSON.stringify({ text: "เดิม", results: [clip], listId: "l1", opened: [] }))
+    storage.setItem(
+      HOME_STORAGE_KEY,
+      JSON.stringify({ v: HOME_STATE_VERSION, text: "เดิม", results: [clip], listId: "l1", opened: [] })
+    )
     const store = createHomeStore(() => storage)
     expect(store.get().text).toBe("เดิม")
     expect(store.get().results).toEqual([clip])
+  })
+
+  it("ข้อมูลรุ่นเก่า/เสียใน storage ถูกทิ้ง: เริ่มว่าง และลบออกจาก storage", () => {
+    const storage = new MemoryStorage()
+    storage.setItem(HOME_STORAGE_KEY, JSON.stringify({ text: "รุ่นเก่า", results: [clip], listId: "l1", opened: [] }))
+    const store = createHomeStore(() => storage)
+    expect(store.get()).toEqual(EMPTY_HOME)
+    expect(storage.getItem(HOME_STORAGE_KEY)).toBeNull()
+  })
+
+  it("setExpanded กางและพับแถวเพลย์ลิสต์ และจำลง storage", () => {
+    const storage = new MemoryStorage()
+    const store = createHomeStore(() => storage)
+    store.setExpanded("PLx", 50)
+    store.setExpanded("PLy", 100)
+    store.setExpanded("PLx", 0)
+    expect(store.get().expanded).toEqual({ PLy: 100 })
+    expect(parseHomeState(storage.getItem(HOME_STORAGE_KEY)).expanded).toEqual({ PLy: 100 })
   })
 
   it("set เขียนลง storage และแจ้งผู้ฟัง", () => {

@@ -7,6 +7,7 @@ import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui
 import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { fill, th } from "@/i18n/th"
+import { looksLikeYoutube } from "@/lib/paste"
 import { pasteShortcut } from "@/lib/platform"
 
 import { RecentSection } from "./home/recent"
@@ -16,9 +17,16 @@ import { useAnalyze, useGlobalPaste } from "./home/use-analyze"
 
 export function HomePage() {
   // ข้อความและรายการผลอยู่ใน homeStore: ไปหน้าคลิปแล้วกลับมา หรือโหลดหน้าใหม่ ก็ยังอยู่ครบ
-  const { text, results, listId } = useHomeState()
+  const { text, results, listId, skipped } = useHomeState()
   const { analyze: run, pending, error, dialog } = useAnalyze()
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  // กลับมาหน้านี้ (ปุ่ม back / โหลดหน้าใหม่) แล้วช่องยังมีข้อความเดิม: แตะช่องครั้งแรกเลือกข้อความทั้งหมด
+  // วางลิงก์ใหม่จึงแทนที่ของเดิมและวิเคราะห์ทันที (ไม่กลายเป็นสองลิงก์ต่อกัน) · ครั้งต่อไปทำงานปกติ
+  const selectOnFirstFocus = useRef(text.trim() !== "")
+  // ข้อความทั้งหมดยังถูกเลือกจากการแตะครั้งแรก (วางตอนนี้ = แทนที่ของเดิม)
+  const restoredSelected = useRef(false)
+  // คลิกเมาส์: เบราว์เซอร์วางเคอร์เซอร์ตอนปล่อยปุ่ม ทับการเลือกทั้งหมด จึงกันไว้หนึ่งครั้ง
+  const keepSelectionOnMouseUp = useRef(false)
   // ข้อความประกาศให้โปรแกรมอ่านหน้าจอหลังกด "ล้างรายการ"
   const [announce, setAnnounce] = useState("")
 
@@ -72,7 +80,37 @@ export function HomePage() {
             placeholder={th.home.placeholder}
             className="max-h-[calc(8lh+1rem)] min-h-24 overflow-y-auto"
             value={text}
-            onChange={(event) => homeStore.set({ text: event.target.value })}
+            onChange={(event) => {
+              restoredSelected.current = false
+              homeStore.set({ text: event.target.value })
+            }}
+            onFocus={(event) => {
+              if (!selectOnFirstFocus.current) return
+              selectOnFirstFocus.current = false
+              if (!event.currentTarget.value) return
+              event.currentTarget.select()
+              restoredSelected.current = true
+              keepSelectionOnMouseUp.current = true
+            }}
+            onMouseUp={(event) => {
+              if (!keepSelectionOnMouseUp.current) return
+              keepSelectionOnMouseUp.current = false
+              event.preventDefault()
+            }}
+            onBlur={() => {
+              restoredSelected.current = false
+              keepSelectionOnMouseUp.current = false
+            }}
+            onPaste={(event) => {
+              const box = event.currentTarget
+              const replacesAll =
+                restoredSelected.current && box.selectionStart === 0 && box.selectionEnd === box.value.length
+              restoredSelected.current = false
+              const pasted = event.clipboardData.getData("text")
+              if (!replacesAll || !looksLikeYoutube(pasted)) return
+              event.preventDefault()
+              analyze(pasted)
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault()
@@ -103,7 +141,9 @@ export function HomePage() {
       <p role="status" className="sr-only">
         {results ? fill(th.home.results.count, { n: results.length }) : announce}
       </p>
-      {results && <ResultList items={results} listId={listId} onWhole={wholePlaylist} onClear={clearList} />}
+      {results && (
+        <ResultList items={results} listId={listId} skipped={skipped} onWhole={wholePlaylist} onClear={clearList} />
+      )}
       <RecentSection />
       <p className="text-center text-sm text-muted-foreground">{th.home.usage}</p>
       {dialog}

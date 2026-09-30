@@ -63,7 +63,12 @@ export type ResolveItem = {
   error?: { code: string; message: string }
 }
 
-export type ResolveResult = { resolveId: string; items: ResolveItem[] }
+export type ResolveResult = {
+  resolveId: string
+  items: ResolveItem[]
+  /** มีข้อความที่ไม่ใช่ลิงก์ถูกข้ามไป (คำทักทายจากแชต ฯลฯ) มีเฉพาะตอนเป็น true */
+  skippedText?: true
+}
 
 export type StoryboardFrame = { index: number; tMs: number; url: string }
 

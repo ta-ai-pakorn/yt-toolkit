@@ -6,12 +6,13 @@ import { toast } from "sonner"
 import { fill, th } from "@/i18n/th"
 
 import { homeStore, useHomeState } from "./home/state"
-import { isFromList, useAnalyze, useGlobalPaste } from "./home/use-analyze"
+import { readFromList, useAnalyze, useGlobalPaste } from "./home/use-analyze"
 import { VideoCrumbs } from "./video/crumbs"
 import { FramesSection } from "./video/frames"
 import { errorMessage } from "./video/errors"
 import { VideoHeader } from "./video/header"
 import { videoQuery } from "./video/queries"
+import { ClipSequence } from "./video/sequence"
 
 /** หน้า W2 (/v/:videoId): breadcrumb + หัวคลิป + ภาพเฟรม · ส่วนไหนข้อมูลมาก่อนแสดงก่อน */
 export function VideoPage() {
@@ -21,8 +22,10 @@ export function VideoPage() {
   const title = video.data?.title
   const hasData = video.data !== undefined
   const { results } = useHomeState()
-  // มาจากรายการผลของ W1 (กด "เปิดดู") และรายการนั้นยังอยู่ = breadcrumb มีขั้น "รายการที่วาง"
-  const listCount = isFromList(location.state) && results && results.length > 0 ? results.length : undefined
+  // มาจากรายการผลของ W1 (กด "เปิดดู" หรือคลิปในเพลย์ลิสต์ที่กางไว้) และรายการนั้นยังอยู่
+  // = breadcrumb มีขั้น "รายการที่วาง" และมีปุ่มคลิปก่อนหน้า/ถัดไป
+  const from = results && results.length > 0 ? readFromList(location.state) : null
+  const listCount = from && results ? results.length : undefined
 
   // วางลิงก์ยูทูปที่หน้านี้ก็วิเคราะห์ได้เหมือนหน้าแรก (คลิปเดียวมาหน้านี้ หลายลิงก์กลับไปแสดงรายการที่หน้าแรก)
   const { analyze, pending, dialog } = useAnalyze()
@@ -49,7 +52,16 @@ export function VideoPage() {
 
   return (
     <div className="flex flex-col gap-6 pt-2">
-      <VideoCrumbs title={title} fallback={video.isError && !hasData ? videoId : ""} listCount={listCount} />
+      {/* breadcrumb กับปุ่มก่อนหน้า/ถัดไปอยู่แถวเดียวกัน (ปุ่มชิดขวา) · จอแคบปุ่มลงไปอยู่บรรทัดใต้ breadcrumb */}
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <VideoCrumbs
+          className="min-w-0 sm:flex-1"
+          title={title}
+          fallback={video.isError && !hasData ? videoId : ""}
+          listCount={listCount}
+        />
+        {from && <ClipSequence videoId={videoId} from={from} />}
+      </div>
       <VideoHeader video={video} />
       {/* คลิปเปิดไม่ได้ (ส่วนตัว/ไลฟ์/ถูกลบ) ก็ไม่มีภาพเฟรมให้ขอ ซ่อนทั้งส่วน */}
       {(hasData || !video.isError) && <FramesSection videoId={videoId} enabled={hasData} />}
