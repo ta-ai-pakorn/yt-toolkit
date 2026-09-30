@@ -31,7 +31,7 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
   const originalLang = originalLanguage(data.tracks, video?.audio)
   const defaultTrackId = data.defaultTrackId
   // ยูทูปไม่ให้โหลดซับแปล: กลับไปแทร็กเริ่มต้นของคลิป (เปลี่ยนแค่แทร็กใน patch เดียว)
-  const useOriginal = defaultTrackId ? () => update({ trackId: defaultTrackId }) : null
+  const backToOriginal = defaultTrackId ? () => update({ trackId: defaultTrackId }) : null
 
   return (
     <section aria-labelledby={titleId}>
@@ -55,7 +55,7 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
           {track && (
             <>
               <Separator />
-              <SubsPreview query={tokens} options={settings.options} onUseOriginal={useOriginal} />
+              <SubsPreview query={tokens} options={settings.options} onUseOriginal={backToOriginal} />
             </>
           )}
           <ExportButtons
