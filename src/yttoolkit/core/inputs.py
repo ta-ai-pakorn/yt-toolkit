@@ -37,31 +37,37 @@ class InputItem:
     kind: Kind
     video_id: str | None = None
     playlist_id: str | None = None
+    # ลิงก์คลิปที่มาพร้อม "มิกซ์" อัตโนมัติของยูทูป (list=RD...) ใช้กับชนิด ambiguous เท่านั้น
+    is_mix: bool = False
 
 
 def _invalid(text: str) -> InputItem:
     return InputItem(input=text, kind="invalid")
 
 
-def _is_mix(list_id: str) -> bool:
-    # mix (radio) ของยูทูปขึ้นต้นด้วย "RD" ตัวพิมพ์ใหญ่เท่านั้น: ID ของยูทูปแยกตัวพิมพ์
-    # ใหญ่/เล็ก จึงไม่ปรับเป็นตัวใหญ่ก่อนเทียบ ("rd..." เป็นเพลย์ลิสต์ปกติ)
+def is_mix(list_id: str) -> bool:
+    """มิกซ์ (radio) ของยูทูปขึ้นต้นด้วย "RD" ตัวพิมพ์ใหญ่เท่านั้น: ID ของยูทูปแยกตัวพิมพ์
+    ใหญ่/เล็ก จึงไม่ปรับเป็นตัวใหญ่ก่อนเทียบ ("rd..." เป็นเพลย์ลิสต์ปกติ)"""
     return list_id.startswith("RD")
 
 
 def _playlist_item(text: str, list_id: str | None) -> InputItem:
-    """เพลย์ลิสต์ล้วน — mix (RD) เป็นลิสต์ไม่รู้จบ ดึงรายการไม่ได้ จึงไม่รับ"""
-    if list_id is None or _is_mix(list_id):
+    """เพลย์ลิสต์ล้วน — มิกซ์ (RD) ที่ไม่มีคลิปตั้งต้น (v=) ดึงรายการไม่ได้ จึงไม่รับ"""
+    if list_id is None or is_mix(list_id):
         return _invalid(text)
     return InputItem(input=text, kind="playlist", playlist_id=list_id)
 
 
 def _video_item(text: str, video_id: str, list_id: str | None) -> InputItem:
-    """คลิปเดียว — ถ้ามี list ที่ใช้ได้ด้วย ต้องให้ผู้ใช้เลือก (RD = mix ถือเป็นคลิปเดียว)"""
-    if list_id is None or _is_mix(list_id):
+    """คลิปเดียว — ถ้ามี list ด้วย (รวมมิกซ์ RD) ต้องให้ผู้ใช้เลือกว่าเอาคลิปนี้หรือทั้งรายการ"""
+    if list_id is None:
         return InputItem(input=text, kind="video", video_id=video_id)
     return InputItem(
-        input=text, kind="ambiguous", video_id=video_id, playlist_id=list_id
+        input=text,
+        kind="ambiguous",
+        video_id=video_id,
+        playlist_id=list_id,
+        is_mix=is_mix(list_id),
     )
 
 
@@ -191,6 +197,7 @@ def parse_line(line: str) -> InputItem:
         kind=result.kind,
         video_id=result.video_id,
         playlist_id=result.playlist_id,
+        is_mix=result.is_mix,
     )
 
 

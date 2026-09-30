@@ -914,3 +914,51 @@ def test_cache_case_check_rejects_miscased_file_after_full_scan(api, monkeypatch
     if (folder / "F_0002.jpg").is_file():  # ดิสก์ไม่สนตัวพิมพ์ (Windows/macOS) ต้องไล่ดูชื่อจริง
         assert scans[-1]["folder"] == folder
         assert scans[-1]["read"] == scans[-1]["total"]  # ไม่เจอชื่อตรงเป๊ะ จึงต้องอ่านครบ
+
+
+# ---------- มิกซ์ (list=RD...) ----------
+
+MIX = "RDaqz-KE-bpKQ"
+
+
+def test_resolve_marks_a_mix_link(api):
+    lines = [
+        f"https://www.youtube.com/watch?v={BBB}&list={MIX}&start_radio=1",
+        f"https://www.youtube.com/watch?v={ZOO}&list={PLAYLIST}",
+    ]
+    body = api().post("/api/resolve", json={"text": "\n".join(lines)}, headers=AUTH).json()
+    assert body["items"][0] == {
+        "input": lines[0],
+        "kind": "ambiguous",
+        "videoId": BBB,
+        "playlistId": MIX,
+        "isMix": True,
+    }
+    # isMix มีเฉพาะตอนเป็นมิกซ์
+    assert "isMix" not in body["items"][1]
+
+
+def test_mix_is_capped_at_25_clips(api):
+    resp = api().get(f"/api/playlists/{MIX}?v={BBB}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["isMix"] is True
+    assert body["title"] == "มิกซ์ - Big Buck Bunny"
+    assert len(body["entries"]) == 25
+    assert body["total"] == 25
+    assert body["truncated"] is True
+
+
+@pytest.mark.parametrize("query", ["", "?v=", "?v=short", f"?v={BBB}x"])
+def test_mix_without_a_valid_starting_clip_is_422(api, query):
+    client = api()
+    resp = client.get(f"/api/playlists/{MIX}{query}")
+    assert resp.status_code == 422
+    assert _error(resp)["code"] == "E_INVALID_INPUT"
+    assert client.fake.calls == []
+
+
+def test_normal_playlist_has_no_mix_flag(api):
+    body = api().get(f"/api/playlists/{PLAYLIST}?v={BBB}").json()
+    assert "isMix" not in body
+    assert body["total"] == 250

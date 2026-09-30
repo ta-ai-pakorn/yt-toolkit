@@ -16,7 +16,7 @@ from typing import Any
 
 from .db import PEEK_SENTINEL, Database
 from .extractor import Extractor
-from .inputs import PLAYLIST_ID, VIDEO_ID
+from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix
 from .yterrors import YtError
 
 log = logging.getLogger("yttoolkit")
@@ -27,6 +27,8 @@ STALE_OK_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK"})
 # นาฬิกาเครื่องเลื่อนถอยได้ไม่เกินนี้ยังถือว่า probe ล่าสุดยังใหม่
 CLOCK_SKEW = timedelta(minutes=5)
 PLAYLIST_LIMIT = 200
+# มิกซ์อัตโนมัติของยูทูปยาวได้ไม่รู้จบ เอาแค่ช่วงต้น (เจ้าของตัดสิน 2026-09-30)
+MIX_LIMIT = 25
 
 _DRC_NOTE = re.compile(r"\bdrc\b", re.IGNORECASE)
 _STORYBOARD = "storyboard"
@@ -508,11 +510,31 @@ class VideoService:
         ]
         return items, total
 
-    def playlist(self, playlist_id: str, limit: int = PLAYLIST_LIMIT) -> dict:
+    def playlist(
+        self,
+        playlist_id: str,
+        limit: int = PLAYLIST_LIMIT,
+        video_id: str | None = None,
+    ) -> dict:
+        """รายการคลิปในเพลย์ลิสต์ (สูงสุด limit คลิป)
+
+        มิกซ์อัตโนมัติ (id ขึ้นต้น RD) ต้องมี video_id = คลิปตั้งต้น และได้ไม่เกิน MIX_LIMIT คลิป
+        คำตอบของมิกซ์มี isMix: true และ total = จำนวนที่ได้มา (มิกซ์ไม่มีจำนวนจริง ยูทูปต่อให้เรื่อย ๆ)
+        เพลย์ลิสต์ปกติไม่ใช้ video_id
+        """
         if not PLAYLIST_ID.fullmatch(playlist_id):
             raise YtError("E_INVALID_INPUT", f"playlist id ไม่ถูกรูปแบบ: {playlist_id!r}")
-        limit = max(limit, 0)
-        info = self._extractor.playlist(playlist_id, limit)
+        mix = is_mix(playlist_id)
+        if mix:
+            if not video_id or not VIDEO_ID.fullmatch(video_id):
+                raise YtError(
+                    "E_INVALID_INPUT", f"มิกซ์ {playlist_id!r} ต้องมีคลิปตั้งต้นที่ถูกรูปแบบ: {video_id!r}"
+                )
+            limit = MIX_LIMIT
+            info = self._extractor.playlist(playlist_id, limit, video_id=video_id)
+        else:
+            limit = max(limit, 0)
+            info = self._extractor.playlist(playlist_id, limit)
         returned = [e for e in (info.get("entries") or []) if isinstance(e, dict)]
         entries = []
         for entry in returned[:limit]:
@@ -528,12 +550,21 @@ class VideoService:
                 item["durationS"] = round(duration)
             item["thumbnailUrl"] = _playlist_thumbnail(entry, video_id)
             entries.append(item)
+        truncated = len(returned) > limit
+        if mix:
+            return {
+                "title": info.get("title") or "",
+                "total": len(entries),
+                "truncated": truncated,
+                "entries": entries,
+                "isMix": True,
+            }
         count = info.get("playlist_count")
         return {
             "title": info.get("title") or "",
             "total": count
             if isinstance(count, int) and not isinstance(count, bool)
             else len(returned),
-            "truncated": len(returned) > limit,
+            "truncated": truncated,
             "entries": entries,
         }

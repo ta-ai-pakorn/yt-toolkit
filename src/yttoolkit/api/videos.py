@@ -140,6 +140,8 @@ def _resolve_item(item: InputItem) -> dict:
         out["videoId"] = item.video_id
     if item.playlist_id:
         out["playlistId"] = item.playlist_id
+    if item.is_mix:
+        out["isMix"] = True
     if item.kind == "invalid":
         out["error"] = {"code": "E_INVALID_INPUT", "message": MESSAGES["E_INVALID_INPUT"]}
     return out
@@ -225,8 +227,9 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
 
     @router.get("/playlists/{playlist_id}", response_model=None)
     @_maps_yt_errors
-    def playlist(playlist_id: str) -> dict:
-        return videos.playlist(playlist_id)
+    def playlist(playlist_id: str, v: str | None = Query(None, max_length=64)) -> dict:
+        # v = คลิปตั้งต้น ต้องมีเมื่อเป็นมิกซ์ (id ขึ้นต้น RD) เพลย์ลิสต์ปกติไม่ใช้
+        return videos.playlist(playlist_id, video_id=v)
 
     @router.get("/history")
     def history(

@@ -29,6 +29,7 @@
 
 ## playlist/
 - `PLfakeplaylist250.json` (id `PLfakeplaylist250` ยาวผ่านกฎ 10-64 ตัวของ `core/inputs.py`): ข้อมูลสังเคราะห์ รูปแบบเดียวกับผล `extract_flat="in_playlist"` มี 250 คลิป (`fake0000001`..`fake0000250`) ใช้เทสการตัดที่ 200 คลิป (AC-IN-07)
+- `RDaqz-KE-bpKQ.json`: มิกซ์อัตโนมัติสังเคราะห์ ชื่อ "มิกซ์ - Big Buck Bunny" มี 30 คลิป (คลิปแรกคือคลิปตั้งต้น `aqz-KE-bpKQ` ตามด้วย `jNQXAC9IVRw` และ `mixfake0003`..`mixfake0030`) ไม่มี `playlist_count` เหมือนมิกซ์จริง ใช้เทสการตัดที่ 25 คลิป · `FakeExtractor` อ่านไฟล์นี้เมื่อส่งคลิปตั้งต้น (`video_id`) มาด้วยเท่านั้น
 
 ## errors/
 ข้อความ error ของ yt-dlp หนึ่งไฟล์ต่อหนึ่งข้อความ ชื่อไฟล์ `<รหัส>-<n>.txt` เทส `tests/unit/test_yterrors.py` ตรวจว่า `classify` ได้รหัสตามชื่อไฟล์

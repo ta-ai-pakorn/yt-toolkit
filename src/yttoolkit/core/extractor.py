@@ -17,7 +17,7 @@ from typing import Protocol, runtime_checkable
 
 import httpx
 
-from .inputs import PLAYLIST_ID, VIDEO_ID
+from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix
 from .yterrors import YtError, classify
 
 log = logging.getLogger("yttoolkit")
@@ -51,8 +51,12 @@ class Extractor(Protocol):
         """ข้อมูลดิบของคลิป (info dict ของ yt-dlp)"""
         ...
 
-    def playlist(self, playlist_id: str, limit: int) -> dict:
-        """ข้อมูลแบบแบน: title + entries[{id,title,duration,thumbnails|thumbnail}] อ่านไม่เกิน limit+1 รายการ"""
+    def playlist(self, playlist_id: str, limit: int, video_id: str | None = None) -> dict:
+        """ข้อมูลแบบแบน: title + entries[{id,title,duration,thumbnails|thumbnail}] อ่านไม่เกิน limit+1 รายการ
+
+        มิกซ์ (id ขึ้นต้น RD) ดึงได้จากลิงก์ watch เท่านั้น จึงต้องส่ง video_id (คลิปตั้งต้น) มาด้วย
+        เพลย์ลิสต์ปกติไม่ใช้ video_id
+        """
         ...
 
     def fetch(self, url: str) -> bytes:
@@ -77,6 +81,17 @@ def _check_video_id(video_id: str) -> None:
 def _check_playlist_id(playlist_id: str) -> None:
     if not PLAYLIST_ID.fullmatch(playlist_id):
         raise YtError("E_INVALID_INPUT", f"playlist id ไม่ถูกรูปแบบ: {playlist_id!r}")
+
+
+def _playlist_url(playlist_id: str, video_id: str | None) -> str:
+    """ตรวจ id แล้วคืนลิงก์ที่ใช้ดึงรายการ: มิกซ์ใช้ลิงก์ watch ของคลิปตั้งต้น เพลย์ลิสต์ปกติใช้ลิงก์ playlist"""
+    _check_playlist_id(playlist_id)
+    if not is_mix(playlist_id):
+        return f"https://www.youtube.com/playlist?list={playlist_id}"
+    if not video_id:
+        raise YtError("E_INVALID_INPUT", f"มิกซ์ {playlist_id!r} ต้องมีคลิปตั้งต้น (v)")
+    _check_video_id(video_id)
+    return f"https://www.youtube.com/watch?v={video_id}&list={playlist_id}"
 
 
 def ytdlp_version() -> str:
@@ -135,12 +150,10 @@ class YtDlpExtractor:
         info = self._extract(f"https://www.youtube.com/watch?v={video_id}", _PROBE_OPTS)
         return check_live(info)
 
-    def playlist(self, playlist_id: str, limit: int) -> dict:
-        _check_playlist_id(playlist_id)
+    def playlist(self, playlist_id: str, limit: int, video_id: str | None = None) -> dict:
+        url = _playlist_url(playlist_id, video_id)
         opts = {**_PLAYLIST_OPTS, "playlistend": limit + 1}
-        info = self._extract(
-            f"https://www.youtube.com/playlist?list={playlist_id}", opts
-        )
+        info = self._extract(url, opts)
         info["entries"] = list(info.get("entries") or [])[: limit + 1]
         return info
 
@@ -217,9 +230,9 @@ class FakeExtractor:
             )
         return check_live(info)
 
-    def playlist(self, playlist_id: str, limit: int) -> dict:
+    def playlist(self, playlist_id: str, limit: int, video_id: str | None = None) -> dict:
         self.calls.append(("playlist", playlist_id))
-        _check_playlist_id(playlist_id)
+        _playlist_url(playlist_id, video_id)  # กฎ id และกฎคลิปตั้งต้นของมิกซ์ เหมือนตัวจริง
         info = self._load("playlist", playlist_id)
         if info is None:
             raise YtError(

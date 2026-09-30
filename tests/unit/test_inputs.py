@@ -67,10 +67,6 @@ def test_ac_in_01_short_link_with_timestamp():
         f"https://www.youtube.com/live/{VID}/?si=abc",
         # ID ล้วน
         VID,
-        # ลิงก์ watch ที่มี list ขึ้นต้น RD (mix) ถือเป็นคลิปเดียว
-        f"https://www.youtube.com/watch?v={VID}&list=RDdQw4w9WgXcQ",
-        f"https://www.youtube.com/watch?v={VID}&list=RDMMdQw4w9WgXcQ&start_radio=1",
-        f"https://www.youtube.com/watch?list=RD{VID}&v={VID}",
     ],
 )
 def test_ac_in_02_accepted_video_forms(line):
@@ -393,7 +389,44 @@ def test_rd_mix_alone_is_not_a_playlist(line):
 def test_rd_prefix_is_case_sensitive():
     # ID ของยูทูปแยกตัวพิมพ์ใหญ่/เล็ก "rd..." ไม่ใช่ mix
     line = f"https://www.youtube.com/watch?v={VID}&list=rdabcdefghij"
-    assert parse_line(line).kind == "ambiguous"
+    item = parse_line(line)
+    assert item.kind == "ambiguous"
+    assert item.is_mix is False
+
+
+def mix(line: str, mix_id: str = f"RD{VID}") -> InputItem:
+    return InputItem(
+        input=line, kind="ambiguous", video_id=VID, playlist_id=mix_id, is_mix=True
+    )
+
+
+@pytest.mark.parametrize(
+    ("line", "mix_id"),
+    [
+        # ลิงก์ที่ยูทูปให้ตอนกดเล่น "มิกซ์" (มักมี start_radio=1 ต่อท้าย)
+        (f"https://www.youtube.com/watch?v={VID}&list=RD{VID}&start_radio=1", f"RD{VID}"),
+        (f"https://www.youtube.com/watch?v={VID}&list=RD{VID}&index=2", f"RD{VID}"),
+        (
+            f"https://www.youtube.com/watch?v={VID}&pp=ygUFbXVzaWM%3D&list=RDMM{VID}&start_radio=1",
+            f"RDMM{VID}",
+        ),
+        (f"https://www.youtube.com/watch?list=RD{VID}&v={VID}", f"RD{VID}"),
+        (
+            f"https://m.youtube.com/watch?v={VID}&list=RDdQw4w9WgXcQ&index=7&pp=x",
+            "RDdQw4w9WgXcQ",
+        ),
+        (f"https://youtu.be/{VID}?list=RD{VID}", f"RD{VID}"),
+        (f"https://youtu.be/{VID}?si=abc&list=RD{VID}&start_radio=1", f"RD{VID}"),
+    ],
+)
+def test_watch_link_with_rd_list_is_an_ambiguous_mix(line, mix_id):
+    assert parse_line(line) == mix(line, mix_id)
+
+
+def test_normal_playlist_link_is_not_a_mix():
+    item = parse_line(f"https://www.youtube.com/watch?v={VID}&list={PL}")
+    assert item.kind == "ambiguous"
+    assert item.is_mix is False
 
 
 # ---------- ตัวคั่นที่ถูก encode ไม่ถูกถอดรหัส ----------
@@ -461,10 +494,19 @@ def test_ambiguous_and_video_of_same_id_are_distinct():
     assert [i.kind for i in parse_text(text)] == ["video", "ambiguous"]
 
 
-def test_rd_mix_is_duplicate_of_plain_video():
+def test_mix_and_plain_video_of_same_id_are_distinct():
     text = f"{VID}\nhttps://www.youtube.com/watch?v={VID}&list=RD{VID}"
     items = parse_text(text)
-    assert len(items) == 1 and items[0].kind == "video"
+    assert [i.kind for i in items] == ["video", "ambiguous"]
+    assert items[1].is_mix is True
+
+
+def test_same_mix_twice_is_deduplicated():
+    text = (
+        f"https://www.youtube.com/watch?v={VID}&list=RD{VID}&start_radio=1\n"
+        f"https://youtu.be/{VID}?list=RD{VID}"
+    )
+    assert len(parse_text(text)) == 1
 
 
 def test_same_playlist_twice_is_deduplicated():

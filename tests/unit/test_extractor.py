@@ -715,3 +715,54 @@ def test_warm_up_raises_when_yt_dlp_cannot_be_imported(
 
 def test_fake_extractor_has_no_warm_up(fake: FakeExtractor) -> None:
     assert not hasattr(fake, "warm_up")  # โหมดข้อมูลปลอมไม่ต้อง import yt-dlp
+
+
+# ---------- มิกซ์ (list=RD...) ----------
+
+MIX = "RDaqz-KE-bpKQ"
+
+
+def test_fake_mix_reads_at_most_limit_plus_one(fake: FakeExtractor) -> None:
+    info = fake.playlist(MIX, 25, video_id=BBB)
+    assert info["id"] == MIX
+    assert len(info["entries"]) == 26
+    assert info["entries"][0]["id"] == BBB
+    assert fake.calls == [("playlist", MIX)]
+
+
+def test_fake_mix_needs_the_starting_clip(fake: FakeExtractor) -> None:
+    with pytest.raises(YtError) as exc:
+        fake.playlist(MIX, 25)
+    assert exc.value.code == "E_INVALID_INPUT"
+
+
+def test_ytdlp_mix_is_read_from_the_watch_link(ydl: type[FakeYDL]) -> None:
+    ydl.result = {
+        "id": MIX,
+        "title": "t",
+        "entries": iter([{"id": f"v{n:010d}", "title": str(n)} for n in range(40)]),
+    }
+    info = YtDlpExtractor().playlist(MIX, 25, video_id=BBB)
+    (inst,) = ydl.instances
+    assert inst.params["extract_flat"] == "in_playlist"
+    assert inst.params["playlistend"] == 26
+    assert "noplaylist" not in inst.params
+    assert inst.urls == [f"https://www.youtube.com/watch?v={BBB}&list={MIX}"]
+    assert len(info["entries"]) == 26
+
+
+def test_ytdlp_normal_playlist_ignores_the_video_id(ydl: type[FakeYDL]) -> None:
+    ydl.result = {"id": PLAYLIST, "title": "t", "entries": []}
+    YtDlpExtractor().playlist(PLAYLIST, 200, video_id=BBB)
+    (inst,) = ydl.instances
+    assert inst.urls == [f"https://www.youtube.com/playlist?list={PLAYLIST}"]
+
+
+@pytest.mark.parametrize("video_id", [None, "", "short", f"{BBB}&x=1"])
+def test_ytdlp_mix_needs_a_valid_starting_clip(
+    ydl: type[FakeYDL], video_id: str | None
+) -> None:
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().playlist(MIX, 25, video_id=video_id)
+    assert exc.value.code == "E_INVALID_INPUT"
+    assert ydl.instances == []

@@ -53,9 +53,10 @@ class CountingExtractor:
         self.count["probe"] += 1
         return self.inner.probe(video_id)
 
-    def playlist(self, playlist_id: str, limit: int) -> dict:
+    def playlist(self, playlist_id: str, limit: int, video_id: str | None = None) -> dict:
         self.count["playlist"] += 1
-        return self.inner.playlist(playlist_id, limit)
+        self.last_video_id = video_id
+        return self.inner.playlist(playlist_id, limit, video_id=video_id)
 
     def fetch(self, url: str) -> bytes:
         return self.inner.fetch(url)
@@ -68,7 +69,8 @@ class StubPlaylist:
     def probe(self, video_id: str) -> dict:
         raise AssertionError("ไม่ควรเรียก probe")
 
-    def playlist(self, playlist_id: str, limit: int) -> dict:
+    def playlist(self, playlist_id: str, limit: int, video_id: str | None = None) -> dict:
+        self.calls = [*getattr(self, "calls", []), (playlist_id, limit, video_id)]
         return self.info
 
     def fetch(self, url: str) -> bytes:
@@ -1233,3 +1235,54 @@ def test_explicit_refresh_offline_still_raises(
     with pytest.raises(YtError) as exc:
         svc.get(BBB, refresh=True)
     assert exc.value.code == "E_NETWORK"
+
+
+# ---------- มิกซ์ (list=RD...) ----------
+
+MIX = "RDaqz-KE-bpKQ"
+
+
+def test_mix_gives_the_first_25_clips(svc: VideoService, ext: CountingExtractor) -> None:
+    result = svc.playlist(MIX, video_id=BBB)
+    assert result["isMix"] is True
+    assert result["title"]
+    assert len(result["entries"]) == 25
+    # มิกซ์ไม่มีจำนวนจริง (ยูทูปต่อรายการให้เรื่อย ๆ) จำนวนที่บอกจึงเท่ากับที่ได้มา
+    assert result["total"] == 25
+    assert result["truncated"] is True
+    assert result["entries"][0]["videoId"] == BBB
+    assert ext.last_video_id == BBB
+
+
+def test_mix_limit_is_25_even_if_asked_for_more(db: Database) -> None:
+    stub = StubPlaylist(
+        {"title": "m", "entries": [{"id": f"abcdefghi{n:02d}"} for n in range(40)]}
+    )
+    result = VideoService(db, stub).playlist("RDabcdefghij", video_id=BBB)
+    assert stub.calls == [("RDabcdefghij", 25, BBB)]
+    assert len(result["entries"]) == 25
+
+
+def test_short_mix_is_not_truncated(db: Database) -> None:
+    stub = StubPlaylist(
+        {"title": "m", "playlist_count": 99, "entries": [{"id": "abcdefghijk"}]}
+    )
+    result = VideoService(db, stub).playlist("RDabcdefghij", video_id=BBB)
+    assert (result["total"], result["truncated"]) == (1, False)
+
+
+@pytest.mark.parametrize("bad", [None, "", "short", "aqz-KE-bpK!"])
+def test_mix_needs_a_valid_starting_clip(
+    svc: VideoService, ext: CountingExtractor, bad: str | None
+) -> None:
+    with pytest.raises(YtError) as exc:
+        svc.playlist(MIX, video_id=bad)
+    assert exc.value.code == "E_INVALID_INPUT"
+    assert ext.count["playlist"] == 0
+
+
+def test_normal_playlist_ignores_the_video_id(db: Database) -> None:
+    stub = StubPlaylist({"title": "p", "entries": [{"id": "abcdefghijk"}]})
+    result = VideoService(db, stub).playlist("PLabcdefghij", video_id=BBB)
+    assert "isMix" not in result
+    assert stub.calls == [("PLabcdefghij", 200, None)]
