@@ -219,15 +219,22 @@ def _dedupe_key(item: InputItem) -> tuple[str, str | None, str | None]:
 
 # ---------- ดึงลิงก์ออกจากข้อความปน (แชต LINE) ----------
 
-# อักขระที่อยู่ในลิงก์ได้: ASCII ที่พิมพ์ได้ ยกเว้น " < > (ตัวห่อลิงก์) · ภาษาไทย/ช่องว่าง = ลิงก์จบตรงนั้น
-_URL_CHAR = r"[!#-;=?-~]"
+# อักขระที่อยู่ในลิงก์ได้: ASCII ที่พิมพ์ได้ ยกเว้น " < > (ตัวห่อลิงก์) และ , | (คั่นลิงก์ที่ติดกัน)
+# ภาษาไทย/ช่องว่าง = ลิงก์จบตรงนั้น
+_URL_CHAR = r"[!#-+\-.-;=?-{}~]"
 # ชิ้นที่หน้าตาเป็นลิงก์: มี scheme (https://...) หรือเป็นชื่อโดเมน (ตามด้วยเส้นทางได้)
 # scheme ยาวไม่เกิน 32 ตัว และเริ่มได้เฉพาะต้นคำ ทั้งสองแบบจึงไม่วนหาซ้ำจนช้ากับข้อความยาว 20,000 ตัว
+# ชื่อโดเมนที่ไม่มี scheme: ขึ้นต้นด้วยตัวอักษร/ตัวเลขเท่านั้น (ขีดนำหน้า "-youtu.be" ไม่ใช่ส่วนของโดเมน)
+# ส่วนแรกที่เป็นตัวเลขล้วนตามด้วยจุด ("2.youtu.be") คือเลขข้อ ไม่ใช่โดเมน · ติด ":" ได้ ("ลิงก์:youtu.be")
 _CANDIDATE = re.compile(
     rf"(?<![A-Za-z0-9])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]{{0,31}}://){_URL_CHAR}*"
-    rf"|(?<![A-Za-z0-9._@/:%-])(?P<host>(?:[A-Za-z0-9-]+\.)+[A-Za-z]{{2,}})(?![A-Za-z0-9-]|://)"
+    rf"|(?<![A-Za-z0-9_@/%])(?!\d+\.)"
+    rf"(?P<host>(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{{2,}})(?![A-Za-z0-9-]|://)"
     rf"(?P<path>[/?#]{_URL_CHAR}*)?"
 )
+# รหัสคลิปจริงแทบทุกอันมีตัวเลข - หรือ _ หรือตัวพิมพ์ใหญ่กลางคำ ส่วนคำ 11 ตัว เช่น Goodmorning ไม่ใช่
+# (กฎเดียวกับ ID_LOOKS_RANDOM ใน web/src/lib/paste.ts)
+ID_LOOKS_RANDOM = re.compile(r"[0-9_-]|.[A-Z]")
 # เครื่องหมายท้ายประโยค/วงเล็บปิด/เครื่องหมายคำพูดที่ติดท้ายลิงก์มา (ID ของยูทูปไม่มีอักขระพวกนี้)
 _TRAILING = ".,;:!?)]}'"
 # เลขข้อ "1." "1)" และสัญลักษณ์หัวข้อ "-" "•" หน้าลิงก์ ไม่นับว่าเป็นข้อความที่ถูกข้าม
@@ -251,8 +258,16 @@ def _looks_like_link(match: re.Match[str]) -> bool:
     return host.startswith("www.") or host in _LINK_HOSTS
 
 
-def _scan_line(line: str) -> tuple[list[InputItem], bool]:
-    """หนึ่งบรรทัด -> (ลิงก์ที่พบตามลำดับ, มีข้อความอื่นถูกข้ามไหม)
+@dataclass(frozen=True)
+class _Line:
+    items: list[InputItem]
+    skipped: bool
+    # ทั้งบรรทัดเป็นรหัสคลิป 11 ตัวล้วน ๆ (ไม่ใช่ลิงก์)
+    bare_id: bool = False
+
+
+def _scan_line(line: str) -> _Line:
+    """หนึ่งบรรทัด -> ลิงก์ที่พบตามลำดับ + มีข้อความอื่นถูกข้ามไหม
 
     บรรทัดที่ทั้งบรรทัดเป็นลิงก์/รหัสคลิปอยู่แล้ว ใช้ parse_line ตรง ๆ (รองรับการห่อ [ข้อความ](url) ฯลฯ เหมือนเดิม)
     ไม่งั้นหาชิ้นที่เป็นลิงก์ในบรรทัด: ลิงก์ยูทูปที่ถูกต้อง = รายการ, ลิงก์เว็บอื่น/ลิงก์ยูทูปที่ผิดรูป = แถว invalid
@@ -260,7 +275,9 @@ def _scan_line(line: str) -> tuple[list[InputItem], bool]:
     """
     whole = parse_line(line)
     if whole.kind != "invalid":
-        return [whole], False
+        return _Line(
+            [whole], False, bare_id=VIDEO_ID.fullmatch(_clean(line)) is not None
+        )
     items: list[InputItem] = []
     rest: list[str] = []
     end = 0
@@ -274,23 +291,33 @@ def _scan_line(line: str) -> tuple[list[InputItem], bool]:
         items.append(parse_line(link))
     rest.append(line[end:])
     leftover = _LIST_MARK.sub(" ", " ".join(rest))
-    return items, _WORD.search(leftover) is not None
+    return _Line(items, _WORD.search(leftover) is not None)
 
 
 def scan_text(text: str) -> ScanResult:
     """แยกข้อความหลายบรรทัด: ดึงลิงก์จากทุกบรรทัด ตัดรายการซ้ำ (ตัวแรกชนะ คงลำดับ)
 
     บรรทัด invalid เทียบซ้ำด้วยข้อความเดิม เพื่อให้แต่ละลิงก์ผิดยังแจ้งเตือนแยกกันได้
+    ข้อความที่มีลิงก์ยูทูปจริงอย่างน้อยหนึ่งลิงก์ (ข้อความจากแชต): บรรทัดคำ 11 ตัวล้วน ๆ นับเป็นรหัสคลิป
+    เฉพาะเมื่อหน้าตาสุ่มแบบรหัสคลิป (ID_LOOKS_RANDOM) เช่น "Goodmorning" ถูกข้าม · ข้อความที่มีแต่รหัสล้วน ๆ รับทุกบรรทัดเหมือนเดิม
     """
+    lines = [_scan_line(line) for raw in text.splitlines() if (line := raw.strip())]
+    has_link = any(
+        not ln.bare_id and any(i.kind != "invalid" for i in ln.items) for ln in lines
+    )
     seen: set[tuple[str, str | None, str | None]] = set()
     items: list[InputItem] = []
     skipped = False
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
+    for line in lines:
+        found = line.items
+        if (
+            has_link
+            and line.bare_id
+            and not ID_LOOKS_RANDOM.search(found[0].video_id or "")
+        ):
+            skipped = True
             continue
-        found, line_skipped = _scan_line(line)
-        skipped = skipped or line_skipped
+        skipped = skipped or line.skipped
         for item in found:
             key = _dedupe_key(item)
             if key in seen:

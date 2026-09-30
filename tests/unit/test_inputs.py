@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from yttoolkit.core.inputs import (
+    ID_LOOKS_RANDOM,
     InputItem,
     is_mix_id,
     parse_line,
@@ -812,3 +813,83 @@ def test_bare_curated_music_playlist_is_a_playlist(line):
 )
 def test_is_mix_id_is_the_one_rule(list_id, expected):
     assert is_mix_id(list_id) is expected
+
+
+# ---------- รอบแก้หลังรีวิว (2026-09-30) ----------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"-youtu.be/{VID}",
+        f"2.youtu.be/{VID}",
+        f"12.youtube.com/watch?v={VID}",
+        f"ลิงก์:youtu.be/{VID}",
+        f"ลิงก์:https://youtu.be/{VID}",
+        f"-www.youtube.com/watch?v={VID}",
+    ],
+)
+def test_scheme_less_link_glued_to_numbering_dash_or_colon_is_a_clip(line):
+    items = parse_text(line)
+    assert [(i.kind, i.video_id) for i in items] == [("video", VID)]
+    assert items[0].input.startswith(("youtu.be", "youtube.com", "www.", "https://"))
+
+
+def test_glued_numbering_and_dash_are_not_skipped_text():
+    assert scan_text(f"-youtu.be/{VID}\n2.youtu.be/{VID2}").skipped_text is False
+
+
+@pytest.mark.parametrize("sep", [",", "|", ", ", " | "])
+def test_comma_and_pipe_end_a_link(sep):
+    text = f"https://youtu.be/{VID}{sep}https://youtu.be/{VID2}"
+    assert [(i.kind, i.video_id) for i in parse_text(text)] == [
+        ("video", VID),
+        ("video", VID2),
+    ]
+
+
+def test_scheme_less_links_separated_by_comma():
+    text = f"youtu.be/{VID},youtu.be/{VID2}"
+    assert [i.video_id for i in parse_text(text)] == [VID, VID2]
+
+
+def test_plain_11_letter_word_next_to_a_real_link_is_not_an_id():
+    scan = scan_text(f"Goodmorning\nhttps://youtu.be/{VID}\ninformation")
+    assert [(i.kind, i.video_id) for i in scan.items] == [("video", VID)]
+    assert scan.skipped_text is True
+
+
+def test_random_looking_bare_id_next_to_a_real_link_is_kept():
+    scan = scan_text(f"https://youtu.be/{VID}\n{VID2}\nabcdefghij_\nabcdEfghijk")
+    assert [i.video_id for i in scan.items] == [VID, VID2, "abcdefghij_", "abcdEfghijk"]
+    assert scan.skipped_text is False
+
+
+def test_text_of_only_bare_ids_keeps_every_line():
+    # ไม่มีลิงก์จริงเลย: รับทุกบรรทัด 11 ตัวเหมือนเดิม (คนวางรหัสล้วน ๆ ตั้งใจวางรหัส)
+    scan = scan_text("Goodmorning\ndevelopment")
+    assert [i.video_id for i in scan.items] == ["Goodmorning", "development"]
+
+
+def test_invalid_link_does_not_count_as_a_real_link():
+    # ลิงก์เว็บอื่นไม่ทำให้บรรทัดรหัสล้วนถูกตรวจแบบเข้ม
+    scan = scan_text("https://vimeo.com/1\nGoodmorning")
+    assert [i.kind for i in scan.items] == ["invalid", "video"]
+
+
+@pytest.mark.parametrize(
+    ("word", "looks_random"),
+    [
+        (VID, True),
+        (VID2, True),
+        ("jNQXAC9IVRw", True),
+        ("abcdefghij_", True),
+        ("abcdefghij-", True),
+        ("abcdEfghijk", True),
+        ("Goodmorning", False),
+        ("development", False),
+        ("information", False),
+    ],
+)
+def test_id_looks_random_rule(word, looks_random):
+    assert (ID_LOOKS_RANDOM.search(word) is not None) is looks_random
