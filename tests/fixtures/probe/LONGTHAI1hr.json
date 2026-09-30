@@ -1,0 +1,40 @@
+{
+ "id": "LONGTHAI1hr",
+ "title": "ทดสอบซับยาว 1 ชั่วโมง",
+ "channel": "ชุดทดสอบ",
+ "uploader": "ชุดทดสอบ",
+ "duration": 3720,
+ "upload_date": "20260930",
+ "timestamp": 1790740800,
+ "live_status": "not_live",
+ "availability": "public",
+ "thumbnail": "https://fake.invalid/thumb/LONGTHAI1hr.jpg",
+ "chapters": null,
+ "description": "คลิปสังเคราะห์สำหรับทดสอบซับยาว 1 ชั่วโมง (ไม่มีของจริง ไฟล์ซับถูกทำซ้ำจากคลิปตัวอย่าง)",
+ "subtitles": {},
+ "automatic_captions": {
+  "th-orig": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.json3?repeat=10",
+    "name": "Thai (Original)"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.vtt",
+    "name": "Thai (Original)"
+   }
+  ]
+ },
+ "formats": [
+  {
+   "format_id": "140",
+   "format_note": "Thai original (default), medium",
+   "ext": "m4a",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2",
+   "language": "th",
+   "language_preference": 10
+  }
+ ]
+}

@@ -1,0 +1,44 @@
+{
+ "id": "NOORIGSUB01",
+ "title": "ทดสอบคลิปที่ไม่มีซับต้นฉบับ",
+ "channel": "ชุดทดสอบ",
+ "uploader": "ชุดทดสอบ",
+ "duration": 372,
+ "upload_date": "20260930",
+ "timestamp": 1790740800,
+ "live_status": "not_live",
+ "availability": "public",
+ "thumbnail": "https://fake.invalid/thumb/NOORIGSUB01.jpg",
+ "chapters": null,
+ "description": "คลิปสังเคราะห์: มีแต่ซับอัตโนมัติภาษา yue (แปลไม่ได้) กับซับแปล en, th",
+ "subtitles": {},
+ "automatic_captions": {
+  "yue": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.json3"
+   }
+  ],
+  "en": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.json3?tlang=en"
+   }
+  ],
+  "th": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.json3?tlang=th"
+   }
+  ]
+ },
+ "formats": [
+  {
+   "format_id": "140",
+   "format_note": "medium",
+   "ext": "m4a",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2"
+  }
+ ]
+}

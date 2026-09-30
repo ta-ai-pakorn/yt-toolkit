@@ -1,0 +1,40 @@
+{
+ "id": "VTTFALLBAK1",
+ "title": "ทดสอบสำรองด้วย vtt เมื่อ json3 เสีย",
+ "channel": "ชุดทดสอบ",
+ "uploader": "ชุดทดสอบ",
+ "duration": 372,
+ "upload_date": "20260930",
+ "timestamp": 1790740800,
+ "live_status": "not_live",
+ "availability": "public",
+ "thumbnail": "https://fake.invalid/thumb/VTTFALLBAK1.jpg",
+ "chapters": null,
+ "description": "คลิปสังเคราะห์: ไฟล์ json3 เสีย (ตัดกลางทาง) ต้องถอยไปอ่าน vtt",
+ "subtitles": {},
+ "automatic_captions": {
+  "th-orig": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/VTTFALLBAK1/broken.json3",
+    "name": "Thai (Original)"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.vtt",
+    "name": "Thai (Original)"
+   }
+  ]
+ },
+ "formats": [
+  {
+   "format_id": "140",
+   "format_note": "Thai original (default), medium",
+   "ext": "m4a",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2",
+   "language": "th",
+   "language_preference": 10
+  }
+ ]
+}
