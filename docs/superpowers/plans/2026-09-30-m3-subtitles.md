@@ -439,6 +439,11 @@ while i < len(cues):
 - `PARSER_VERSION = 1`
 - `SubParseError(ValueError)` means the data is not usable, which triggers the vtt fallback.
 - **Untimed overlap rule (controller ruling 2026-09-30):** each kept untimed block is spread over `[start, max(start, min(end, next kept block's start))]`, so overlapping blocks never interleave words in the final stable sort. When the next block starts at the same ms, the result is zero-length tokens, which C6 allows.
+- **Review fixes (controller ruling 2026-09-30, round 2).** Where these differ from the Task 7 rules below, these win.
+  - **json3 word timing:** `has_word_timing` = any kept seg has `tOffsetMs`. It no longer counts events with ≥ 2 segs. Styled owner subtitles split one event into several `pPenId` segs without offsets, and those files stay untimed.
+  - **Block order:** untimed blocks are stably sorted by start before the repeat skip, the clip and the space prefix.
+  - **Parse errors:** a `RecursionError` from `json.loads` becomes `SubParseError`.
+  - **Direction marks:** `&lrm;` and `&rlm;` unescape to `""`.
 
 ### C8. Web contracts (T6 writes them; T9, T10, T13 and T14 consume them)
 **`web/src/lib/types.ts` additions:**

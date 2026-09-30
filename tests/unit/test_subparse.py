@@ -71,8 +71,8 @@ def _assert_c6(tokens: tuple[Token, ...]) -> None:
 
 
 def test_normalize_text_removes_zero_width_and_maps_whitespace():
-    assert normalize_text("a​b‌c‍d﻿e") == "abcde"
-    assert normalize_text("a\nb c\td　e") == "a b c d e"
+    assert normalize_text("a\u200bb\u200cc\u200dd\ufeffe") == "abcde"
+    assert normalize_text("a\nb\u00a0c\td\u3000e") == "a b c d e"
     assert normalize_text("a \n b") == "a   b"  # no collapsing
 
 
@@ -184,7 +184,7 @@ def test_timed_json3_clamps_overlapping_events():
         ]
     }
     track = parse_json3(json.dumps(doc).encode())
-    assert track.has_word_timing  # one event has 2 segs
+    assert track.has_word_timing  # a seg has tOffsetMs
     assert track.tokens == (Token("a", 0, 1000), Token(" b", 1000, 3000), Token(" c", 3000, 4000))
 
 
@@ -196,6 +196,73 @@ def test_single_seg_with_offset_counts_as_word_timing():
 
 
 # json3: untimed (owner subtitles)
+
+THAI_60 = "ร้านกาแฟเล็กๆแถวบ้านขายดีมากเพราะเจ้าของใส่ใจลูกค้าทุกคนเสมอ"
+
+
+def test_styled_owner_json3_with_multi_seg_event_stays_untimed():
+    # Styled owner subtitles split one event into several segs (pPenId) with no
+    # tOffsetMs. That is not word timing: the Thai sentence must still be cut
+    # by newmm (AC-SUB-09), and the vtt of the same track must agree (AC-SUB-11).
+    doc = {
+        "pens": [{}, {"bAttr": 1}, {"iAttr": 1}],
+        "events": [
+            {"tStartMs": 0, "dDurationMs": 5000, "segs": [{"utf8": THAI_60}]},
+            {"tStartMs": 6000, "dDurationMs": 2000, "segs": [
+                {"utf8": "สวัสดี", "pPenId": 1},
+                {"utf8": "ครับ", "pPenId": 2},
+            ]},
+        ],
+    }
+    js = parse_json3(json.dumps(doc, ensure_ascii=False).encode())
+    assert js.has_word_timing is False
+    words = tf.split_words(THAI_60)
+    assert len(words) >= 4
+    assert [t.t for t in js.tokens[: len(words)]] == words
+    assert js.tokens[0].s == 0 and js.tokens[len(words) - 1].e == 5000
+    assert cue_text(js.tokens[len(words) :]) == "สวัสดีครับ"
+
+    vtt = parse_vtt(
+        (
+            "WEBVTT\n\n"
+            f"00:00:00.000 --> 00:00:05.000\n{THAI_60}\n\n"
+            "00:00:06.000 --> 00:00:08.000\n<c.colorE5E5E5>สวัสดี</c><c>ครับ</c>\n"
+        ).encode()
+    )
+    assert vtt.has_word_timing is False
+    assert vtt.tokens == js.tokens
+
+
+def test_untimed_json3_out_of_order_events_act_like_sorted_ones():
+    in_order = [
+        {"tStartMs": 0, "dDurationMs": 2000, "segs": [{"utf8": "Hello there"}]},
+        {"tStartMs": 3000, "dDurationMs": 1000, "segs": [{"utf8": "Bye"}]},
+    ]
+    shuffled = parse_json3(json.dumps({"events": in_order[::-1]}).encode())
+    expected = parse_json3(json.dumps({"events": in_order}).encode())
+    assert shuffled.tokens == expected.tokens
+    # No glued words ("thereBye") and no block squeezed to zero length.
+    assert [(t.t, t.s, t.e) for t in shuffled.tokens] == [
+        ("Hello", 0, 909),
+        (" there", 909, 2000),
+        (" Bye", 3000, 4000),
+    ]
+
+
+def test_untimed_json3_rolling_repeat_chain_keeps_one_copy():
+    doc = {
+        "events": [
+            {"tStartMs": 0, "dDurationMs": 2000, "segs": [{"utf8": "same line"}]},
+            {"tStartMs": 1000, "dDurationMs": 2000, "segs": [{"utf8": "same  line"}]},
+            {"tStartMs": 2500, "dDurationMs": 2000, "segs": [{"utf8": "same line "}]},
+            {"tStartMs": 4000, "dDurationMs": 1500, "segs": [{"utf8": "same line"}]},
+            {"tStartMs": 6000, "dDurationMs": 1000, "segs": [{"utf8": "next"}]},
+        ]
+    }
+    track = parse_json3(json.dumps(doc).encode())
+    # Each repeat starts before the block right before it ends, so the whole chain is one block.
+    assert [t.t for t in track.tokens] == ["same", " line", " next"]
+    assert track.tokens[0].s == 0 and track.tokens[1].e == 2000
 
 
 def test_owner_english_json3_is_untimed_blocks():
@@ -331,7 +398,7 @@ def test_owner_vtt_matches_owner_json3():
 
 def test_vtt_timed_tags_entities_and_short_cues():
     data = (
-        "﻿WEBVTT\r\nKind: captions\r\n\r\n"
+        "\ufeffWEBVTT\r\nKind: captions\r\n\r\n"
         "NOTE a comment\r\n\r\n"
         "cue-1\r\n"
         "00:00:01.000 --> 00:00:03.000 align:start position:0%\r\n"
@@ -374,6 +441,36 @@ def test_vtt_untimed_joins_lines_and_strips_tags():
     assert track.tokens[0].s == 1000 and track.tokens[-1].e == 3000
 
 
+def test_vtt_direction_marks_are_dropped():
+    # &lrm; / &rlm; become "", so a mark-only line never turns into an invisible token.
+    untimed = parse_vtt(
+        (
+            "WEBVTT\n\n"
+            "00:00:01.000 --> 00:00:02.000\n&lrm;&rlm;\n\n"
+            "00:00:02.000 --> 00:00:03.000\n&rlm;word&lrm;\n"
+        ).encode()
+    )
+    assert untimed.tokens == (Token("word", 2000, 3000),)
+
+    timed = parse_vtt(b"WEBVTT\n\n00:00:03.000 --> 00:00:04.000\nHi<00:00:03.500><c>&lrm;</c>\n")
+    assert timed.has_word_timing is True
+    assert timed.tokens == (Token("Hi", 3000, 4000),)
+
+
+def test_vtt_untimed_skips_repeated_cue():
+    data = (
+        "WEBVTT\n\n"
+        "00:00:00.000 --> 00:00:02.000\nHello there\n\n"
+        "00:00:01.000 --> 00:00:03.000\nHello\nthere\n\n"
+        "00:00:02.500 --> 00:00:03.500\nHello  there\n\n"
+        "00:00:04.000 --> 00:00:05.000\nBye\n"
+    ).encode()
+    track = parse_vtt(data)
+    assert track.has_word_timing is False
+    assert [t.t for t in track.tokens] == ["Hello", " there", " Bye"]
+    assert track.tokens[1].e == 2000 and track.tokens[2].s == 4000
+
+
 # errors and constants
 
 
@@ -394,6 +491,14 @@ def test_vtt_untimed_joins_lines_and_strips_tags():
 def test_json3_errors(data):
     with pytest.raises(SubParseError):
         parse_json3(data)
+
+
+def test_json3_deep_nesting_is_a_parse_error_not_a_crash():
+    depth = 100_000
+    with pytest.raises(RecursionError):
+        json.loads("[" * depth + "]" * depth)  # what the parser must catch
+    with pytest.raises(SubParseError):
+        parse_json3(b'{"events": ' + b"[" * depth + b"]" * depth + b"}")
 
 
 @pytest.mark.parametrize(
