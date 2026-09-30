@@ -64,4 +64,10 @@ describe("playlistQuery", () => {
     await new QueryClient().fetchQuery(options)
     expect(fetch).toHaveBeenCalledWith("/api/playlists/RDaqz-KE-bpKQ?v=aqz-KE-bpKQ", expect.anything())
   })
+
+  it("รหัสเพลย์ลิสต์ถูก encode ใน path (กันอักขระแปลกจากประวัติของเบราว์เซอร์)", async () => {
+    const fetch = stubFetch({ title: "p", total: 0, truncated: false, entries: [] })
+    await new QueryClient().fetchQuery(playlistQuery("PL/../x?y#z"))
+    expect(fetch).toHaveBeenCalledWith("/api/playlists/PL%2F..%2Fx%3Fy%23z", expect.anything())
+  })
 })

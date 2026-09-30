@@ -348,10 +348,10 @@ test.describe("W2 ภาพเฟรม", () => {
     expect(bytes.subarray(0, 3).toString("hex")).toBe("ffd8ff")
   })
 
-  test("ภาพรวมทุกเฟรม โหลดได้ไฟล์ .jpg และ zip โหลดได้ไฟล์ .zip", async ({ page }) => {
+  test("โหลดภาพรวมเฟรม โหลดได้ไฟล์ .jpg และ zip โหลดได้ไฟล์ .zip", async ({ page }) => {
     await openBbb(page)
     const sheet = page.waitForEvent("download")
-    await page.getByRole("button", { name: "ภาพรวมทุกเฟรม" }).click()
+    await page.getByRole("button", { name: "โหลดภาพรวมเฟรม" }).click()
     expect((await sheet).suggestedFilename()).toMatch(/\.jpg$/)
 
     const zip = page.waitForEvent("download")
@@ -378,7 +378,7 @@ test.describe("W2 ภาพเฟรม", () => {
 
   test("ปุ่มโหลดชุดใหญ่เป็นปุ่มรอง ไม่ใช่ปุ่มหลักสีเหลือง และหน้านี้ไม่มีปุ่มหลัก", async ({ page }) => {
     await openBbb(page)
-    for (const name of ["ภาพรวมทุกเฟรม", "โหลดทั้งหมด (.zip)"]) {
+    for (const name of ["โหลดภาพรวมเฟรม", "โหลดทั้งหมด (.zip)"]) {
       await expect(page.getByRole("button", { name })).toHaveClass(/bg-secondary/)
     }
     await expect(page.locator("main [data-slot=button].bg-primary")).toHaveCount(0)
@@ -406,7 +406,7 @@ test.describe("W2 ภาพเฟรม", () => {
       await new Promise((resolve) => setTimeout(resolve, 600))
       await route.continue()
     })
-    const sheet = page.getByRole("button", { name: "ภาพรวมทุกเฟรม" })
+    const sheet = page.getByRole("button", { name: "โหลดภาพรวมเฟรม" })
     const downloading = page.waitForEvent("download")
     await sheet.click()
     await expect(page.getByText("กำลังเตรียมไฟล์…")).toBeVisible()
@@ -426,7 +426,7 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(button).toHaveCSS("cursor", "not-allowed")
     await button.hover()
     await expect(page.locator('[data-slot="tooltip-content"]')).toHaveText("เปิดใช้ในเวอร์ชันถัดไป")
-    await expect(page.getByRole("button", { name: "ภาพรวมทุกเฟรม" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "โหลดภาพรวมเฟรม" })).toHaveCount(0)
   })
 
   test("ภาพเฟรมโหลดไม่ได้: Alert พร้อมลองใหม่ (หัวคลิปยังอยู่)", async ({ page }) => {
@@ -847,9 +847,9 @@ test.describe("W2 บอกวิธีใช้ภาพเฟรม", () => {
     await expect(page.getByText(/คลิกภาพเพื่อดูภาพใหญ่/)).toHaveCount(0)
   })
 
-  test("ชี้ที่ปุ่ม ภาพรวมทุกเฟรม เห็นคำอธิบายภาษาไทย", async ({ page }) => {
+  test("ชี้ที่ปุ่ม โหลดภาพรวมเฟรม เห็นคำอธิบายภาษาไทย", async ({ page }) => {
     await openBbb(page)
-    await page.getByRole("button", { name: "ภาพรวมทุกเฟรม" }).hover()
+    await page.getByRole("button", { name: "โหลดภาพรวมเฟรม" }).hover()
     await expect(page.locator('[data-slot="tooltip-content"]')).toHaveText("ภาพเดียวที่รวมทุกเฟรม พร้อมเวลาใต้แต่ละภาพ")
   })
 })

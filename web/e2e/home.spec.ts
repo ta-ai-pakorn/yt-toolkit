@@ -150,7 +150,7 @@ test.describe("W1 วิเคราะห์ลิงก์", () => {
     await expect(rows).toHaveCount(1)
     await expect(rows).toContainText(PLAYLIST_TITLE)
     await expect(rows).toContainText("250 คลิป")
-    await expect(rows).toContainText("เลือกคลิปจากเพลย์ลิสต์ได้ในเวอร์ชันถัดไป")
+    await expect(rows).not.toContainText("เวอร์ชันถัดไป")
     await expect(rows).toContainText("แสดงแค่ 200 คลิปแรก")
   })
 
@@ -191,7 +191,7 @@ test.describe("W1 วิเคราะห์ลิงก์", () => {
 
     await expect(rows.nth(2)).toContainText(PLAYLIST_TITLE)
     await expect(rows.nth(2)).toContainText("250 คลิป")
-    await expect(rows.nth(2)).toContainText("เลือกคลิปจากเพลย์ลิสต์ได้ในเวอร์ชันถัดไป")
+    await expect(rows.nth(2)).not.toContainText("เวอร์ชันถัดไป")
     await expect(rows.nth(2)).toContainText("แสดงแค่ 200 คลิปแรก")
   })
 
@@ -925,6 +925,6 @@ test.describe("ปรับจากการเดินตามเส้น�
     // Tab ต่อไปถึงปุ่มในส่วนภาพเฟรมเลย ไม่ต้องย้อนผ่านเมนูบนหัว
     await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(128)
     await page.keyboard.press("Tab")
-    await expect(page.getByRole("button", { name: "ภาพรวมทุกเฟรม" })).toBeFocused()
+    await expect(page.getByRole("button", { name: "โหลดภาพรวมเฟรม" })).toBeFocused()
   })
 })

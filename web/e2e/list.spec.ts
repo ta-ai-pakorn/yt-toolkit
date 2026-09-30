@@ -413,3 +413,82 @@ test.describe("D5 กลับมาหน้าแรกแล้วแตะ�
     await expect(page).toHaveURL(/\/$/)
   })
 })
+
+test.describe("รอบแก้หลังรีวิว (2026-09-30)", () => {
+  test("กด 'แสดงเพิ่ม' → โฟกัสไปคลิปแรกที่เพิ่งแสดง · ครั้งสุดท้าย (ปุ่มหายไป) โฟกัสก็ไม่หลุดไป body", async ({ page }) => {
+    await page.route("https://i.ytimg.com/**", (route) => route.fulfill({ contentType: "image/png", body: PIXEL }))
+    await pasteThree(page)
+    const row = rows(page).nth(2)
+    await row.getByRole("button", { name: "ดูคลิปในเพลย์ลิสต์" }).click()
+    const links = row.getByRole("list").getByRole("link")
+    await expect(links).toHaveCount(50)
+    await row.getByRole("button", { name: "แสดงเพิ่ม" }).click()
+    await expect(links).toHaveCount(100)
+    await expect(links.nth(50)).toBeFocused()
+    await row.getByRole("button", { name: "แสดงเพิ่ม" }).click()
+    await row.getByRole("button", { name: "แสดงเพิ่ม" }).click()
+    await expect(links).toHaveCount(200)
+    await expect(row.getByRole("button", { name: "แสดงเพิ่ม" })).toHaveCount(0)
+    await expect(links.nth(150)).toBeFocused()
+    await expect(links.nth(150)).toHaveAttribute("href", "/v/fake0000151")
+  })
+
+  test("กดถัดไปแล้วคลิปนั้นเปิดไม่ได้ (ไม่มีชื่อคลิป) → โฟกัสไปที่กล่อง error ไม่หลุดไป body", async ({ page }) => {
+    await analyze(page, [`https://youtu.be/${BBB}`, "https://youtu.be/missing0001"].join("\n"))
+    await expect(rows(page)).toHaveCount(2)
+    await rows(page).nth(0).getByRole("link", { name: /เปิดดู/ }).click()
+    await expect(heading(page)).toContainText("Big Buck Bunny")
+    await sequence(page).getByRole("button", { name: "ถัดไป" }).click()
+    await expect(page).toHaveURL(/\/v\/missing0001$/)
+    const error = page.getByRole("alert").filter({ hasText: "เปิดข้อมูลคลิปไม่สำเร็จ" })
+    await expect(error).toBeVisible()
+    await expect(error).toBeFocused()
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false)
+    await expect(sequence(page)).toContainText("2 จาก 2")
+  })
+
+  test("ภาพใหญ่โหลดไม่ได้ → ไม่ค้างเป็นพื้นมืดเปล่า เห็นกรอบภาพ และ Esc ปิดได้", async ({ page }) => {
+    await page.route("**/api/cache/**", (route) => route.fulfill({ status: 404, body: "" }))
+    await page.goto(`/v/${BBB}`)
+    const button = page.getByRole("button", { name: "ภาพเฟรมที่ 00:00:04" })
+    await button.click()
+    const image = page.getByRole("dialog").locator("img")
+    await expect(image).toHaveCSS("visibility", "visible")
+    const box = (await image.boundingBox())!
+    expect(box.width).toBeGreaterThan(100)
+    expect(box.height).toBeGreaterThan(50)
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    await expect(button).toBeFocused()
+  })
+
+  test("กลับมาแล้วกด Tab เข้าช่อง (เลือกทั้งหมด) แล้วคลิกในช่อง → เคอร์เซอร์อยู่ตรงที่คลิกตามปกติ", async ({ page }) => {
+    await pasteThree(page)
+    await page.reload()
+    await expectThreeIntact(page)
+    await page.getByRole("button", { name: "วิเคราะห์" }).focus()
+    await page.keyboard.press("Shift+Tab")
+    const box = page.getByRole("textbox")
+    await expect(box).toBeFocused()
+    const all = await box.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd, el.value.length])
+    expect([all[0], all[1]]).toEqual([0, all[2]])
+    await box.click({ position: { x: 40, y: 12 } })
+    const [start, end] = await box.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd])
+    expect(start).toBe(end)
+  })
+
+  test("จอ 360 px: หัวข้อ 'ภาพเฟรม' อยู่บรรทัดเดียว ปุ่มโหลดอยู่บรรทัดของตัวเอง ไม่ล้นจอ", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 780 })
+    await page.goto(`/v/${BBB}`)
+    const title = page.getByRole("heading", { name: "ภาพเฟรม" })
+    await expect(title).toBeVisible()
+    const titleBox = (await title.boundingBox())!
+    const lineHeight = await title.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight))
+    expect(titleBox.height).toBeLessThan(lineHeight * 1.5)
+    const sheet = (await page.getByRole("button", { name: "โหลดภาพรวมเฟรม" }).boundingBox())!
+    const zip = (await page.getByRole("button", { name: "โหลดทั้งหมด (.zip)" }).boundingBox())!
+    expect(sheet.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height - 1)
+    expect(zip.x + zip.width).toBeLessThanOrEqual(360)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
+  })
+})

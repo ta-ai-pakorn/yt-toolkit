@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { Check, ChevronDown, ChevronUp, CircleX, ListVideo, Trash2 } from "lucide-react"
-import { useId, useState, type ReactNode } from "react"
+import { useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { Link } from "react-router"
 
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
@@ -200,9 +200,18 @@ function PlaylistClips({ title, entries, shown, playlistId, mixVideoId }: Playli
   const opened = useHomeState().opened
   const state = fromPlaylistState(playlistId, mixVideoId)
   const key = playlistKey(playlistId, mixVideoId)
+  const listRef = useRef<HTMLOListElement>(null)
+  // กด "แสดงเพิ่ม" แล้วโฟกัสย้ายไปคลิปแรกที่เพิ่งแสดง (ปุ่มอาจหายไปเพราะแสดงครบแล้ว โฟกัสจะได้ไม่หลุดไป body)
+  const focusFrom = useRef<number | null>(null)
+  useEffect(() => {
+    const index = focusFrom.current
+    if (index === null) return
+    focusFrom.current = null
+    listRef.current?.querySelectorAll<HTMLAnchorElement>("a[href]")[index]?.focus()
+  }, [shown])
   return (
     <>
-      <ol aria-label={fill(t.clipsLabel, { title })} className="flex flex-col gap-0.5 border-t pt-2">
+      <ol ref={listRef} aria-label={fill(t.clipsLabel, { title })} className="flex flex-col gap-0.5 border-t pt-2">
         {entries.slice(0, shown).map((entry, index) => (
           <li key={`${index}-${entry.videoId}`}>
             <Link
@@ -229,7 +238,14 @@ function PlaylistClips({ title, entries, shown, playlistId, mixVideoId }: Playli
       </ol>
       {shown < entries.length && (
         <div className="flex items-center gap-3 pt-1">
-          <Button variant="ghost" size="sm" onClick={() => homeStore.setExpanded(key, shown + CLIPS_PAGE)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              focusFrom.current = shown
+              homeStore.setExpanded(key, shown + CLIPS_PAGE)
+            }}
+          >
             {t.showMore}
           </Button>
           <span className="text-xs text-muted-foreground">
@@ -324,8 +340,7 @@ function PlaylistRow({ playlistId, mixVideoId }: { playlistId: string; mixVideoI
           <ItemDescription>{t.playlistEmpty}</ItemDescription>
         ) : (
           <ItemDescription>
-            <span className="font-mono">{fill(t.clips, { n: total })}</span> ·{" "}
-            {t.playlistLater}
+            <span className="font-mono">{fill(t.clips, { n: total })}</span>
             {/* มิกซ์: จำนวนที่บอกคือ 25 คลิปแรกอยู่แล้ว (กล่องถามบอกไว้) ไม่ต้องบอกว่าตัด */}
             {isMix && (
               <>

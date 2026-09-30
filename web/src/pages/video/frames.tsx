@@ -280,7 +280,7 @@ function BulkDownloads({ videoId }: { videoId: string }) {
 
   return (
     <ButtonGroup aria-label={t.downloadGroup}>
-      {/* "ภาพรวมทุกเฟรม" (contact sheet): ชี้แล้วมีคำอธิบายว่าได้ไฟล์แบบไหน */}
+      {/* "โหลดภาพรวมเฟรม" (contact sheet): ชี้แล้วมีคำอธิบายว่าได้ไฟล์แบบไหน */}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -330,7 +330,8 @@ export function FramesSection({ videoId, enabled }: { videoId: string; enabled: 
   return (
     <section aria-labelledby="frames-title">
       <Card>
-        <CardHeader>
+        {/* จอแคบ: หัวข้อ แถวปุ่มโหลด และคำแนะนำ เรียงกันคนละบรรทัด หัวข้อจะได้ไม่ถูกบีบจนขึ้นบรรทัดใหม่ */}
+        <CardHeader className="max-sm:grid-cols-1!">
           <CardTitle>
             <h2 id="frames-title" className="text-base font-medium">
               {t.title}
@@ -339,10 +340,10 @@ export function FramesSection({ videoId, enabled }: { videoId: string; enabled: 
           {/* บอกว่าภาพเฟรมทำอะไรได้บ้าง (คลิกดูใหญ่ / คลิกขวาคัดลอก-โหลด) คนที่ไม่รู้ว่าคลิกขวาได้จะได้เจอ */}
           {storyboard.isSuccess && frames.length > 0 && (
             // จอแคบ: ลงไปอยู่ใต้ปุ่มโหลดเต็มความกว้าง ไม่ถูกบีบข้างปุ่ม
-            <CardDescription className="col-span-2 sm:col-span-1">{t.hint}</CardDescription>
+            <CardDescription className="sm:col-span-1">{t.hint}</CardDescription>
           )}
           {storyboard.isSuccess && frames.length > 0 && (
-            <CardAction>
+            <CardAction className="max-sm:col-start-1 max-sm:row-span-1 max-sm:row-start-2 max-sm:justify-self-start">
               <BulkDownloads videoId={videoId} />
             </CardAction>
           )}

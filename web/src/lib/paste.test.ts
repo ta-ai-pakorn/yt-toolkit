@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { looksLikeYoutube } from "./paste"
+import { ID_LOOKS_RANDOM, looksLikeYoutube } from "./paste"
 
 describe("looksLikeYoutube", () => {
   it.each([
@@ -31,6 +31,13 @@ describe("looksLikeYoutube", () => {
     "ดูคลิปนี้ youtu.be/aqz-KE-bpKQ นะ",
     "สวัสดีครับ\n2. https://www.youtube.com/watch?v=jNQXAC9IVRw ขอบคุณครับ",
     "(https://www.youtube.com/playlist?list=PLfakeplaylist250)",
+    "1.https://youtu.be/aqz-KE-bpKQ",
+    "12.https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+    "ลิงก์:https://youtu.be/aqz-KE-bpKQ",
+    "ลิงก์:youtu.be/aqz-KE-bpKQ",
+    "-youtu.be/aqz-KE-bpKQ",
+    "2.youtu.be/aqz-KE-bpKQ",
+    "https://youtu.be/aqz-KE-bpKQ,https://youtu.be/jNQXAC9IVRw",
   ])("ลิงก์ในข้อความจากแชต: รับ %j", (text) => {
     expect(looksLikeYoutube(text)).toBe(true)
   })
@@ -59,7 +66,24 @@ describe("looksLikeYoutube", () => {
     "ดูคำว่า youtube.com/watch ในประโยค",
     "https://drive.google.com/youtube.com/watch?v=aqz-KE-bpKQ",
     "me@youtube.com/watch?v=aqz-KE-bpKQ",
+    "Goodmorning",
+    "abc.youtu.be/aqz-KE-bpKQ",
   ])("ไม่รับ %j", (text) => {
     expect(looksLikeYoutube(text)).toBe(false)
+  })
+
+  // ตารางเดียวกับ tests/unit/test_inputs.py::test_id_looks_random_rule (กฎต้องตรงกันทั้งสองฝั่ง)
+  it.each([
+    ["dQw4w9WgXcQ", true],
+    ["aqz-KE-bpKQ", true],
+    ["jNQXAC9IVRw", true],
+    ["abcdefghij_", true],
+    ["abcdefghij-", true],
+    ["abcdEfghijk", true],
+    ["Goodmorning", false],
+    ["development", false],
+    ["information", false],
+  ] as const)("ID_LOOKS_RANDOM %s → %s", (word, expected) => {
+    expect(ID_LOOKS_RANDOM.test(word)).toBe(expected)
   })
 })

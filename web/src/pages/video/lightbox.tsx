@@ -77,8 +77,12 @@ export function FrameLightbox({ frames, index, onIndexChange, returnFocus }: Pro
               }
               if (known?.width !== loaded.width || known.height !== loaded.height) setNatural({ frames, ...loaded })
             }}
-            style={{ width, visibility: known ? undefined : "hidden" }}
-            className="block h-auto max-w-none cursor-zoom-out rounded-sm select-none"
+            onError={() => {
+              // โหลดภาพไม่ได้: เลิกซ่อน ใช้ขนาดสำรอง ให้เห็นกรอบภาพ (ไม่ค้างเป็นพื้นมืดเปล่า ๆ) คลิกหรือ Esc ปิดได้ตามปกติ
+              if (!known) setNatural({ frames, ...DEFAULT_SIZE })
+            }}
+            style={{ width, aspectRatio: `${size.width} / ${size.height}`, visibility: known ? undefined : "hidden" }}
+            className="block h-auto max-w-none cursor-zoom-out rounded-sm bg-muted select-none"
           />
           <span className="sr-only" aria-live="polite">
             {time}

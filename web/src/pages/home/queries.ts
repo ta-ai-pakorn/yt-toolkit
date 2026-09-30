@@ -47,7 +47,8 @@ export function videoTitleQuery(videoId: string, botStop?: BotStop) {
  * มิกซ์อัตโนมัติ (id ขึ้นต้น RD) ต้องส่งคลิปตั้งต้น (`videoId`) ไปด้วย เพราะยูทูปให้ดึงมิกซ์จากลิงก์คลิปเท่านั้น
  */
 export function playlistQuery(playlistId: string, botStop?: BotStop, videoId?: string) {
-  const path = videoId ? `/playlists/${playlistId}?v=${encodeURIComponent(videoId)}` : `/playlists/${playlistId}`
+  const id = encodeURIComponent(playlistId)
+  const path = videoId ? `/playlists/${id}?v=${encodeURIComponent(videoId)}` : `/playlists/${id}`
   return queryOptions({
     queryKey: videoId ? ["playlist", playlistId, videoId] : ["playlist", playlistId],
     queryFn: ({ signal }) => playlistLimit(guarded(signal, botStop, () => api<PlaylistInfo>(path, { signal }))),

@@ -52,6 +52,8 @@ function Meta({ video }: { video: VideoInfo }) {
   return <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">{parts}</p>
 }
 
+const focusLost = () => document.activeElement === null || document.activeElement === document.body
+
 /** หัวคลิปของ W2: ปก ชื่อ ช่อง ความยาว จำนวนตอน วันที่เผยแพร่ (โหลดอยู่ = Skeleton รูปเดียวกัน, ผิดพลาด = Alert) */
 export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error> }) {
   // มีข้อมูลอยู่แล้ว (เช่นจากรายการผลของ W1) แต่รีเฟรชเบื้องหลังล้มเหลว = ยังแสดงข้อมูลเดิม (หน้าแม่แจ้งด้วย toast)
@@ -61,13 +63,25 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
   // เปิดหน้านี้จากลิงก์ (กด Enter ที่ "เปิดดู") โฟกัสหลุดไปที่ body: ย้ายมาที่ชื่อคลิป
   // โปรแกรมอ่านหน้าจอจะอ่านชื่อคลิปให้ และกด Tab ต่อจากตรงนี้ได้เลย · ถ้าผู้ใช้โฟกัสที่อื่นอยู่แล้วไม่ยุ่ง
   useEffect(() => {
-    if (videoId && (document.activeElement === null || document.activeElement === document.body)) {
-      headingRef.current?.focus({ preventScroll: true })
-    }
+    if (videoId && focusLost()) headingRef.current?.focus({ preventScroll: true })
   }, [videoId])
+  // เปิดคลิปที่เปิดไม่ได้ (เช่นกด "ถัดไป" แล้วคลิปนั้นถูกลบ) ไม่มีชื่อคลิป: โฟกัสกล่อง error แทน ไม่ปล่อยไว้ที่ body
+  const errorRef = useRef<HTMLDivElement>(null)
+  const failed = !data && video.isError
+  useEffect(() => {
+    if (failed && focusLost()) errorRef.current?.focus({ preventScroll: true })
+  }, [failed, video.error])
   if (!data) {
     if (video.isError) {
-      return <LoadError showHome title={t.loadError} error={video.error} onRetry={() => void video.refetch()} />
+      return (
+        <LoadError
+          ref={errorRef}
+          showHome
+          title={t.loadError}
+          error={video.error}
+          onRetry={() => void video.refetch()}
+        />
+      )
     }
     return <HeaderSkeleton />
   }

@@ -26,7 +26,9 @@ export function HomePage() {
   // ข้อความทั้งหมดยังถูกเลือกจากการแตะครั้งแรก (วางตอนนี้ = แทนที่ของเดิม)
   const restoredSelected = useRef(false)
   // คลิกเมาส์: เบราว์เซอร์วางเคอร์เซอร์ตอนปล่อยปุ่ม ทับการเลือกทั้งหมด จึงกันไว้หนึ่งครั้ง
+  // เฉพาะเมื่อโฟกัสครั้งแรกมาจากการคลิก (มาด้วย Tab ไม่มีการปล่อยปุ่มเมาส์ คลิกครั้งถัดไปต้องวางเคอร์เซอร์ตามปกติ)
   const keepSelectionOnMouseUp = useRef(false)
+  const pointerDown = useRef(false)
   // ข้อความประกาศให้โปรแกรมอ่านหน้าจอหลังกด "ล้างรายการ"
   const [announce, setAnnounce] = useState("")
 
@@ -84,15 +86,21 @@ export function HomePage() {
               restoredSelected.current = false
               homeStore.set({ text: event.target.value })
             }}
+            onMouseDown={() => {
+              pointerDown.current = true
+            }}
             onFocus={(event) => {
+              const byPointer = pointerDown.current
+              pointerDown.current = false
               if (!selectOnFirstFocus.current) return
               selectOnFirstFocus.current = false
               if (!event.currentTarget.value) return
               event.currentTarget.select()
               restoredSelected.current = true
-              keepSelectionOnMouseUp.current = true
+              keepSelectionOnMouseUp.current = byPointer
             }}
             onMouseUp={(event) => {
+              pointerDown.current = false
               if (!keepSelectionOnMouseUp.current) return
               keepSelectionOnMouseUp.current = false
               event.preventDefault()

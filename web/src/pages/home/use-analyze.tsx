@@ -26,13 +26,18 @@ export function fromPlaylistState(playlistId: string, mixVideoId?: string): From
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 /** อ่าน state ของ router อย่างระวัง (ค่ามาจากประวัติของเบราว์เซอร์ อาจเป็นอะไรก็ได้) · ไม่ได้มาจากรายการ = null */
+// กฎรหัสเดียวกับ backend (core/inputs.py: PLAYLIST_ID, VIDEO_ID)
+const PLAYLIST_ID = /^[A-Za-z0-9_-]{10,64}$/
+const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/
+
 export function readFromList(state: unknown): FromListState | null {
   if (!isRecord(state) || state.fromList !== true) return null
   const playlist = state.playlist
-  if (isRecord(playlist) && typeof playlist.id === "string") {
-    return fromPlaylistState(playlist.id, typeof playlist.v === "string" ? playlist.v : undefined)
-  }
-  return fromListState
+  if (playlist === undefined) return fromListState
+  // playlist ที่รูปร่างผิดหรือรหัสผิดกฎ = state แปลกปลอม ไม่เชื่อทั้งก้อน (ไม่แสดง "รายการที่วาง" และก่อนหน้า/ถัดไป)
+  if (!isRecord(playlist) || typeof playlist.id !== "string" || !PLAYLIST_ID.test(playlist.id)) return null
+  if (playlist.v !== undefined && (typeof playlist.v !== "string" || !VIDEO_ID.test(playlist.v))) return null
+  return fromPlaylistState(playlist.id, playlist.v)
 }
 
 export function isFromList(state: unknown): boolean {
