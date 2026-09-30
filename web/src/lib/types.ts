@@ -49,6 +49,8 @@ export type VideoInfo = {
   audio: AudioFormat[]
   hasStoryboard: boolean
   isLive: boolean
+  /** คำอธิบายคลิปตามที่ยูทูปให้มา (ข้อความดิบ) ไม่มีคีย์นี้เมื่อว่าง */
+  description?: string
 }
 
 export type ResolveKind = "video" | "playlist" | "ambiguous" | "invalid"
@@ -100,3 +102,31 @@ export type HistoryItem = {
 }
 
 export type HistoryPage = { items: HistoryItem[]; total: number }
+
+export type SubtitleGroup = "owner" | "original" | "translated"
+
+export type SubtitleTrack = { id: string; lang: string; name: string; group: SubtitleGroup }
+
+export type SubtitleTracks = { tracks: SubtitleTrack[]; defaultTrackId?: string }
+
+/** คำหรือชิ้นข้อความหนึ่งชิ้นของซับ: t = ข้อความ, s/e = เวลาเริ่ม/จบ (มิลลิวินาที) */
+export type SubToken = { t: string; s: number; e: number }
+
+export type SubTokens = { hasWordTiming: boolean; tokens: SubToken[] }
+
+export type SubMode = "chars" | "tokens"
+
+export type SubOptions = {
+  maxChars: number
+  lines: 1 | 2
+  minMs: number
+  maxMs: number
+  mode: SubMode
+  tokensPerCue?: number
+}
+
+export type SubPreset = "short" | "medium" | "long"
+
+export type Cue = { startMs: number; endMs: number; lines: string[] }
+
+export type SubExportFormat = "srt" | "txt" | "md"
