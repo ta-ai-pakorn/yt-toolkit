@@ -926,7 +926,7 @@ Optionally a case also carries `"md": {"title", "videoId", "chapters": [{"startM
 *json3:*
 1. **Load.** Decode UTF-8 (BOM allowed). JSON must be an object with list `events`, else `SubParseError`.
 2. **Skip events** with a truthy `aAppend`, without `segs`, or whose normalized joined text is blank.
-3. **Word timing.** `has_word_timing` = any kept event has ≥ 2 segs, or any seg has `tOffsetMs`.
+3. **Word timing.** `has_word_timing` = any kept seg has `tOffsetMs` (review ruling 2026-09-30, see C7).
 4. **Timed file** (`has_word_timing` true):
    - Every seg with non-blank normalized text becomes a token: `s = tStartMs + (tOffsetMs or 0)`, `e` = the next token's `s` within the event, and the last one gets `tStartMs + dDurationMs`.
    - A whitespace-only seg is glued as a leading space onto the next seg of the same event.
