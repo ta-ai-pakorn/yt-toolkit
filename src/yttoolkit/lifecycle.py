@@ -184,7 +184,19 @@ def run_app(
             extractor=extractor,
         )
     finally:
+        close_extractor(extractor)
         db.close()
+
+
+def close_extractor(extractor: Extractor) -> None:
+    """ปิดการเชื่อมต่อที่ extractor ถือไว้ (ตัวจริง = httpx client) ตัวที่ไม่มี close ข้าม พลาดแค่บันทึก log"""
+    close = getattr(extractor, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception:
+        log.warning("ปิดการเชื่อมต่อของ extractor ไม่สำเร็จ", exc_info=True)
 
 
 def _run_server(

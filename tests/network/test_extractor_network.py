@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import time
+from collections.abc import Iterator
 
 import pytest
 from PIL import Image
@@ -21,9 +22,11 @@ SINGLE_VIDEO_PLAYLIST = (
 
 
 @pytest.fixture(scope="module")
-def ex() -> YtDlpExtractor:
+def ex() -> Iterator[YtDlpExtractor]:
     ytdlp_version()  # import yt_dlp ก่อน จะได้ไม่นับเวลา import ไปในเวลา probe
-    return YtDlpExtractor()
+    extractor = YtDlpExtractor()
+    yield extractor
+    extractor.close()
 
 
 def _timed_probe(ex: YtDlpExtractor) -> tuple[dict, float]:

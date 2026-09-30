@@ -24,8 +24,8 @@ def _run_once(root: Path) -> tuple[float, dict]:
     root.mkdir(parents=True)
     db = Database(root / "app.db")
     db.migrate()
+    extractor = YtDlpExtractor()
     try:
-        extractor = YtDlpExtractor()
         videos = VideoService(db, extractor)
         cache_root = root / "cache"
         start = time.monotonic()
@@ -33,6 +33,7 @@ def _run_once(root: Path) -> tuple[float, dict]:
         index = storyboard.get_storyboard(BBB, videos, cache_root, extractor.fetch)
         elapsed = time.monotonic() - start
     finally:
+        extractor.close()
         db.close()
     assert info["videoId"] == BBB
     return elapsed, {"index": index, "cache": cache_root / BBB / storyboard.FOLDER}

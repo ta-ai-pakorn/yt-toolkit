@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -32,6 +33,9 @@ _PROBE_OPTS = {
     "noplaylist": True,
     "socket_timeout": 10,
 }
+FETCH_TIMEOUT = 10  # วินาที ต่อทุกช่วงของคำขอ (เชื่อมต่อ/ส่ง/รอ/อ่าน) เท่ากับ httpx.get(timeout=10) แบบเดิม
+# แผ่น storyboard โหลดพร้อมกันได้ถึง 8 แผ่น (storyboard.build) เก็บการเชื่อมต่อไว้ใช้ซ้ำ ไม่ต้องจับมือ TLS ใหม่ทุกแผ่น
+_FETCH_LIMITS = httpx.Limits(max_connections=16, max_keepalive_connections=8)
 _PLAYLIST_OPTS = {
     "quiet": True,
     "no_warnings": True,
@@ -98,6 +102,34 @@ class _YtDlpLogger:
 
 
 class YtDlpExtractor:
+    """ตัวจริง: probe/playlist ผ่าน yt-dlp, fetch ผ่าน httpx.Client ตัวเดียวที่ใช้ร่วมกันทุก thread
+
+    client สร้างเมื่อ fetch ครั้งแรก และปิดด้วย close() ตอนปิดโปรแกรม (เรียกซ้ำได้ ใช้ต่อหลัง close ได้)
+    transport มีไว้ให้เทสใส่ httpx.MockTransport แทนเน็ตจริง
+    """
+
+    def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
+        self._transport = transport
+        self._client: httpx.Client | None = None
+        self._client_lock = threading.Lock()
+
+    def _http(self) -> httpx.Client:
+        with self._client_lock:
+            if self._client is None:
+                self._client = httpx.Client(
+                    timeout=FETCH_TIMEOUT,
+                    follow_redirects=True,
+                    limits=_FETCH_LIMITS,
+                    transport=self._transport,
+                )
+            return self._client
+
+    def close(self) -> None:
+        with self._client_lock:
+            client, self._client = self._client, None
+        if client is not None:
+            client.close()
+
     def probe(self, video_id: str) -> dict:
         _check_video_id(video_id)
         info = self._extract(f"https://www.youtube.com/watch?v={video_id}", _PROBE_OPTS)
@@ -125,7 +157,7 @@ class YtDlpExtractor:
 
     def fetch(self, url: str) -> bytes:
         try:
-            response = httpx.get(url, timeout=10, follow_redirects=True)
+            response = self._http().get(url)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise YtError("E_NETWORK", f"{type(exc).__name__}: {exc}") from exc

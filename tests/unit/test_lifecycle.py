@@ -899,3 +899,56 @@ def test_run_app_starts_even_if_warm_up_import_fails(paths, fake_platform, monke
         threads[0].join(5)
     assert code == 0
     assert "เตรียม yt-dlp ล่วงหน้าไม่สำเร็จ" in caplog.text
+
+
+# ---------- final review: ปิด httpx client ของ extractor ตอนปิดโปรแกรม ----------
+
+
+class _ClosingExtractor:
+    def __init__(self) -> None:
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+def _services_with(extractor, paths):
+    from yttoolkit.core.db import Database
+    from yttoolkit.core.videos import VideoService
+
+    def fake_open_services(p, *args, **kwargs):
+        db = Database(paths.db)
+        db.migrate()
+        return db, VideoService(db, extractor), extractor
+
+    return fake_open_services
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_run_app_closes_extractor_on_shutdown(paths, fake_platform, monkeypatch, ready):
+    extractor = _ClosingExtractor()
+    monkeypatch.setattr(lifecycle, "open_services", _services_with(extractor, paths))
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, ready=ready)
+    assert code == (0 if ready else 1)
+    assert extractor.closed == 1
+    assert _db_closed(ctx.db)
+
+
+def test_run_app_closes_db_even_if_extractor_close_fails(paths, fake_platform, monkeypatch, caplog):
+    class Broken(_ClosingExtractor):
+        def close(self) -> None:
+            raise RuntimeError("ปิดไม่ได้")
+
+    monkeypatch.setattr(lifecycle, "open_services", _services_with(Broken(), paths))
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    assert code == 0
+    assert _db_closed(ctx.db)
+    assert "ปิดการเชื่อมต่อของ extractor ไม่สำเร็จ" in caplog.text
+
+
+def test_run_app_accepts_extractor_without_close(paths, fake_platform, monkeypatch):
+    monkeypatch.setenv("YT_TOOLKIT_FAKE", "1")
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    assert code == 0
+    assert not hasattr(ctx.extractor, "close")

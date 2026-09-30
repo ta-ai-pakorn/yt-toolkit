@@ -479,23 +479,45 @@ def test_ytdlp_playlist_rejects_malformed_ids(
     assert ydl.instances == []
 
 
-# ---------- YtDlpExtractor.fetch (httpx is replaced) ----------
+# ---------- YtDlpExtractor.fetch (httpx transport is replaced, no network) ----------
+
+URL = "https://i.ytimg.com/sb/x/M0.jpg"
 
 
-def test_ytdlp_fetch_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict = {}
+def _mock(handler) -> YtDlpExtractor:
+    return YtDlpExtractor(transport=httpx.MockTransport(handler))
 
-    def get(url: str, **kwargs: object) -> httpx.Response:
-        seen.update(url=url, **kwargs)
-        return httpx.Response(200, content=b"img", request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(extractor_mod.httpx, "get", get)
-    assert YtDlpExtractor().fetch("https://i.ytimg.com/sb/x/M0.jpg") == b"img"
-    assert seen == {
-        "url": "https://i.ytimg.com/sb/x/M0.jpg",
-        "timeout": 10,
-        "follow_redirects": True,
-    }
+def test_ytdlp_fetch_ok() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, content=b"img")
+
+    extractor = _mock(handler)
+    try:
+        assert extractor.fetch(URL) == b"img"
+    finally:
+        extractor.close()
+    assert [str(r.url) for r in seen] == [URL]
+    assert seen[0].method == "GET"
+
+
+def test_ytdlp_fetch_keeps_timeout_and_follows_redirects() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("M0.jpg"):
+            return httpx.Response(302, headers={"Location": "https://i.ytimg.com/sb/x/M0b.jpg"})
+        return httpx.Response(200, content=b"moved")
+
+    extractor = _mock(handler)
+    try:
+        assert extractor.fetch(URL) == b"moved"
+        client = extractor._http()
+        assert client.timeout == httpx.Timeout(10)
+        assert client.follow_redirects is True
+    finally:
+        extractor.close()
 
 
 @pytest.mark.parametrize(
@@ -508,19 +530,106 @@ def test_ytdlp_fetch_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     ],
     ids=["connect", "timeout", "404", "503"],
 )
-def test_ytdlp_fetch_failure_is_network_error(
-    monkeypatch: pytest.MonkeyPatch, outcome: object
-) -> None:
-    def get(url: str, **kwargs: object) -> httpx.Response:
+def test_ytdlp_fetch_failure_is_network_error(outcome: object) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
         if isinstance(outcome, Exception):
             raise outcome
-        return httpx.Response(outcome, request=httpx.Request("GET", url))
+        return httpx.Response(outcome)
 
-    monkeypatch.setattr(extractor_mod.httpx, "get", get)
-    with pytest.raises(YtError) as exc:
-        YtDlpExtractor().fetch("https://i.ytimg.com/sb/x/M0.jpg")
+    extractor = _mock(handler)
+    try:
+        with pytest.raises(YtError) as exc:
+            extractor.fetch(URL)
+    finally:
+        extractor.close()
     assert exc.value.code == "E_NETWORK"
     assert exc.value.detail
+
+
+class _CountingClient(httpx.Client):
+    created: ClassVar[int] = 0
+    closed: ClassVar[int] = 0
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        type(self).created += 1
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+
+    def close(self) -> None:
+        type(self).closed += 1
+        super().close()
+
+
+@pytest.fixture
+def counting(monkeypatch: pytest.MonkeyPatch) -> type[_CountingClient]:
+    _CountingClient.created = _CountingClient.closed = 0
+    monkeypatch.setattr(extractor_mod.httpx, "Client", _CountingClient)
+    return _CountingClient
+
+
+def test_ytdlp_fetch_reuses_one_client(counting: type[_CountingClient]) -> None:
+    extractor = _mock(lambda request: httpx.Response(200, content=b"x"))
+    assert counting.created == 0  # สร้างเมื่อใช้ครั้งแรกเท่านั้น
+    for _ in range(5):
+        extractor.fetch(URL)
+    assert counting.created == 1
+    extractor.close()
+    assert counting.closed == 1
+
+
+def test_ytdlp_fetch_is_thread_safe_and_creates_one_client(
+    counting: type[_CountingClient],
+) -> None:
+    import threading
+    import time
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        time.sleep(0.01)
+        return httpx.Response(200, content=request.url.path.encode())
+
+    extractor = _mock(handler)
+    barrier = threading.Barrier(16)
+    results: list[bytes] = []
+    errors: list[BaseException] = []
+
+    def worker(n: int) -> None:
+        try:
+            barrier.wait(5)
+            results.append(extractor.fetch(f"https://i.ytimg.com/sb/x/M{n}.jpg"))
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    extractor.close()
+    assert not errors
+    assert sorted(results) == sorted(f"/sb/x/M{n}.jpg".encode() for n in range(16))
+    assert counting.created == 1
+
+
+def test_ytdlp_close_is_safe_to_repeat_and_before_use(
+    counting: type[_CountingClient],
+) -> None:
+    extractor = _mock(lambda request: httpx.Response(200, content=b"x"))
+    extractor.close()  # ยังไม่เคยสร้าง client
+    assert counting.created == 0
+    extractor.fetch(URL)
+    extractor.close()
+    extractor.close()
+    assert counting.closed == 1
+
+
+def test_ytdlp_fetch_after_close_opens_a_new_client(
+    counting: type[_CountingClient],
+) -> None:
+    extractor = _mock(lambda request: httpx.Response(200, content=b"x"))
+    extractor.fetch(URL)
+    extractor.close()
+    assert extractor.fetch(URL) == b"x"
+    extractor.close()
+    assert (counting.created, counting.closed) == (2, 2)
 
 
 # ---------- protocol and module boundaries ----------
