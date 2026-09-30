@@ -11,7 +11,8 @@ import httpx
 import pytest
 import yt_dlp
 from PIL import Image
-from yt_dlp.networking.exceptions import RequestError, TransportError
+from yt_dlp.networking.common import Response
+from yt_dlp.networking.exceptions import HTTPError, RequestError, TransportError
 from yt_dlp.utils import DownloadError, ExtractorError, UnsupportedError
 
 from yttoolkit.core import extractor as extractor_mod
@@ -774,3 +775,286 @@ def test_ytdlp_curated_music_playlist_is_read_as_a_playlist(ydl: type[FakeYDL]) 
     YtDlpExtractor().playlist(curated, 200)
     (inst,) = ydl.instances
     assert inst.urls == [f"https://www.youtube.com/playlist?list={curated}"]
+
+
+# ---------- fetch_subtitle: FakeExtractor ----------
+
+SUBS = "https://fake.invalid/subs/"
+SUB_VID = "SUBTEST0001"
+
+
+def _json3(events: list[dict], **extra: object) -> bytes:
+    doc = {"wireMagic": "pb3", **extra, "events": events}
+    return json.dumps(doc, ensure_ascii=False).encode("utf-8")
+
+
+@pytest.fixture
+def subs_root(tmp_path: Path) -> Path:
+    folder = tmp_path / "subs" / SUB_VID
+    folder.mkdir(parents=True)
+    (folder / "th.json3").write_bytes(
+        _json3(
+            [
+                {"tStartMs": 0, "dDurationMs": 1500, "segs": [{"utf8": "สวัสดี"}]},
+                {"tStartMs": 2000, "dDurationMs": 1200, "segs": [{"utf8": "ครับ"}]},
+            ]
+        )
+    )
+    (folder / "th.vtt").write_bytes(b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nhi\n")
+    (folder / "tlang-en.json3").write_bytes(b'{"events": [], "tag": "english"}')
+    (tmp_path / "secret.json3").write_bytes(b"do not read")
+    return tmp_path
+
+
+@pytest.fixture
+def fake_subs(subs_root: Path) -> FakeExtractor:
+    return FakeExtractor(subs_root)
+
+
+def test_fake_subs_prefix_constant() -> None:
+    assert FakeExtractor.SUBS_PREFIX == "https://fake.invalid/subs/"
+
+
+def test_fake_fetch_subtitle_returns_the_file_bytes_unchanged(
+    fake_subs: FakeExtractor, subs_root: Path
+) -> None:
+    expected = (subs_root / "subs" / SUB_VID / "th.json3").read_bytes()
+    assert fake_subs.fetch_subtitle(f"{SUBS}{SUB_VID}/th.json3") == expected
+    assert fake_subs.fetch_subtitle(f"{SUBS}{SUB_VID}/th.vtt").startswith(b"WEBVTT")
+
+
+def test_fake_fetch_subtitle_tlang_maps_to_tlang_file(fake_subs: FakeExtractor) -> None:
+    data = fake_subs.fetch_subtitle(f"{SUBS}{SUB_VID}/th-orig.json3?tlang=en")
+    assert json.loads(data)["tag"] == "english"
+
+
+def test_fake_fetch_subtitle_ignores_unrelated_query_keys(fake_subs: FakeExtractor) -> None:
+    data = fake_subs.fetch_subtitle(f"{SUBS}{SUB_VID}/th.vtt?expire=1&sig=abc")
+    assert data.startswith(b"WEBVTT")
+
+
+def test_fake_fetch_subtitle_repeat_tiles_events_with_shifted_starts(
+    fake_subs: FakeExtractor,
+) -> None:
+    data = fake_subs.fetch_subtitle(f"{SUBS}{SUB_VID}/th.json3?repeat=3")
+    doc = json.loads(data)
+    events = doc["events"]
+    assert len(events) == 6
+    assert doc["wireMagic"] == "pb3"
+    # span = max(tStartMs + dDurationMs) = 3200 -> ปัดขึ้นเป็น 4000
+    assert [e["tStartMs"] for e in events] == [0, 2000, 4000, 6000, 8000, 10000]
+    assert [e["dDurationMs"] for e in events] == [1500, 1200] * 3
+    assert events[4]["segs"] == [{"utf8": "สวัสดี"}]
+    assert "สวัสดี" in data.decode("utf-8")  # ensure_ascii=False
+
+
+def test_fake_fetch_subtitle_repeat_rounds_span_up_to_a_whole_second(
+    tmp_path: Path,
+) -> None:
+    folder = tmp_path / "subs" / SUB_VID
+    folder.mkdir(parents=True)
+    (folder / "a.json3").write_bytes(_json3([{"tStartMs": 100, "dDurationMs": 2000}]))
+    (folder / "b.json3").write_bytes(_json3([{"tStartMs": 0, "dDurationMs": 3000}]))
+    fake = FakeExtractor(tmp_path)
+    a = json.loads(fake.fetch_subtitle(f"{SUBS}{SUB_VID}/a.json3?repeat=2"))
+    b = json.loads(fake.fetch_subtitle(f"{SUBS}{SUB_VID}/b.json3?repeat=2"))
+    assert [e["tStartMs"] for e in a["events"]] == [100, 3100]
+    assert [e["tStartMs"] for e in b["events"]] == [0, 3000]
+
+
+@pytest.mark.parametrize("repeat", ["0", "51", "-1", "abc", ""])
+def test_fake_fetch_subtitle_repeat_out_of_range_is_network_error(
+    fake_subs: FakeExtractor, repeat: str
+) -> None:
+    with pytest.raises(YtError) as exc:
+        fake_subs.fetch_subtitle(f"{SUBS}{SUB_VID}/th.json3?repeat={repeat}")
+    assert exc.value.code == "E_NETWORK"
+
+
+def test_fake_fetch_subtitle_repeat_limits_are_inclusive(fake_subs: FakeExtractor) -> None:
+    one = fake_subs.fetch_subtitle(f"{SUBS}{SUB_VID}/th.json3?repeat=1")
+    fifty = fake_subs.fetch_subtitle(f"{SUBS}{SUB_VID}/th.json3?repeat=50")
+    assert len(json.loads(one)["events"]) == 2
+    assert len(json.loads(fifty)["events"]) == 100
+
+
+def test_fake_fetch_subtitle_repeat_is_json3_only(fake_subs: FakeExtractor) -> None:
+    with pytest.raises(YtError) as exc:
+        fake_subs.fetch_subtitle(f"{SUBS}{SUB_VID}/th.vtt?repeat=2")
+    assert exc.value.code == "E_NETWORK"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"{SUBS}../secret.json3",
+        f"{SUBS}{SUB_VID}/../../secret.json3",
+        f"{SUBS}%2e%2e/secret.json3",
+        f"{SUBS}{SUB_VID}/%2e%2e%2fsecret.json3",
+        f"{SUBS}{SUB_VID}\\th.json3",
+        f"{SUBS}..\\secret.json3",
+        f"{SUBS}/etc/passwd",
+        f"{SUBS}C:/Windows/win.ini",
+        "https://fake.invalid/subs//etc/passwd",
+        "https://other.example/subs/SUBTEST0001/th.json3",
+        "http://fake.invalid/subs/SUBTEST0001/th.json3",
+        "file:///etc/passwd",
+        "/subs/SUBTEST0001/th.json3",
+        f"{SUBS}",
+        f"{SUBS}{SUB_VID}",
+        f"{SUBS}{SUB_VID}/",
+        f"{SUBS}{SUB_VID}/th.json3/extra",
+        f"{SUBS}{SUB_VID}/missing.json3",
+        f"{SUBS}{SUB_VID}/th.json3?tlang=../x",
+        f"{SUBS}{SUB_VID}/th.json3?tlang=%2e%2e",
+        f"{SUBS}{SUB_VID}/th.json3?tlang=zz",
+        f"{SUBS}NOSUCHVIDEO/th.json3",
+    ],
+)
+def test_fake_fetch_subtitle_bad_or_missing_paths_are_network_errors(
+    fake_subs: FakeExtractor, url: str
+) -> None:
+    with pytest.raises(YtError) as exc:
+        fake_subs.fetch_subtitle(url)
+    assert exc.value.code == "E_NETWORK"
+    assert "fake" in exc.value.detail
+
+
+def test_fake_fetch_subtitle_records_calls(fake_subs: FakeExtractor) -> None:
+    ok = f"{SUBS}{SUB_VID}/th.vtt"
+    bad = f"{SUBS}{SUB_VID}/missing.vtt"
+    fake_subs.fetch_subtitle(ok)
+    with pytest.raises(YtError):
+        fake_subs.fetch_subtitle(bad)
+    assert fake_subs.calls == [("fetch_subtitle", ok), ("fetch_subtitle", bad)]
+
+
+# ---------- fetch_subtitle: YtDlpExtractor (urlopen replaced, no network) ----------
+
+TIMEDTEXT = "https://www.youtube.com/api/timedtext?v=x&fmt=json3"
+
+
+def _http_error(status: int) -> HTTPError:
+    return HTTPError(Response(io.BytesIO(b""), TIMEDTEXT, {}, status=status))
+
+
+class UrlopenYDL:
+    """แทน yt_dlp.YoutubeDL ให้ urlopen คืนไบต์หรือโยน error ที่ตั้งไว้"""
+
+    instances: ClassVar[list[UrlopenYDL]] = []
+    outcome: ClassVar[object] = None
+
+    def __init__(self, params: dict) -> None:
+        self.params = params
+        self.urls: list[str] = []
+        self.entered = 0
+        self.exited = 0
+        UrlopenYDL.instances.append(self)
+
+    def __enter__(self) -> Self:
+        self.entered += 1
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.exited += 1
+
+    def urlopen(self, url: str) -> io.BytesIO:
+        self.urls.append(url)
+        if isinstance(UrlopenYDL.outcome, BaseException):
+            raise UrlopenYDL.outcome
+        assert isinstance(UrlopenYDL.outcome, bytes)
+        return io.BytesIO(UrlopenYDL.outcome)
+
+
+@pytest.fixture
+def urlopen_ydl(monkeypatch: pytest.MonkeyPatch) -> type[UrlopenYDL]:
+    UrlopenYDL.instances = []
+    UrlopenYDL.outcome = b"x"
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", UrlopenYDL)
+    return UrlopenYDL
+
+
+def test_ytdlp_fetch_subtitle_returns_the_body(urlopen_ydl: type[UrlopenYDL]) -> None:
+    assert YtDlpExtractor().fetch_subtitle(TIMEDTEXT) == b"x"
+    (inst,) = urlopen_ydl.instances
+    assert inst.urls == [TIMEDTEXT]
+    assert (inst.entered, inst.exited) == (1, 1)
+    expected = {"quiet": True, "skip_download": True, "socket_timeout": 10}
+    assert expected.items() <= inst.params.items()
+    assert inst.params["logger"] is not None
+
+
+def test_ytdlp_fetch_subtitle_429_is_bot_check(urlopen_ydl: type[UrlopenYDL]) -> None:
+    urlopen_ydl.outcome = _http_error(429)
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().fetch_subtitle(TIMEDTEXT)
+    assert exc.value.code == "E_BOT_CHECK"
+    assert "429" in exc.value.detail
+
+
+@pytest.mark.parametrize("status", [403, 404, 410, 500, 502, 401])
+def test_ytdlp_fetch_subtitle_other_http_errors_are_network(
+    urlopen_ydl: type[UrlopenYDL], status: int
+) -> None:
+    urlopen_ydl.outcome = _http_error(status)
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().fetch_subtitle(TIMEDTEXT)
+    assert exc.value.code == "E_NETWORK"
+    assert str(status) in exc.value.detail
+
+
+@pytest.mark.parametrize("error_type", [TransportError, RequestError])
+def test_ytdlp_fetch_subtitle_request_error_is_network(
+    urlopen_ydl: type[UrlopenYDL], error_type: type[RequestError]
+) -> None:
+    urlopen_ydl.outcome = error_type("Connection reset by peer")
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().fetch_subtitle(TIMEDTEXT)
+    assert exc.value.code == "E_NETWORK"
+
+
+def test_ytdlp_fetch_subtitle_other_ytdlp_errors_go_through_classify(
+    urlopen_ydl: type[UrlopenYDL],
+) -> None:
+    urlopen_ydl.outcome = DownloadError("\x1b[0;31mERROR:\x1b[0m Video unavailable")
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().fetch_subtitle(TIMEDTEXT)
+    assert exc.value.code == "E_VIDEO_UNAVAILABLE"
+    assert "\x1b" not in exc.value.detail
+
+
+def test_ytdlp_fetch_subtitle_strips_ansi_from_network_details(
+    urlopen_ydl: type[UrlopenYDL],
+) -> None:
+    urlopen_ydl.outcome = TransportError("\x1b[0;31mERROR:\x1b[0m reset")
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().fetch_subtitle(TIMEDTEXT)
+    assert exc.value.code == "E_NETWORK"
+    assert "\x1b" not in exc.value.detail
+
+
+def test_ytdlp_fetch_subtitle_unexpected_error_is_unknown(
+    urlopen_ydl: type[UrlopenYDL],
+) -> None:
+    urlopen_ydl.outcome = KeyError("boom")
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().fetch_subtitle(TIMEDTEXT)
+    assert exc.value.code == "E_UNKNOWN"
+    assert "KeyError" in exc.value.detail
+
+
+def test_protocol_requires_fetch_subtitle(fake: FakeExtractor) -> None:
+    assert isinstance(fake, Extractor)
+    assert isinstance(YtDlpExtractor(), Extractor)
+
+    class NoSubs:
+        def probe(self, video_id: str) -> dict:
+            return {}
+
+        def playlist(self, playlist_id: str, limit: int, video_id: str | None = None) -> dict:
+            return {}
+
+        def fetch(self, url: str) -> bytes:
+            return b""
+
+    assert not isinstance(NoSubs(), Extractor)

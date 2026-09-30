@@ -14,6 +14,7 @@ import re
 import threading
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+from urllib.parse import parse_qs
 
 import httpx
 
@@ -61,6 +62,13 @@ class Extractor(Protocol):
 
     def fetch(self, url: str) -> bytes:
         """โหลดไฟล์ภาพ (เช่นแผ่น storyboard) ด้วย HTTP GET"""
+        ...
+
+    def fetch_subtitle(self, url: str) -> bytes:
+        """โหลดไฟล์ซับ (json3/vtt) จากลิงก์ timedtext ใน probe
+
+        ลิงก์มีลายเซ็นและหมดอายุ: 403/404/410 -> E_NETWORK (ผู้เรียกไป probe ใหม่แล้วลองอีกครั้ง), 429 -> E_BOT_CHECK
+        """
         ...
 
 
@@ -176,6 +184,33 @@ class YtDlpExtractor:
             raise YtError("E_NETWORK", f"{type(exc).__name__}: {exc}") from exc
         return response.content
 
+    def fetch_subtitle(self, url: str) -> bytes:
+        """โหลดไฟล์ซับผ่าน urlopen ของ yt-dlp แล้วแปลงทุกความผิดพลาดเป็น YtError"""
+        import yt_dlp
+        from yt_dlp.networking.exceptions import HTTPError, RequestError
+        from yt_dlp.utils import YoutubeDLError
+
+        try:
+            with yt_dlp.YoutubeDL({**_PROBE_OPTS, "logger": _YtDlpLogger()}) as ydl:
+                with ydl.urlopen(url) as resp:
+                    return resp.read()
+        except YtError:
+            raise
+        except HTTPError as exc:
+            message = _ANSI.sub("", str(exc)) or type(exc).__name__
+            if exc.status == 429:
+                raise YtError("E_BOT_CHECK", message) from exc
+            # 403/404/410 = ลิงก์ที่เซ็นไว้หมดอายุ (ผู้เรียก probe ใหม่เอง) ที่เหลือก็ถือเป็นปัญหาเครือข่ายเช่นกัน
+            raise YtError("E_NETWORK", message) from exc
+        except RequestError as exc:
+            message = _ANSI.sub("", str(exc)) or type(exc).__name__
+            raise YtError("E_NETWORK", message) from exc
+        except YoutubeDLError as exc:
+            message = _ANSI.sub("", str(exc)) or type(exc).__name__
+            raise YtError(classify(message), message) from exc
+        except Exception as exc:
+            raise YtError("E_UNKNOWN", f"{type(exc).__name__}: {exc}") from exc
+
     @staticmethod
     def _extract(url: str, opts: dict) -> dict:
         """เรียก yt-dlp แล้วแปลงทุกความผิดพลาดเป็น YtError (ห้ามมี exception ดิบหลุดออกไป)"""
@@ -209,7 +244,9 @@ class FakeExtractor:
 
     PRIVATE_ID = "PRIVATEVID1"
     STORYBOARD_PREFIX = "https://fake.invalid/storyboard/"
+    SUBS_PREFIX = "https://fake.invalid/subs/"
     _SAFE_NAME = re.compile(r"[A-Za-z0-9_-]+")
+    _REPEAT_RANGE = range(1, 51)
 
     def __init__(self, fixtures_root: Path) -> None:
         self.root = Path(fixtures_root)
@@ -252,6 +289,65 @@ class FakeExtractor:
                 if path.is_file() and path.resolve().is_relative_to(base):
                     return path.read_bytes()
         raise YtError("E_NETWORK", f"fake: ไม่มีไฟล์สำหรับ {url}")
+
+    def fetch_subtitle(self, url: str) -> bytes:
+        """https://fake.invalid/subs/<videoId>/<ชื่อ>.<นามสกุล>[?tlang=X][&repeat=n] -> subs/<videoId>/...
+
+        tlang=X อ่านไฟล์ tlang-X.<นามสกุล> แทน, repeat=n (1..50 เฉพาะ json3) ต่อเหตุการณ์ซ้ำ n รอบ
+        ใช้ทดสอบคลิปยาวโดยไม่ต้องเก็บไฟล์ใหญ่ ทุกชิ้นส่วนของพาธต้องเป็นชื่อปลอดภัย และไฟล์ต้องอยู่ใต้ subs/
+        """
+        self.calls.append(("fetch_subtitle", url))
+        missing = YtError("E_NETWORK", f"fake: ไม่มีไฟล์สำหรับ {url}")
+        if not url.startswith(self.SUBS_PREFIX):
+            raise missing
+        rest, _, query_text = url[len(self.SUBS_PREFIX) :].partition("?")
+        parts = rest.split("/")
+        if len(parts) != 2:
+            raise missing
+        video_id, filename = parts
+        stem, dot, ext = filename.rpartition(".")
+        if not (dot and all(self._SAFE_NAME.fullmatch(p) for p in (video_id, stem, ext))):
+            raise missing
+        query = parse_qs(query_text, keep_blank_values=True)
+        tlang = query.get("tlang", [None])[0]
+        if tlang is not None:
+            if not self._SAFE_NAME.fullmatch(tlang):
+                raise missing
+            stem = f"tlang-{tlang}"
+        repeat = self._parse_repeat(query.get("repeat", [None])[0], ext, missing)
+        base = (self.root / "subs").resolve()
+        path = (base / video_id / f"{stem}.{ext}").resolve()
+        if not (path.is_relative_to(base) and path.is_file()):
+            raise missing
+        data = path.read_bytes()
+        return data if repeat is None else self._tile_json3(data, repeat, missing)
+
+    def _parse_repeat(self, raw: str | None, ext: str, error: YtError) -> int | None:
+        if raw is None:
+            return None
+        if ext != "json3" or not raw.isascii() or not raw.isdigit() or int(raw) not in self._REPEAT_RANGE:
+            raise error
+        return int(raw)
+
+    @staticmethod
+    def _tile_json3(data: bytes, times: int, error: YtError) -> bytes:
+        """ต่อเหตุการณ์ n ชุด ชุดที่ k เลื่อน tStartMs ไป k*span (span = เวลาจบสุดท้าย ปัดขึ้นเป็นวินาทีเต็ม)"""
+        try:
+            doc = json.loads(data)
+            events = list(doc["events"])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise error from exc
+        end = max((e.get("tStartMs", 0) + e.get("dDurationMs", 0) for e in events), default=0)
+        span = -(-end // 1000) * 1000
+        tiled = []
+        for k in range(times):
+            for event in events:
+                copy = json.loads(json.dumps(event))
+                if "tStartMs" in copy:
+                    copy["tStartMs"] += k * span
+                tiled.append(copy)
+        doc["events"] = tiled
+        return json.dumps(doc, ensure_ascii=False).encode("utf-8")
 
     def _load(self, kind: str, ident: str) -> dict | None:
         """อ่าน fixture ใหม่ทุกครั้ง ผู้เรียกจึงแก้ dict ที่ได้ไปได้โดยไม่กระทบครั้งถัดไป"""
