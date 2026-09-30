@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { CaptionsOff, Search, X } from "lucide-react"
-import { useDeferredValue, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { useDeferredValue, useId, useMemo, useRef, useState, type KeyboardEvent } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,8 +10,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { fill, th } from "@/i18n/th"
 import type { Cue, SubtitleTrack, SubtitleTracks } from "@/lib/types"
 
+import { hasCode } from "./errors"
 import { cueIndexAt } from "./frame-target"
 import { LoadError } from "./load-error"
+import { TranslationBlocked } from "./subs/translation-blocked"
 import { tokensQuery } from "./subs-queries"
 import { useSubSettings } from "./subs-settings"
 import { SubtitleGate } from "./subtitle-gate"
@@ -143,16 +145,28 @@ function TranscriptLines({ cues, at, onPick }: LinesProps) {
   )
 }
 
-type TrackProps = { videoId: string; track: SubtitleTrack; at: number | null; onPick: (cue: Cue) => void }
+type TrackProps = {
+  videoId: string
+  track: SubtitleTrack
+  at: number | null
+  onPick: (cue: Cue) => void
+  /** ปุ่ม "ใช้ซับภาษาต้นฉบับ" เมื่อยูทูปไม่ให้โหลดซับแปล null = คลิปไม่มีแทร็กเริ่มต้น (ไม่มีปุ่ม) */
+  onUseOriginal: (() => void) | null
+}
 
-/** ทรานสคริปต์ของแทร็กที่ใช้อยู่ แบ่งบรรทัดตามความยาวซับที่เลือกในแท็บซับ (เห็นอะไรที่นี่ ได้แบบนั้นในไฟล์ .srt) */
-function TrackTranscript({ videoId, track, at, onPick }: TrackProps) {
+/**
+ * ทรานสคริปต์ของแทร็กที่ใช้อยู่ แบ่งบรรทัดตามความยาวซับที่เลือกในแท็บซับ (เห็นอะไรที่นี่ ได้แบบนั้นในไฟล์ .srt)
+ * สถานะเดียวกับตัวอย่างในแท็บซับ: แทร็กไม่มีข้อความ = Empty · ยูทูปไม่ให้โหลดซับแปล = ปุ่มใช้ซับภาษาต้นฉบับ
+ */
+function TrackTranscript({ videoId, track, at, onPick, onUseOriginal }: TrackProps) {
   const tokens = useQuery(tokensQuery(videoId, track.id))
   const { options } = useSubSettings()
   const cues = useCues(tokens.data?.tokens, options)
 
   let body
-  if (tokens.isError) {
+  if (hasCode(tokens.error, "E_NO_SUBTITLES")) body = <NoLines />
+  else if (hasCode(tokens.error, "E_TRANSLATION_BLOCKED")) body = <TranslationBlocked onUseOriginal={onUseOriginal} />
+  else if (tokens.isError) {
     body = <LoadError title={th.subs.loadError} error={tokens.error} onRetry={() => void tokens.refetch()} />
   } else if (!tokens.isSuccess) body = <LinesSkeleton />
   else if (cues.length === 0) body = <NoLines />
@@ -171,6 +185,7 @@ function Transcript({ videoId, data }: { videoId: string; data: SubtitleTracks }
   const track = trackInEffect(data, trackId)
   // เปลี่ยนแท็บแล้วล้างเวลาที่ไฮไลต์ไว้ เหมือนกดแถบแท็บ
   if (!track) return <NoTrack onGoToSubs={() => update({ tab: "subs", at: null })} />
+  const defaultTrackId = data.defaultTrackId
   return (
     <TrackTranscript
       videoId={videoId}
@@ -178,6 +193,8 @@ function Transcript({ videoId, data }: { videoId: string; data: SubtitleTracks }
       at={at}
       // FR-SUB-8: กดบรรทัด → แท็บภาพเฟรม ไฮไลต์ภาพของเวลานั้น (patch เดียว: update อ่าน URL ตอนสร้าง)
       onPick={(cue) => update({ tab: "frames", at: cue.startMs })}
+      // ยูทูปไม่ให้โหลดซับแปล: กลับไปแทร็กเริ่มต้นของคลิป (เปลี่ยนแค่แทร็กใน patch เดียว)
+      onUseOriginal={defaultTrackId ? () => update({ trackId: defaultTrackId }) : null}
     />
   )
 }
@@ -188,12 +205,13 @@ function Transcript({ videoId, data }: { videoId: string; data: SubtitleTracks }
  * มาจาก "ดูซับช่วงนี้" (?at=) = บรรทัดของเวลานั้นมีกรอบ เลื่อนมาให้เห็น และได้โฟกัส
  */
 export function TranscriptPanel({ videoId, enabled }: { videoId: string; enabled: boolean }) {
+  const titleId = useId()
   return (
-    <section aria-labelledby="transcript-title">
+    <section aria-labelledby={titleId}>
       <Card>
         <CardHeader>
           <CardTitle>
-            <h2 id="transcript-title" className="text-base font-medium">
+            <h2 id={titleId} className="text-base font-medium">
               {t.title}
             </h2>
           </CardTitle>

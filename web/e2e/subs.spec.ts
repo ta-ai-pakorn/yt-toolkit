@@ -266,6 +266,151 @@ test.describe("แท็บซับ", () => {
   })
 })
 
+const BLOCKED = "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน"
+const USE_ORIGINAL = "ใช้ซับภาษาต้นฉบับ"
+const EXPORT_BUTTONS = ["โหลด .srt", "โหลด .txt", "โหลด .md", "คัดลอกข้อความ"]
+const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: true })
+
+/** ข้อความของซับในตัวอย่าง: บรรทัดย่อยต่อด้วยช่องว่าง แบบเดียวกับที่ทรานสคริปต์แสดง */
+const cueTexts = (page: Page) =>
+  cues(page).evaluateAll((items) =>
+    items.map((item) =>
+      [...item.querySelectorAll('[data-slot="cue-line"]')]
+        .map((line) => line.textContent ?? "")
+        .join(" ")
+        .replace(/\s+/g, " "),
+    ),
+  )
+
+/** ยูทูปตอบ 429 กับซับแปล (backend แปลงเป็น 503 E_TRANSLATION_BLOCKED) คืนตัวนับคำขอ token ของแทร็กนั้น */
+async function blockTranslated(page: Page, videoId: string, trackId: string) {
+  const calls = { n: 0 }
+  await page.route(`**/api/videos/${videoId}/subtitles/${trackId}/tokens`, (route) => {
+    calls.n += 1
+    return route.fulfill({
+      status: 503,
+      json: { error: { code: "E_TRANSLATION_BLOCKED", message: BLOCKED, detail: null } },
+    })
+  })
+  return calls
+}
+
+test.describe("แท็บซับ: ซับแปลที่ยูทูปไม่ให้โหลด (E_TRANSLATION_BLOCKED)", () => {
+  test("บอกตรง ๆ ว่าซับแปลโหลดไม่ได้ ไม่มีปุ่มลองใหม่ ปุ่มโหลด/คัดลอกกดไม่ได้ สลับแท็บไม่ยิงซ้ำ · กด 'ใช้ซับภาษาต้นฉบับ' ได้ซับไทย", async ({
+    page,
+  }) => {
+    const calls = await blockTranslated(page, THAI, "t.en")
+    await page.goto(`/v/${THAI}?tab=subs&track=t.en`)
+    await expect(page.getByText(BLOCKED)).toBeVisible()
+    await expect(page.getByText("ยูทูปขอให้ยืนยันว่าไม่ใช่บอท", { exact: false })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "ลองใหม่" })).toHaveCount(0)
+    for (const name of EXPORT_BUTTONS) {
+      await expect(page.getByRole("button", { name })).toBeDisabled()
+    }
+    expect(calls.n).toBe(1)
+
+    // สลับไปทรานสคริปต์แล้วกลับมา: เห็นข้อความเดิมทั้งสองแท็บ โดยไม่ยิงคำขอไปยูทูปซ้ำ
+    await tab(page, "ทรานสคริปต์").click()
+    await expect(page.getByText(BLOCKED)).toBeVisible()
+    await expect(page.getByRole("button", { name: USE_ORIGINAL })).toBeVisible()
+    await tab(page, "ซับ").click()
+    await expect(page.getByText(BLOCKED)).toBeVisible()
+    expect(calls.n).toBe(1)
+
+    await page.getByRole("button", { name: USE_ORIGINAL }).click()
+    await expect(page).toHaveURL(/[?&]track=a\.th-orig(&|$)/)
+    await expect(page).toHaveURL(/[?&]tab=subs(&|$)/)
+    await expect(trackValue(page)).toHaveText("ไทย (อัตโนมัติ)")
+    await expect(cues(page)).toHaveCount(5)
+    await expect(firstCueLines(page).first()).toContainText("สวัสดี")
+    await expect(page.getByText(BLOCKED)).toHaveCount(0)
+    for (const name of EXPORT_BUTTONS) {
+      await expect(page.getByRole("button", { name })).toBeEnabled()
+    }
+  })
+
+  test("คลิปไม่มีแทร็กเริ่มต้น: บอกข้อความเดียวกันแต่ไม่มีปุ่ม 'ใช้ซับภาษาต้นฉบับ'", async ({ page }) => {
+    await blockTranslated(page, NO_ORIG, "t.en")
+    await page.goto(`/v/${NO_ORIG}?tab=subs&track=t.en`)
+    await expect(page.getByText(BLOCKED)).toBeVisible()
+    await expect(page.getByRole("button", { name: USE_ORIGINAL })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "ลองใหม่" })).toHaveCount(0)
+    // ยังเลือกแทร็กอื่นเองได้
+    await expect(trackSelect(page)).toBeVisible()
+  })
+
+  test("error อื่นของ token (เช่น เน็ตหลุด) ก็ทำให้ปุ่มโหลด/คัดลอกกดไม่ได้", async ({ page }) => {
+    await page.route(`**/api/videos/${THAI}/subtitles/*/tokens`, (route) =>
+      route.fulfill({ status: 502, json: { error: { code: "E_NETWORK", message: "เน็ตหลุด ลองใหม่อีกครั้ง", detail: null } } }),
+    )
+    await page.goto(`/v/${THAI}?tab=subs`)
+    await expect(page.getByText("เน็ตหลุด ลองใหม่อีกครั้ง")).toBeVisible()
+    await expect(page.getByRole("button", { name: "ลองใหม่" })).toBeVisible()
+    for (const name of EXPORT_BUTTONS) {
+      await expect(page.getByRole("button", { name })).toBeDisabled()
+    }
+  })
+})
+
+test.describe("แท็บซับ: track= ใน URL ที่คลิปนี้ไม่มี", () => {
+  test("ใช้แทร็กเริ่มต้นแทน: ป้ายแทร็ก แท็บซับ และทรานสคริปต์ใช้ซับไทย (อัตโนมัติ)", async ({ page }) => {
+    await page.goto(`/v/${THAI}?tab=subs&track=o.xx`)
+    await expect(trackValue(page)).toHaveText("ไทย (อัตโนมัติ)")
+    await expect(cues(page)).toHaveCount(5)
+    await expect(page.getByText(PICK_HINT)).toHaveCount(0)
+    await expect(page.getByText("ซับ: ไทย (อัตโนมัติ)")).toBeVisible()
+    await tab(page, "ทรานสคริปต์").click()
+    await expect(page.getByText("จากแทร็ก ไทย (อัตโนมัติ)", { exact: false })).toBeVisible()
+    await expect(page.getByRole("list", { name: "บรรทัดในทรานสคริปต์" }).getByRole("listitem").first()).toBeVisible()
+  })
+})
+
+test.describe("แท็บซับ + ทรานสคริปต์ใช้ค่าความยาวซับก้อนเดียวกัน (Q4)", () => {
+  test("เบราว์เซอร์บล็อก localStorage และ sessionStorage: ปรับเองในแท็บซับ → ทรานสคริปต์แบ่งบรรทัดตรงกับตัวอย่างซับ และค่ายังอยู่เมื่อกลับมา", async ({
+    page,
+  }) => {
+    const pageErrors: string[] = []
+    page.on("pageerror", (error) => pageErrors.push(error.message))
+    await page.addInitScript(() => {
+      for (const name of ["localStorage", "sessionStorage"]) {
+        Object.defineProperty(window, name, {
+          get() {
+            throw new DOMException("The operation is insecure.", "SecurityError")
+          },
+        })
+      }
+    })
+    await openSubs(page, THAI)
+    const medium = await firstCueLines(page).allTextContents()
+    await page.getByRole("button", { name: "ปรับเอง" }).click()
+    const slider = page.getByRole("slider", { name: MAX_CHARS })
+    await slider.focus()
+    for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowLeft")
+    await expect(slider).toHaveAttribute("aria-valuenow", "15")
+    await expect(page.getByText("ใช้ค่าที่ปรับเอง")).toBeVisible()
+    await expect.poll(() => firstCueLines(page).allTextContents()).not.toEqual(medium)
+
+    // ข้อความของ 5 ซับแรกในตัวอย่าง (บรรทัดย่อยต่อด้วยช่องว่าง แบบที่ทรานสคริปต์แสดง)
+    const previewTexts = await cueTexts(page)
+    expect(previewTexts).toHaveLength(5)
+
+    await tab(page, "ทรานสคริปต์").click()
+    const lines = page.getByRole("list", { name: "บรรทัดในทรานสคริปต์" }).getByRole("listitem")
+    await expect(lines.first()).toBeVisible()
+    const transcriptTexts = await lines.evaluateAll((items) =>
+      items.slice(0, 5).map((item) => item.querySelector("button > span:last-child")?.textContent ?? ""),
+    )
+    expect(transcriptTexts).toEqual(previewTexts)
+
+    // กลับมาแท็บซับ: ค่าที่ปรับเองยังอยู่ (ไม่ถอยกลับเป็น 'กลาง')
+    await tab(page, "ซับ").click()
+    await expect(page.getByText("ใช้ค่าที่ปรับเอง")).toBeVisible()
+    await expect(cues(page)).toHaveCount(5)
+    expect(await cueTexts(page)).toEqual(previewTexts)
+    expect(pageErrors).toEqual([])
+  })
+})
+
 test.describe("แท็บซับ การเข้าถึง (axe)", () => {
   for (const scheme of ["dark", "light"] as const) {
     test(`แท็บซับ · กล่องปรับเองเปิด · กล่องซับแปลเปิด ไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
