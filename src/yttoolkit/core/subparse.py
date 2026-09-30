@@ -117,8 +117,12 @@ def _blocks_to_tokens(blocks: list[tuple[str, int, int]]) -> list[Token]:
     A block that repeats the block right before it (same text, starting before
     that one ends) is skipped. Every kept block after the first starts with a
     space, because owner lines are sentences.
+
+    Each kept block is spread over [start, min(end, next kept block's start)]
+    (never below start), so overlapping blocks cannot interleave their words
+    in the final sort.
     """
-    tokens: list[Token] = []
+    kept: list[tuple[str, int, int]] = []
     prev: tuple[str, int] | None = None  # (collapsed text, end) of the block before
     for text, start, end in blocks:
         key = _collapse(text).strip(" ")
@@ -126,8 +130,13 @@ def _blocks_to_tokens(blocks: list[tuple[str, int, int]]) -> list[Token]:
             continue
         repeat = prev is not None and key == prev[0] and start < prev[1]
         prev = (key, end)
-        if repeat:
-            continue
+        if not repeat:
+            kept.append((text, start, end))
+
+    tokens: list[Token] = []
+    for i, (text, start, end) in enumerate(kept):
+        if i + 1 < len(kept):
+            end = max(min(end, kept[i + 1][1]), start)
         block = split_block(text, start, end)
         if tokens and block and not block[0].t.startswith(" "):
             first = block[0]

@@ -258,6 +258,40 @@ def test_untimed_json3_skips_repeated_block_and_prefixes_space():
     assert [(t.s, t.e) for t in track.tokens] == [(0, 909), (909, 2000), (3000, 4000), (4000, 5000)]
 
 
+def test_overlapping_untimed_blocks_never_interleave_words():
+    doc = {
+        "events": [
+            {"tStartMs": 0, "dDurationMs": 4000, "segs": [{"utf8": "aa bb cc"}]},
+            {"tStartMs": 1000, "dDurationMs": 3000, "segs": [{"utf8": "dd ee"}]},
+            {"tStartMs": 1000, "dDurationMs": 500, "segs": [{"utf8": "ff"}]},  # same start
+        ]
+    }
+    track = parse_json3(json.dumps(doc).encode())
+    assert [t.t for t in track.tokens] == ["aa", " bb", " cc", " dd", " ee", " ff"]
+    # Block 1 is spread over 0-1000 (the next block's start), not 0-4000.
+    # Block 2 starts where block 3 starts, so it gets zero length (C6 allows e == s).
+    assert [(t.s, t.e) for t in track.tokens] == [
+        (0, 250),
+        (250, 625),
+        (625, 1000),
+        (1000, 1000),
+        (1000, 1000),
+        (1000, 1500),
+    ]
+    _assert_c6(track.tokens)
+
+
+def test_synthetic_translated_track_reads_in_order():
+    # tlang-en.json3 copies the overlapping ASR event times (fixture notes).
+    path = SUBS / "88o5Sk8_m1Y" / "tlang-en.json3"
+    track = parse_json3(path.read_bytes())
+    assert track.has_word_timing is False
+    lines = [seg["utf8"] for ev in _raw_events(path) for seg in ev["segs"]]
+    assert lines[:2] == ["Synthetic translated line 1.", "Synthetic translated line 2."]
+    assert cue_text(track.tokens) == " ".join(lines)
+    _assert_c6(track.tokens)
+
+
 def test_all_json3_fixtures_meet_the_c6_guarantees():
     for path in ALL_JSON3:
         if path.name == "broken.json3":
