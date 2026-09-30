@@ -1,7 +1,16 @@
 const FLAG = "chunk-reloaded"
 
 type FlagStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">
-type Deps = { storage?: FlagStorage; reload?: () => void }
+type Deps = { storage?: FlagStorage | null; reload?: () => void }
+
+/** sessionStorage ของแท็บนี้ · เบราว์เซอร์ที่ปิดการเก็บข้อมูลไว้โยน error ตั้งแต่ตอนแตะชื่อ sessionStorage จึงคืน null แทน */
+function sessionFlags(): FlagStorage | null {
+  try {
+    return sessionStorage
+  } catch {
+    return null
+  }
+}
 
 /** error จากการโหลดไฟล์โค้ดของหน้า (ไฟล์เก่าหายหลังอัปเดตโปรแกรม) ต่างจากบั๊กในโค้ดหน้านั้น */
 export function isChunkLoadError(error: unknown): boolean {
@@ -21,12 +30,12 @@ export async function importWithReload<T>(
   factory: () => Promise<T>,
   deps: Deps = {}
 ): Promise<T> {
-  const storage = deps.storage ?? sessionStorage
+  const storage = deps.storage === undefined ? sessionFlags() : deps.storage
   const reload = deps.reload ?? (() => location.reload())
   try {
     const module = await factory()
     try {
-      storage.removeItem(FLAG)
+      storage?.removeItem(FLAG)
     } catch {
       // ล้างธงไม่ได้ก็ไม่เป็นไร แค่ครั้งหน้าจะไม่โหลดใหม่ให้อัตโนมัติ
     }
@@ -40,7 +49,8 @@ export async function importWithReload<T>(
 }
 
 /** จองสิทธิ์โหลดใหม่หนึ่งครั้ง: คืน false ถ้าเคยโหลดใหม่แล้ว หรือเก็บธงไม่ได้ (กันวนไม่ได้จึงไม่เสี่ยง) */
-function claimReload(storage: FlagStorage): boolean {
+function claimReload(storage: FlagStorage | null): boolean {
+  if (!storage) return false
   try {
     if (storage.getItem(FLAG) !== null) return false
     storage.setItem(FLAG, "1")

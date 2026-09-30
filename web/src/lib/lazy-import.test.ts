@@ -58,6 +58,43 @@ describe("importWithReload", () => {
   })
 })
 
+describe("importWithReload เมื่อแตะ sessionStorage ไม่ได้เลย", () => {
+  // โหมดที่ปิดการเก็บข้อมูล: แค่อ่านชื่อ sessionStorage ก็โยน SecurityError
+  function blockSessionStorage() {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage")
+    Object.defineProperty(globalThis, "sessionStorage", {
+      configurable: true,
+      get() {
+        throw new Error("SecurityError")
+      },
+    })
+    return () => {
+      if (original) Object.defineProperty(globalThis, "sessionStorage", original)
+      else delete (globalThis as { sessionStorage?: unknown }).sessionStorage
+    }
+  }
+
+  it("โหลดโค้ดสำเร็จก็ได้หน้าตามปกติ ไม่ล้ม", async () => {
+    const restore = blockSessionStorage()
+    try {
+      await expect(importWithReload(async () => "หน้า")).resolves.toBe("หน้า")
+    } finally {
+      restore()
+    }
+  })
+
+  it("โหลดโค้ดไม่สำเร็จ: ไม่โหลดใหม่ (กันวนไม่ได้) แต่โยน error เดิมให้หน้าแจ้งผู้ใช้", async () => {
+    const restore = blockSessionStorage()
+    const reload = vi.fn()
+    try {
+      await expect(importWithReload(() => Promise.reject(new Error("404")), { reload })).rejects.toThrow("404")
+      expect(reload).not.toHaveBeenCalled()
+    } finally {
+      restore()
+    }
+  })
+})
+
 describe("isChunkLoadError", () => {
   it.each([
     "Failed to fetch dynamically imported module: http://x/assets/video-abc.js",
