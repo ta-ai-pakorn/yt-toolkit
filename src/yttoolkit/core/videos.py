@@ -16,7 +16,7 @@ from typing import Any
 
 from .db import PEEK_SENTINEL, Database
 from .extractor import Extractor
-from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix
+from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix_id
 from .yterrors import YtError
 
 log = logging.getLogger("yttoolkit")
@@ -524,7 +524,7 @@ class VideoService:
         """
         if not PLAYLIST_ID.fullmatch(playlist_id):
             raise YtError("E_INVALID_INPUT", f"playlist id ไม่ถูกรูปแบบ: {playlist_id!r}")
-        mix = is_mix(playlist_id)
+        mix = is_mix_id(playlist_id)
         if mix:
             if not video_id or not VIDEO_ID.fullmatch(video_id):
                 raise YtError(
@@ -539,17 +539,17 @@ class VideoService:
         returned = [e for e in (info.get("entries") or []) if isinstance(e, dict)]
         entries = []
         for entry in returned[:limit]:
-            video_id = str(entry.get("id") or "")
-            if not VIDEO_ID.fullmatch(video_id):
+            entry_id = str(entry.get("id") or "")
+            if not VIDEO_ID.fullmatch(entry_id):
                 continue  # คลิปที่ถูกลบ/ไม่มี id เปิดต่อไม่ได้
             item: dict[str, Any] = {
-                "videoId": video_id,
+                "videoId": entry_id,
                 "title": entry.get("title") or "",
             }
             duration = entry.get("duration")
             if isinstance(duration, int | float) and not isinstance(duration, bool):
                 item["durationS"] = round(duration)
-            item["thumbnailUrl"] = _playlist_thumbnail(entry, video_id)
+            item["thumbnailUrl"] = _playlist_thumbnail(entry, entry_id)
             entries.append(item)
         truncated = len(returned) > limit
         if mix:

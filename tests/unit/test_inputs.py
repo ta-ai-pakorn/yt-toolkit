@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from yttoolkit.core.inputs import InputItem, parse_line, parse_text
+from yttoolkit.core.inputs import (
+    InputItem,
+    is_mix_id,
+    parse_line,
+    parse_text,
+    scan_text,
+)
 
 VID = "dQw4w9WgXcQ"
 VID2 = "aqz-KE-bpKQ"
@@ -483,9 +489,14 @@ def test_ac_in_04_invalid_line_among_valid_ones():
     assert items[0].video_id == VID and items[2].video_id == VID2
 
 
-def test_different_invalid_lines_are_not_merged_but_repeats_are():
-    items = parse_text("hello\nworld\nhello\n; rm -rf /")
-    assert [i.input for i in items] == ["hello", "world", "; rm -rf /"]
+def test_different_invalid_links_are_not_merged_but_repeats_are():
+    text = "https://vimeo.com/1\nhttps://vimeo.com/2\nhttps://vimeo.com/1\nyoutube.com"
+    items = parse_text(text)
+    assert [i.input for i in items] == [
+        "https://vimeo.com/1",
+        "https://vimeo.com/2",
+        "youtube.com",
+    ]
     assert all(i.kind == "invalid" for i in items)
 
 
@@ -540,3 +551,264 @@ def test_input_item_is_frozen():
     item = parse_line(VID)
     with pytest.raises(AttributeError):
         item.kind = "invalid"  # type: ignore[misc]
+
+
+# ---------- ดึงลิงก์จากข้อความปน (ข้อความจากแชต LINE) ----------
+
+VID3 = "jNQXAC9IVRw"
+
+
+def _kinds_and_ids(text: str) -> list[tuple[str, str | None]]:
+    return [(i.kind, i.video_id) for i in parse_text(text)]
+
+
+def test_line_chat_message_gives_two_clips_and_skips_the_greeting():
+    text = "\n".join(
+        [
+            "สวัสดีครับ ส่งคลิปให้ดูครับ",
+            f"1. https://youtu.be/{VID}",
+            f"2. https://www.youtube.com/watch?v={VID2} ขอบคุณครับ",
+        ]
+    )
+    scan = scan_text(text)
+    assert [(i.kind, i.video_id) for i in scan.items] == [
+        ("video", VID),
+        ("video", VID2),
+    ]
+    # แถวแสดงเฉพาะตัวลิงก์ ไม่ใช่ทั้งบรรทัด
+    assert [i.input for i in scan.items] == [
+        f"https://youtu.be/{VID}",
+        f"https://www.youtube.com/watch?v={VID2}",
+    ]
+    assert scan.skipped_text is True
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"ดูอันนี้https://youtu.be/{VID}",
+        f"https://youtu.be/{VID}ขอบคุณครับ",
+        f"ดูอันนี้https://youtu.be/{VID}นะคะ",
+        f"คลิปนี้ youtu.be/{VID} ค่ะ",
+        f"ลิงก์ www.youtube.com/watch?v={VID}&t=5s ครับ",
+        f"ลิงก์ m.youtube.com/watch?v={VID}",
+        f"music.youtube.com/watch?v={VID} เพลงนี้",
+        f"HTTPS://YOUTU.BE/{VID} ตัวใหญ่",
+        f"“https://youtu.be/{VID}”",
+        f"「https://youtu.be/{VID}」",
+        f"‘https://youtu.be/{VID}’ครับ",
+    ],
+)
+def test_links_glued_to_or_surrounded_by_thai_text(line):
+    assert _kinds_and_ids(line) == [("video", VID)]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"1. https://youtu.be/{VID}",
+        f"1) https://youtu.be/{VID}",
+        f"12. https://youtu.be/{VID}",
+        f"- https://youtu.be/{VID}",
+        f"• https://youtu.be/{VID}",
+        f"1.https://youtu.be/{VID}",
+        f"-https://youtu.be/{VID}",
+        f"•youtu.be/{VID}",
+    ],
+)
+def test_numbering_and_bullets_are_not_counted_as_skipped_text(line):
+    scan = scan_text(line)
+    assert [(i.kind, i.video_id) for i in scan.items] == [("video", VID)]
+    assert scan.skipped_text is False
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"ดูคลิปนี้ (https://youtu.be/{VID})",
+        f"ดูคลิปนี้ https://youtu.be/{VID}.",
+        f"ดูคลิปนี้ https://youtu.be/{VID}),",
+        f"ดู https://youtu.be/{VID}!",
+        f"ดู https://youtu.be/{VID}?",
+        f"ดู https://youtu.be/{VID}...",
+        f"ดู https://youtu.be/{VID};",
+        f"ดู https://youtu.be/{VID}:",
+        f"ดู [https://youtu.be/{VID}]",
+        f"ดู 'https://youtu.be/{VID}'",
+        f'ดู "https://youtu.be/{VID}"',
+        f"ดู <https://youtu.be/{VID}>",
+    ],
+)
+def test_trailing_punctuation_and_brackets_are_stripped(line):
+    assert _kinds_and_ids(line) == [("video", VID)]
+
+
+def test_several_links_on_one_line_keep_their_order():
+    text = f"https://youtu.be/{VID2} กับ https://youtu.be/{VID}, และ youtu.be/{VID3}."
+    assert [i.video_id for i in parse_text(text)] == [VID2, VID, VID3]
+
+
+def test_links_on_one_line_are_deduplicated_across_lines():
+    text = (
+        f"https://youtu.be/{VID} https://youtu.be/{VID2}\n"
+        f"อีกรอบ https://www.youtube.com/watch?v={VID}"
+    )
+    assert [i.video_id for i in parse_text(text)] == [VID, VID2]
+
+
+def test_playlist_and_ambiguous_links_inside_text():
+    text = (
+        f"เพลย์ลิสต์ https://www.youtube.com/playlist?list={PL} ครับ\n"
+        f"คลิป https://www.youtube.com/watch?v={VID}&list={PL}"
+    )
+    items = parse_text(text)
+    assert [(i.kind, i.video_id, i.playlist_id) for i in items] == [
+        ("playlist", None, PL),
+        ("ambiguous", VID, PL),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("line", "link"),
+    [
+        (
+            "ไฟล์อยู่ที่ https://drive.google.com/file/d/abc/view ครับ",
+            "https://drive.google.com/file/d/abc/view",
+        ),
+        (
+            "https://www.facebook.com/watch?v=123",
+            "https://www.facebook.com/watch?v=123",
+        ),
+        ("ดู facebook.com/somepage นะ", "facebook.com/somepage"),
+        ("www.example.com", "www.example.com"),
+        ("https://vimeo.com/123.", "https://vimeo.com/123"),
+    ],
+)
+def test_links_to_other_sites_stay_invalid_rows(line, link):
+    items = parse_text(line)
+    assert [(i.kind, i.input) for i in items] == [("invalid", link)]
+
+
+def test_broken_youtube_link_inside_text_is_an_invalid_row():
+    items = parse_text("ช่องนี้ https://www.youtube.com/@somebody ครับ")
+    assert [(i.kind, i.input) for i in items] == [
+        ("invalid", "https://www.youtube.com/@somebody")
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "สวัสดีครับ",
+        "hello",
+        "ขอบคุณครับ\nแล้วเจอกันนะ",
+        f"คำว่า {VID} ในประโยคไม่ใช่รหัสคลิป",
+        f"1. {VID}",
+        f"{VID} ครับ",
+        "ไฟล์ report.pdf กับ e.g. ราคา 1.5 บาท",
+    ],
+)
+def test_plain_words_are_skipped_silently_not_invalid_rows(text):
+    scan = scan_text(text)
+    assert scan.items == []
+    assert scan.skipped_text is True
+
+
+def test_bare_id_line_still_works():
+    scan = scan_text(f"{VID}\n  {VID2}  ")
+    assert [i.video_id for i in scan.items] == [VID, VID2]
+    assert scan.skipped_text is False
+
+
+def test_clean_links_have_no_skipped_text():
+    scan = scan_text(
+        f"https://youtu.be/{VID}\n\n[คลิป](https://youtu.be/{VID2})\n<youtu.be/{VID3}>"
+    )
+    assert len(scan.items) == 3
+    assert scan.skipped_text is False
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://youtu.be/{VID};rm -rf /",
+        f"https://www.youtube.com/watch?v={VID}&x=$(whoami)",
+        f"https://youtu.be/{VID}`whoami`",
+    ],
+)
+def test_shell_characters_glued_to_a_link_keep_it_invalid(line):
+    # AC-SEC-05: ชิ้นลิงก์ที่มีอักขระคำสั่งเชลล์ติดมายังไม่ผ่าน ไม่ถูกตัดทิ้งแล้วกลายเป็นคลิป
+    assert [i.kind for i in parse_text(line)] == ["invalid"]
+
+
+def test_extracted_links_are_checked_strictly():
+    items = parse_text(
+        f"ลิงก์ปลอม https://youtube.com.evil.example/watch?v={VID} กับ https://youtu.be/{VID}x"
+    )
+    assert [i.kind for i in items] == ["invalid", "invalid"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a" * 20_000,
+        "a." * 10_000,
+        "http" * 5_000,
+        ("x" * 30 + "://") * 600,
+        "1." * 10_000,
+        "ก" * 20_000,
+    ],
+    ids=["letters", "dots", "http", "schemes", "numbering", "thai"],
+)
+def test_long_text_is_scanned_without_a_clip(text):
+    # ข้อความยาวสุดที่ /resolve รับ (20,000 ตัว): regex เริ่มหาได้เฉพาะต้นคำ ไม่วนหาซ้ำจนค้าง
+    assert all(item.kind == "invalid" for item in scan_text(text).items)
+
+
+# ---------- เพลย์ลิสต์ของ YouTube Music (RDCLAK) ไม่ใช่มิกซ์ (D6, 2026-09-30) ----------
+
+CURATED = "RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://www.youtube.com/watch?v={VID}&list={CURATED}",
+        f"https://music.youtube.com/watch?v={VID}&list={CURATED}",
+        f"https://youtu.be/{VID}?list={CURATED}",
+    ],
+)
+def test_watch_link_with_a_curated_music_playlist_is_ambiguous_not_a_mix(line):
+    assert parse_line(line) == InputItem(
+        input=line, kind="ambiguous", video_id=VID, playlist_id=CURATED
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://www.youtube.com/playlist?list={CURATED}",
+        f"https://music.youtube.com/playlist?list={CURATED}",
+        f"music.youtube.com/playlist?list={CURATED}&si=abc",
+        f"https://www.youtube.com/watch?list={CURATED}",
+    ],
+)
+def test_bare_curated_music_playlist_is_a_playlist(line):
+    assert parse_line(line) == InputItem(
+        input=line, kind="playlist", playlist_id=CURATED
+    )
+
+
+@pytest.mark.parametrize(
+    ("list_id", "expected"),
+    [
+        (f"RD{VID}", True),
+        (f"RDMM{VID}", True),
+        ("RDCLAK5uy_abcdefghij", False),
+        ("RDCLA" + "x" * 10, True),
+        ("rdabcdefghij", False),
+        (PL, False),
+    ],
+)
+def test_is_mix_id_is_the_one_rule(list_id, expected):
+    assert is_mix_id(list_id) is expected

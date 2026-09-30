@@ -134,7 +134,7 @@ def test_resolve_foreign_host_rejected(api):  # AC-SEC-02
 def test_resolve_items_in_order(api):
     lines = [
         "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
-        "ไม่ใช่ลิงก์",
+        "https://vimeo.com/123",
         "https://www.youtube.com/playlist?list=PLfakeplaylist250",
         "https://www.youtube.com/watch?v=jNQXAC9IVRw&list=PLfakeplaylist250",
     ]
@@ -146,7 +146,7 @@ def test_resolve_items_in_order(api):
     assert body["items"] == [
         {"input": "https://www.youtube.com/watch?v=aqz-KE-bpKQ", "kind": "video", "videoId": BBB},
         {
-            "input": "ไม่ใช่ลิงก์",
+            "input": "https://vimeo.com/123",
             "kind": "invalid",
             "error": {"code": "E_INVALID_INPUT", "message": MESSAGES["E_INVALID_INPUT"]},
         },
@@ -162,6 +162,38 @@ def test_resolve_items_in_order(api):
             "playlistId": PLAYLIST,
         },
     ]
+
+
+    # ทุกบรรทัดเป็นลิงก์ ไม่มีข้อความถูกข้าม
+    assert "skippedText" not in body
+
+
+def test_resolve_pulls_links_out_of_a_chat_message(api):  # D1 (2026-09-30)
+    text = "\n".join(
+        [
+            "สวัสดีครับ ส่งคลิปให้ดูครับ",
+            f"1. https://youtu.be/{BBB}",
+            f"2. https://www.youtube.com/watch?v={ZOO} ขอบคุณครับ",
+            "ดูไฟล์นี้ด้วย https://drive.google.com/file/d/abc",
+        ]
+    )
+    body = api().post("/api/resolve", json={"text": text}, headers=AUTH).json()
+    assert body["items"] == [
+        {"input": f"https://youtu.be/{BBB}", "kind": "video", "videoId": BBB},
+        {"input": f"https://www.youtube.com/watch?v={ZOO}", "kind": "video", "videoId": ZOO},
+        {
+            "input": "https://drive.google.com/file/d/abc",
+            "kind": "invalid",
+            "error": {"code": "E_INVALID_INPUT", "message": MESSAGES["E_INVALID_INPUT"]},
+        },
+    ]
+    assert body["skippedText"] is True
+
+
+def test_resolve_text_without_links_gives_no_items(api):
+    body = api().post("/api/resolve", json={"text": "สวัสดีครับ\nขอบคุณครับ"}, headers=AUTH).json()
+    assert body["items"] == []
+    assert body["skippedText"] is True
 
 
 def test_resolve_ids_differ_each_call(api):
@@ -956,6 +988,57 @@ def test_mix_without_a_valid_starting_clip_is_422(api, query):
     assert resp.status_code == 422
     assert _error(resp)["code"] == "E_INVALID_INPUT"
     assert client.fake.calls == []
+
+
+@pytest.mark.parametrize("playlist", [MIX, PLAYLIST])
+def test_overlong_v_is_invalid_input_not_bad_request(api, playlist):
+    client = api()
+    resp = client.get(f"/api/playlists/{playlist}?v={'a' * 65}")
+    assert resp.status_code == 422
+    assert _error(resp)["code"] == "E_INVALID_INPUT"
+    assert client.fake.calls == []
+
+
+def test_v_at_the_length_limit_passes_the_length_check(api):
+    # 64 ตัวผ่านด่านความยาว: มิกซ์ยังตรวจรูปแบบ 11 ตัวต่อ (E_INVALID_INPUT) เพลย์ลิสต์ปกติไม่ใช้ v
+    assert api().get(f"/api/playlists/{PLAYLIST}?v={'a' * 64}").status_code == 200
+    resp = api().get(f"/api/playlists/{MIX}?v={'a' * 64}")
+    assert resp.status_code == 422
+    assert _error(resp)["code"] == "E_INVALID_INPUT"
+
+
+CURATED = "RDCLAK5uy_abcdefghij"
+
+
+class CuratedExtractor(FakeExtractor):
+    """เพลย์ลิสต์ของ YouTube Music (RDCLAK...) ใช้ข้อมูลของเพลย์ลิสต์ทดสอบ 250 คลิป"""
+
+    def _load(self, kind: str, ident: str) -> dict | None:
+        if kind == "playlist" and ident == CURATED:
+            return super()._load(kind, PLAYLIST)
+        return super()._load(kind, ident)
+
+
+def test_curated_music_playlist_needs_no_v_and_is_not_a_mix(api):  # D6 (2026-09-30)
+    client = api(CuratedExtractor(FIXTURES))
+    resp = client.get(f"/api/playlists/{CURATED}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "isMix" not in body
+    # ขีดจำกัดของเพลย์ลิสต์ปกติ (200) ไม่ใช่ของมิกซ์ (25)
+    assert (body["total"], body["truncated"], len(body["entries"])) == (250, True, 200)
+    resolved = client.post(
+        "/api/resolve",
+        json={"text": f"https://music.youtube.com/playlist?list={CURATED}"},
+        headers=AUTH,
+    ).json()
+    assert resolved["items"] == [
+        {
+            "input": f"https://music.youtube.com/playlist?list={CURATED}",
+            "kind": "playlist",
+            "playlistId": CURATED,
+        }
+    ]
 
 
 def test_normal_playlist_has_no_mix_flag(api):

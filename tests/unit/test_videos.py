@@ -1286,3 +1286,19 @@ def test_normal_playlist_ignores_the_video_id(db: Database) -> None:
     result = VideoService(db, stub).playlist("PLabcdefghij", video_id=BBB)
     assert "isMix" not in result
     assert stub.calls == [("PLabcdefghij", 200, None)]
+
+
+def test_curated_music_playlist_takes_the_normal_playlist_path(db: Database) -> None:
+    # RDCLAK... = เพลย์ลิสต์ของ YouTube Music: ไม่ต้องมีคลิปตั้งต้น ไม่ถูกตัดที่ 25 ไม่มี isMix (D6)
+    curated = "RDCLAK5uy_abcdefghij"
+    stub = StubPlaylist(
+        {
+            "title": "c",
+            "playlist_count": 30,
+            "entries": [{"id": f"abcdefghi{n:02d}"} for n in range(30)],
+        }
+    )
+    result = VideoService(db, stub).playlist(curated)
+    assert stub.calls == [(curated, 200, None)]
+    assert "isMix" not in result
+    assert (result["total"], result["truncated"], len(result["entries"])) == (30, False, 30)

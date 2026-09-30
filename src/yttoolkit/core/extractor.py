@@ -17,7 +17,7 @@ from typing import Protocol, runtime_checkable
 
 import httpx
 
-from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix
+from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix_id
 from .yterrors import YtError, classify
 
 log = logging.getLogger("yttoolkit")
@@ -86,7 +86,7 @@ def _check_playlist_id(playlist_id: str) -> None:
 def _playlist_url(playlist_id: str, video_id: str | None) -> str:
     """ตรวจ id แล้วคืนลิงก์ที่ใช้ดึงรายการ: มิกซ์ใช้ลิงก์ watch ของคลิปตั้งต้น เพลย์ลิสต์ปกติใช้ลิงก์ playlist"""
     _check_playlist_id(playlist_id)
-    if not is_mix(playlist_id):
+    if not is_mix_id(playlist_id):
         return f"https://www.youtube.com/playlist?list={playlist_id}"
     if not video_id:
         raise YtError("E_INVALID_INPUT", f"มิกซ์ {playlist_id!r} ต้องมีคลิปตั้งต้น (v)")

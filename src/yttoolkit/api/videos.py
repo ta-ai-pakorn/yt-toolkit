@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from ..core.frames import contact_sheet, file_timecode, frames_zip
-from ..core.inputs import VIDEO_ID, InputItem, parse_text
+from ..core.inputs import VIDEO_ID, InputItem, scan_text
 from ..core.storyboard import FOLDER as STORYBOARD_FOLDER
 from ..core.storyboard import INDEX as STORYBOARD_INDEX
 from ..core.storyboard import get_storyboard
@@ -40,6 +40,7 @@ RESOLVE_MAX_CHARS = 20_000
 HISTORY_DEFAULT_LIMIT = 20
 HISTORY_MAX_LIMIT = 100
 TITLE_MAX_CHARS = 100
+PLAYLIST_V_MAX_CHARS = 64
 FRAME_CACHE_CONTROL = "public, max-age=86400, immutable"
 
 # รหัส error -> HTTP status (รหัสอื่นทั้งหมด รวม E_UNKNOWN = 500)
@@ -166,10 +167,15 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
 
     @router.post("/resolve")
     def resolve(body: ResolveBody) -> dict:
-        return {
+        scan = scan_text(body.text)
+        out: dict[str, Any] = {
             "resolveId": uuid.uuid4().hex,  # ยังไม่เก็บลง DB (W3 ใช้ใน M4)
-            "items": [_resolve_item(item) for item in parse_text(body.text)],
+            "items": [_resolve_item(item) for item in scan.items],
         }
+        # มีข้อความที่ไม่ใช่ลิงก์ถูกข้าม (คำทักทายจากแชต ฯลฯ): หน้าเว็บบอกเบา ๆ ใต้รายการ
+        if scan.skipped_text:
+            out["skippedText"] = True
+        return out
 
     @router.get("/videos/{video_id}", response_model=None)
     @_maps_yt_errors
@@ -227,8 +233,11 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
 
     @router.get("/playlists/{playlist_id}", response_model=None)
     @_maps_yt_errors
-    def playlist(playlist_id: str, v: str | None = Query(None, max_length=64)) -> dict:
+    def playlist(playlist_id: str, v: str | None = None) -> dict:
         # v = คลิปตั้งต้น ต้องมีเมื่อเป็นมิกซ์ (id ขึ้นต้น RD) เพลย์ลิสต์ปกติไม่ใช้
+        # ยาวเกินก็เป็น v ที่ผิดรูปแบบเหมือนค่าผิดอื่น ๆ (E_INVALID_INPUT ไม่ใช่ E_BAD_REQUEST) และไม่ยกค่ากลับไปใน log
+        if v is not None and len(v) > PLAYLIST_V_MAX_CHARS:
+            raise YtError("E_INVALID_INPUT", f"v ยาวเกิน {PLAYLIST_V_MAX_CHARS} ตัว ({len(v)} ตัว)")
         return videos.playlist(playlist_id, video_id=v)
 
     @router.get("/history")

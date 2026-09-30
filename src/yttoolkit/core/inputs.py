@@ -3,6 +3,9 @@
 เป็นฟังก์ชันล้วน (pure) ใช้แค่ไลบรารีมาตรฐาน: ไม่เรียกเครือข่าย ไม่รันคำสั่งใด ๆ
 (AC-SEC-05) — อะไรที่ไม่ตรงรูปแบบเป๊ะ ๆ จะได้ชนิด "invalid" เท่านั้น
 ตัวคั่นที่ถูก URL-encode (เช่น watch%3Fv%3D...) ไม่ถูกถอดรหัส จึงเป็น invalid
+
+ข้อความที่คัดลอกมาจากแชต (LINE) มีคำทักทาย เลขข้อ และหลายลิงก์ในบรรทัดเดียว: scan_text ดึงลิงก์ออกมาจาก
+ตรงไหนของบรรทัดก็ได้ แต่ละลิงก์ยังต้องผ่านการตรวจแบบเข้มของ parse_line ทุกข้อ ข้อความธรรมดาถูกข้ามเงียบ ๆ
 """
 
 from __future__ import annotations
@@ -45,15 +48,22 @@ def _invalid(text: str) -> InputItem:
     return InputItem(input=text, kind="invalid")
 
 
-def is_mix(list_id: str) -> bool:
-    """มิกซ์ (radio) ของยูทูปขึ้นต้นด้วย "RD" ตัวพิมพ์ใหญ่เท่านั้น: ID ของยูทูปแยกตัวพิมพ์
-    ใหญ่/เล็ก จึงไม่ปรับเป็นตัวใหญ่ก่อนเทียบ ("rd..." เป็นเพลย์ลิสต์ปกติ)"""
-    return list_id.startswith("RD")
+# เพลย์ลิสต์ที่ YouTube Music จัดไว้ (id ขึ้นต้น RDCLAK) เป็นเพลย์ลิสต์ปกติที่มีจำนวนแน่นอน ไม่ใช่มิกซ์
+_CURATED_PREFIX = "RDCLAK"
+
+
+def is_mix_id(list_id: str) -> bool:
+    """กฎเดียวของทั้งแอพว่า id ไหนเป็นมิกซ์อัตโนมัติ (radio) ของยูทูป
+
+    มิกซ์ขึ้นต้นด้วย "RD" ตัวพิมพ์ใหญ่เท่านั้น: ID ของยูทูปแยกตัวพิมพ์ใหญ่/เล็ก จึงไม่ปรับเป็นตัวใหญ่ก่อนเทียบ
+    ("rd..." เป็นเพลย์ลิสต์ปกติ) · ยกเว้น "RDCLAK..." = เพลย์ลิสต์ของ YouTube Music ใช้ทางเพลย์ลิสต์ปกติ
+    """
+    return list_id.startswith("RD") and not list_id.startswith(_CURATED_PREFIX)
 
 
 def _playlist_item(text: str, list_id: str | None) -> InputItem:
     """เพลย์ลิสต์ล้วน — มิกซ์ (RD) ที่ไม่มีคลิปตั้งต้น (v=) ดึงรายการไม่ได้ จึงไม่รับ"""
-    if list_id is None or is_mix(list_id):
+    if list_id is None or is_mix_id(list_id):
         return _invalid(text)
     return InputItem(input=text, kind="playlist", playlist_id=list_id)
 
@@ -67,7 +77,7 @@ def _video_item(text: str, video_id: str, list_id: str | None) -> InputItem:
         kind="ambiguous",
         video_id=video_id,
         playlist_id=list_id,
-        is_mix=is_mix(list_id),
+        is_mix=is_mix_id(list_id),
     )
 
 
@@ -207,21 +217,89 @@ def _dedupe_key(item: InputItem) -> tuple[str, str | None, str | None]:
     return (item.kind, item.video_id, item.playlist_id)
 
 
-def parse_text(text: str) -> list[InputItem]:
-    """แยกข้อความหลายบรรทัด: ตัดช่องว่าง ทิ้งบรรทัดว่าง ตัดรายการซ้ำ (ตัวแรกชนะ คงลำดับ)
+# ---------- ดึงลิงก์ออกจากข้อความปน (แชต LINE) ----------
 
-    บรรทัด invalid เทียบซ้ำด้วยข้อความเดิม เพื่อให้แต่ละบรรทัดผิดยังแจ้งเตือนแยกกันได้
+# อักขระที่อยู่ในลิงก์ได้: ASCII ที่พิมพ์ได้ ยกเว้น " < > (ตัวห่อลิงก์) · ภาษาไทย/ช่องว่าง = ลิงก์จบตรงนั้น
+_URL_CHAR = r"[!#-;=?-~]"
+# ชิ้นที่หน้าตาเป็นลิงก์: มี scheme (https://...) หรือเป็นชื่อโดเมน (ตามด้วยเส้นทางได้)
+# scheme ยาวไม่เกิน 32 ตัว และเริ่มได้เฉพาะต้นคำ ทั้งสองแบบจึงไม่วนหาซ้ำจนช้ากับข้อความยาว 20,000 ตัว
+_CANDIDATE = re.compile(
+    rf"(?<![A-Za-z0-9])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]{{0,31}}://){_URL_CHAR}*"
+    rf"|(?<![A-Za-z0-9._@/:%-])(?P<host>(?:[A-Za-z0-9-]+\.)+[A-Za-z]{{2,}})(?![A-Za-z0-9-]|://)"
+    rf"(?P<path>[/?#]{_URL_CHAR}*)?"
+)
+# เครื่องหมายท้ายประโยค/วงเล็บปิด/เครื่องหมายคำพูดที่ติดท้ายลิงก์มา (ID ของยูทูปไม่มีอักขระพวกนี้)
+_TRAILING = ".,;:!?)]}'"
+# เลขข้อ "1." "1)" และสัญลักษณ์หัวข้อ "-" "•" หน้าลิงก์ ไม่นับว่าเป็นข้อความที่ถูกข้าม
+_LIST_MARK = re.compile(r"(?<!\w)\d{1,3}[.)]|[-•*]")
+_WORD = re.compile(r"\w")
+_LINK_HOSTS = _YOUTUBE_HOSTS | _SHORT_HOSTS | _NOCOOKIE_HOSTS
+
+
+@dataclass(frozen=True)
+class ScanResult:
+    items: list[InputItem]
+    # มีข้อความที่ไม่ใช่ลิงก์ถูกข้ามไป (คำทักทาย คำขอบคุณ ฯลฯ) — หน้าเว็บบอกเบา ๆ ไม่ใช่ error
+    skipped_text: bool
+
+
+def _looks_like_link(match: re.Match[str]) -> bool:
+    """ชื่อโดเมนล้วน ๆ (เช่น file.txt) ไม่นับเป็นลิงก์ ยกเว้นขึ้นต้น www. หรือเป็นโดเมนของยูทูป"""
+    if match.group("scheme") or match.group("path"):
+        return True
+    host = match.group("host").lower()
+    return host.startswith("www.") or host in _LINK_HOSTS
+
+
+def _scan_line(line: str) -> tuple[list[InputItem], bool]:
+    """หนึ่งบรรทัด -> (ลิงก์ที่พบตามลำดับ, มีข้อความอื่นถูกข้ามไหม)
+
+    บรรทัดที่ทั้งบรรทัดเป็นลิงก์/รหัสคลิปอยู่แล้ว ใช้ parse_line ตรง ๆ (รองรับการห่อ [ข้อความ](url) ฯลฯ เหมือนเดิม)
+    ไม่งั้นหาชิ้นที่เป็นลิงก์ในบรรทัด: ลิงก์ยูทูปที่ถูกต้อง = รายการ, ลิงก์เว็บอื่น/ลิงก์ยูทูปที่ผิดรูป = แถว invalid
+    ส่วนคำธรรมดา (รวมคำ 11 ตัวในประโยค) ไม่ใช่รหัสคลิป ถูกข้าม
+    """
+    whole = parse_line(line)
+    if whole.kind != "invalid":
+        return [whole], False
+    items: list[InputItem] = []
+    rest: list[str] = []
+    end = 0
+    for match in _CANDIDATE.finditer(line):
+        if not _looks_like_link(match):
+            continue
+        link = match.group(0).rstrip(_TRAILING)
+        rest.append(line[end : match.start()])
+        rest.append(match.group(0)[len(link) :])
+        end = match.end()
+        items.append(parse_line(link))
+    rest.append(line[end:])
+    leftover = _LIST_MARK.sub(" ", " ".join(rest))
+    return items, _WORD.search(leftover) is not None
+
+
+def scan_text(text: str) -> ScanResult:
+    """แยกข้อความหลายบรรทัด: ดึงลิงก์จากทุกบรรทัด ตัดรายการซ้ำ (ตัวแรกชนะ คงลำดับ)
+
+    บรรทัด invalid เทียบซ้ำด้วยข้อความเดิม เพื่อให้แต่ละลิงก์ผิดยังแจ้งเตือนแยกกันได้
     """
     seen: set[tuple[str, str | None, str | None]] = set()
     items: list[InputItem] = []
+    skipped = False
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
             continue
-        item = parse_line(line)
-        key = _dedupe_key(item)
-        if key in seen:
-            continue
-        seen.add(key)
-        items.append(item)
-    return items
+        found, line_skipped = _scan_line(line)
+        skipped = skipped or line_skipped
+        for item in found:
+            key = _dedupe_key(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(item)
+    return ScanResult(items=items, skipped_text=skipped)
+
+
+def parse_text(text: str) -> list[InputItem]:
+    """รายการลิงก์จากข้อความหลายบรรทัด (ดู scan_text)"""
+    return scan_text(text).items

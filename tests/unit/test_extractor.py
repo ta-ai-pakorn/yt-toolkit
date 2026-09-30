@@ -766,3 +766,11 @@ def test_ytdlp_mix_needs_a_valid_starting_clip(
         YtDlpExtractor().playlist(MIX, 25, video_id=video_id)
     assert exc.value.code == "E_INVALID_INPUT"
     assert ydl.instances == []
+
+
+def test_ytdlp_curated_music_playlist_is_read_as_a_playlist(ydl: type[FakeYDL]) -> None:
+    curated = "RDCLAK5uy_abcdefghij"
+    ydl.result = {"id": curated, "title": "t", "entries": []}
+    YtDlpExtractor().playlist(curated, 200)
+    (inst,) = ydl.instances
+    assert inst.urls == [f"https://www.youtube.com/playlist?list={curated}"]
