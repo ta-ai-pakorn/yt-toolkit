@@ -3,8 +3,9 @@ import path from "node:path"
 
 import { defineConfig, devices } from "@playwright/test"
 
-const PORT = 8799
-const dataRoot = path.join(os.tmpdir(), "yt-toolkit-e2e")
+// E2E_PORT ให้รันหลายชุดพร้อมกันได้ (แต่ละชุดมีพอร์ตและโฟลเดอร์ข้อมูลของตัวเอง)
+const PORT = Number(process.env.E2E_PORT ?? 8799)
+const dataRoot = path.join(os.tmpdir(), PORT === 8799 ? "yt-toolkit-e2e" : `yt-toolkit-e2e-${PORT}`)
 
 export default defineConfig({
   testDir: "e2e",
