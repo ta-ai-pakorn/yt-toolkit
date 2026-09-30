@@ -298,7 +298,7 @@ def _draw_badge(draw: ImageDraw.ImageDraw, left: int, top: int, label: str) -> N
 def contact_sheet(
     frames: Frames, title: str, duration_s: int, columns: int = 5
 ) -> bytes:
-    """ภาพรวมทุกเฟรมในไฟล์ JPEG เดียว: หัวภาพ (ชื่อคลิป + ความยาว + จำนวนเฟรม) แล้วตามด้วยกริด
+    """ภาพรวมเฟรม (ปุ่ม "โหลดภาพรวมเฟรม" ที่ W2) ในไฟล์ JPEG เดียว: หัวภาพ (ชื่อคลิป + ความยาว + จำนวนเฟรม) แล้วตามด้วยกริด
 
     เกิน MAX_SHEET_FRAMES เฟรมจะสุ่มเลือกห่างเท่า ๆ กันและบอกไว้ที่หัวภาพ
     """

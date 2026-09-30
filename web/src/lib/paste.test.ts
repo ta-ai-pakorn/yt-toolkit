@@ -38,6 +38,9 @@ describe("looksLikeYoutube", () => {
     "-youtu.be/aqz-KE-bpKQ",
     "2.youtu.be/aqz-KE-bpKQ",
     "https://youtu.be/aqz-KE-bpKQ,https://youtu.be/jNQXAC9IVRw",
+    "123.youtu.be/aqz-KE-bpKQ",
+    "ข้อ 2.https://youtu.be/aqz-KE-bpKQ",
+    "(3.youtu.be/aqz-KE-bpKQ)",
   ])("ลิงก์ในข้อความจากแชต: รับ %j", (text) => {
     expect(looksLikeYoutube(text)).toBe(true)
   })
@@ -68,6 +71,17 @@ describe("looksLikeYoutube", () => {
     "me@youtube.com/watch?v=aqz-KE-bpKQ",
     "Goodmorning",
     "abc.youtu.be/aqz-KE-bpKQ",
+    // ตารางเดียวกับ tests/unit/test_inputs.py::NOT_CLIPS (backend ให้เป็นแถว invalid ไม่ใช่คลิป)
+    "a2.youtu.be/dQw4w9WgXcQ",
+    "https://evil2.youtube.com/watch?v=dQw4w9WgXcQ",
+    "www2.youtube.com/watch?v=dQw4w9WgXcQ",
+    "https://drive.google.com/x1.youtu.be/dQw4w9WgXcQ",
+    "me@evil.youtu.be/dQw4w9WgXcQ",
+    "x/evil.youtu.be/dQw4w9WgXcQ",
+    "a%2Fevil.youtu.be/dQw4w9WgXcQ",
+    "me@youtube.com/watch?v=dQw4w9WgXcQ",
+    "a.youtu.be/dQw4w9WgXcQ",
+    "ข้อความ x.https://youtu.be/dQw4w9WgXcQ",
   ])("ไม่รับ %j", (text) => {
     expect(looksLikeYoutube(text)).toBe(false)
   })

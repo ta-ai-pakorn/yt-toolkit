@@ -225,13 +225,18 @@ _URL_CHAR = r"[!#-+\-.-;=?-{}~]"
 # ชิ้นที่หน้าตาเป็นลิงก์: มี scheme (https://...) หรือเป็นชื่อโดเมน (ตามด้วยเส้นทางได้)
 # scheme ยาวไม่เกิน 32 ตัว และเริ่มได้เฉพาะต้นคำ ทั้งสองแบบจึงไม่วนหาซ้ำจนช้ากับข้อความยาว 20,000 ตัว
 # ชื่อโดเมนที่ไม่มี scheme: ขึ้นต้นด้วยตัวอักษร/ตัวเลขเท่านั้น (ขีดนำหน้า "-youtu.be" ไม่ใช่ส่วนของโดเมน)
-# ส่วนแรกที่เป็นตัวเลขล้วนตามด้วยจุด ("2.youtu.be") คือเลขข้อ ไม่ใช่โดเมน · ติด ":" ได้ ("ลิงก์:youtu.be")
+# ลิงก์เริ่มได้เฉพาะต้นคำ: ข้างหน้าไม่ใช่ตัวอักษร ตัวเลข _ หรือจุด · ยกเว้นเลขข้อ 1-3 หลักตามด้วยจุดที่อยู่ต้นคำ
+# ("2.youtu.be", "12.https://…") ซึ่งไม่นับเป็นส่วนของลิงก์ (กฎเดียวกับ YOUTUBE_LINK ใน web/src/lib/paste.ts)
+# ติด ":" "-" ได้ ("ลิงก์:youtu.be") · ติด "@" "/" "%" = อยู่ในลิงก์/อีเมลอื่น เป็นแถว invalid (ดู _EMBEDDED)
 _CANDIDATE = re.compile(
-    rf"(?<![A-Za-z0-9])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]{{0,31}}://){_URL_CHAR}*"
-    rf"|(?<![A-Za-z0-9_@/%])(?!\d+\.)"
-    rf"(?P<host>(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{{2,}})(?![A-Za-z0-9-]|://)"
+    rf"(?<![A-Za-z0-9_.])(?:\d{{1,3}}\.)?(?P<link>"
+    rf"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]{{0,31}}://){_URL_CHAR}*"
+    rf"|(?P<host>(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{{2,}})(?![A-Za-z0-9-]|://)"
     rf"(?P<path>[/?#]{_URL_CHAR}*)?"
+    rf")"
 )
+# ลิงก์ที่มีอักขระพวกนี้ติดหน้า เป็นชิ้นส่วนของอีเมล/ลิงก์อื่น (me@evil.youtu.be, x/evil.youtu.be) ไม่ใช่คลิป
+_EMBEDDED = frozenset("@/%")
 # รหัสคลิปจริงแทบทุกอันมีตัวเลข - หรือ _ หรือตัวพิมพ์ใหญ่กลางคำ ส่วนคำ 11 ตัว เช่น Goodmorning ไม่ใช่
 # (กฎเดียวกับ ID_LOOKS_RANDOM ใน web/src/lib/paste.ts)
 ID_LOOKS_RANDOM = re.compile(r"[0-9_-]|.[A-Z]")
@@ -284,11 +289,16 @@ def _scan_line(line: str) -> _Line:
     for match in _CANDIDATE.finditer(line):
         if not _looks_like_link(match):
             continue
-        link = match.group(0).rstrip(_TRAILING)
-        rest.append(line[end : match.start()])
-        rest.append(match.group(0)[len(link) :])
+        raw = match.group("link")
+        start = match.start("link")
+        link = raw.rstrip(_TRAILING)
+        rest.append(line[end:start])
+        rest.append(raw[len(link) :])
         end = match.end()
-        items.append(parse_line(link))
+        if start > 0 and line[start - 1] in _EMBEDDED:
+            items.append(_invalid(link))
+        else:
+            items.append(parse_line(link))
     rest.append(line[end:])
     leftover = _LIST_MARK.sub(" ", " ".join(rest))
     return _Line(items, _WORD.search(leftover) is not None)

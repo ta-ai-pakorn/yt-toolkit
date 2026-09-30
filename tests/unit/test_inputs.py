@@ -893,3 +893,40 @@ def test_invalid_link_does_not_count_as_a_real_link():
 )
 def test_id_looks_random_rule(word, looks_random):
     assert (ID_LOOKS_RANDOM.search(word) is not None) is looks_random
+
+
+# ---------- ลิงก์ที่เป็นชิ้นส่วนของอีเมล/ลิงก์อื่น ไม่ใช่คลิป (รอบแก้สุดท้าย 2026-09-30) ----------
+
+# ตารางเดียวกับ web/src/lib/paste.test.ts ("ไม่รับ"): หน้าเว็บไม่วิเคราะห์เอง และ backend ไม่ให้เป็นคลิป
+NOT_CLIPS = [
+    f"a2.youtu.be/{VID}",
+    f"https://evil2.youtube.com/watch?v={VID}",
+    f"www2.youtube.com/watch?v={VID}",
+    f"https://drive.google.com/x1.youtu.be/{VID}",
+    f"me@evil.youtu.be/{VID}",
+    f"x/evil.youtu.be/{VID}",
+    f"a%2Fevil.youtu.be/{VID}",
+    f"me@youtube.com/watch?v={VID}",
+    f"a.youtu.be/{VID}",
+    f"ข้อความ x.https://youtu.be/{VID}",
+]
+
+
+@pytest.mark.parametrize("text", NOT_CLIPS)
+def test_links_inside_other_links_or_emails_are_invalid_rows_not_clips(text):
+    items = parse_text(text)
+    assert items
+    assert all(i.kind == "invalid" for i in items)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"1.youtu.be/{VID}",
+        f"123.youtu.be/{VID}",
+        f"ข้อ 2.https://youtu.be/{VID}",
+        f"(3.youtu.be/{VID})",
+    ],
+)
+def test_numbering_at_a_word_start_still_works(text):
+    assert [(i.kind, i.video_id) for i in parse_text(text)] == [("video", VID)]
