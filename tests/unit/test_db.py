@@ -338,3 +338,23 @@ def test_purge_keeps_fresh_peek_only_rows(db: Database, tmp_path: Path):
     add_peeked_video(db, "peeknew0001", NOW - timedelta(days=1))
     assert purge_stale_cache(db, tmp_path / "cache", NOW) == 0
     assert len(db.execute("SELECT video_id FROM videos")) == 1
+
+
+def test_purge_keeps_row_reopened_during_the_purge(db: Database, tmp_path: Path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    old = datetime(2026, 1, 1, tzinfo=UTC)
+    db.execute(
+        "INSERT INTO videos (video_id, title, probe_json, probed_at, opened_at) VALUES (?, ?, ?, ?, ?)",
+        ("abcdefghijk", "t", "{}", old.isoformat(), old.isoformat()),
+    )
+    real_remove = db_module._remove_cache_folder
+
+    def reopen_then_remove(root, video_id):
+        # ผู้ใช้เปิดคลิปนี้พอดีระหว่างรอบล้าง
+        db.execute("UPDATE videos SET opened_at = ? WHERE video_id = ?", ("2026-03-01T00:00:00+00:00", video_id))
+        return real_remove(root, video_id)
+
+    monkeypatch.setattr(db_module, "_remove_cache_folder", reopen_then_remove)
+    removed = purge_stale_cache(db, cache_root, datetime(2026, 3, 1, tzinfo=UTC))
+    assert removed == 0
+    assert len(db.execute("SELECT video_id FROM videos")) == 1

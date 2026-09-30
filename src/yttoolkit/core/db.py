@@ -159,11 +159,12 @@ def purge_stale_cache(db: Database, cache_root: Path, now: datetime, days: int =
             continue
         if not _remove_cache_folder(root, video_id):
             continue
+        # ลบเฉพาะเมื่อแถวยังเหมือนตอนอ่าน: ถ้าผู้ใช้เพิ่งเปิดคลิปนี้ระหว่างรอบล้าง (opened_at/probed_at เปลี่ยน) ให้เก็บไว้
         deleted = db.execute(
-            "DELETE FROM videos WHERE video_id = ? "
+            "DELETE FROM videos WHERE video_id = ? AND opened_at = ? AND probed_at = ? "
             "AND NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.video_id = videos.video_id) "
             "RETURNING video_id",
-            (video_id,),
+            (video_id, row["opened_at"], row["probed_at"]),
         )
         removed += len(deleted)
     return removed
