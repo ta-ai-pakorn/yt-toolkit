@@ -341,7 +341,7 @@ LIMITS = { maxChars: [10, 60], lines: [1, 2], minMs: [300, 3000] /*step 100*/,
   - **TS:** iterate with `for…of` or `Array.from(text)` and never use `.length`, which counts UTF-16 units. T9 adds its own unit assertion `displayLen("😀") === 1`, since no shared case has an astral character.
 - `cueText(tokens)` = the concatenation of `t`, with every run of 2+ **U+0020** spaces collapsed to one (`/ {2,}/g` → `" "`), then trimmed of **U+0020 only** at both ends. Use Python `.strip(" ")`, and never JS `.trim()` here.
 - `lineLen(toks) = displayLen(cueText(toks))`. It never decreases as tokens are appended (or prepended), because `cueText` of a prefix is a prefix of `cueText` of the whole.
-- `MERGE_LIMIT_FACTOR = 1.0` (Q3 = ก; 1.2 if Q3 = ข).
+- `MERGE_LIMIT_FACTOR = 1.0` (Q3 = ก; owner ruling 2026-09-30: no line may ever exceed maxChars).
 - **`fits(toks, cap)`** (owner ruling 2026-09-30: **no line may ever exceed maxChars**). It replaces the old whole-cue `limit = maxChars * lines` check:
   ```
   fits(toks, cap):
@@ -804,8 +804,8 @@ Optionally a case also carries `"md": {"title", "videoId", "chapters": [{"startM
   4. **`max-duration`** (maxMs 3000; tokens every 1000 ms without gaps) → a split when `tok.e − cur[0].s > 3000`.
   5. **`tokens-mode`** (mode `tokens`, tokensPerCue 3; 7 short tokens) → cues of 3, 3 and 1 tokens (then the min-duration rules).
   6. **`single-long-token`** (a 40-char token at medium) → one cue with that token alone; the neighbours are in their own cues.
-  7. **`min-extend-adjacent`** → a short cue extended only up to the next cue's start, and left short because the merge would exceed the limit (allowed: adjacent).
-  8. **`min-merge`** → a short cue merged with the next when the merged length is ≤ limit × factor.
+  7. **`min-extend-adjacent`** → a short cue extended only up to the next cue's start, and left short because the merged cue would not `fits` maxChars (allowed: adjacent).
+  8. **`min-merge`** → a short cue merged with the next when the merged cue `fits` maxChars (C6).
   9. **`merge-refused-over-limit`** → a merge refused (length 26 at medium with factor 1.0).
   10. **`two-lines-middle`** (long preset; 50 chars across 8 tokens) → a split at the balanced boundary. Include a tie that must pick the smaller k.
   11. **`two-lines-fits-one`** (long preset; 30 chars) → a single line.
@@ -820,7 +820,7 @@ Optionally a case also carries `"md": {"title", "videoId", "chapters": [{"startM
     - cues partition the tokens in order;
     - no `end > next.start`;
     - `start < end` except zero-duration input;
-    - every line ≤ limit unless the cue has one token;
+    - every line ≤ maxChars unless the cue has exactly one token (owner ruling 2026-09-30, C6 `fits`);
     - a cue shorter than `min_ms` exists only when its `end_ms == next.start_ms` (AC-SUB-05);
     - numbering in SRT is 1..n;
     - `"\n"` appears only as part of `"\r\n"` (AC-SUB-08).
