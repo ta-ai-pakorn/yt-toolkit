@@ -7,8 +7,11 @@ import { th } from "@/i18n/th"
 const t = th.subs
 
 type Props = {
-  /** เปลี่ยนไปใช้แทร็กเริ่มต้นของคลิป null = คลิปไม่มีแทร็กเริ่มต้น (ไม่มีปุ่ม) */
-  onUseOriginal: (() => void) | null
+  /**
+   * เปลี่ยนไปใช้แทร็กเริ่มต้นของคลิป null = คลิปไม่มีแทร็กเริ่มต้น (ไม่มีปุ่ม)
+   * ได้ปุ่มที่ถูกกดมาด้วย: ปุ่มนี้หายไปหลังเปลี่ยนแทร็ก ผู้เรียกต้องย้ายโฟกัสไปที่ที่ยังอยู่ ไม่ให้หลุดไป body
+   */
+  onUseOriginal: ((button: HTMLButtonElement) => void) | null
 }
 
 /**
@@ -23,7 +26,7 @@ export function TranslationBlocked({ onUseOriginal }: Props) {
       <AlertDescription>{t.translationBlocked}</AlertDescription>
       {onUseOriginal && (
         <div className="col-start-2 mt-2">
-          <Button variant="secondary" size="sm" className="max-sm:h-11" onClick={onUseOriginal}>
+          <Button variant="secondary" size="sm" className="max-sm:h-11" onClick={(event) => onUseOriginal(event.currentTarget)}>
             {t.useOriginal}
           </Button>
         </div>

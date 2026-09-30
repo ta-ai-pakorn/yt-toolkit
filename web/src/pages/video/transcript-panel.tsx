@@ -151,7 +151,7 @@ type TrackProps = {
   at: number | null
   onPick: (cue: Cue) => void
   /** ปุ่ม "ใช้ซับภาษาต้นฉบับ" เมื่อยูทูปไม่ให้โหลดซับแปล null = คลิปไม่มีแทร็กเริ่มต้น (ไม่มีปุ่ม) */
-  onUseOriginal: (() => void) | null
+  onUseOriginal: ((button: HTMLButtonElement) => void) | null
 }
 
 /**
@@ -194,7 +194,15 @@ function Transcript({ videoId, data }: { videoId: string; data: SubtitleTracks }
       // FR-SUB-8: กดบรรทัด → แท็บภาพเฟรม ไฮไลต์ภาพของเวลานั้น (patch เดียว: update อ่าน URL ตอนสร้าง)
       onPick={(cue) => update({ tab: "frames", at: cue.startMs })}
       // ยูทูปไม่ให้โหลดซับแปล: กลับไปแทร็กเริ่มต้นของคลิป (เปลี่ยนแค่แทร็กใน patch เดียว)
-      onUseOriginal={defaultTrackId ? () => update({ trackId: defaultTrackId }) : null}
+      // ปุ่มที่กดจะหายไป: โฟกัสแผงของแท็บทรานสคริปต์ก่อน (อยู่ต่อ ช่องค้นหายังไม่มีจนโหลดคำเสร็จ)
+      onUseOriginal={
+        defaultTrackId
+          ? (button) => {
+              button.closest<HTMLElement>('[role="tabpanel"]')?.focus()
+              update({ trackId: defaultTrackId })
+            }
+          : null
+      }
     />
   )
 }

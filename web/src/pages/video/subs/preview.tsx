@@ -117,7 +117,7 @@ type Props = {
   query: UseQueryResult<SubTokens>
   options: SubOptions
   /** ปุ่ม "ใช้ซับภาษาต้นฉบับ" เมื่อยูทูปไม่ให้โหลดซับแปล null = คลิปไม่มีแทร็กเริ่มต้น (ไม่มีปุ่ม) */
-  onUseOriginal: (() => void) | null
+  onUseOriginal: ((button: HTMLButtonElement) => void) | null
 }
 
 /**

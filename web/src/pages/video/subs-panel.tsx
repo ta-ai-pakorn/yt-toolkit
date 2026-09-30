@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId } from "react"
+import { useId, useRef } from "react"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
@@ -31,7 +31,14 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
   const originalLang = originalLanguage(data.tracks, video?.audio)
   const defaultTrackId = data.defaultTrackId
   // ยูทูปไม่ให้โหลดซับแปล: กลับไปแทร็กเริ่มต้นของคลิป (เปลี่ยนแค่แทร็กใน patch เดียว)
-  const backToOriginal = defaultTrackId ? () => update({ trackId: defaultTrackId }) : null
+  // โฟกัสไปที่ช่องเลือกแทร็กก่อน (ปุ่มที่กดจะหายไป) ช่องนี้อยู่ต่อและบอกแทร็กใหม่ให้โปรแกรมอ่านหน้าจอ
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const backToOriginal = defaultTrackId
+    ? () => {
+        triggerRef.current?.focus()
+        update({ trackId: defaultTrackId })
+      }
+    : null
 
   return (
     <section aria-labelledby={titleId}>
@@ -50,6 +57,7 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
             originalLang={originalLang}
             // เปลี่ยนแค่แทร็ก (ส่งคีย์เดียว คีย์อื่นใน URL คงเดิม)
             onChoose={(id) => update({ trackId: id })}
+            triggerRef={triggerRef}
           />
           <PresetControls options={settings.options} onPreset={settings.choosePreset} onCustom={settings.setCustom} />
           {track && (

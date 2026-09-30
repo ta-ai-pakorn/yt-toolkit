@@ -270,6 +270,7 @@ const BLOCKED = "ยูทูปยังไม่ให้โหลดซับ
 const USE_ORIGINAL = "ใช้ซับภาษาต้นฉบับ"
 const EXPORT_BUTTONS = ["โหลด .srt", "โหลด .txt", "โหลด .md", "คัดลอกข้อความ"]
 const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: true })
+const panel = (page: Page, name: string) => page.getByRole("tabpanel", { name, exact: true })
 
 /** ข้อความของซับในตัวอย่าง: บรรทัดย่อยต่อด้วยช่องว่าง แบบเดียวกับที่ทรานสคริปต์แสดง */
 const cueTexts = (page: Page) =>
@@ -310,16 +311,20 @@ test.describe("แท็บซับ: ซับแปลที่ยูทูป
     expect(calls.n).toBe(1)
 
     // สลับไปทรานสคริปต์แล้วกลับมา: เห็นข้อความเดิมทั้งสองแท็บ โดยไม่ยิงคำขอไปยูทูปซ้ำ
+    // แผงที่กำลังปิดยังอยู่ครู่หนึ่ง (มีข้อความและปุ่มชื่อเดียวกัน) จึงเจาะจงแผงของแท็บที่เปิด
     await tab(page, "ทรานสคริปต์").click()
-    await expect(page.getByText(BLOCKED)).toBeVisible()
-    await expect(page.getByRole("button", { name: USE_ORIGINAL })).toBeVisible()
+    await expect(panel(page, "ทรานสคริปต์").getByText(BLOCKED)).toBeVisible()
+    await expect(panel(page, "ทรานสคริปต์").getByRole("button", { name: USE_ORIGINAL })).toBeVisible()
     await tab(page, "ซับ").click()
-    await expect(page.getByText(BLOCKED)).toBeVisible()
+    await expect(panel(page, "ซับ").getByText(BLOCKED)).toBeVisible()
     expect(calls.n).toBe(1)
 
-    await page.getByRole("button", { name: USE_ORIGINAL }).click()
+    // ใช้คีย์บอร์ด: ปุ่มหายไปหลังเปลี่ยนแทร็ก โฟกัสต้องไปอยู่ที่ช่องเลือกแทร็ก ไม่หลุดไป body
+    await panel(page, "ซับ").getByRole("button", { name: USE_ORIGINAL }).focus()
+    await page.keyboard.press("Enter")
     await expect(page).toHaveURL(/[?&]track=a\.th-orig(&|$)/)
     await expect(page).toHaveURL(/[?&]tab=subs(&|$)/)
+    await expect(trackSelect(page)).toBeFocused()
     await expect(trackValue(page)).toHaveText("ไทย (อัตโนมัติ)")
     await expect(cues(page)).toHaveCount(5)
     await expect(firstCueLines(page).first()).toContainText("สวัสดี")
@@ -327,6 +332,8 @@ test.describe("แท็บซับ: ซับแปลที่ยูทูป
     for (const name of EXPORT_BUTTONS) {
       await expect(page.getByRole("button", { name })).toBeEnabled()
     }
+    await expect(trackSelect(page)).toBeFocused()
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false)
   })
 
   test("คลิปไม่มีแทร็กเริ่มต้น: บอกข้อความเดียวกันแต่ไม่มีปุ่ม 'ใช้ซับภาษาต้นฉบับ'", async ({ page }) => {

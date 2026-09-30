@@ -345,6 +345,11 @@ test.describe("M3 ทรานสคริปต์: แทร็กที่อ
     await expect(tab(page, "ทรานสคริปต์")).toHaveAttribute("aria-selected", "true")
     await expect(lineItems(page).first()).toContainText("สวัสดี")
     await expect(page.getByText(blocked)).toHaveCount(0)
+    // ปุ่มหายไปแล้ว: โฟกัสอยู่ที่แผงของแท็บทรานสคริปต์ (ไม่หลุดไป body) Tab ถัดไปถึงช่องค้นหา
+    await expect(page.getByRole("tabpanel", { name: "ทรานสคริปต์" })).toBeFocused()
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false)
+    await page.keyboard.press("Tab")
+    await expect(searchBox(page)).toBeFocused()
   })
 })
 
