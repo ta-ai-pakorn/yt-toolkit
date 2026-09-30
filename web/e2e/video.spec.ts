@@ -10,6 +10,8 @@ const PRIVATE_MESSAGE = "คลิปนี้เป็นส่วนตัว 
 const BOT_MESSAGE = "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท รอสัก 10 นาทีแล้วค่อยลองใหม่"
 const NO_STORYBOARD_MESSAGE = "คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว ภาพคมจะใช้ได้ในเวอร์ชันถัดไป"
 const FRAME_LIST = "รายการภาพเฟรม"
+// ลิงก์เว็บอื่นยังเป็นแถวสีแดง (ข้อความธรรมดาที่ไม่มีลิงก์ถูกข้ามเงียบ ๆ ตั้งแต่ D1)
+const NOT_YOUTUBE = "https://vimeo.com/123"
 const MENU_ITEMS = ["คัดลอกภาพ", "โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้"]
 
 const frameItems = (page: Page) => page.getByRole("list", { name: FRAME_LIST }).getByRole("listitem")
@@ -123,7 +125,7 @@ test.describe("W2 ลำดับการโหลดและความท�
 
   test("รีเฟรชเบื้องหลังล้มเหลว แต่มีข้อมูลจากรายการผลของ W1 อยู่แล้ว → คงข้อมูลไว้ และแจ้งด้วย toast ไม่ใช่ Alert", async ({ page }) => {
     await page.goto("/")
-    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, NOT_YOUTUBE].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     await expect(page.locator('section[aria-labelledby="results-title"] [role="listitem"]').first()).toContainText("Big Buck Bunny")
     await page.route(`**/api/videos/${BBB}`, (route) =>
@@ -202,7 +204,7 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(chip("00:00:00")).toBeHidden()
   })
 
-  test("คีย์บอร์ด: Shift+F10 และปุ่ม Menu เปิดเมนู มีสามรายการ · Esc ปิดแล้วโฟกัสกลับที่ภาพ", async ({ page }) => {
+  test("คีย์บอร์ด: Shift+F10 และปุ่ม Menu เปิดเมนู มีสี่รายการ · Esc ปิดแล้วโฟกัสกลับที่ภาพ", async ({ page }) => {
     await openBbb(page)
     const frame = frameButton(page, "00:00:09")
     await frame.focus()
@@ -336,10 +338,10 @@ test.describe("W2 ภาพเฟรม", () => {
     expect(bytes.subarray(0, 3).toString("hex")).toBe("ffd8ff")
   })
 
-  test("Contact sheet โหลดได้ไฟล์ .jpg และ zip โหลดได้ไฟล์ .zip", async ({ page }) => {
+  test("ภาพรวมทุกเฟรม โหลดได้ไฟล์ .jpg และ zip โหลดได้ไฟล์ .zip", async ({ page }) => {
     await openBbb(page)
     const sheet = page.waitForEvent("download")
-    await page.getByRole("button", { name: "Contact sheet" }).click()
+    await page.getByRole("button", { name: "ภาพรวมทุกเฟรม" }).click()
     expect((await sheet).suggestedFilename()).toMatch(/\.jpg$/)
 
     const zip = page.waitForEvent("download")
@@ -368,7 +370,7 @@ test.describe("W2 ภาพเฟรม", () => {
 
   test("ปุ่มโหลดชุดใหญ่เป็นปุ่มรอง ไม่ใช่ปุ่มหลักสีเหลือง และหน้านี้ไม่มีปุ่มหลัก", async ({ page }) => {
     await openBbb(page)
-    for (const name of ["Contact sheet", "โหลดทั้งหมด (.zip)"]) {
+    for (const name of ["ภาพรวมทุกเฟรม", "โหลดทั้งหมด (.zip)"]) {
       await expect(page.getByRole("button", { name })).toHaveClass(/bg-secondary/)
     }
     await expect(page.locator("main [data-slot=button].bg-primary")).toHaveCount(0)
@@ -396,7 +398,7 @@ test.describe("W2 ภาพเฟรม", () => {
       await new Promise((resolve) => setTimeout(resolve, 600))
       await route.continue()
     })
-    const sheet = page.getByRole("button", { name: "Contact sheet" })
+    const sheet = page.getByRole("button", { name: "ภาพรวมทุกเฟรม" })
     const downloading = page.waitForEvent("download")
     await sheet.click()
     await expect(page.getByText("กำลังเตรียมไฟล์…")).toBeVisible()
@@ -416,7 +418,7 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(button).toHaveCSS("cursor", "not-allowed")
     await button.hover()
     await expect(page.locator('[data-slot="tooltip-content"]')).toHaveText("เปิดใช้ในเวอร์ชันถัดไป")
-    await expect(page.getByRole("button", { name: "Contact sheet" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "ภาพรวมทุกเฟรม" })).toHaveCount(0)
   })
 
   test("ภาพเฟรมโหลดไม่ได้: Alert พร้อมลองใหม่ (หัวคลิปยังอยู่)", async ({ page }) => {
@@ -522,6 +524,42 @@ test.describe("W2 ภาพใหญ่ (lightbox)", () => {
       return [Math.round(box.width), Math.round(box.height)]
     }
     await expect.poll(size).toEqual([640, 360])
+  })
+
+  test("ภาพเล็ก (160×90) ที่ยังโหลดไม่เสร็จ: ซ่อนไว้ก่อน ไม่แวบขึ้นมาใหญ่ตามขนาดเดา · โหลดแล้วได้ 2 เท่า = 320 px", async ({
+    page,
+  }) => {
+    await page.goto("/")
+    // ภาพ PNG 160×90 วาดจาก canvas ในหน้า (ภาพเฟรมจริงของชุดทดสอบเป็น 320×180)
+    const small = await page.evaluate(() => {
+      const canvas = document.createElement("canvas")
+      canvas.width = 160
+      canvas.height = 90
+      const context = canvas.getContext("2d")!
+      context.fillStyle = "#3a7"
+      context.fillRect(0, 0, 160, 90)
+      return canvas.toDataURL("image/png").split(",")[1]
+    })
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route("**/api/cache/**", async (route) => {
+      await gate
+      await route.fulfill({ contentType: "image/png", body: Buffer.from(small, "base64") })
+    })
+    await openBbb(page)
+    await frameButton(page, "00:00:04").click()
+    await expect(lightbox(page)).toHaveAttribute("aria-label", "ภาพเฟรมที่ 00:00:04")
+    await expect(lightboxImage(page)).toHaveCSS("visibility", "hidden")
+    release()
+    await expect(lightboxImage(page)).toHaveCSS("visibility", "visible")
+    await expect.poll(async () => Math.round((await lightboxImage(page).boundingBox())!.width)).toBe(320)
+    // ภาพถัดไปใช้ขนาดเดิมทันที ไม่ต้องซ่อนอีก
+    await page.keyboard.press("ArrowRight")
+    await expect(lightbox(page)).toHaveAttribute("aria-label", "ภาพเฟรมที่ 00:00:09")
+    await expect(lightboxImage(page)).toHaveCSS("visibility", "visible")
+    await expect.poll(async () => Math.round((await lightboxImage(page).boundingBox())!.width)).toBe(320)
   })
 
   test("จอเตี้ย: ภาพหดให้อยู่ในกรอบ 85vh", async ({ page }) => {
@@ -736,7 +774,7 @@ test.describe("W2 วางลิงก์ที่หน้าคลิป", ()
   test("วางหลายลิงก์ → กลับหน้าแรกพร้อมรายการผลและข้อความที่วาง", async ({ page }) => {
     await page.goto(`/v/${BBB}`)
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
-    const text = [`https://youtu.be/${ZOO}`, "ไม่ใช่ลิงก์"].join("\n")
+    const text = [`https://youtu.be/${ZOO}`, NOT_YOUTUBE].join("\n")
     await pasteOnPage(page, text)
     await expect(page).toHaveURL(/\/$/)
     await expect(page.locator('section[aria-labelledby="results-title"] [role="listitem"]')).toHaveCount(2)
@@ -802,9 +840,9 @@ test.describe("W2 บอกวิธีใช้ภาพเฟรม", () => {
     await expect(page.getByText(/คลิกภาพเพื่อดูภาพใหญ่/)).toHaveCount(0)
   })
 
-  test("ชี้ที่ปุ่ม Contact sheet เห็นคำอธิบายภาษาไทย", async ({ page }) => {
+  test("ชี้ที่ปุ่ม ภาพรวมทุกเฟรม เห็นคำอธิบายภาษาไทย", async ({ page }) => {
     await openBbb(page)
-    await page.getByRole("button", { name: "Contact sheet" }).hover()
+    await page.getByRole("button", { name: "ภาพรวมทุกเฟรม" }).hover()
     await expect(page.locator('[data-slot="tooltip-content"]')).toHaveText("ภาพเดียวที่รวมทุกเฟรม พร้อมเวลาใต้แต่ละภาพ")
   })
 })

@@ -39,6 +39,8 @@ const ZOO = "jNQXAC9IVRw"
 const PLAYLIST_ID = "PLfakeplaylist250"
 const PLAYLIST_URL = `https://www.youtube.com/playlist?list=${PLAYLIST_ID}`
 const AMBIGUOUS_URL = `${BBB_URL}&list=${PLAYLIST_ID}`
+// ลิงก์เว็บอื่นยังเป็นแถวสีแดง (ข้อความธรรมดาที่ไม่มีลิงก์ถูกข้ามเงียบ ๆ ตั้งแต่ D1)
+const NOT_YOUTUBE = "https://vimeo.com/123"
 const INVALID_MESSAGE = "ลิงก์นี้ไม่ใช่ลิงก์ยูทูป ลองคัดลอกจากแถบที่อยู่ของเบราว์เซอร์อีกครั้ง"
 const PLAYLIST_TITLE: string = JSON.parse(
   fs.readFileSync(path.join(import.meta.dirname, "../../tests/fixtures/playlist", `${PLAYLIST_ID}.json`), "utf8"),
@@ -172,7 +174,7 @@ test.describe("W1 วิเคราะห์ลิงก์", () => {
 
   test("หลายบรรทัด → แสดงรายการ: คลิป 1, ลิงก์อ่านไม่ออก 1, เพลย์ลิสต์ 1 ตามลำดับที่วาง", async ({ page }) => {
     await page.goto("/")
-    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, "สวัสดี ไม่ใช่ลิงก์", PLAYLIST_URL].join("\n"))
+    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, NOT_YOUTUBE, PLAYLIST_URL].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     await expect(page.getByRole("heading", { name: "ผลการวิเคราะห์" })).toBeVisible()
     await expect(page).toHaveURL(/\/$/)
@@ -182,7 +184,7 @@ test.describe("W1 วิเคราะห์ลิงก์", () => {
     await expect(rows.nth(0)).toContainText(ZOO)
     await expect(rows.nth(0).getByRole("link", { name: /เปิดดู/ })).toHaveAttribute("href", `/v/${ZOO}`)
 
-    await expect(rows.nth(1)).toContainText("สวัสดี ไม่ใช่ลิงก์")
+    await expect(rows.nth(1)).toContainText(NOT_YOUTUBE)
     const message = rows.nth(1).getByText(INVALID_MESSAGE)
     await expect(message).toBeVisible()
     await expect(message).toHaveClass(/text-destructive/)
@@ -195,7 +197,7 @@ test.describe("W1 วิเคราะห์ลิงก์", () => {
 
   test("รายการผล: กด Tab จากปุ่มวิเคราะห์ผ่าน 'ล้างรายการ' ไปถึงลิงก์ 'เปิดดู' ได้ แล้วกด Enter เข้าหน้าคลิป", async ({ page }) => {
     await page.goto("/")
-    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, NOT_YOUTUBE].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     const link = page.getByRole("link", { name: /เปิดดู/ })
     await expect(link).toBeVisible()
@@ -372,7 +374,7 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
       if (request.url().includes(`/api/videos/${ZOO}`)) peekUrls.push(request.url())
     })
     await page.goto("/")
-    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, NOT_YOUTUBE].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     const row = page.locator(RESULT_ROWS).first()
     await expect(row.locator("img")).toHaveAttribute("src", `https://i.ytimg.com/vi/${ZOO}/mqdefault.jpg`)
@@ -394,7 +396,7 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
       await route.continue()
     })
     await page.goto("/")
-    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, NOT_YOUTUBE].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     await page.getByRole("link", { name: /เปิดดู/ }).click()
     await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
@@ -409,7 +411,7 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
       if (request.url().includes(`/api/videos/${BBB}`)) requests.push(request.url())
     })
     await page.goto("/")
-    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, NOT_YOUTUBE].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     await expect(page.locator(RESULT_ROWS).first()).toContainText("Big Buck Bunny")
     expect(requests.every((url) => url.endsWith("?peek=1"))).toBe(true)
@@ -457,7 +459,7 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
       }),
     )
     await page.goto("/")
-    await page.getByRole("textbox").fill(["PRIVATEVID1", "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("textbox").fill(["PRIVATEVID1", NOT_YOUTUBE].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     const row = page.locator(RESULT_ROWS).first()
     await expect(row).toContainText("PRIVATEVID1")
@@ -472,7 +474,7 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
       await route.continue()
     })
     await page.goto("/")
-    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, NOT_YOUTUBE].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     const row = page.locator(RESULT_ROWS).first()
     await expect(row).toHaveAttribute("aria-busy", "true")
@@ -617,7 +619,7 @@ test.describe("W1 การวาง การเข้าถึง และข
 
   test("แสดงผลแล้วประกาศจำนวนรายการให้โปรแกรมอ่านหน้าจอ", async ({ page }) => {
     await page.goto("/")
-    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, "ไม่ใช่ลิงก์", PLAYLIST_URL].join("\n"))
+    await page.getByRole("textbox").fill([`https://youtu.be/${ZOO}`, NOT_YOUTUBE, PLAYLIST_URL].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     await expect(page.getByRole("status").filter({ hasText: "ผลการวิเคราะห์ 3 รายการ" })).toBeAttached()
   })
@@ -844,19 +846,31 @@ test.describe("W1 จำรายการที่วางไว้", () => {
     await expect(rows.first()).toContainText(PLAYLIST_TITLE)
   })
 
-  test("sessionStorage ใช้ไม่ได้ → ยังใช้งานได้ปกติ และสลับหน้าแล้วรายการยังอยู่", async ({ page }) => {
+  test("เบราว์เซอร์ไม่ให้เว็บเก็บข้อมูล (แตะ localStorage/sessionStorage แล้ว error) → W1 และ W2 ยังขึ้นปกติ ไม่มี error ในหน้า และสลับหน้าแล้วรายการยังอยู่", async ({
+    page,
+  }) => {
+    const pageErrors: string[] = []
+    page.on("pageerror", (error) => pageErrors.push(error.message))
     await page.addInitScript(() => {
-      Object.defineProperty(window, "sessionStorage", {
-        get() {
-          throw new Error("SecurityError")
-        },
-      })
+      for (const name of ["localStorage", "sessionStorage"]) {
+        Object.defineProperty(window, name, {
+          get() {
+            throw new DOMException("The operation is insecure.", "SecurityError")
+          },
+        })
+      }
     })
     const rows = await pasteThree(page)
+    await expect(page.locator("html")).toHaveClass(/dark|light/)
     await rows.nth(1).getByRole("link", { name: /เปิดดู/ }).click()
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Me at the zoo")
     await page.getByRole("navigation", { name: "ตำแหน่งของหน้านี้" }).getByRole("link", { name: /รายการที่วาง/ }).click()
     await expectListIntact(page, 1)
+    // เปิด W2 ตรง ๆ (โหลดหน้าใหม่ทั้งหน้า) ก็ขึ้น
+    await page.goto(`/v/${BBB}`)
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    await expect(page.getByText("หน้านี้ทำงานผิดพลาด")).toHaveCount(0)
+    expect(pageErrors).toEqual([])
   })
 
   test("ย้อนกลับมาหน้าแรกแล้วกลับไปตำแหน่งเลื่อนเดิม", async ({ page }) => {
@@ -901,7 +915,7 @@ test.describe("ปรับจากการเดินตามเส้น�
 
   test("เปิดหน้าคลิปด้วยคีย์บอร์ด (Enter ที่ 'เปิดดู') → โฟกัสไปที่ชื่อคลิป ไม่หลุดไปที่ body", async ({ page }) => {
     await page.goto("/")
-    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, "ไม่ใช่ลิงก์"].join("\n"))
+    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, NOT_YOUTUBE].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     await page.getByRole("link", { name: /เปิดดู/ }).focus()
     await page.keyboard.press("Enter")
@@ -911,6 +925,6 @@ test.describe("ปรับจากการเดินตามเส้น�
     // Tab ต่อไปถึงปุ่มในส่วนภาพเฟรมเลย ไม่ต้องย้อนผ่านเมนูบนหัว
     await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(12)
     await page.keyboard.press("Tab")
-    await expect(page.getByRole("button", { name: "Contact sheet" })).toBeFocused()
+    await expect(page.getByRole("button", { name: "ภาพรวมทุกเฟรม" })).toBeFocused()
   })
 })
