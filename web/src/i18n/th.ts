@@ -1,6 +1,13 @@
 export const th = {
   app: { name: "YT Toolkit" },
-  common: { loading: "กำลังโหลด", close: "ปิด", reload: "โหลดหน้าใหม่", retry: "ลองใหม่", backHome: "กลับหน้าแรก" },
+  common: {
+    loading: "กำลังโหลด",
+    close: "ปิด",
+    reload: "โหลดหน้าใหม่",
+    retry: "ลองใหม่",
+    backHome: "กลับหน้าแรก",
+    more: "เพิ่มเติม",
+  },
   time: {
     justNow: "เมื่อสักครู่",
     minutesAgo: "{n} นาทีก่อน",
@@ -11,7 +18,7 @@ export const th = {
     monthsAgo: "{n} เดือนก่อน",
     yearsAgo: "{n} ปีก่อน",
   },
-  nav: { settings: "ตั้งค่า", home: "หน้าแรก" },
+  nav: { settings: "ตั้งค่า", home: "หน้าแรก", main: "เมนูหลัก", breadcrumb: "ตำแหน่งของหน้านี้" },
   home: {
     title: "วางลิงก์ยูทูป แล้วเลือกสิ่งที่อยากได้",
     subtitle: "วางได้หลายลิงก์ บรรทัดละลิงก์ หรือลิงก์เพลย์ลิสต์",
@@ -31,6 +38,11 @@ export const th = {
       playlistError: "โหลดข้อมูลเพลย์ลิสต์ไม่สำเร็จ",
       playlistLoading: "กำลังโหลดข้อมูลเพลย์ลิสต์",
       wholePlaylist: "ทั้งเพลย์ลิสต์",
+      wholeMix: "ทั้งมิกซ์ (25 คลิปแรก)",
+      mixNote: "มิกซ์อัตโนมัติ แต่ละคนอาจได้รายการไม่เหมือนกัน",
+      opened: "เปิดดูแล้ว",
+      clear: "ล้างรายการ",
+      cleared: "ล้างรายการแล้ว",
       none: "ไม่พบลิงก์ในข้อความที่วาง",
       count: "ผลการวิเคราะห์ {n} รายการ",
       showTitle: "แสดงชื่อ",
@@ -39,8 +51,10 @@ export const th = {
     },
     dialog: {
       title: "ลิงก์นี้อยู่ในเพลย์ลิสต์ จะเอาแค่คลิปนี้ หรือทั้งเพลย์ลิสต์?",
+      mixTitle: "ลิงก์นี้เป็นมิกซ์อัตโนมัติของยูทูป จะเอาแค่คลิปนี้ หรือ 25 คลิปแรกของมิกซ์?",
       clipOnly: "คลิปนี้",
       wholePlaylist: "ทั้งเพลย์ลิสต์",
+      wholeMix: "ทั้งมิกซ์ (25 คลิปแรก)",
     },
     recent: {
       title: "ล่าสุด",
@@ -55,6 +69,8 @@ export const th = {
     chapters: "{n} ตอน",
     publishedOn: "เผยแพร่ {date}",
     pageTitle: "{title} · {app}",
+    crumbList: "รายการที่วาง ({n} ลิงก์)",
+    crumbLoading: "กำลังโหลดชื่อคลิป",
   },
   frames: {
     title: "ภาพเฟรม",
@@ -64,6 +80,9 @@ export const th = {
     frameAlt: "ภาพเฟรมที่ {time}",
     showAll: "ดูทั้งหมด ({n})",
     collapse: "ย่อ",
+    copyImage: "คัดลอกภาพ",
+    imageCopied: "คัดลอกภาพแล้ว",
+    copyImageFailed: "คัดลอกภาพไม่สำเร็จ ลองใช้ โหลดภาพนี้ แทน",
     downloadFrame: "โหลดภาพนี้",
     copyTime: "คัดลอกเวลา",
     copyLink: "คัดลอกลิงก์ช่วงนี้",

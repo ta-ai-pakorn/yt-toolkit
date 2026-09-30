@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
-import { ChevronDown, ChevronUp, Copy, Download, ImageOff, Link2 } from "lucide-react"
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react"
+import { ChevronDown, ChevronUp, Copy, Download, ImageIcon, ImageOff, Link2 } from "lucide-react"
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { toast } from "sonner"
 
 import { AspectRatio } from "@/components/ui/aspect-ratio"
@@ -9,18 +9,19 @@ import { ButtonGroup } from "@/components/ui/button-group"
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { fill, th } from "@/i18n/th"
 import { ApiError } from "@/lib/api"
+import { copyImage } from "@/lib/clipboard"
 import { downloadFile } from "@/lib/download"
 import { formatTimecode, youtubeLinkAt } from "@/lib/format"
 import type { StoryboardFrame } from "@/lib/types"
 import { cn } from "cn"
 
 import { errorMessage } from "./errors"
+import { FrameLightbox } from "./lightbox"
 import { LoadError } from "./load-error"
 import { storyboardQuery } from "./queries"
 
@@ -40,6 +41,16 @@ async function downloadWithToast(url: string, fallbackName: string): Promise<voi
     toast.dismiss(id)
   } catch (error) {
     toast.error(errorMessage(error, th.errors.downloadFailed), { id })
+  }
+}
+
+/** คัดลอกภาพเฟรมลงคลิปบอร์ดเป็น PNG (วางใน LINE / Word / PowerPoint ได้ทันที) */
+async function copyFrameImage(url: string): Promise<void> {
+  try {
+    await copyImage(url)
+    toast.success(t.imageCopied)
+  } catch {
+    toast.error(t.copyImageFailed)
   }
 }
 
@@ -94,10 +105,17 @@ function focusFirstItem(itemRef: RefObject<HTMLElement | null>): () => void {
 // เพราะ content-visibility ตัดทุกอย่างที่ล้นกรอบ ไม่งั้นวงโฟกัสของปุ่มในภาพจะถูกตัด (margin ติดลบชดเชยให้ระยะห่างเท่าเดิม)
 const TILE = "group relative -m-[3px] p-[3px] [contain-intrinsic-size:auto_80px] [content-visibility:auto]"
 
-function FrameTile({ frame, videoId, hideOnNarrow }: { frame: StoryboardFrame; videoId: string; hideOnNarrow: boolean }) {
+type FrameTileProps = {
+  frame: StoryboardFrame
+  videoId: string
+  hideOnNarrow: boolean
+  onOpen: () => void
+  buttonRef: (element: HTMLButtonElement | null) => void
+}
+
+function FrameTile({ frame, videoId, hideOnNarrow, onOpen, buttonRef }: FrameTileProps) {
   const time = formatTimecode(frame.tMs)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
   const keyboardOpenRef = useRef(false)
   const firstItemRef = useRef<HTMLDivElement>(null)
   const downloadingRef = useRef(false)
@@ -110,22 +128,12 @@ function FrameTile({ frame, videoId, hideOnNarrow }: { frame: StoryboardFrame; v
     if (keyboardOpenRef.current) return focusFirstItem(firstItemRef)
   }, [menuOpen])
 
+  // Shift+F10 / ปุ่ม Menu = เปิดเมนูเหมือนคลิกขวา (คลิกซ้าย/Enter/Space = ดูภาพใหญ่)
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
       event.preventDefault()
       keyboardOpenRef.current = true
       openContextMenuAt(event.currentTarget)
-    }
-  }
-
-  // คลิกซ้าย/Enter/Space ที่ภาพ = เปิดเมนูเดียวกัน (คนที่ไม่รู้ว่าคลิกขวาได้ก็เจอ และใช้บนจอสัมผัสได้)
-  function onClick(event: MouseEvent<HTMLButtonElement>) {
-    if (event.detail === 0) {
-      keyboardOpenRef.current = true
-      openContextMenuAt(event.currentTarget)
-    } else {
-      keyboardOpenRef.current = false
-      openContextMenuAt(event.currentTarget, event.clientX, event.clientY)
     }
   }
 
@@ -143,45 +151,37 @@ function FrameTile({ frame, videoId, hideOnNarrow }: { frame: StoryboardFrame; v
   return (
     <ContextMenu onOpenChange={setMenuOpen}>
       <ContextMenuTrigger render={<li className={cn(TILE, hideOnNarrow && "max-sm:hidden")} />}>
-        <HoverCard open={previewOpen && !menuOpen} onOpenChange={setPreviewOpen}>
-          <HoverCardTrigger
-            delay={250}
-            closeDelay={100}
-            render={
-              <button
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
-                onClick={onClick}
-                onKeyDown={onKeyDown}
-                className="block w-full cursor-pointer rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring"
-              />
-            }
-          >
-            <AspectRatio ratio={16 / 9} className="overflow-hidden rounded-md bg-muted">
-              <img
-                src={frame.url}
-                alt={fill(t.frameAlt, { time })}
-                width={320}
-                height={180}
-                loading="lazy"
-                decoding="async"
-                className="size-full object-cover"
-              />
-              {/* ผู้ใช้คีย์บอร์ดไม่มีเมาส์ชี้ ให้เห็นเวลาตอนโฟกัสด้วย */}
-              <span className="pointer-events-none absolute bottom-1 left-1 hidden rounded-sm bg-background/85 px-1 font-mono text-[11px] text-foreground group-has-[:focus-visible]:block">
-                {time}
-              </span>
-            </AspectRatio>
-          </HoverCardTrigger>
-          <HoverCardContent side="top" className="w-[min(492px,calc(100vw-1.5rem))] p-1.5">
-            <img src={frame.url} alt="" width={480} height={270} decoding="async" className="aspect-video w-full rounded-md" />
-            <p className="pt-1.5 text-center font-mono text-xs">{time}</p>
-          </HoverCardContent>
-        </HoverCard>
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-haspopup="dialog"
+          onClick={onOpen}
+          onKeyDown={onKeyDown}
+          className="block w-full cursor-zoom-in rounded-md outline-none hover:ring-2 hover:ring-ring/40 focus-visible:ring-3 focus-visible:ring-ring"
+        >
+          <AspectRatio ratio={16 / 9} className="overflow-hidden rounded-md bg-muted">
+            <img
+              src={frame.url}
+              alt={fill(t.frameAlt, { time })}
+              width={320}
+              height={180}
+              loading="lazy"
+              decoding="async"
+              className="size-full object-cover"
+            />
+            {/* เวลาของภาพ: เห็นตอนชี้เมาส์ และตอนโฟกัสด้วยคีย์บอร์ด (ผู้ใช้คีย์บอร์ดไม่มีเมาส์ชี้) */}
+            <span className="pointer-events-none absolute bottom-1 left-1 hidden rounded-sm bg-background/85 px-1 font-mono text-[11px] text-foreground group-hover:block group-has-[:focus-visible]:block">
+              {time}
+            </span>
+          </AspectRatio>
+        </button>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem ref={firstItemRef} onClick={() => void downloadFrame()}>
+        <ContextMenuItem ref={firstItemRef} onClick={() => void copyFrameImage(frame.url)}>
+          <ImageIcon aria-hidden />
+          {t.copyImage}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => void downloadFrame()}>
           <Download aria-hidden />
           {t.downloadFrame}
         </ContextMenuItem>
@@ -200,14 +200,39 @@ function FrameTile({ frame, videoId, hideOnNarrow }: { frame: StoryboardFrame; v
 
 function FrameGrid({ frames, videoId }: { frames: StoryboardFrame[]; videoId: string }) {
   const [expanded, setExpanded] = useState(false)
+  // ภาพที่เปิดดูใหญ่อยู่ (ตำแหน่งใน frames) · null = ปิด
+  const [viewing, setViewing] = useState<number | null>(null)
+  const openerRef = useRef<number>(0)
+  const buttons = useRef(new Map<number, HTMLButtonElement>())
   const shown = expanded ? frames : frames.slice(0, COLLAPSED_COUNT)
   // 12 ภาพหรือน้อยกว่าบนจอกว้างเห็นครบแล้ว ปุ่มจึงจำเป็นเฉพาะจอแคบ (ที่เห็นแค่ 6 ภาพ)
   const toggleNeeded = frames.length > COLLAPSED_COUNT
+
+  // ปิดภาพใหญ่แล้วโฟกัสกลับที่ภาพเฟรมที่ดูอยู่ล่าสุด (ถ้าภาพนั้นอยู่ในตารางและมองเห็นได้) ไม่งั้นกลับภาพที่กดเปิด
+  function returnFocus(last: number): HTMLElement | null {
+    const current = buttons.current.get(last)
+    if (current && current.offsetParent !== null) return current
+    return buttons.current.get(openerRef.current) ?? null
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <ul className={GRID} aria-label={t.listLabel}>
         {shown.map((frame, index) => (
-          <FrameTile key={frame.index} frame={frame} videoId={videoId} hideOnNarrow={!expanded && index >= NARROW_COUNT} />
+          <FrameTile
+            key={frame.index}
+            frame={frame}
+            videoId={videoId}
+            hideOnNarrow={!expanded && index >= NARROW_COUNT}
+            onOpen={() => {
+              openerRef.current = index
+              setViewing(index)
+            }}
+            buttonRef={(element) => {
+              if (element) buttons.current.set(index, element)
+              else buttons.current.delete(index)
+            }}
+          />
         ))}
       </ul>
       {frames.length > NARROW_COUNT && (
@@ -222,6 +247,7 @@ function FrameGrid({ frames, videoId }: { frames: StoryboardFrame[]; videoId: st
           {expanded ? t.collapse : fill(t.showAll, { n: frames.length })}
         </Button>
       )}
+      <FrameLightbox frames={frames} index={viewing} onIndexChange={setViewing} returnFocus={returnFocus} />
     </div>
   )
 }
