@@ -7,7 +7,7 @@ import type { StoryboardFrame } from "@/lib/types"
 
 /** ขยายภาพได้ไม่เกิน 2 เท่าของขนาดจริง: ภาพ storyboard เล็ก (160-320 px) ขยายมากกว่านี้จะเบลอ */
 const MAX_UPSCALE = 2
-// ขนาดภาพ storyboard ที่พบบ่อย ใช้ก่อนภาพโหลดเสร็จ (ภาพมาจาก cache ของเบราว์เซอร์ ปกติโหลดทันที)
+// ขนาดสำรองเผื่อเบราว์เซอร์บอกขนาดภาพไม่ได้
 const DEFAULT_SIZE = { width: 320, height: 180 }
 
 type Props = {
@@ -30,11 +30,14 @@ export function FrameLightbox({ frames, index, onIndexChange, returnFocus }: Pro
   if (index !== null && index !== last) setLast(index)
   const position = index ?? last
   const frame = frames[Math.min(position, frames.length - 1)]
-  const [natural, setNatural] = useState<{ url: string; width: number; height: number } | null>(null)
+  // ขนาดจริงของภาพเฟรม: ทุกภาพในชุดเดียวกันขนาดเท่ากัน จึงใช้ขนาดของภาพที่โหลดแล้วกับภาพถัดไปได้เลย
+  // ยังไม่รู้ขนาด (เปิดครั้งแรก) = ซ่อนภาพไว้จนโหลดเสร็จ ภาพเล็กจะได้ไม่แวบขึ้นมาใหญ่เกินก่อน
+  const [natural, setNatural] = useState<{ frames: StoryboardFrame[]; width: number; height: number } | null>(null)
 
   if (!frame) return null
   const time = formatTimecode(frame.tMs)
-  const size = natural?.url === frame.url ? natural : DEFAULT_SIZE
+  const known = natural?.frames === frames ? natural : null
+  const size = known ?? DEFAULT_SIZE
   // ใหญ่ที่สุดที่ยังอยู่ในกรอบ 90vw × 85vh และไม่เกิน 2 เท่าของขนาดจริง (คงสัดส่วนภาพ)
   const width = `min(90vw, calc(85vh * ${size.width} / ${size.height}), ${size.width * MAX_UPSCALE}px)`
 
@@ -67,14 +70,14 @@ export function FrameLightbox({ frames, index, onIndexChange, returnFocus }: Pro
             alt=""
             draggable={false}
             onClick={() => onIndexChange(null)}
-            onLoad={(event) =>
-              setNatural({
-                url: frame.url,
+            onLoad={(event) => {
+              const loaded = {
                 width: event.currentTarget.naturalWidth || DEFAULT_SIZE.width,
                 height: event.currentTarget.naturalHeight || DEFAULT_SIZE.height,
-              })
-            }
-            style={{ width }}
+              }
+              if (known?.width !== loaded.width || known.height !== loaded.height) setNatural({ frames, ...loaded })
+            }}
+            style={{ width, visibility: known ? undefined : "hidden" }}
             className="block h-auto max-w-none cursor-zoom-out rounded-sm select-none"
           />
           <span className="sr-only" aria-live="polite">

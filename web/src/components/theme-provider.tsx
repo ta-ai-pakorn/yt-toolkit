@@ -31,6 +31,32 @@ function isTheme(value: string | null): value is Theme {
   return THEME_VALUES.includes(value as Theme)
 }
 
+// เบราว์เซอร์ที่ตั้ง "ไม่ให้เว็บเก็บข้อมูล" โยน error ตั้งแต่ตอนแตะชื่อ localStorage (และตอนอ่าน/เขียน)
+// ทุกการแตะจึงห่อ try/catch: อ่านไม่ได้ = ใช้ค่าเริ่มต้น เขียนไม่ได้ = ธีมยังเปลี่ยนได้แค่ไม่ถูกจำ
+function themeStorage(): Storage | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function readStoredTheme(storageKey: string): string | null {
+  try {
+    return themeStorage()?.getItem(storageKey) ?? null
+  } catch {
+    return null
+  }
+}
+
+function writeStoredTheme(storageKey: string, theme: Theme) {
+  try {
+    themeStorage()?.setItem(storageKey, theme)
+  } catch {
+    // เก็บไม่ได้ก็ไม่เป็นไร
+  }
+}
+
 function getSystemTheme(): ResolvedTheme {
   if (window.matchMedia(COLOR_SCHEME_QUERY).matches) {
     return "dark"
@@ -66,7 +92,7 @@ export function ThemeProvider({
   ...props
 }: ThemeProviderProps) {
   const [theme, setThemeState] = React.useState<Theme>(() => {
-    const storedTheme = localStorage.getItem(storageKey)
+    const storedTheme = readStoredTheme(storageKey)
     if (isTheme(storedTheme)) {
       return storedTheme
     }
@@ -76,7 +102,7 @@ export function ThemeProvider({
 
   const setTheme = React.useCallback(
     (nextTheme: Theme) => {
-      localStorage.setItem(storageKey, nextTheme)
+      writeStoredTheme(storageKey, nextTheme)
       setThemeState(nextTheme)
     },
     [storageKey]
@@ -123,7 +149,7 @@ export function ThemeProvider({
 
   React.useEffect(() => {
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.storageArea !== localStorage) {
+      if (event.storageArea === null || event.storageArea !== themeStorage()) {
         return
       }
 
