@@ -952,3 +952,96 @@ def test_run_app_accepts_extractor_without_close(paths, fake_platform, monkeypat
     code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
     assert code == 0
     assert not hasattr(ctx.extractor, "close")
+
+
+# ---------- final review: ล้าง cache เก่าทุก 24 ชม. ระหว่างเปิดโปรแกรม ----------
+
+
+def _wait_for(predicate, timeout: float = 5.0) -> bool:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+def test_periodic_purge_default_interval_is_24_hours():
+    assert lifecycle.PURGE_INTERVAL_S == 24 * 60 * 60
+
+
+def test_periodic_purge_runs_every_interval_until_stopped(paths, monkeypatch):
+    import threading
+
+    calls = []
+    monkeypatch.setattr(lifecycle, "purge_stale_cache", lambda db, root, now: calls.append((db, root)) or 0)
+    stop = threading.Event()
+    thread = lifecycle.start_periodic_purge("db", paths.cache, stop, interval=0.01)
+    assert thread.daemon
+    assert _wait_for(lambda: len(calls) >= 3)
+    stop.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert calls[0] == ("db", paths.cache)
+
+
+def test_periodic_purge_waits_one_interval_before_first_run(paths, monkeypatch):
+    import threading
+
+    calls = []
+    monkeypatch.setattr(lifecycle, "purge_stale_cache", lambda *a: calls.append(a) or 0)
+    stop = threading.Event()
+    thread = lifecycle.start_periodic_purge("db", paths.cache, stop, interval=60)
+    stop.set()  # ตอนเปิดโปรแกรมล้างไปแล้วใน open_services รอบแรกของ timer จึงอยู่ที่ 24 ชม. ถัดไป
+    thread.join(5)
+    assert calls == []
+
+
+def test_periodic_purge_survives_errors(paths, monkeypatch, caplog):
+    import threading
+
+    calls = []
+
+    def broken(*args):
+        calls.append(args)
+        raise OSError("ดิสก์เสีย")
+
+    monkeypatch.setattr(lifecycle, "purge_stale_cache", broken)
+    stop = threading.Event()
+    with caplog.at_level(logging.ERROR, logger="yttoolkit"):
+        thread = lifecycle.start_periodic_purge("db", paths.cache, stop, interval=0.01)
+        assert _wait_for(lambda: len(calls) >= 3)  # ล้มแล้วยังวนต่อ ไม่ตาย
+        stop.set()
+        thread.join(5)
+    assert "ล้าง cache เก่าไม่สำเร็จ" in caplog.text
+
+
+def test_run_app_starts_periodic_purge_and_stops_it_on_shutdown(paths, fake_platform, monkeypatch):
+    import threading
+
+    started = []
+
+    def fake_start(db, cache_root, stop, interval=lifecycle.PURGE_INTERVAL_S):
+        started.append((db, cache_root, stop, interval))
+        thread = threading.Thread(target=stop.wait, daemon=True)
+        thread.start()
+        return thread
+
+    monkeypatch.setattr(lifecycle, "start_periodic_purge", fake_start)
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    assert code == 0
+    assert len(started) == 1
+    db, cache_root, stop, interval = started[0]
+    assert db is ctx.db and cache_root == paths.cache
+    assert interval == lifecycle.PURGE_INTERVAL_S
+    assert stop.is_set()  # ปิดโปรแกรมแล้ว timer หยุดก่อนปิดฐานข้อมูล
+
+
+def test_run_app_does_not_start_periodic_purge_when_server_fails(paths, fake_platform, monkeypatch):
+    started = []
+    monkeypatch.setattr(lifecycle, "start_periodic_purge", lambda *a, **k: started.append(a))
+    code, _ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, ready=False)
+    assert code == 1
+    assert started == []

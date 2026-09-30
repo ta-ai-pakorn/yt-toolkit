@@ -31,6 +31,7 @@ from .probe import base_url, find_running, is_alive, setup_file_log  # noqa: F40
 log = logging.getLogger("yttoolkit")
 
 DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+PURGE_INTERVAL_S = 24 * 60 * 60  # ล้าง cache เก่าซ้ำทุก 24 ชม. สำหรับเครื่องที่เปิดโปรแกรมทิ้งไว้หลายวัน
 
 
 def default_output_dir(plat: Platform) -> Path:
@@ -146,13 +147,33 @@ def open_services(paths: Paths) -> tuple[Database, VideoService, Extractor]:
     except BaseException:
         db.close()
         raise
+    purge_cache_once(db, paths.cache)
+    return db, VideoService(db, extractor), extractor
+
+
+def purge_cache_once(db: Database, cache_root: Path) -> None:
+    """ล้าง cache ของคลิปที่ไม่ได้เปิดเกิน 30 วัน พลาดแค่บันทึก log (ห้ามทำให้เปิดโปรแกรมไม่ได้ รอบหน้าค่อยลองใหม่)"""
     try:
-        removed = purge_stale_cache(db, paths.cache, datetime.now(UTC))
+        removed = purge_stale_cache(db, cache_root, datetime.now(UTC))
         if removed:
             log.info("ล้าง cache ของคลิปที่ไม่ได้เปิดเกิน 30 วันแล้ว %s คลิป", removed)
-    except Exception:  # ห้ามทำให้เปิดโปรแกรมไม่ได้ รอบหน้าค่อยลองใหม่
+    except Exception:
         log.exception("ล้าง cache เก่าไม่สำเร็จ (ข้ามไปก่อน)")
-    return db, VideoService(db, extractor), extractor
+
+
+def start_periodic_purge(
+    db: Database, cache_root: Path, stop: threading.Event, interval: float = PURGE_INTERVAL_S
+) -> threading.Thread:
+    """ล้าง cache เก่าทุก `interval` วินาทีใน daemon thread จนกว่าจะ set `stop` (รอบแรกหลังเปิดโปรแกรมไปแล้ว 1 รอบเวลา
+    เพราะ open_services ล้างไปแล้วตอนเปิด)"""
+
+    def loop() -> None:
+        while not stop.wait(interval):
+            purge_cache_once(db, cache_root)
+
+    thread = threading.Thread(target=loop, name="cache-purge", daemon=True)
+    thread.start()
+    return thread
 
 
 def run_app(
@@ -248,6 +269,8 @@ def _run_server(
         paths.app_json, runstate.RunInfo(port=port, pid=os.getpid(), token=token, started_at=runstate.now_iso())
     )
     warm_up_in_background(extractor)
+    purge_stop = threading.Event()
+    purge_thread = start_periodic_purge(db, paths.cache, purge_stop)
     if auto_ffmpeg:
         threading.Thread(target=ensure_ffmpeg, args=(paths, plat), name="ffmpeg-setup", daemon=True).start()
     url = base_url(port)
@@ -278,7 +301,9 @@ def _run_server(
         pass
     finally:
         server.stop()
+        purge_stop.set()  # หยุด timer ก่อนผู้เรียกปิดฐานข้อมูล
         server.join(timeout=10)
+        purge_thread.join(timeout=5)
         runstate.clear(paths.app_json)
     return 0
 
