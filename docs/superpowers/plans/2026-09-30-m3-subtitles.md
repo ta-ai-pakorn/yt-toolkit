@@ -435,9 +435,10 @@ while i < len(cues):
 - **`cueStats(cues)` (TS only, for the preview):** `{count, avgChars: one decimal of the mean displayLen(lines.join(" ")), underOneSecond: count of endMs − startMs < 1000}`.
 
 ### C7. Parser output (`core/subparse.py`, T7)
-- `ParsedTrack(tokens: list[Token], has_word_timing: bool, source: "json3" | "vtt")`
+- `ParsedTrack(tokens: tuple[Token, ...], has_word_timing: bool, source: "json3" | "vtt")` (frozen dataclass, so `tokens` is a tuple)
 - `PARSER_VERSION = 1`
 - `SubParseError(ValueError)` means the data is not usable, which triggers the vtt fallback.
+- **Untimed overlap rule (controller ruling 2026-09-30):** each kept untimed block is spread over `[start, max(start, min(end, next kept block's start))]`, so overlapping blocks never interleave words in the final stable sort. When the next block starts at the same ms, the result is zero-length tokens, which C6 allows.
 
 ### C8. Web contracts (T6 writes them; T9, T10, T13 and T14 consume them)
 **`web/src/lib/types.ts` additions:**
