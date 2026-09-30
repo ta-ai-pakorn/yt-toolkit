@@ -1,0 +1,9 @@
+# คลิปจริงที่ network test ใช้ (PRD ข้อ 9) เก็บแค่ id ไม่มีเนื้อหาของคลิปในรีโป
+# network test อ่านจากยูทูปสด ๆ ตอนรัน แล้วไม่เก็บอะไรลงรีโป
+
+[subtitles]
+thai_asr = "88o5Sk8_m1Y"      # th-orig, CC BY
+multi_audio_orig = "8lpOfyoxcvU"  # th original + en-US dub, two -orig tracks, CC BY
+owner_subs_chapters = "jNQXAC9IVRw"  # owner en/de, 3 chapters
+owner_thai = "iG9CE55wbtY"    # owner th (TED)
+no_subs = "aqz-KE-bpKQ"
