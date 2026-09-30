@@ -51,3 +51,15 @@ export function revealAndFocus(find: () => HTMLElement | null | undefined, onDon
     cancelAnimationFrame(second)
   }
 }
+
+/**
+ * เลื่อนเฉพาะในกรอบเลื่อน (ScrollArea) ให้ element อยู่กลางกรอบ ไม่เลื่อนทั้งหน้า และไม่ย้ายโฟกัส
+ * ใช้ตอนบรรทัดที่ไฮไลต์กลับมาให้เห็นอีกครั้ง (เช่นล้างคำค้น) ผู้ใช้ยังพิมพ์ต่อในช่องค้นหาได้
+ */
+export function centerInScrollArea(element: HTMLElement): void {
+  const viewport = element.closest<HTMLElement>('[data-slot="scroll-area-viewport"]')
+  if (!viewport) return
+  const box = element.getBoundingClientRect()
+  const frame = viewport.getBoundingClientRect()
+  viewport.scrollTop += box.top - frame.top - (frame.height - box.height) / 2
+}

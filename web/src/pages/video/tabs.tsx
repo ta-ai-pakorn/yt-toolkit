@@ -52,7 +52,8 @@ export function VideoTabs({ videoId, enabled }: Props) {
       <TabsContent value="subs" className={PANEL}>
         <SubsPanel videoId={videoId} enabled={enabled} />
       </TabsContent>
-      <TabsContent value="transcript" className={PANEL}>
+      {/* แท็บทรานสคริปต์เริ่มด้วยช่องค้นหา (หรือปุ่มไปแท็บซับ) ที่โฟกัสได้อยู่แล้ว: แผงไม่เป็นจุด Tab เพิ่ม */}
+      <TabsContent value="transcript" tabIndex={-1} className={PANEL}>
         <TranscriptPanel videoId={videoId} enabled={enabled} />
       </TabsContent>
     </Tabs>

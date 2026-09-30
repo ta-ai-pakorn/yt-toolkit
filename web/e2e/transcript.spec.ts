@@ -99,7 +99,13 @@ async function expectHighlightedFrameNear(page: Page, at: number) {
   await expect(highlighted).toHaveCount(1)
   await expect(highlighted).toBeFocused()
   await expect(highlighted).toBeInViewport()
-  await expect(highlighted).not.toHaveCSS("box-shadow", "none")
+  await expect(highlighted).toHaveAttribute("aria-current", "true")
+  // กรอบไฮไลต์ (outline) หรือวงโฟกัส (box-shadow) อย่างใดอย่างหนึ่งต้องเห็นอยู่ ขึ้นกับว่าเบราว์เซอร์ถือว่าโฟกัสจากคีย์บอร์ดไหม
+  const marked = await highlighted.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return style.outlineStyle !== "none" || style.boxShadow !== "none"
+  })
+  expect(marked).toBe(true)
   const alt = (await highlighted.locator("img").getAttribute("alt")) ?? ""
   const time = /\d{2}:\d{2}:\d{2}/.exec(alt)?.[0] ?? ""
   // ห่างจาก at ไม่เกินครึ่งช่วงห่างของภาพ · timecode ตัดเศษวินาทีทิ้ง จึงเผื่อเพิ่มอีก 1 วินาที
