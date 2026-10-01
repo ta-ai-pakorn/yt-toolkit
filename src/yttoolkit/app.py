@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
 from .api.errors import install_error_handlers
 from .api.routes import build_router
 from .api.security import LocalOnlyMiddleware
+from .api.settings import build_settings_router
 from .api.static import mount_web
 from .api.subtitles import build_subtitles_router
 from .api.videos import build_videos_router
@@ -19,6 +21,12 @@ from .core.extractor import Extractor
 from .core.subtitles import SubtitleService
 from .core.videos import VideoService
 from .platform import Platform
+
+if TYPE_CHECKING:  # โมดูลของ M4 ที่ lane อื่นสร้าง ใช้แค่เป็นชนิดของฟิลด์
+    from .core.events import EventBus
+    from .core.media import MediaTools
+    from .core.queue import QueueRunner
+    from .core.settings import SettingsStore
 
 
 def _no_pending_jobs() -> int:
@@ -48,6 +56,15 @@ class AppContext:
     subtitles: SubtitleService | None = None
     # บริการคอมเมนต์ปักหมุด: router ข้อมูลคลิปสร้างให้ แล้ว router โน้ตใช้ตัวเดียวกัน (ใช้ cache ร่วมกัน)
     pinned: PinnedCommentService | None = None
+    # บริการของ M4 (ไม่มี = ไม่เปิด API นั้น) settings = T2, events = T6, media = T5, queue = T11
+    settings: SettingsStore | None = None
+    queue: QueueRunner | None = None
+    events: EventBus | None = None
+    media: MediaTools | None = None
+    on_bot_check: Callable[[], None] | None = None
+    # ตัวแทน platform.reveal / open_folder (โหมดข้อมูลปลอมใช้ตัวที่ไม่เปิดหน้าต่างจริง) None = ใช้ ctx.plat
+    reveal: Callable[[Path], None] | None = None
+    open_folder: Callable[[Path], None] | None = None
 
 
 def create_app(ctx: AppContext) -> FastAPI:
@@ -59,6 +76,8 @@ def create_app(ctx: AppContext) -> FastAPI:
         app.include_router(build_videos_router(ctx), prefix="/api")
     if ctx.subtitles is not None:
         app.include_router(build_subtitles_router(ctx), prefix="/api")
+    if ctx.settings is not None:
+        app.include_router(build_settings_router(ctx), prefix="/api")
     mount_web(app, ctx.paths.web_dist, ctx.token)
     app.add_middleware(LocalOnlyMiddleware, port=ctx.port, token=ctx.token, extra_origins=ctx.extra_origins)
     return app

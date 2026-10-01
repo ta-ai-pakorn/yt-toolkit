@@ -804,7 +804,7 @@ def test_run_app_starts_even_if_purge_fails(paths, fake_platform, monkeypatch, c
 
 
 def test_run_app_fails_cleanly_when_db_cannot_open(paths, fake_platform, monkeypatch, caplog):
-    def broken_services(paths, **kwargs):
+    def broken_services(paths, plat, **kwargs):
         raise RuntimeError("ฐานข้อมูลเป็นเวอร์ชัน 9 ใหม่กว่าโปรแกรมนี้")
 
     monkeypatch.setattr(lifecycle, "open_services", broken_services)
@@ -814,7 +814,7 @@ def test_run_app_fails_cleanly_when_db_cannot_open(paths, fake_platform, monkeyp
     assert "ใหม่กว่าโปรแกรมนี้" in caplog.text
 
 
-def test_open_services_closes_db_when_migrate_fails(paths, monkeypatch):
+def test_open_services_closes_db_when_migrate_fails(paths, fake_platform, monkeypatch):
     from yttoolkit.core.db import Database
 
     closed = []
@@ -830,7 +830,7 @@ def test_open_services_closes_db_when_migrate_fails(paths, monkeypatch):
     monkeypatch.setattr(Database, "migrate", boom)
     monkeypatch.setattr(Database, "close", tracking_close)
     with pytest.raises(RuntimeError, match="migrate พัง"):
-        lifecycle.open_services(paths)
+        lifecycle.open_services(paths, fake_platform)
     assert len(closed) == 1
 
 
@@ -922,12 +922,13 @@ class _ClosingExtractor:
 
 def _services_with(extractor, paths):
     from yttoolkit.core.db import Database
+    from yttoolkit.core.settings import SettingsStore
     from yttoolkit.core.videos import VideoService
 
     def fake_open_services(p, *args, **kwargs):
         db = Database(paths.db)
         db.migrate()
-        return db, VideoService(db, extractor), extractor, None
+        return db, VideoService(db, extractor), extractor, None, SettingsStore(db, paths.data_root / "output")
 
     return fake_open_services
 
@@ -1107,3 +1108,43 @@ def test_run_app_ignores_fake_env_unless_asked(paths, fake_platform, monkeypatch
     assert code == 0
     assert ctx.fake is False
     assert isinstance(ctx.extractor, YtDlpExtractor)
+
+
+# ---------- M4 T2: ตั้งค่า ----------
+
+
+def test_open_services_fake_mode_output_defaults_under_data_root(paths, fake_platform):
+    db, *_, settings = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        assert settings.get()["outputDir"] == str(paths.data_root / "output")
+    finally:
+        db.close()
+
+
+def test_open_services_real_mode_output_defaults_to_platform_downloads(paths, fake_platform):
+    db, *_, settings = lifecycle.open_services(paths, fake_platform, fake=False)
+    try:
+        assert settings.output_dir() == fake_platform.downloads / "YT-Toolkit"
+    finally:
+        db.close()
+
+
+def test_run_app_sets_settings_on_the_context(paths, fake_platform, monkeypatch):
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch)
+    assert code == 0
+    assert ctx.settings is not None
+    assert ctx.output_dir == fake_platform.downloads / "YT-Toolkit"
+    assert ctx.open_folder is None and ctx.reveal is None
+
+
+def test_run_app_fake_mode_never_opens_real_folders(paths, fake_platform, monkeypatch, caplog):
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, fake=True)
+    assert code == 0
+    assert ctx.output_dir == paths.data_root / "output"
+    assert ctx.open_folder is not None and ctx.reveal is not None
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        ctx.open_folder(ctx.output_dir)
+        ctx.reveal(ctx.output_dir / "x.mp4")
+    assert fake_platform.opened == [] and fake_platform.revealed == []
+    assert caplog.text.count("โหมดข้อมูลปลอม: ไม่เปิดโฟลเดอร์") == 2
+    assert str(paths.data_root) not in caplog.text  # ห้ามบันทึก path เต็มของโฟลเดอร์ผู้ใช้
