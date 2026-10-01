@@ -10,6 +10,7 @@ import { readFromList, useAnalyze, useGlobalPaste } from "./home/use-analyze"
 import { VideoCrumbs } from "./video/crumbs"
 import { errorMessage } from "./video/errors"
 import { VideoHeader } from "./video/header"
+import { playerActions } from "./video/player/player-store"
 import { videoQuery } from "./video/queries"
 import { ClipSequence } from "./video/sequence"
 import { VideoTabs } from "./video/tabs"
@@ -30,6 +31,12 @@ export function VideoPage() {
   // วางลิงก์ยูทูปที่หน้านี้ก็วิเคราะห์ได้เหมือนหน้าแรก (คลิปเดียวมาหน้านี้ หลายลิงก์กลับไปแสดงรายการที่หน้าแรก)
   const { analyze, pending, dialog } = useAnalyze()
   useGlobalPaste(analyze, pending)
+
+  // ตัวเล่นคลิป (M3.5) เป็นของคลิปนี้: เปลี่ยนคลิปหรือออกจากหน้า = หยุดและล้างตัวเล่นเดิม
+  useEffect(() => {
+    playerActions.reset(videoId || null)
+    return () => playerActions.reset(null)
+  }, [videoId])
 
   // เปิดหน้านี้ = ดูคลิปนี้แล้ว (แถวในรายการผลของ W1 ขึ้นป้าย "เปิดดูแล้ว")
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
-import { ExternalLink, NotebookPen, ZoomIn } from "lucide-react"
+import { ExternalLink, ImageIcon, NotebookPen } from "lucide-react"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
@@ -13,11 +13,11 @@ import { downloadFile } from "@/lib/download"
 import { youtubeWatchUrl } from "@/lib/format"
 import { notePath } from "@/lib/sub-options"
 import type { SubtitleTrack, VideoInfo } from "@/lib/types"
-import { Thumbnail } from "@/pages/home/thumbnail"
 
 import { errorMessage } from "./errors"
 import { Lightbox } from "./lightbox"
 import { LoadError } from "./load-error"
+import { PlayerSlot } from "./player/player-slot"
 import { useTrackWarming } from "./session-warming"
 import { StatTiles } from "./stats"
 import { subtitlesQuery } from "./subs-queries"
@@ -45,7 +45,11 @@ function HeaderSkeleton() {
       <span className="sr-only" role="status">
         {t.loading}
       </span>
-      <Skeleton className={`aspect-video ${COVER}`} />
+      {/* ช่องตัวเล่น + ปุ่ม "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" ใต้ตัวเล่น (จอแคบ: ปุ่มเต็มแถวใต้ชื่อคลิป) */}
+      <div className="max-sm:contents sm:flex sm:w-72 sm:shrink-0 sm:flex-col sm:gap-2">
+        <Skeleton className={`aspect-video ${COVER}`} />
+        <Skeleton className="h-7 w-52 max-sm:col-span-2 max-sm:row-start-2 max-sm:h-11 max-sm:w-60" />
+      </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:contents">
         <div className="flex flex-col gap-2 max-sm:self-center">
           <Skeleton className="h-8 w-3/4 max-sm:h-7" />
@@ -120,35 +124,30 @@ function Meta({ video, trackName }: { video: VideoInfo; trackName: string | null
 }
 
 /**
- * ปกคลิป: กด (หรือ Enter/Space) แล้วเปิดภาพปกขนาดใหญ่ในกล่องลอย (Lightbox เดียวกับภาพเฟรม) · Esc/คลิกปิด แล้วโฟกัสกลับที่ปก
- * ชี้เมาส์หรือโฟกัสแล้วเห็นไอคอนขยายและเคอร์เซอร์แว่นขยาย · ภาพปกที่ backend ส่งมาเป็นขนาดใหญ่ที่สุดที่ยูทูปมีอยู่แล้ว
- * ไม่มีภาพปก = กรอบเทาเฉย ๆ (กดไม่ได้) · ขนาดปุ่มเท่ากรอบปกของ Skeleton ภาพจึงไม่กระโดดตอนโหลดเสร็จ
+ * ปุ่ม "ดูภาพปก" ในแถวปุ่มของหัวคลิป: เปิดภาพปกขนาดใหญ่ในกล่องลอย (Lightbox เดียวกับภาพเฟรม) · Esc/คลิกปิด แล้วโฟกัสกลับที่ปุ่ม
+ * (M3.5: ปกกลายเป็นช่องตัวเล่น กดปกแล้วเล่นคลิป ภาพปกใหญ่จึงย้ายมาเป็นปุ่มนี้ กดได้ทุกสถานะของตัวเล่น และไม่หยุดคลิปที่กำลังเล่น)
+ * ไม่มีภาพปก = ไม่มีปุ่ม
  */
-function Cover({ src }: { src: string }) {
+function CoverButton({ src }: { src: string }) {
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
-  if (!src) return <Thumbnail src={src} className={COVER} />
+  if (!src) return null
   return (
     <>
-      <button
+      <Button
         ref={buttonRef}
-        type="button"
+        variant="secondary"
+        size="sm"
+        // จอแคบเหลือแค่ไอคอน (ชื่อปุ่มยังอ่านได้) แถวปุ่มจึงไม่ขึ้นบรรทัดใหม่
+        className={`${TOUCH} max-sm:w-11 max-sm:px-0`}
+        title={th.player.viewCover}
         aria-haspopup="dialog"
-        aria-label={t.cover.open}
+        data-slot="cover-button"
         onClick={() => setOpen(true)}
-        className={`group/cover relative block shrink-0 cursor-zoom-in rounded-md outline-none hover:ring-2 hover:ring-ring/40 focus-visible:ring-3 focus-visible:ring-ring ${COVER}`}
       >
-        <Thumbnail src={src} className="w-full" />
-        <span
-          aria-hidden
-          data-slot="cover-zoom"
-          className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-md bg-black/30 opacity-0 transition-opacity group-hover/cover:opacity-100 group-focus-visible/cover:opacity-100 motion-reduce:transition-none"
-        >
-          <span className="flex size-10 items-center justify-center rounded-full bg-black/60 text-white">
-            <ZoomIn className="size-5" />
-          </span>
-        </span>
-      </button>
+        <ImageIcon aria-hidden />
+        <span className="max-sm:sr-only">{th.player.viewCover}</span>
+      </Button>
       <Lightbox
         open={open}
         src={src}
@@ -231,8 +230,8 @@ function NoteButton({ videoId, trackId }: { videoId: string; trackId: string | n
 const focusLost = () => document.activeElement === null || document.activeElement === document.body
 
 /**
- * หัวคลิปของ W2 (สูงคงที่): ปก (กดดูภาพใหญ่) ชื่อ แถวป้าย (ช่อง หมวดหมู่ แทร็กซับ) ช่องตัวเลข
- * และปุ่ม "บันทึกเป็นโน้ต (.md)" กับ "เปิดในยูทูป" · คำอธิบาย chapter คอมเมนต์ปักหมุด แท็ก อยู่ในแท็บข้อมูลคลิป
+ * หัวคลิปของ W2 (สูงคงที่): ช่องตัวเล่น (ปก + ▶) ชื่อ แถวป้าย (ช่อง หมวดหมู่ แทร็กซับ) ช่องตัวเลข
+ * และปุ่ม "บันทึกเป็นโน้ต (.md)" "เปิดในยูทูป" "ดูภาพปก" · คำอธิบาย chapter คอมเมนต์ปักหมุด แท็ก อยู่ในแท็บข้อมูลคลิป
  * (โหลดอยู่ = Skeleton รูปเดียวกัน, ผิดพลาด = Alert)
  */
 export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error> }) {
@@ -268,8 +267,8 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
   }
   return (
     <div className={LAYOUT}>
-      {/* key: เปิดคลิปถัดไปแล้วกล่องภาพปกปิดเสมอ */}
-      <Cover key={data.videoId} src={data.thumbnailUrl} />
+      {/* ช่องตัวเล่น (ปก + ▶ ก่อนเล่น) · key: เปิดคลิปถัดไปแล้วเริ่มใหม่ */}
+      <PlayerSlot key={data.videoId} video={data} />
       <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:contents">
         {/* จอแคบ (< 640 px) ตัดชื่อที่ 3 บรรทัด ไม่ให้ชื่อยาวดันแถบแท็บพ้นจอแรก (review I-3: ชื่อไทย 100 ตัวดันไป 805 px)
             ชื่อเต็มยังอยู่ใน title (ชี้เมาส์) และโปรแกรมอ่านหน้าจออ่านครบ (ตัดแค่ที่ตาเห็น) */}
@@ -286,6 +285,8 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
         <div className={`flex flex-wrap items-center gap-2 ${FULL_ROW}`}>
           <NoteButton videoId={data.videoId} trackId={track?.id ?? null} />
           <YoutubeLink videoId={data.videoId} />
+          {/* key: เปิดคลิปถัดไปแล้วกล่องภาพปกปิดเสมอ */}
+          <CoverButton key={data.videoId} src={data.thumbnailUrl} />
         </div>
       </div>
     </div>

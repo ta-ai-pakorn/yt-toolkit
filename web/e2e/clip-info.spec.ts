@@ -2,6 +2,8 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page, type Route } from "@playwright/test"
 
+import { installFakeYT } from "./fake-yt"
+
 // owner round 2-4 (หน้าเว็บ): ช่องตัวเลข · แท็บข้อมูลคลิป (คำอธิบาย chapter ช่วงที่คนดูซ้ำ คอมเมนต์ปักหมุด แท็ก)
 // · บันทึกเป็นโน้ต · เปิดในยูทูป · ภาพปกขนาดใหญ่ · หัวคลิปแบบกระชับ (สูงคงที่)
 // ข้อมูลใหม่ของ backend (stats, tags, categories, mostReplayed, /pinned-comment, /note) จำลองด้วย page.route
@@ -21,7 +23,7 @@ const FRAME_LIST = "รายการภาพเฟรม"
 const LINES = "บรรทัดในทรานสคริปต์"
 const INFO_TAB = "ข้อมูลคลิป"
 const REPLAYED_TITLE = "ช่วงที่คนดูซ้ำบ่อย"
-const COVER = "ดูภาพปกขนาดใหญ่"
+const COVER = "ดูภาพปก"
 
 /**
  * แก้ข้อมูลคลิปที่ backend ส่งมา: ลบคีย์ใหม่ทั้งหมดก่อน (ผลไม่ขึ้นกับว่า backend มีข้อมูลเหล่านี้แล้วหรือยัง) แล้วใส่ patch
@@ -489,55 +491,43 @@ test.describe("เปิดในยูทูป และภาพปก", () =
     await expect(link).toHaveClass(/bg-secondary/)
   })
 
-  test("ปกไม่ใช่ลิงก์ไปยูทูป: กดแล้วเปิดภาพปกขนาดใหญ่ (กล่องเดียวกับภาพเฟรม) · Esc ปิดแล้วโฟกัสกลับที่ปก", async ({ page }) => {
+  // M3.5: ปกกลายเป็นช่องตัวเล่น (กดแล้วเล่นคลิป ดู player.spec.ts) ภาพปกขนาดใหญ่ย้ายมาเป็นปุ่ม "ดูภาพปก" ในแถวปุ่ม
+  test("ปุ่ม 'ดูภาพปก' เปิดภาพปกขนาดใหญ่ (กล่องเดียวกับภาพเฟรม) · Esc ปิดแล้วโฟกัสกลับที่ปุ่ม · ปกไม่ใช่ลิงก์ไปยูทูป", async ({ page }) => {
+    await installFakeYT(page)
     const info = await (await page.request.get(`/api/videos/${ZOO}`)).json() as { thumbnailUrl: string }
     expect(info.thumbnailUrl).not.toBe("")
     await page.goto(`/v/${ZOO}`)
-    const cover = page.getByRole("button", { name: COVER })
-    await expect(cover).toHaveAttribute("aria-haspopup", "dialog")
-    // ลิงก์ไปยูทูปในหน้ามีแค่ปุ่ม "เปิดในยูทูป" ปกไม่ได้อยู่ในลิงก์
+    const button = page.getByRole("button", { name: COVER, exact: true })
+    await expect(button).toHaveAttribute("aria-haspopup", "dialog")
+    // ลิงก์ไปยูทูปในหน้ามีแค่ปุ่ม "เปิดในยูทูป" ปก (ปุ่ม "เล่นคลิป") ไม่ได้อยู่ในลิงก์
     await expect(page.locator("a[href^='https://www.youtube.com/watch']")).toHaveCount(1)
-    await expect(cover.locator("xpath=ancestor::a")).toHaveCount(0)
-    await expect(cover).toHaveCSS("cursor", "zoom-in")
+    await expect(page.getByRole("button", { name: "เล่นคลิป" }).locator("xpath=ancestor::a")).toHaveCount(0)
 
-    await cover.click()
+    await button.click()
     const dialog = page.getByRole("dialog", { name: "ภาพปกของคลิป" })
     await expect(dialog).toBeVisible()
     await expect(dialog.locator("img")).toHaveAttribute("src", info.thumbnailUrl)
     await page.keyboard.press("Escape")
     await expect(dialog).toHaveCount(0)
-    await expect(cover).toBeFocused()
+    await expect(button).toBeFocused()
   })
 
   for (const key of ["Enter", "Space"]) {
-    test(`คีย์บอร์ด: ${key} ที่ปกเปิดภาพใหญ่ · เห็นไอคอนขยายตอนโฟกัส · คลิกที่ภาพปิดได้`, async ({ page }) => {
+    test(`คีย์บอร์ด: ${key} ที่ปุ่ม 'ดูภาพปก' เปิดภาพใหญ่ · คลิกที่ภาพปิดได้`, async ({ page }) => {
+      await installFakeYT(page)
       await page.goto(`/v/${ZOO}`)
-      const cover = page.getByRole("button", { name: COVER })
-      const zoom = cover.locator('[data-slot="cover-zoom"]')
-      await expect(zoom).toHaveCSS("opacity", "0")
-      await cover.focus()
-      await page.keyboard.press("Tab")
-      await page.keyboard.press("Shift+Tab")
-      await expect(cover).toBeFocused()
-      await expect(zoom).toHaveCSS("opacity", "1")
+      const button = page.getByRole("button", { name: COVER, exact: true })
+      await button.focus()
+      await expect(button).toBeFocused()
       await page.keyboard.press(key)
       const dialog = page.getByRole("dialog", { name: "ภาพปกของคลิป" })
       await expect(dialog).toBeVisible()
       await expect(dialog.locator("img")).toBeVisible()
       await dialog.locator("img").click()
       await expect(dialog).toHaveCount(0)
-      await expect(cover).toBeFocused()
+      await expect(button).toBeFocused()
     })
   }
-
-  test("ชี้เมาส์ที่ปกเห็นไอคอนขยาย", async ({ page }) => {
-    await page.goto(`/v/${ZOO}`)
-    const cover = page.getByRole("button", { name: COVER })
-    const zoom = cover.locator('[data-slot="cover-zoom"]')
-    await expect(zoom).toHaveCSS("opacity", "0")
-    await cover.hover()
-    await expect(zoom).toHaveCSS("opacity", "1")
-  })
 })
 
 test.describe("แท็บข้อมูลคลิป: ช่วงที่คนดูซ้ำบ่อย", () => {

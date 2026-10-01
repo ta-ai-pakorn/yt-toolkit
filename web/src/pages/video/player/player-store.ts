@@ -29,6 +29,8 @@ export type PlayerState = {
   reel: { ranges: PlayRange[]; index: number } | null
   /** เวลาที่ขอไว้ก่อน adapter พร้อม adapter อ่านแล้วล้างด้วย takePendingSeek() */
   pendingSeekMs: number | null
+  /** (เพิ่มโดย lane P) นับครั้งที่มีคนขอเล่นระหว่างผิดพลาด: ช่องตัวเล่นใช้ค่านี้รู้ว่าต้องโฟกัสข้อความผิดพลาด */
+  errorNudge: number
 }
 
 /** สิ่งที่ adapter ของ YouTube ต้องทำได้ */
@@ -49,6 +51,7 @@ const INITIAL: PlayerState = {
   errorAtMs: null,
   reel: null,
   pendingSeekMs: null,
+  errorNudge: 0,
 }
 
 let state: PlayerState = INITIAL
@@ -72,7 +75,7 @@ export function getPlayerState(): PlayerState {
 /** ขอเล่น (จากเวลาที่ให้ หรือจากตำแหน่งปัจจุบัน) ตัวเล่นยังไม่โหลด = เริ่มโหลด แล้วเล่นเมื่อพร้อม */
 function request(ms: number | undefined, reel: PlayerState["reel"]): void {
   if (state.status === "error" && state.error !== "offline") {
-    set({ errorAtMs: ms ?? state.currentMs })
+    set({ errorAtMs: ms ?? state.currentMs, errorNudge: state.errorNudge + 1 })
     return
   }
   if (adapter && state.status !== "loading") {

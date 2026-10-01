@@ -929,6 +929,9 @@ test.describe("ปรับจากการเดินตามเส้น�
     await expect(page.getByRole("button", { name: "บันทึกเป็นโน้ต (.md)", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(page.getByRole("link", { name: /^เปิดในยูทูป/ })).toBeFocused()
+    // M3.5: ปุ่ม "ดูภาพปก" ต่อท้ายแถวปุ่ม
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "ดูภาพปก", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(page.getByRole("tab", { name: "ภาพเฟรม", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")

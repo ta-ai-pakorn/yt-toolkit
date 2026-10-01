@@ -86,9 +86,16 @@ const FAKE_SCRIPT = String.raw`(function () {
 
 const isYouTube = (url: string) => /^https:\/\/([a-z0-9-]+\.)*(youtube\.com|youtube-nocookie\.com|ytimg\.com|googlevideo\.com)\//.test(url)
 
-/** ติดตั้งก่อน page.goto คืนรายการคำขอไปยูทูปทั้งหมด (ใช้ตรวจว่าไม่มีคำขอก่อนกดเล่น) */
-export async function installFakeYT(page: Page, options: FakeYTOptions = {}): Promise<{ requests: string[] }> {
+/**
+ * ติดตั้งก่อน page.goto คืนรายการคำขอไปยูทูปทั้งหมด (ใช้ตรวจว่าไม่มีคำขอก่อนกดเล่น)
+ * setFailScript (เพิ่มโดย lane P): เปลี่ยนว่าโหลดสคริปต์ได้หรือไม่ระหว่างเทสต์ เช่นออฟไลน์แล้วกด "ลองอีกครั้ง"
+ */
+export async function installFakeYT(
+  page: Page,
+  options: FakeYTOptions = {},
+): Promise<{ requests: string[]; setFailScript: (fail: boolean) => void }> {
   const requests: string[] = []
+  let failScript = options.failScript === true
   page.on("request", (req: Request) => {
     if (isYouTube(req.url()) && !req.url().includes("i.ytimg.com")) requests.push(req.url())
   })
@@ -96,14 +103,19 @@ export async function installFakeYT(page: Page, options: FakeYTOptions = {}): Pr
     ;(window as unknown as { __fakeYTConfig: unknown }).__fakeYTConfig = cfg
   }, options)
   await page.route("https://www.youtube.com/iframe_api", (route) =>
-    options.failScript
+    failScript
       ? route.abort("internetdisconnected")
       : route.fulfill({ contentType: "text/javascript", body: FAKE_SCRIPT }),
   )
   await page.route(/^https:\/\/www\.(youtube|youtube-nocookie)\.com\/embed\//, (route) =>
     route.fulfill({ contentType: "text/html", body: "<!doctype html><html><body style='margin:0;background:#000'></body></html>" }),
   )
-  return { requests }
+  return {
+    requests,
+    setFailScript: (fail: boolean) => {
+      failScript = fail
+    },
+  }
 }
 
 /** บันทึกของตัวเล่นปลอม: seek (วินาที), state และชื่อคำสั่งที่ถูกเรียก */
