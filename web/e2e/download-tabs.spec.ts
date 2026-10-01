@@ -39,6 +39,9 @@ function fixtureTitle(videoId: string): string {
 
 const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: true })
 const combobox = (page: Page, name: string) => page.getByRole("combobox", { name, exact: true })
+// ค่าที่เลือกอยู่ของช่องเลือก: ปุ่ม combobox มีไอคอนลูกศรของ Base UI ที่มีอักษร "▼" ซ่อนอยู่ใน svg (aria-hidden)
+// toHaveText ของทั้งปุ่มจึงได้ "…▼" อ่านจาก SelectValue แทน
+const selectedValue = (page: Page, name: string) => combobox(page, name).locator('[data-slot="select-value"]')
 const downloadMp4 = (page: Page) => page.getByRole("button", { name: DOWNLOAD_MP4, exact: true })
 const downloadAudio = (page: Page) => page.getByRole("button", { name: DOWNLOAD_AUDIO, exact: true })
 const tooltip = (page: Page) => page.locator('[data-slot="tooltip-content"]')
@@ -123,7 +126,7 @@ test.describe("W2 แท็บวิดีโอ", () => {
   test("ค่าเริ่มต้นของ BBB: ส่งงานวิดีโอแบบอัตโนมัติ มีเสียง ภาษาต้นฉบับ · toast 'เพิ่มเข้าคิวแล้ว'", async ({ page }) => {
     const { bodies } = await mockEnqueue(page)
     await openTab(page, BBB, "video")
-    await expect(combobox(page, "คุณภาพ")).toHaveText("เปิดได้ทุกที่ สูงสุด 1080p (แนะนำ)")
+    await expect(selectedValue(page, "คุณภาพ")).toHaveText("เปิดได้ทุกที่ สูงสุด 1080p (แนะนำ)")
     await expect(page.getByText(/^ขนาดประมาณ \d+(\.\d)? (MB|GB)$/)).toBeVisible()
     await downloadMp4(page).click()
     await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
@@ -188,21 +191,21 @@ test.describe("W2 แท็บวิดีโอ", () => {
   }) => {
     const { bodies } = await mockEnqueue(page)
     await openTab(page, DUB, "video")
-    await expect(combobox(page, LANGUAGE)).toHaveText("ต้นฉบับ (ไทย)")
+    await expect(selectedValue(page, LANGUAGE)).toHaveText("ต้นฉบับ (ไทย)")
     await combobox(page, LANGUAGE).click()
     await expect(page.getByRole("option")).toHaveText(["ต้นฉบับ (ไทย)", "อังกฤษ (สหรัฐอเมริกา)"])
     await page.getByRole("option", { name: "อังกฤษ (สหรัฐอเมริกา)" }).click()
-    await expect(combobox(page, LANGUAGE)).toHaveText("อังกฤษ (สหรัฐอเมริกา)")
+    await expect(selectedValue(page, LANGUAGE)).toHaveText("อังกฤษ (สหรัฐอเมริกา)")
     await downloadMp4(page).click()
     await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
     expect((bodies[0][0].params as VideoJobParams).audioLanguage).toBe("en-US")
 
     await tab(page, "เสียง").click()
-    await expect(combobox(page, LANGUAGE)).toHaveText("อังกฤษ (สหรัฐอเมริกา)")
+    await expect(selectedValue(page, LANGUAGE)).toHaveText("อังกฤษ (สหรัฐอเมริกา)")
     // เปลี่ยนที่แท็บเสียง แท็บวิดีโอก็เปลี่ยนตาม
     await choose(page, LANGUAGE, "ต้นฉบับ (ไทย)")
     await tab(page, "วิดีโอ").click()
-    await expect(combobox(page, LANGUAGE)).toHaveText("ต้นฉบับ (ไทย)")
+    await expect(selectedValue(page, LANGUAGE)).toHaveText("ต้นฉบับ (ไทย)")
   })
 
   test("เปิด 'ความละเอียดสูงสุด' → ตัวเลือก VP9/AV1 มีป้าย 'บางโปรแกรมเปิดไม่ได้' · เลือก 2160p ส่ง formatId และ maxQuality", async ({
@@ -217,7 +220,7 @@ test.describe("W2 แท็บวิดีโอ", () => {
 
     await page.getByRole("switch", { name: "ความละเอียดสูงสุด" }).click()
     // ตัวเลือกอัตโนมัติเปลี่ยนชื่อเป็นภาพดีที่สุดของคลิป (BBB = 2160p VP9 จึงมีป้ายเตือนด้วย)
-    await expect(combobox(page, "คุณภาพ")).toHaveText("สูงสุดที่คลิปนี้มี")
+    await expect(selectedValue(page, "คุณภาพ")).toHaveText("สูงสุดที่คลิปนี้มี")
     await combobox(page, "คุณภาพ").click()
     const auto = page.getByRole("option").first()
     await expect(auto).toContainText("สูงสุดที่คลิปนี้มี")
@@ -239,12 +242,12 @@ test.describe("W2 แท็บวิดีโอ", () => {
     await downloadMp4(page).click()
     await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
     await page.reload()
-    await expect(combobox(page, "คุณภาพ")).toHaveText(/^720p · 60 fps · H\.264/)
+    await expect(selectedValue(page, "คุณภาพ")).toHaveText(/^720p · 60 fps · H\.264/)
   })
 
   test("ฝังซับ: BBB ไม่มีซับ → กดไม่ได้ พร้อมเหตุผล 'คลิปนี้ไม่มีซับให้ฝัง' ใต้ช่องและใน Tooltip", async ({ page }) => {
     await openTab(page, BBB, "video")
-    await expect(combobox(page, EMBED)).toHaveText("ไม่ฝัง")
+    await expect(selectedValue(page, EMBED)).toHaveText("ไม่ฝัง")
     await expect(combobox(page, EMBED)).toBeDisabled()
     await expect(panelText(page, "คลิปนี้ไม่มีซับให้ฝัง")).toBeVisible()
     await expect(await hoverDisabled(page, EMBED)).toHaveText("คลิปนี้ไม่มีซับให้ฝัง")
@@ -254,7 +257,7 @@ test.describe("W2 แท็บวิดีโอ", () => {
     const { bodies } = await mockEnqueue(page)
     await openTab(page, THAI, "video")
     await expect(combobox(page, EMBED)).toBeEnabled()
-    await expect(combobox(page, EMBED)).toHaveText("ไม่ฝัง")
+    await expect(selectedValue(page, EMBED)).toHaveText("ไม่ฝัง")
     await expect(panelText(page, "ผู้ชมเปิดหรือปิดซับได้จากโปรแกรมเล่น ความยาวซับตามที่ตั้งไว้ในแท็บซับ")).toBeVisible()
     await expect(panelText(page, "คลิปนี้ไม่มีซับให้ฝัง")).toHaveCount(0)
     await combobox(page, EMBED).click()
@@ -262,7 +265,7 @@ test.describe("W2 แท็บวิดีโอ", () => {
     // ซับแปลอัตโนมัติไม่อยู่ในรายการฝังซับ
     await expect(page.getByRole("option", { name: /แปลอัตโนมัติ/ })).toHaveCount(0)
     await page.getByRole("option", { name: "ไทย (อัตโนมัติ)" }).click()
-    await expect(combobox(page, EMBED)).toHaveText("ไทย (อัตโนมัติ)")
+    await expect(selectedValue(page, EMBED)).toHaveText("ไทย (อัตโนมัติ)")
     await downloadMp4(page).click()
     await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
     expect(bodies[0][0].params).toMatchObject({ embedSubs: "a.th-orig", subOptions: MEDIUM })
@@ -318,7 +321,7 @@ test.describe("W2 แท็บเสียง", () => {
     await openTab(page, BBB, "audio")
     await page.getByRole("button", { name: "mp3", exact: true }).click()
     await expect(page.getByText("เปิดได้ทุกเครื่อง แต่ต้องแปลงไฟล์จึงช้ากว่า m4a", { exact: true })).toBeVisible()
-    await expect(combobox(page, "คุณภาพ mp3")).toHaveText("192 kbps")
+    await expect(selectedValue(page, "คุณภาพ mp3")).toHaveText("192 kbps")
     await combobox(page, "คุณภาพ mp3").click()
     await expect(page.getByRole("option")).toHaveText(["128 kbps", "192 kbps", "320 kbps"])
     await page.keyboard.press("Escape")
