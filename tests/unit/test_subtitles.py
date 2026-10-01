@@ -420,7 +420,8 @@ def clean_thai_env(monkeypatch):
 def test_open_services_builds_subtitle_service_and_thai_dir(paths, fake_platform, clean_thai_env):
     import os
 
-    db, videos, extractor, subtitles, _ = lifecycle.open_services(paths, fake_platform, fake=True)
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    db, subtitles = services.db, services.subtitles
     try:
         assert isinstance(subtitles, SubtitleService)
         assert subtitles.tracks(THAI)["defaultTrackId"] == TRACK
@@ -627,7 +628,8 @@ def test_open_services_real_mode_shares_one_session(paths, fake_platform, clean_
     from yttoolkit.core.extractor import YtDlpExtractor
     from yttoolkit.core.visitor_session import VisitorSession
 
-    db, videos, extractor, subtitles, _ = lifecycle.open_services(paths, fake_platform, fake=False)
+    services = lifecycle.open_services(paths, fake_platform, fake=False)
+    db, extractor, subtitles = services.db, services.extractor, services.subtitles
     try:
         assert isinstance(extractor, YtDlpExtractor)
         assert isinstance(extractor.session, VisitorSession)
@@ -640,7 +642,8 @@ def test_open_services_real_mode_shares_one_session(paths, fake_platform, clean_
 
 
 def test_open_services_fake_mode_has_no_session(paths, fake_platform, clean_thai_env):
-    db, _, extractor, subtitles, _ = lifecycle.open_services(paths, fake_platform, fake=True)
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    db, extractor, subtitles = services.db, services.extractor, services.subtitles
     try:
         assert subtitles._session is None
         assert not hasattr(extractor, "session")

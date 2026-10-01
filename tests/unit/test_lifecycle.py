@@ -921,14 +921,32 @@ class _ClosingExtractor:
 
 
 def _services_with(extractor, paths):
+    from yttoolkit.api.errors import redact_home
+    from yttoolkit.config import CODE_ROOT
     from yttoolkit.core.db import Database
+    from yttoolkit.core.events import EventBus
+    from yttoolkit.core.jobs import JobStore
+    from yttoolkit.core.media import FakeMediaTools
+    from yttoolkit.core.queue import QueueRunner
     from yttoolkit.core.settings import SettingsStore
     from yttoolkit.core.videos import VideoService
 
     def fake_open_services(p, *args, **kwargs):
         db = Database(paths.db)
         db.migrate()
-        return db, VideoService(db, extractor), extractor, None, SettingsStore(db, paths.data_root / "output")
+        settings = SettingsStore(db, paths.data_root / "output")
+        events = EventBus()
+        queue = QueueRunner(JobStore(db), events, {}, settings=settings, work_root=paths.work, redact=redact_home)
+        return lifecycle.Services(
+            db=db,
+            videos=VideoService(db, extractor),
+            extractor=extractor,
+            subtitles=None,
+            settings=settings,
+            events=events,
+            media=FakeMediaTools(CODE_ROOT / "tests" / "fixtures" / "media"),
+            queue=queue,
+        )
 
     return fake_open_services
 
@@ -1114,19 +1132,19 @@ def test_run_app_ignores_fake_env_unless_asked(paths, fake_platform, monkeypatch
 
 
 def test_open_services_fake_mode_output_defaults_under_data_root(paths, fake_platform):
-    db, *_, settings = lifecycle.open_services(paths, fake_platform, fake=True)
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
     try:
-        assert settings.get()["outputDir"] == str(paths.data_root / "output")
+        assert services.settings.get()["outputDir"] == str(paths.data_root / "output")
     finally:
-        db.close()
+        services.db.close()
 
 
 def test_open_services_real_mode_output_defaults_to_platform_downloads(paths, fake_platform):
-    db, *_, settings = lifecycle.open_services(paths, fake_platform, fake=False)
+    services = lifecycle.open_services(paths, fake_platform, fake=False)
     try:
-        assert settings.output_dir() == fake_platform.downloads / "YT-Toolkit"
+        assert services.settings.output_dir() == fake_platform.downloads / "YT-Toolkit"
     finally:
-        db.close()
+        services.db.close()
 
 
 def test_run_app_sets_settings_on_the_context(paths, fake_platform, monkeypatch):
@@ -1148,3 +1166,491 @@ def test_run_app_fake_mode_never_opens_real_folders(paths, fake_platform, monkey
     assert fake_platform.opened == [] and fake_platform.revealed == []
     assert caplog.text.count("โหมดข้อมูลปลอม: ไม่เปิดโฟลเดอร์") == 2
     assert str(paths.data_root) not in caplog.text  # ห้ามบันทึก path เต็มของโฟลเดอร์ผู้ใช้
+
+
+# ---------- M4 T18: ต่อคิว ตั้งค่า ข่าว และเครื่องมือสื่อเข้ากับวงจรชีวิตของแอพ ----------
+
+JOB_KINDS = {"video", "audio", "subtitle", "contact_sheet", "frames_zip"}
+
+
+def test_open_services_fake_mode_wires_fakes(paths, fake_platform):
+    from yttoolkit.api.errors import redact_home
+    from yttoolkit.config import CODE_ROOT
+    from yttoolkit.core.events import EventBus
+    from yttoolkit.core.extractor import FakeExtractor
+    from yttoolkit.core.media import FakeMediaTools
+    from yttoolkit.core.queue import QueueRunner
+
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        assert isinstance(services.extractor, FakeExtractor)
+        assert isinstance(services.media, FakeMediaTools)
+        assert services.media.available()  # e2e ไม่มี ffmpeg แต่ POST /jobs ต้องไม่ได้ 409 E_FFMPEG_MISSING
+        assert services.media._root == CODE_ROOT / "tests" / "fixtures" / "media"
+        assert isinstance(services.events, EventBus)
+        assert isinstance(services.queue, QueueRunner)
+        assert services.queue._delay_range == lifecycle.FAKE_DELAY_RANGE == (0.05, 0.2)
+        assert services.queue._redact is redact_home
+        assert services.queue._work_root == paths.work
+        assert services.queue._settings is services.settings
+        assert set(services.queue._handlers) == JOB_KINDS
+        assert services.queue._thread is None  # ยังไม่เริ่ม (เริ่มหลังเซิร์ฟเวอร์พร้อม)
+        assert services.settings.output_dir() == paths.data_root / "output"
+    finally:
+        services.db.close()
+
+
+def test_open_services_real_mode_wires_ffmpeg_tools(paths, fake_platform, monkeypatch):
+    from yttoolkit.core.extractor import YtDlpExtractor
+    from yttoolkit.core.media import FfmpegTools
+
+    monkeypatch.setenv("YT_TOOLKIT_FFMPEG_PATH_LOOKUP", "0")
+    fake_platform.popen_flags = 0x08000000
+    services = lifecycle.open_services(paths, fake_platform, fake=False)
+    try:
+        assert isinstance(services.extractor, YtDlpExtractor)
+        assert isinstance(services.media, FfmpegTools)
+        assert services.media._popen_flags == 0x08000000
+        assert services.media.available() is False  # ยังไม่มี ffmpeg ใน <data>/bin และปิดการหาใน PATH
+        exe = paths.bin / fake_platform.exe_name("ffmpeg")
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        exe.write_bytes(b"")
+        assert services.media.ffmpeg_path() == exe  # หาใหม่ทุกครั้ง (ผู้ใช้เพิ่งติดตั้ง ffmpeg)
+        assert services.queue._delay_range == (2.0, 5.0)  # ค่าเริ่มต้นของตัวรันคิว
+    finally:
+        services.db.close()
+
+
+def test_open_services_closes_db_when_building_queue_fails(paths, fake_platform, monkeypatch):
+    from yttoolkit.core.db import Database
+
+    closed = []
+    original_close = Database.close
+
+    def tracking_close(self):
+        closed.append(self)
+        original_close(self)
+
+    def broken_queue(*args, **kwargs):
+        raise RuntimeError("สร้างคิวไม่ได้")
+
+    monkeypatch.setattr(Database, "close", tracking_close)
+    monkeypatch.setattr(lifecycle, "QueueRunner", broken_queue)
+    with pytest.raises(RuntimeError, match="สร้างคิวไม่ได้"):
+        lifecycle.open_services(paths, fake_platform, fake=True)
+    assert len(closed) == 1
+
+
+def test_run_app_sets_queue_fields_on_the_context(paths, fake_platform, monkeypatch):
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, fake=True)
+    assert code == 0
+    assert ctx.queue is not None and ctx.events is not None and ctx.media is not None
+    assert ctx.settings is not None
+    assert ctx.on_bot_check == ctx.queue.brake
+    assert ctx.pending_jobs == ctx.queue.pending_count
+    assert ctx.output_dir == paths.data_root / "output"
+
+
+def test_run_app_starts_queue_after_server_is_ready(paths, fake_platform, monkeypatch):
+    seen = {}
+    server = FakeServer()
+
+    def make_server(ctx):
+        seen["ctx"] = ctx
+        seen["started_at_create"] = ctx.queue._thread is not None
+        server.start = ctx.request_shutdown
+        return server
+
+    def ready(timeout: float = 15.0) -> bool:
+        seen["started_before_ready"] = seen["ctx"].queue._thread is not None
+        return True
+
+    server.wait_until_ready = ready
+    monkeypatch.setattr(lifecycle, "Server", make_server)
+    assert lifecycle.run_app(**_run_app_kwargs(paths, fake_platform), fake=True) == 0
+    assert seen["started_at_create"] is False and seen["started_before_ready"] is False
+    assert seen["ctx"].queue._thread is not None  # เริ่มแล้วหลังพร้อม
+    assert seen["ctx"].queue._stopping  # และหยุดแล้วตอนปิดโปรแกรม
+
+
+def test_run_app_does_not_start_queue_when_server_fails(paths, fake_platform, monkeypatch):
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, ready=False, fake=True)
+    assert code == 1
+    assert ctx.queue._thread is None
+    from yttoolkit.core.events import CLOSED
+
+    assert ctx.events.subscribe().get(0) is CLOSED  # bus ปิดแล้ว
+
+
+def _job_running_in_db(paths):
+    from yttoolkit.core.db import Database
+    from yttoolkit.core.jobs import JobStore, NewJob
+
+    db = Database(paths.db)
+    db.migrate()
+    store = JobStore(db)
+    (job,) = store.add([NewJob("aqz-KE-bpKQ", "video", {}, "Big Buck Bunny")])
+    store.transition(job.id, "running")
+    db.close()
+    return job.id
+
+
+def test_run_app_recovers_running_jobs_before_server_starts(paths, fake_platform, monkeypatch):  # AC-Q-05
+    job_id = _job_running_in_db(paths)
+    (paths.work / job_id).mkdir(parents=True)
+    (paths.work / job_id / "media.mp4.part").write_bytes(b"x")
+    seen = {}
+    server = FakeServer()
+
+    def make_server(ctx):
+        job = ctx.queue.store.get(job_id)
+        seen["status"], seen["code"] = job.status, job.error_code
+        seen["work"] = list(paths.work.iterdir())
+        server.start = ctx.request_shutdown
+        return server
+
+    monkeypatch.setattr(lifecycle, "Server", make_server)
+    assert lifecycle.run_app(**_run_app_kwargs(paths, fake_platform), fake=True) == 0
+    assert seen == {"status": "interrupted", "code": "E_INTERRUPTED", "work": []}
+
+
+def test_run_app_shutdown_order(paths, fake_platform, monkeypatch):
+    order = []
+    real_open = lifecycle.open_services
+
+    def recording_open(p, plat, fake=False):
+        services = real_open(p, plat, fake=fake)
+        real_shutdown, real_publish, real_close = (
+            services.queue.shutdown, services.events.publish, services.events.close
+        )
+
+        def shutdown(timeout=5.0):
+            order.append(("queue.shutdown", timeout))
+            real_shutdown(timeout=timeout)
+
+        def publish(name, data):
+            order.append(("publish", name))
+            real_publish(name, data)
+
+        def close():
+            order.append(("events.close",))
+            real_close()
+
+        services.queue.shutdown = shutdown
+        services.events.publish = publish
+        services.events.close = close
+        return services
+
+    server = FakeServer()
+
+    def make_server(ctx):
+        server.start = ctx.request_shutdown
+        server.stop = lambda: order.append(("server.stop",))
+        return server
+
+    monkeypatch.setattr(lifecycle, "open_services", recording_open)
+    monkeypatch.setattr(lifecycle, "Server", make_server)
+    assert lifecycle.run_app(**_run_app_kwargs(paths, fake_platform), fake=True) == 0
+    assert order[:4] == [
+        ("queue.shutdown", 5.0),
+        ("publish", "app.shutdown"),
+        ("events.close",),
+        ("server.stop",),
+    ]
+
+
+def test_server_config_has_graceful_shutdown_timeout(paths, fake_platform):
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        from yttoolkit.app import AppContext
+
+        ctx = AppContext(
+            paths=paths, plat=fake_platform, port=8851, token="t", version="0", commit=None,
+            output_dir=paths.data_root / "output", request_shutdown=lambda: None,
+        )
+        assert lifecycle.Server(ctx).config.timeout_graceful_shutdown == 3
+    finally:
+        services.db.close()
+
+
+# ---------- ล้างไฟล์ค้างของงานที่หยุดกลางคัน ----------
+
+
+def _sweep_env(paths):
+    from yttoolkit.core import files
+    from yttoolkit.core.db import Database
+    from yttoolkit.core.jobs import JobStore, NewJob, OutputFile
+
+    db = Database(paths.db)
+    db.migrate()
+    store = JobStore(db)
+    root = (paths.data_root / "output").resolve()
+    title = "Big Buck Bunny"
+    planned = files.plan_output(root, title, "aqz-KE-bpKQ", "", "mp4")
+    folder = planned.parent
+    folder.mkdir(parents=True)
+    done, stopped = store.add([NewJob("aqz-KE-bpKQ", "video", {}, title), NewJob("aqz-KE-bpKQ", "audio", {}, title)])
+    store.transition(done.id, "running")
+    (folder / f"{title} (2).srt").write_bytes(b"")  # ไฟล์ผลลัพธ์ของงานที่เสร็จ (ว่างจริง) ห้ามลบ
+    store.transition(done.id, "done", outputs=(OutputFile(str(root), f"{folder.name}/{title} (2).srt", 0, "subtitle"),))
+    store.transition(stopped.id, "running")
+    return db, store, root, folder, title, stopped.id
+
+
+def test_sweep_removes_placeholders_and_part_files_of_interrupted_jobs(paths):
+    db, store, root, folder, title, job_id = _sweep_env(paths)
+    try:
+        (folder / f"{title}.mp4").write_bytes(b"")  # ชื่อที่จองไว้แล้วโปรแกรมดับก่อนย้ายไฟล์เข้า
+        (folder / f"{title}.m4a.part").write_bytes(b"half")  # คัดลอกข้ามไดรฟ์ค้างครึ่งทาง
+        (folder / f"{title} (3).mp4").write_bytes(b"real video")  # ไฟล์จริง ห้ามลบ
+        (folder / "แหล่งที่มา.txt").write_bytes(b"source")
+        (folder / "notes.txt").write_bytes(b"")  # ไฟล์ของผู้ใช้ (ชื่อไม่ขึ้นต้นด้วยชื่อคลิป) ห้ามลบ
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 2
+        assert sorted(p.name for p in folder.iterdir()) == sorted(
+            [f"{title} (2).srt", f"{title} (3).mp4", "แหล่งที่มา.txt", "notes.txt"]
+        )
+    finally:
+        db.close()
+
+
+def test_sweep_ignores_folders_of_jobs_that_are_not_interrupted(paths):
+    db, store, root, folder, title, job_id = _sweep_env(paths)
+    try:
+        (folder / f"{title}.mp4").write_bytes(b"")  # งานยังรันอยู่ (เช่นเรียกผิดเวลา) ไม่ใช่งานที่หยุดกลางคัน
+        assert lifecycle.sweep_interrupted_outputs(store, root, [job_id]) == 0
+        assert (folder / f"{title}.mp4").exists()
+    finally:
+        db.close()
+
+
+def test_sweep_missing_folder_is_fine(paths):
+    db, store, root, folder, title, job_id = _sweep_env(paths)
+    try:
+        store.interrupt_running("หยุดกลางคัน")
+        for child in folder.iterdir():
+            child.unlink()
+        folder.rmdir()
+        assert lifecycle.sweep_interrupted_outputs(store, root, [job_id]) == 0
+    finally:
+        db.close()
+
+
+def test_run_app_sweeps_outputs_of_recovered_jobs(paths, fake_platform, monkeypatch):
+    from yttoolkit.core import files
+
+    _job_running_in_db(paths)
+    folder = files.plan_output((paths.data_root / "output").resolve(), "Big Buck Bunny", "aqz-KE-bpKQ", "", "mp4").parent
+    folder.mkdir(parents=True)
+    (folder / "Big Buck Bunny.mp4").write_bytes(b"")
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, fake=True)
+    assert code == 0
+    assert not (folder / "Big Buck Bunny.mp4").exists()
+
+
+def test_recover_jobs_failure_is_logged_not_raised(paths, fake_platform, monkeypatch, caplog):
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        def boom():
+            raise RuntimeError("ฐานข้อมูลล็อก")
+
+        services.queue.recover = boom
+        with caplog.at_level(logging.ERROR, logger="yttoolkit"):
+            lifecycle.recover_jobs(services)
+        assert "กู้งานที่ค้างจากรอบก่อนไม่สำเร็จ" in caplog.text
+    finally:
+        services.db.close()
+
+
+# ---------- tray: จำนวนงานที่กำลังทำ ----------
+
+
+class _FakeIcon:
+    def __init__(self) -> None:
+        self.updates = 0
+        self.stopped = False
+
+    def update_menu(self) -> None:
+        self.updates += 1
+
+    def run(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+def test_tray_refresher_updates_menu_on_job_events_at_most_once_per_interval():
+    from yttoolkit.core.events import EventBus
+
+    bus = EventBus()
+    icon = _FakeIcon()
+    thread = lifecycle.start_tray_refresher(bus, icon, interval=0.3)
+    try:
+        bus.publish("job.created", {"id": "a"})
+        assert _wait_for(lambda: icon.updates == 1, 2)
+        for n in range(5):  # มาติดกันภายในช่วงเดียว = อัปเดตอีกแค่ครั้งเดียว (หลังครบช่วง)
+            bus.job_updated(f"j{n}", {"status": "running"})
+        assert _wait_for(lambda: icon.updates == 2, 2)
+        import time
+
+        time.sleep(0.5)
+        assert icon.updates == 2
+        bus.job_updated("p", {"progress": 0.5})  # ความคืบหน้าอย่างเดียว จำนวนงานไม่เปลี่ยน
+        bus.publish("queue.paused", {"until": "x", "reason": "E_BOT_CHECK"})
+        time.sleep(0.5)
+        assert icon.updates == 2
+    finally:
+        bus.close()
+        thread.join(2)
+    assert not thread.is_alive()  # bus ปิด = เธรดจบเอง
+
+
+def test_tray_refresher_survives_update_errors(caplog):
+    from yttoolkit.core.events import EventBus
+
+    class Broken(_FakeIcon):
+        def update_menu(self) -> None:
+            super().update_menu()
+            raise RuntimeError("เมนูพัง")
+
+    bus = EventBus()
+    icon = Broken()
+    thread = lifecycle.start_tray_refresher(bus, icon, interval=0.05)
+    try:
+        with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+            bus.publish("job.created", {"id": "a"})
+            assert _wait_for(lambda: icon.updates == 1, 2)
+            import time
+
+            time.sleep(0.1)
+            bus.publish("job.created", {"id": "b"})
+            assert _wait_for(lambda: icon.updates == 2, 2)
+    finally:
+        bus.close()
+        thread.join(2)
+    assert "อัปเดตเมนู tray ไม่สำเร็จ" in caplog.text
+
+
+def test_run_app_with_tray_passes_running_count_and_refreshes(paths, fake_platform, monkeypatch):
+    from yttoolkit import tray
+
+    _job_running_in_db(paths)
+    seen = {}
+    icon = _FakeIcon()
+    refreshers = []
+
+    def fake_build_tray(open_app, open_output, quit_app, running_count):
+        seen["count"] = running_count
+        seen["value"] = running_count()
+        return icon
+
+    monkeypatch.setattr(tray, "build_tray", fake_build_tray)
+    monkeypatch.setattr(lifecycle, "start_tray_refresher", lambda bus, i: refreshers.append((bus, i)))
+    monkeypatch.setattr(lifecycle, "Server", lambda ctx: FakeServer())
+    kwargs = {**_run_app_kwargs(paths, fake_platform), "with_tray": True}
+    assert lifecycle.run_app(**kwargs, fake=True) == 0
+    assert seen["value"] == 0  # งานที่ค้าง running ถูกกู้เป็น interrupted ก่อน
+    assert len(refreshers) == 1 and refreshers[0][1] is icon
+
+
+def test_running_count_reflects_running_jobs_and_never_raises(paths, fake_platform):
+    from yttoolkit.core.jobs import NewJob
+
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    count = lifecycle.running_count(services)
+    try:
+        assert count() == 0
+        (job,) = services.queue.store.add([NewJob("aqz-KE-bpKQ", "video", {})])
+        services.queue.store.transition(job.id, "running")
+        assert count() == 1
+    finally:
+        services.db.close()
+    assert count() == 0  # ฐานข้อมูลปิดแล้ว เมนูยังเปิดได้
+
+
+def test_tray_open_output_uses_current_settings(paths, fake_platform, monkeypatch):
+    from yttoolkit import tray
+
+    captured = []
+    target = paths.data_root / "เลือกเอง"
+
+    def fake_build_tray(open_app, open_output, quit_app, running_count):
+        icon = _FakeIcon()
+
+        def run() -> None:  # ระหว่างแอพเปิดอยู่ ผู้ใช้เปลี่ยนโฟลเดอร์ แล้วกด "เปิดโฟลเดอร์ผลลัพธ์" ใน tray
+            open_output()
+            captured[0].settings.patch({"outputDir": str(target)})
+            open_output()
+
+        icon.run = run
+        return icon
+
+    def make_server(ctx):
+        captured.append(ctx)
+        return FakeServer()
+
+    monkeypatch.setattr(tray, "build_tray", fake_build_tray)
+    monkeypatch.setattr(lifecycle, "start_tray_refresher", lambda bus, i: None)
+    monkeypatch.setattr(lifecycle, "Server", make_server)
+    kwargs = {**_run_app_kwargs(paths, fake_platform), "with_tray": True}
+    assert lifecycle.run_app(**kwargs) == 0  # โหมดจริง: open_folder ของ platform
+    assert fake_platform.opened == [fake_platform.downloads / "YT-Toolkit", target]
+
+
+# ---------- log: ซ่อนโฟลเดอร์ผู้ใช้ (ruling M6) ----------
+
+
+def _format_with_filter(record) -> str:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.addFilter(lifecycle.HomePathFilter())
+    assert handler.filter(record)
+    return handler.format(record)
+
+
+def test_home_path_filter_redacts_message_args_and_traceback():
+    from pathlib import Path
+
+    home = str(Path.home())
+    try:
+        raise OSError(f"เขียนไม่ได้: {home}\\Downloads\\YT-Toolkit\\a.mp4")
+    except OSError:
+        import sys
+
+        exc_info = sys.exc_info()
+    record = logging.LogRecord(
+        "yttoolkit", logging.ERROR, __file__, 1, "ย้ายไฟล์ %s ไม่สำเร็จ", (f"{home}\\Downloads\\x.mp4",), exc_info
+    )
+    text = _format_with_filter(record)
+    assert home not in text
+    assert "~\\Downloads\\x.mp4" in text
+    assert "~\\Downloads\\YT-Toolkit\\a.mp4" in text  # ใน traceback ด้วย
+    assert "Traceback" in text
+
+
+def test_home_path_filter_leaves_other_text_alone():
+    record = logging.LogRecord("yttoolkit", logging.INFO, __file__, 1, "งาน %s จบด้วย %s", ("abc", "done"), None)
+    assert _format_with_filter(record) == "งาน abc จบด้วย done"
+
+
+def test_setup_file_logging_installs_home_filter_once(paths):
+    import logging.handlers
+
+    root = logging.getLogger()
+    before = list(root.handlers)
+    level = root.level
+    try:
+        lifecycle.setup_file_logging(paths)
+        lifecycle.setup_file_logging(paths)
+        added = [h for h in root.handlers if h not in before]
+        assert len(added) == 1
+        filters = [f for f in added[0].filters if isinstance(f, lifecycle.HomePathFilter)]
+        assert len(filters) == 1
+    finally:
+        for h in list(root.handlers):
+            if h not in before:
+                root.removeHandler(h)
+                h.close()
+        root.setLevel(level)

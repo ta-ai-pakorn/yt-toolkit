@@ -10,6 +10,7 @@ import threading
 import time
 import webbrowser
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,11 +18,17 @@ import httpx
 import uvicorn
 
 from . import __version__, runstate
+from .api.errors import redact_home
 from .app import AppContext, create_app
 from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
-from .core import thai_fallback, tools
+from .core import files, thai_fallback, tools
 from .core.db import Database, purge_stale_cache
+from .core.events import CLOSED, Event, EventBus
 from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, visitor_session
+from .core.handlers import HandlerDeps, build_handlers
+from .core.jobs import JobStore
+from .core.media import FakeMediaTools, FfmpegTools, MediaTools
+from .core.queue import QueueRunner
 from .core.settings import SettingsStore
 from .core.subtitles import SubtitleService
 from .core.videos import VideoService
@@ -36,6 +43,13 @@ DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 PURGE_INTERVAL_S = 24 * 60 * 60  # ล้าง cache เก่าซ้ำทุก 24 ชม. สำหรับเครื่องที่เปิดโปรแกรมทิ้งไว้หลายวัน
 # ชื่อเก่าของตัวแปรโฟลเดอร์ข้อมูล PyThaiNLP ถ้าตั้งไว้คู่กับ PYTHAINLP_DATA PyThaiNLP จะโยน ValueError
 LEGACY_PYTHAINLP_ENV = "PYTHAINLP_DATA_DIR"
+# โหมดข้อมูลปลอม (E2E) ไม่ต้องเว้นช่วงเริ่มงานยูทูป 2-5 วินาทีเหมือนของจริง
+FAKE_DELAY_RANGE = (0.05, 0.2)
+QUEUE_SHUTDOWN_TIMEOUT_S = 5.0  # รองานที่กำลังทำหยุดตอนปิดโปรแกรมไม่เกินเท่านี้
+GRACEFUL_SHUTDOWN_S = 3  # uvicorn รอ request ที่ค้าง (เช่นสตรีมข่าว) ไม่เกินเท่านี้
+TRAY_REFRESH_INTERVAL_S = 1.0  # อัปเดตตัวเลขงานในเมนู tray ไม่เกิน 1 ครั้งต่อวินาที
+# ตอนเปิดโปรแกรม ล้างไฟล์ค้างในโฟลเดอร์ของงานที่หยุดกลางคันล่าสุดไม่เกินเท่านี้งาน (รวมงานที่เพิ่งกู้คืนเสมอ)
+SWEEP_RECENT_INTERRUPTED = 20
 
 
 def default_output_dir(plat: Platform) -> Path:
@@ -65,8 +79,42 @@ def git_commit(root: Path, plat: Platform) -> str | None:
     return out.stdout.strip() or None
 
 
+class HomePathFilter(logging.Filter):
+    """แทนโฟลเดอร์ผู้ใช้ด้วย ~ ในข้อความ log และ traceback ก่อนเขียนลงไฟล์
+
+    log.exception ของคิวงานและ lifecycle อาจมี path เต็ม ซึ่งมีชื่อผู้ใช้ Windows ติดไปกับไฟล์ log ที่ส่งต่อ
+    """
+
+    _formatter = logging.Formatter()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True  # ข้อความจัดรูปไม่ได้ ปล่อยให้ logging รายงานตามปกติ
+        record.msg = redact_home(message)
+        record.args = None
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self._formatter.formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = redact_home(record.exc_text)
+        if record.stack_info:
+            record.stack_info = redact_home(record.stack_info)
+        return True
+
+
+def _app_log_handlers(paths: Paths) -> list[logging.Handler]:
+    target = os.path.abspath(paths.logs / "app.log")
+    return [
+        h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler) and h.baseFilename == target
+    ]
+
+
 def setup_file_logging(paths: Paths) -> None:
     setup_file_log(paths)  # เรียกซ้ำได้ (__main__ ตั้งไว้ก่อน import lifecycle แล้ว) ไม่เกิด handler ซ้ำ
+    for handler in _app_log_handlers(paths):
+        if not any(isinstance(f, HomePathFilter) for f in handler.filters):
+            handler.addFilter(HomePathFilter())
     if sys.stdout is None or sys.stderr is None:  # แอพที่เปิดแบบไม่มีหน้าต่างดำจะไม่มี console
         stream = open(paths.logs / "console.log", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
         sys.stdout = sys.stdout or stream
@@ -77,8 +125,14 @@ class Server:
     """uvicorn ที่รันใน thread แยก เพื่อให้ main thread ว่างไว้ให้ tray"""
 
     def __init__(self, ctx: AppContext) -> None:
+        # timeout_graceful_shutdown: request ที่ค้าง (เช่นสตรีมข่าว SSE) ไม่ขวางการปิดโปรแกรม (ปิด bus ก่อนอยู่แล้ว นี่คือกันเหนียว)
         self.config = uvicorn.Config(
-            create_app(ctx), host=HOST, port=ctx.port, log_config=None, access_log=False
+            create_app(ctx),
+            host=HOST,
+            port=ctx.port,
+            log_config=None,
+            access_log=False,
+            timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S,
         )
         self._server = uvicorn.Server(self.config)
         self._thread = threading.Thread(target=self._server.run, name="uvicorn", daemon=True)
@@ -143,14 +197,28 @@ def configure_thai(paths: Paths) -> None:
     thai_fallback.configure(paths.data_root / "pythainlp")
 
 
-def open_services(
-    paths: Paths, plat: Platform, fake: bool = False
-) -> tuple[Database, VideoService, Extractor, SubtitleService, SettingsStore]:
-    """เปิดฐานข้อมูล (สร้างตารางถ้ายังไม่มี) ล้าง cache เก่า เลือก extractor และสร้างบริการซับกับที่เก็บตั้งค่า
+@dataclass
+class Services:
+    """บริการทั้งหมดที่ run_app ต่อเข้า AppContext (open_services สร้างให้ ตัวรันคิวยังไม่เริ่มทำงาน)"""
+
+    db: Database
+    videos: VideoService
+    extractor: Extractor
+    subtitles: SubtitleService
+    settings: SettingsStore
+    events: EventBus
+    media: MediaTools
+    queue: QueueRunner
+
+
+def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
+    """เปิดฐานข้อมูล (สร้างตารางถ้ายังไม่มี) ล้าง cache เก่า เลือก extractor และสร้างบริการทั้งหมด
 
     โฟลเดอร์ปลายทางเริ่มต้น: <Downloads>/YT-Toolkit (โหมดข้อมูลปลอม = <data_root>/output ไม่ไปเขียนใน Downloads ของเครื่อง)
-    fake=True = ใช้ข้อมูลทดสอบใน tests/fixtures แทนยูทูปจริง (serve ส่งมาเมื่อ YT_TOOLKIT_FAKE=1 ใช้กับ E2E)
+    fake=True = ใช้ข้อมูลทดสอบใน tests/fixtures แทนยูทูปจริง และจัดไฟล์สื่อด้วยการคัดลอกแทน ffmpeg
+    (serve ส่งมาเมื่อ YT_TOOLKIT_FAKE=1 ใช้กับ E2E ซึ่งเครื่องอาจไม่มี ffmpeg)
     ล้าง cache ไม่สำเร็จแค่บันทึก log แล้วเปิดโปรแกรมต่อ ส่วนฐานข้อมูลเปิดไม่ได้จะโยนต่อ
+    ตัวรันคิวยังไม่เริ่ม: run_app กู้งานค้างก่อนเปิดเซิร์ฟเวอร์ แล้วค่อยเริ่มคิวเมื่อเซิร์ฟเวอร์พร้อม
     """
     session = None
     if fake:
@@ -164,15 +232,198 @@ def open_services(
     db = Database(paths.db)
     try:
         db.migrate()
+        purge_cache_once(db, paths.cache)
+        configure_thai(paths)
+        videos = VideoService(db, extractor)
+        subtitles = SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
+        default_output = paths.data_root / "output" if fake else default_output_dir(plat)
+        settings = SettingsStore(db, default_output)
+        media: MediaTools
+        if fake:
+            media = FakeMediaTools(CODE_ROOT / "tests" / "fixtures" / "media")
+        else:
+            media = FfmpegTools(lambda: tools.find_ffmpeg(paths, plat), popen_flags=plat.popen_flags)
+        events = EventBus()
+        deps = HandlerDeps(
+            videos=videos,
+            downloader=extractor,  # type: ignore[arg-type]  # ทั้งตัวจริงและตัวปลอมมี download (C8)
+            media=media,
+            subtitles=subtitles,
+            cache_root=paths.cache,
+        )
+        delays = {"delay_range": FAKE_DELAY_RANGE} if fake else {}
+        queue = QueueRunner(
+            JobStore(db),
+            events,
+            build_handlers(deps),
+            settings=settings,
+            work_root=paths.work,
+            redact=redact_home,
+            **delays,
+        )
     except BaseException:
         db.close()
         raise
-    purge_cache_once(db, paths.cache)
-    configure_thai(paths)
-    videos = VideoService(db, extractor)
-    subtitles = SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
-    default_output = paths.data_root / "output" if fake else default_output_dir(plat)
-    return db, videos, extractor, subtitles, SettingsStore(db, default_output)
+    return Services(
+        db=db,
+        videos=videos,
+        extractor=extractor,
+        subtitles=subtitles,
+        settings=settings,
+        events=events,
+        media=media,
+        queue=queue,
+    )
+
+
+def recover_jobs(services: Services) -> None:
+    """ตอนเปิดโปรแกรม ก่อนเปิดเซิร์ฟเวอร์ (AC-Q-05): งานที่ค้าง running จากรอบก่อนเป็น interrupted ล้าง work/
+    แล้วล้างไฟล์ค้างในโฟลเดอร์ผลลัพธ์ของงานที่หยุดกลางคัน พลาดแค่บันทึก log (ห้ามทำให้เปิดโปรแกรมไม่ได้)"""
+    store = services.queue.store
+    try:
+        stranded = [job.id for job in store.running()]
+        services.queue.recover()
+    except Exception:
+        log.exception("กู้งานที่ค้างจากรอบก่อนไม่สำเร็จ")
+        return
+    try:
+        removed = sweep_interrupted_outputs(store, services.settings.output_dir(), stranded)
+        if removed:
+            log.info("ล้างไฟล์ที่ค้างจากงานที่หยุดกลางคันแล้ว %s ไฟล์", removed)
+    except Exception:
+        log.exception("ล้างไฟล์ที่ค้างจากงานที่หยุดกลางคันไม่สำเร็จ (ข้ามไปก่อน)")
+
+
+def _clip_folders(root: Path, video_id: str, title: str) -> list[tuple[Path, str]]:
+    """โฟลเดอร์ของคลิป (กฎตั้งชื่อเดียวกับ files.plan_output) คู่กับคำขึ้นต้นของชื่อไฟล์ในโฟลเดอร์นั้น
+
+    ลองทั้งชื่องานและชื่อว่าง (คลิปไม่มีชื่อ handler ตั้งชื่อจาก videoId ส่วนชื่องานอาจเป็นชื่อที่หน้าเว็บส่งมา)"""
+    found: list[tuple[Path, str]] = []
+    for candidate in dict.fromkeys((title, "")):
+        try:
+            folder = files.plan_output(root, candidate, video_id, "", "x").parent
+        except Exception:
+            continue
+        tag = f" [{video_id}]"
+        prefix = folder.name[: -len(tag)] if folder.name.endswith(tag) else folder.name
+        if prefix and (folder, prefix) not in found:
+            found.append((folder, prefix))
+    return found
+
+
+def sweep_interrupted_outputs(store: JobStore, output_root: Path, job_ids: Iterable[str] = ()) -> int:
+    """ลบไฟล์ค้างในโฟลเดอร์ผลลัพธ์ของงานที่หยุดกลางคัน คืนจำนวนไฟล์ที่ลบ เรียกตอนไม่มีงานไหนรันอยู่เท่านั้น
+
+    ไฟล์ค้างมาจาก files.move_into_place ที่ถูกตัดกลางทาง (โปรแกรมดับ): ไฟล์ว่าง 0 ไบต์ที่จองชื่อไว้
+    และ <ชื่อ>.part ตอนคัดลอกข้ามไดรฟ์ ถ้าไม่ลบ งานถัดไปของคลิปเดียวกันจะได้ชื่อ " (2)" โดยไม่จำเป็น
+    งานที่ดู = job_ids (งานที่เพิ่งกู้คืน) + งานที่หยุดกลางคันล่าสุด (เผื่อปิดโปรแกรมตอนกำลังย้ายไฟล์ใหญ่ข้ามไดรฟ์)
+    ลบเฉพาะไฟล์ที่ชื่อขึ้นต้นด้วยชื่อคลิปของโฟลเดอร์นั้น และไม่ใช่ไฟล์ผลลัพธ์ของงานที่เสร็จแล้ว
+    """
+    jobs = {job.id: job for job in store.list_status("interrupted", SWEEP_RECENT_INTERRUPTED)}
+    for job_id in job_ids:
+        if job_id not in jobs and (job := store.get(job_id)) is not None and job.status == "interrupted":
+            jobs[job_id] = job
+    if not jobs:
+        return 0
+    root = output_root.resolve()
+    video_ids = {job.video_id for job in jobs.values()}
+    keep = {
+        os.path.normcase(str(Path(output.root) / output.rel))
+        for done in store.list_status("done", -1)
+        if done.video_id in video_ids
+        for output in done.outputs
+    }
+    seen: set[Path] = set()
+    removed = 0
+    for job in jobs.values():
+        for folder, prefix in _clip_folders(root, job.video_id, job.title):
+            if folder not in seen:
+                seen.add(folder)
+                removed += _sweep_folder(folder, prefix, keep)
+    return removed
+
+
+def _sweep_folder(folder: Path, prefix: str, keep: set[str]) -> int:
+    try:
+        children = list(folder.iterdir())
+    except FileNotFoundError:
+        return 0
+    except OSError as exc:
+        log.warning("อ่านโฟลเดอร์ผลลัพธ์ไม่ได้ตอนล้างไฟล์ค้าง: %s", type(exc).__name__)
+        return 0
+    removed = 0
+    for child in children:
+        if not child.name.startswith(prefix) or os.path.normcase(str(child)) in keep:
+            continue
+        try:
+            if child.is_symlink() or not child.is_file():
+                continue
+            if child.name.endswith(".part") or child.stat().st_size == 0:
+                child.unlink()
+                removed += 1
+        except OSError as exc:
+            log.warning("ลบไฟล์ค้างไม่ได้: %s", type(exc).__name__)
+    return removed
+
+
+def shutdown_services(services: Services, timeout: float = QUEUE_SHUTDOWN_TIMEOUT_S) -> None:
+    """ขั้นแรกของการปิดโปรแกรม ก่อนหยุดเซิร์ฟเวอร์: หยุดคิว (งานที่ทำอยู่จบเป็น interrupted) บอกหน้าเว็บว่าแอพปิด
+    แล้วปิด bus สตรีมข่าวที่เปิดค้างจึงจบเอง uvicorn ไม่ต้องรอ"""
+    try:
+        services.queue.shutdown(timeout=timeout)
+    except Exception:
+        log.exception("หยุดคิวงานไม่สำเร็จ")
+    services.events.publish("app.shutdown", {})
+    services.events.close()
+
+
+def running_count(services: Services) -> Callable[[], int]:
+    """จำนวนงานที่กำลังทำ สำหรับเมนู tray (อ่านฐานข้อมูลไม่ได้ = 0 เมนูต้องเปิดได้เสมอ)"""
+
+    def count() -> int:
+        try:
+            return len(services.queue.store.running())
+        except Exception:
+            return 0
+
+    return count
+
+
+def start_tray_refresher(
+    bus: EventBus,
+    icon,
+    *,
+    interval: float = TRAY_REFRESH_INTERVAL_S,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> threading.Thread:
+    """ฟังข่าวงานใน daemon thread แล้วสั่ง icon.update_menu() (ตัวเลข "กำลังทำ n งาน") ไม่เกิน 1 ครั้งต่อ interval
+
+    นับเฉพาะ job.created และ job.updated ที่มีสถานะใหม่ (ข่าวความคืบหน้าไม่ทำให้จำนวนงานเปลี่ยน)
+    จบเองเมื่อ bus ปิด (ตอนปิดโปรแกรม)"""
+    sub = bus.subscribe()
+
+    def loop() -> None:
+        last = -float("inf")
+        dirty = False
+        while True:
+            item = sub.get(max(last + interval - monotonic(), 0.0) if dirty else interval)
+            if item is CLOSED:
+                return
+            if isinstance(item, Event) and (
+                item.name == "job.created" or (item.name == "job.updated" and "status" in item.data)
+            ):
+                dirty = True
+            if dirty and monotonic() - last >= interval:
+                last = monotonic()
+                dirty = False
+                try:
+                    icon.update_menu()
+                except Exception:
+                    log.warning("อัปเดตเมนู tray ไม่สำเร็จ", exc_info=True)
+
+    thread = threading.Thread(target=loop, name="tray-refresh", daemon=True)
+    thread.start()
+    return thread
 
 
 def _fake_open_folder(path: Path) -> None:
@@ -216,11 +467,12 @@ def run_app(
     fake: bool = False,
 ) -> int:
     try:
-        db, videos, extractor, subtitles, settings = open_services(paths, plat, fake=fake)
+        services = open_services(paths, plat, fake=fake)
     except Exception:
         log.exception("เปิดฐานข้อมูลไม่สำเร็จ (%s)", paths.db)
         return 1
     try:
+        recover_jobs(services)  # ก่อนเปิดเซิร์ฟเวอร์: หน้าเว็บต้องไม่เห็นงานที่ค้าง running จากรอบก่อน (AC-Q-05)
         return _run_server(
             paths=paths,
             plat=plat,
@@ -229,16 +481,13 @@ def run_app(
             open_browser=open_browser,
             auto_ffmpeg=auto_ffmpeg,
             extra_origins=extra_origins,
-            db=db,
-            videos=videos,
-            extractor=extractor,
-            subtitles=subtitles,
-            settings=settings,
+            services=services,
             fake=fake,
         )
     finally:
-        close_extractor(extractor)
-        db.close()
+        services.events.close()  # เรียกซ้ำได้ (ทางที่เซิร์ฟเวอร์ไม่ขึ้นยังไม่ได้ปิด)
+        close_extractor(services.extractor)
+        services.db.close()
 
 
 def close_extractor(extractor: Extractor) -> None:
@@ -261,13 +510,10 @@ def _run_server(
     open_browser: bool,
     auto_ffmpeg: bool,
     extra_origins: Iterable[str],
-    db: Database,
-    videos: VideoService,
-    extractor: Extractor,
-    subtitles: SubtitleService | None = None,
-    settings: SettingsStore | None = None,
+    services: Services,
     fake: bool = False,
 ) -> int:
+    queue = services.queue
     token = runstate.new_token()
     stop_event = threading.Event()
     tray_holder: list = []
@@ -284,16 +530,22 @@ def _run_server(
         token=token,
         version=__version__,
         commit=git_commit(paths.code_root, plat),
-        output_dir=settings.output_dir() if settings is not None else default_output_dir(plat),
+        output_dir=services.settings.output_dir(),
         request_shutdown=request_shutdown,
+        pending_jobs=queue.pending_count,
         extra_origins=tuple(extra_origins),
-        db=db,
-        videos=videos,
-        extractor=extractor,
+        db=services.db,
+        videos=services.videos,
+        extractor=services.extractor,
         cache_root=paths.cache,
         fake=fake,
-        subtitles=subtitles,
-        settings=settings,
+        subtitles=services.subtitles,
+        settings=services.settings,
+        queue=queue,
+        events=services.events,
+        media=services.media,
+        # router อ่านค่านี้ตอนเรียกจริง และเรียกจากเธรดของ FastAPI (brake ถือ lock ของคิวเอง)
+        on_bot_check=queue.brake,
     )
     if fake:
         # โหมดข้อมูลปลอมไม่เปิดหน้าต่างจริง (E2E รันบนเครื่องพนักงานได้โดยไม่มีหน้าต่างโผล่)
@@ -310,9 +562,10 @@ def _run_server(
     runstate.write(
         paths.app_json, runstate.RunInfo(port=port, pid=os.getpid(), token=token, started_at=runstate.now_iso())
     )
-    warm_up_in_background(extractor)
+    queue.start()  # หลังเซิร์ฟเวอร์พร้อม: ข่าวของงานแรกไปถึงหน้าเว็บที่เปิดอยู่ได้
+    warm_up_in_background(services.extractor)
     purge_stop = threading.Event()
-    purge_thread = start_periodic_purge(db, paths.cache, purge_stop)
+    purge_thread = start_periodic_purge(services.db, paths.cache, purge_stop)
     if auto_ffmpeg:
         threading.Thread(target=ensure_ffmpeg, args=(paths, plat), name="ffmpeg-setup", daemon=True).start()
     url = base_url(port)
@@ -320,7 +573,7 @@ def _run_server(
         webbrowser.open(url)
 
     def open_output() -> None:
-        folder = ctx.settings.output_dir() if ctx.settings is not None else ctx.output_dir
+        folder = services.settings.output_dir()
         folder.mkdir(parents=True, exist_ok=True)
         (ctx.open_folder or plat.open_folder)(folder)
 
@@ -334,8 +587,9 @@ def _run_server(
         if with_tray:
             from .tray import build_tray
 
-            icon = build_tray(lambda: webbrowser.open(url), open_output, quit_from_tray)
+            icon = build_tray(lambda: webbrowser.open(url), open_output, quit_from_tray, running_count(services))
             tray_holder.append(icon)
+            start_tray_refresher(services.events, icon)  # จบเองเมื่อ bus ปิดใน finally
             icon.run()  # บล็อก main thread จนกว่าจะเรียก icon.stop()
         else:
             while not stop_event.wait(0.5):
@@ -343,6 +597,8 @@ def _run_server(
     except KeyboardInterrupt:
         pass
     finally:
+        # ลำดับ: หยุดคิว -> app.shutdown -> ปิด bus (สตรีมข่าวจบ) -> หยุดเซิร์ฟเวอร์
+        shutdown_services(services)
         server.stop()
         purge_stop.set()  # หยุด timer ก่อนผู้เรียกปิดฐานข้อมูล
         server.join(timeout=10)
