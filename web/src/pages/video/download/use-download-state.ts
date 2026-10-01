@@ -46,12 +46,13 @@ export const MP3_BITRATES: readonly Mp3Kbps[] = [128, 192, 320]
 export const AUDIO_FORMATS: readonly AudioFormatChoice[] = ["m4a", "mp3", "wav"]
 
 /**
- * คุณภาพเริ่มต้นจากค่าที่จำไว้ (จำเป็นความสูงของภาพ ไม่ใช่ formatId): ตัวเลือกแรกที่สูงเท่ากัน (fps มากสุดก่อน
- * ตามลำดับของ qualityOptions) · ไม่มีความสูงนั้น หรือจำว่า "auto" = "auto"
+ * คุณภาพเริ่มต้นจากค่าที่จำไว้ (จำเป็นความสูงของภาพ ไม่ใช่ formatId): ตัวเลือกที่สูงเท่ากัน โดยเลือกแบบเปิดได้ทุกที่ (H.264)
+ * ก่อน แล้วค่อยตามลำดับของ qualityOptions (fps มากสุดก่อน) · ไม่มีความสูงนั้น หรือจำว่า "auto" = "auto"
  */
 export function qualityForHeight(options: readonly QualityOption[], height: DownloadPrefs["quality"]): string {
   if (height === AUTO_QUALITY) return AUTO_QUALITY
-  return options.find((option) => option.height === height)?.value ?? AUTO_QUALITY
+  const same = options.filter((option) => option.height === height)
+  return (same.find((option) => option.compat) ?? same[0])?.value ?? AUTO_QUALITY
 }
 
 /** ความสูงของคุณภาพที่เลือก สำหรับจำไว้ใช้กับคลิปอื่น ("auto" หรือ formatId ที่ไม่อยู่ในรายการ = "auto") */
@@ -68,7 +69,8 @@ export function languageOptions(video: VideoInfo): LanguageOption[] | null {
  * ตัวเลือกที่ใช้จริงกับคลิปนี้ (ฟังก์ชันล้วน ทั้งสองแท็บเรียกด้วยค่าชุดเดียวกันจึงได้ภาษาเสียงตรงกันเสมอ):
  * ที่ผู้ใช้เลือกเองก่อน ไม่ได้เลือก = ค่าที่จำไว้ (prefs) ที่ปรับให้เข้ากับคลิปนี้
  * · คุณภาพที่เลือกไว้แต่ไม่อยู่ในรายการแล้ว (เช่น ปิดความละเอียดสูงสุดหลังเลือก 4K) = กลับไปใช้ความสูงที่จำไว้/อัตโนมัติ
- * · ภาษาเสียงที่จำไว้ = ภาษาที่ตรงในคลิปนี้ ("en" ใช้ "en-US" ได้) ไม่มี = ต้นฉบับ
+ * · ภาษาเสียงที่จำไว้ = ภาษาที่ตรงในคลิปนี้ ("en" ใช้ "en-US" ได้) ไม่มี = ต้นฉบับ · คลิปไม่มีตัวเลือกภาษา = ต้นฉบับเสมอ
+ * · "ไม่เอาเสียง" ไม่จำข้ามคลิป (เริ่มปิดทุกคลิป ผู้ใช้จะได้ไม่ได้ไฟล์เงียบโดยไม่รู้ตัว) · คลิปไม่มีเสียงเลย = เปิดเสมอ
  */
 export function resolveDownloadState(
   prefs: DownloadPrefs,
@@ -87,11 +89,13 @@ export function resolveDownloadState(
   const audioLanguage =
     chosenLanguage !== undefined && languages?.some((option) => option.value === chosenLanguage)
       ? chosenLanguage
-      : resolveAudioLanguage(languages, prefs.audioLanguage)
+      : languages === null
+        ? "original"
+        : resolveAudioLanguage(languages, prefs.audioLanguage)
   return {
     quality,
     maxQuality,
-    noAudio: choices.noAudio ?? prefs.noAudio,
+    noAudio: video.audio.length === 0 || (choices.noAudio ?? false),
     audioLanguage,
     audioFormat: choices.audioFormat ?? prefs.audioFormat,
     mp3Kbps: choices.mp3Kbps ?? prefs.mp3Kbps,
@@ -103,19 +107,37 @@ export function languageLocked(state: Pick<DownloadState, "noAudio">): boolean {
   return state.noAudio
 }
 
-/** ค่าที่จำไว้หลังส่งงานวิดีโอเข้าคิวสำเร็จ (คุณภาพเป็นความสูง) */
-export function videoPrefsPatch(state: DownloadState, video: VideoInfo): Partial<DownloadPrefs> {
+/** ภาษาเสียงที่จะจำ: คลิปที่ไม่มีตัวเลือกภาษาไม่ได้ให้ผู้ใช้เลือก จึงไม่ทับภาษาที่จำไว้ */
+function languagePatch(state: DownloadState, languages: LanguageOption[] | null): Partial<DownloadPrefs> {
+  return languages === null ? {} : { audioLanguage: state.audioLanguage }
+}
+
+/** ค่าที่จำไว้หลังส่งงานวิดีโอเข้าคิวสำเร็จ (คุณภาพเป็นความสูง · ไม่จำ "ไม่เอาเสียง") */
+export function videoPrefsPatch(
+  state: DownloadState,
+  video: VideoInfo,
+  languages: LanguageOption[] | null,
+): Partial<DownloadPrefs> {
   return {
     quality: heightOf(qualityOptions(video, state.maxQuality), state.quality),
     maxQuality: state.maxQuality,
-    noAudio: state.noAudio,
-    audioLanguage: state.audioLanguage,
+    ...languagePatch(state, languages),
   }
 }
 
 /** ค่าที่จำไว้หลังส่งงานเสียงเข้าคิวสำเร็จ */
-export function audioPrefsPatch(state: DownloadState): Partial<DownloadPrefs> {
-  return { audioFormat: state.audioFormat, mp3Kbps: state.mp3Kbps, audioLanguage: state.audioLanguage }
+export function audioPrefsPatch(state: DownloadState, languages: LanguageOption[] | null): Partial<DownloadPrefs> {
+  return { audioFormat: state.audioFormat, mp3Kbps: state.mp3Kbps, ...languagePatch(state, languages) }
+}
+
+/** แท็บวิดีโอมีตัวเลือกให้กด (มีภาพให้โหลด) · ไม่มี = Skeleton หรือ Empty แผงต้องรับโฟกัสเอง */
+export function videoPanelHasControls(video: VideoInfo | undefined): boolean {
+  return video !== undefined && video.video.length > 0
+}
+
+/** แท็บเสียงมีตัวเลือกให้กด (มีเสียงให้โหลด) · ไม่มี = Skeleton หรือ Empty แผงต้องรับโฟกัสเอง */
+export function audioPanelHasControls(video: VideoInfo | undefined): boolean {
+  return video !== undefined && video.audio.length > 0
 }
 
 /**
@@ -138,15 +160,6 @@ export function resolveEmbed(choice: string | null | undefined, tracks: readonly
 export function wavSourceTrack(audio: readonly AudioFormat[]): AudioFormat | undefined {
   const aac = audio.filter((track) => track.acodec.startsWith("mp4a"))
   return aac.find((track) => track.isOriginal) ?? aac[0] ?? audio.find((track) => track.isOriginal) ?? audio[0]
-}
-
-/** ขนาดไฟล์แบบฐานสิบ (1 MB = 1,000,000 ไบต์): ต่ำกว่า 10 MB มีทศนิยม 1 ตำแหน่ง (อย่างน้อย 0.1) · ตั้งแต่ 1 GB เป็น GB ทศนิยม 1 ตำแหน่ง */
-export function formatSize(bytes: number): string {
-  const safe = Number.isFinite(bytes) && bytes > 0 ? bytes : 0
-  if (safe === 0) return "0 MB"
-  if (safe >= 1e9) return `${(safe / 1e9).toFixed(1)} GB`
-  const mb = safe / 1e6
-  return mb < 10 ? `${Math.max(0.1, Math.round(mb * 10) / 10).toFixed(1)} MB` : `${Math.round(mb)} MB`
 }
 
 /**

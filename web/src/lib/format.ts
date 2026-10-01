@@ -84,3 +84,15 @@ export function formatTags(tags: readonly string[]): string {
     .filter((tag) => tag !== "")
     .join(", ")
 }
+
+/**
+ * ขนาดไฟล์แบบฐานสิบ (1 MB = 1,000,000 ไบต์ ตามกติกาของ PRD): ตั้งแต่ 1 GB เป็น GB ทศนิยม 1 ตำแหน่ง
+ * · ต่ำกว่า 10 MB มีทศนิยม 1 ตำแหน่ง (อย่างน้อย 0.1 MB) · นอกนั้น MB จำนวนเต็ม · ค่าที่ไม่ใช่ตัวเลขจริงหรือไม่เกิน 0 = "0 MB"
+ */
+export function formatBytes(bytes: number): string {
+  const safe = Number.isFinite(bytes) && bytes > 0 ? bytes : 0
+  if (safe === 0) return "0 MB"
+  if (safe >= 1e9) return `${(safe / 1e9).toFixed(1)} GB`
+  const mb = safe / 1e6
+  return mb < 10 ? `${Math.max(0.1, Math.round(mb * 10) / 10).toFixed(1)} MB` : `${Math.round(mb)} MB`
+}

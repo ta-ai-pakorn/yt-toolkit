@@ -51,7 +51,7 @@ function AudioForm({ video, choices, choose }: Props) {
     if (pending) return
     const params = buildAudioParams({ format: state.audioFormat, mp3Kbps: state.mp3Kbps, audioLanguage: state.audioLanguage })
     const ok = await enqueue([{ videoId: video.videoId, kind: "audio", params, title: video.title }])
-    if (ok) remember(audioPrefsPatch(state))
+    if (ok) remember(audioPrefsPatch(state, languages))
   }
 
   return (
@@ -73,7 +73,7 @@ function AudioForm({ video, choices, choose }: Props) {
           }}
         >
           {AUDIO_FORMATS.map((format) => (
-            <ToggleGroupItem key={format} value={format} className="px-4 max-sm:h-11">
+            <ToggleGroupItem key={format} value={format} className="px-4">
               {t.formats[format]}
             </ToggleGroupItem>
           ))}
@@ -112,7 +112,7 @@ function AudioForm({ video, choices, choose }: Props) {
       <AudioLanguageSelect options={languages} value={state.audioLanguage} onChange={(audioLanguage) => choose({ audioLanguage })} />
 
       <div>
-        <Button variant="secondary" className="max-sm:h-11" disabled={pending} focusableWhenDisabled onClick={() => void submit()}>
+        <Button variant="secondary" disabled={pending} focusableWhenDisabled onClick={() => void submit()}>
           {pending ? <Spinner aria-hidden /> : <Music aria-hidden />}
           {t.download}
         </Button>

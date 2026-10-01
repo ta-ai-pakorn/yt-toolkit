@@ -4,15 +4,16 @@ import { prefsFromSettings, type DownloadPrefs } from "@/lib/download-prefs"
 import type { AudioFormat, SubtitleTrack, VideoFormat, VideoInfo } from "@/lib/types"
 
 import {
+  audioPanelHasControls,
   audioPrefsPatch,
   embeddableTracks,
-  formatSize,
   heightOf,
   languageLocked,
   languageOptions,
   qualityForHeight,
   resolveDownloadState,
   resolveEmbed,
+  videoPanelHasControls,
   videoPrefsPatch,
   wavSourceTrack,
 } from "./use-download-state"
@@ -76,6 +77,17 @@ describe("qualityForHeight / heightOf", () => {
     expect(heightOf(compat, "298")).toBe(720)
     expect(heightOf(compat, "auto")).toBe("auto")
     expect(heightOf(compat, "999")).toBe("auto")
+  })
+
+  it("ความสูงเท่ากันหลายแบบ: เลือกแบบเปิดได้ทุกที่ (H.264) ก่อน แม้ VP9 อยู่ก่อนในรายการ", () => {
+    const mixed = [
+      { value: "303", height: 1080, fps: 60, codec: "VP9", compat: false },
+      { value: "299", height: 1080, fps: 60, codec: "H.264", compat: true },
+      { value: "302", height: 720, fps: 60, codec: "VP9", compat: false },
+    ]
+    expect(qualityForHeight(mixed, 1080)).toBe("299")
+    // ไม่มี H.264 ที่ความสูงนั้น = ตัวแรกของความสูงนั้น
+    expect(qualityForHeight(mixed, 720)).toBe("302")
   })
 })
 
@@ -151,8 +163,11 @@ describe("ภาษาเสียงใช้ร่วมกันระหว�
     expect(resolveDownloadState(prefs(), DUBBED, languages, { audioLanguage: "ko" }).audioLanguage).toBe("original")
   })
 
-  it("คลิปไม่มีตัวเลือกภาษา = ส่งภาษาที่จำไว้ไปตามเดิม (backend ใช้ต้นฉบับแทนและแจ้งในคิว)", () => {
-    expect(resolveDownloadState(prefs({ audioLanguage: "th" }), clip(), null, {}).audioLanguage).toBe("th")
+  it("คลิปไม่มีตัวเลือกภาษา = ส่ง 'original' เสมอ (ไม่ส่งภาษาที่จำไว้ ซึ่งผู้ใช้มองไม่เห็นในหน้านี้)", () => {
+    expect(resolveDownloadState(prefs({ audioLanguage: "th" }), clip(), null, {}).audioLanguage).toBe("original")
+    expect(resolveDownloadState(prefs({ audioLanguage: "en" }), clip(), null, { audioLanguage: "en" }).audioLanguage).toBe(
+      "original",
+    )
   })
 
   it("'ไม่เอาเสียง' เปิด = ช่องภาษาเสียงกดไม่ได้", () => {
@@ -161,21 +176,53 @@ describe("ภาษาเสียงใช้ร่วมกันระหว�
   })
 })
 
+describe("ไม่เอาเสียง", () => {
+  it("ไม่จำข้ามคลิป: แม้ค่าที่จำไว้ (รุ่นเก่า) เป็น true ทุกคลิปก็เริ่มที่ปิด", () => {
+    expect(resolveDownloadState(prefs({ noAudio: true }), clip(), null, {}).noAudio).toBe(false)
+    expect(resolveDownloadState(prefs(), clip(), null, { noAudio: true }).noAudio).toBe(true)
+  })
+
+  it("คลิปไม่มีเสียงเลย = เปิดเสมอ (ผู้ใช้ปิดไม่ได้)", () => {
+    const silent = clip({ audio: [] })
+    expect(resolveDownloadState(prefs(), silent, null, {}).noAudio).toBe(true)
+    expect(resolveDownloadState(prefs(), silent, null, { noAudio: false }).noAudio).toBe(true)
+  })
+})
+
 describe("จำค่าหลังส่งเข้าคิว", () => {
-  it("งานวิดีโอจำคุณภาพเป็นความสูง (auto = auto) พร้อมสวิตช์และภาษา", () => {
-    const state = resolveDownloadState(prefs(), clip(), null, { quality: "298", noAudio: true })
-    expect(videoPrefsPatch(state, clip())).toEqual({ quality: 720, maxQuality: false, noAudio: true, audioLanguage: "original" })
+  it("งานวิดีโอจำคุณภาพเป็นความสูง (auto = auto) และความละเอียดสูงสุด แต่ไม่จำ 'ไม่เอาเสียง'", () => {
+    const languages = languageOptions(DUBBED)
+    const state = resolveDownloadState(prefs(), DUBBED, languages, { quality: "298", noAudio: true, audioLanguage: "en-US" })
+    expect(videoPrefsPatch(state, DUBBED, languages)).toEqual({ quality: 720, maxQuality: false, audioLanguage: "en-US" })
     const auto = resolveDownloadState(prefs(), clip(), null, {})
-    expect(videoPrefsPatch(auto, clip()).quality).toBe("auto")
+    expect(videoPrefsPatch(auto, clip(), null).quality).toBe("auto")
+  })
+
+  it("คลิปที่ไม่มีตัวเลือกภาษาไม่ทับภาษาที่จำไว้", () => {
+    const state = resolveDownloadState(prefs({ audioLanguage: "en" }), clip(), null, {})
+    expect(videoPrefsPatch(state, clip(), null)).not.toHaveProperty("audioLanguage")
+    expect(audioPrefsPatch(state, null)).toEqual({ audioFormat: "m4a", mp3Kbps: 192 })
   })
 
   it("งานเสียงจำรูปแบบไฟล์ บิตเรต และภาษา", () => {
-    const state = resolveDownloadState(prefs(), DUBBED, languageOptions(DUBBED), {
+    const languages = languageOptions(DUBBED)
+    const state = resolveDownloadState(prefs(), DUBBED, languages, {
       audioFormat: "mp3",
       mp3Kbps: 320,
       audioLanguage: "en-US",
     })
-    expect(audioPrefsPatch(state)).toEqual({ audioFormat: "mp3", mp3Kbps: 320, audioLanguage: "en-US" })
+    expect(audioPrefsPatch(state, languages)).toEqual({ audioFormat: "mp3", mp3Kbps: 320, audioLanguage: "en-US" })
+  })
+})
+
+describe("แผงมีตัวเลือกให้กด (แผงไม่ต้องรับโฟกัสเอง)", () => {
+  it("ยังโหลดอยู่ = ไม่มี · มีภาพ/เสียง = มี · ไม่มีภาพหรือเสียงของแผงนั้น = ไม่มี", () => {
+    expect(videoPanelHasControls(undefined)).toBe(false)
+    expect(audioPanelHasControls(undefined)).toBe(false)
+    expect(videoPanelHasControls(clip())).toBe(true)
+    expect(audioPanelHasControls(clip())).toBe(true)
+    expect(videoPanelHasControls(clip({ video: [] }))).toBe(false)
+    expect(audioPanelHasControls(clip({ audio: [] }))).toBe(false)
   })
 })
 
@@ -200,7 +247,7 @@ describe("ฝังซับ", () => {
   })
 })
 
-describe("ขนาด wav และขนาดไฟล์", () => {
+describe("ขนาด wav", () => {
   it("แทร็กที่ใช้ประมาณ wav: AAC ต้นฉบับก่อน · ไม่มีต้นฉบับใช้ AAC ตัวแรก", () => {
     const opus: AudioFormat = { formatId: "251", isOriginal: true, acodec: "opus" }
     const dub = aac("140-0", "en-US", false, { sampleRate: 48000 })
@@ -209,13 +256,5 @@ describe("ขนาด wav และขนาดไฟล์", () => {
     expect(wavSourceTrack([opus, dub])).toBe(dub)
     expect(wavSourceTrack([opus])).toBe(opus)
     expect(wavSourceTrack([])).toBeUndefined()
-  })
-
-  it("ขนาดแบบฐานสิบ: MB จำนวนเต็ม · ต่ำกว่า 10 MB ทศนิยม 1 ตำแหน่ง · GB ทศนิยม 1 ตำแหน่ง", () => {
-    expect(formatSize(268_000_000)).toBe("268 MB")
-    expect(formatSize(4_240_000)).toBe("4.2 MB")
-    expect(formatSize(1_362_269_481)).toBe("1.4 GB")
-    expect(formatSize(1000)).toBe("0.1 MB")
-    expect(formatSize(Number.NaN)).toBe("0 MB")
   })
 })

@@ -4,7 +4,7 @@ import type { VideoInfo } from "@/lib/types"
 
 import { ClipInfoPanel } from "./clip-details"
 import { AudioPanel } from "./download/audio-panel"
-import { useDownloadChoices } from "./download/use-download-state"
+import { audioPanelHasControls, useDownloadChoices, videoPanelHasControls } from "./download/use-download-state"
 import { VideoPanel } from "./download/video-panel"
 import { FramesSection } from "./frames"
 import { useWarmingRefetch } from "./session-warming"
@@ -79,10 +79,10 @@ export function VideoTabs({ videoId, enabled, video }: Props) {
       </TabsContent>
       {/* แท็บวิดีโอ/เสียงที่มีตัวเลือกเริ่มด้วยช่องเลือกที่โฟกัสได้อยู่แล้ว = แผงไม่เป็นจุด Tab เพิ่ม
           ยังโหลดอยู่หรือคลิปไม่มีไฟล์ให้โหลด (ไม่มีปุ่ม) = แผงรับโฟกัสเอง */}
-      <TabsContent value="video" tabIndex={video && video.video.length > 0 ? -1 : undefined} className={PANEL}>
+      <TabsContent value="video" tabIndex={videoPanelHasControls(video) ? -1 : undefined} className={PANEL}>
         <VideoPanel video={video} enabled={enabled} choices={choices} choose={choose} />
       </TabsContent>
-      <TabsContent value="audio" tabIndex={video && video.audio.length > 0 ? -1 : undefined} className={PANEL}>
+      <TabsContent value="audio" tabIndex={audioPanelHasControls(video) ? -1 : undefined} className={PANEL}>
         <AudioPanel video={video} choices={choices} choose={choose} />
       </TabsContent>
       <TabsContent value="subs" className={PANEL}>

@@ -13,6 +13,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { fill, th } from "@/i18n/th"
 import { AUTO_QUALITY, buildVideoParams, qualityOptions, videoSizeEstimate, type QualityOption } from "@/lib/download-options"
+import { formatBytes } from "@/lib/format"
 import { useEnqueue } from "@/lib/jobs"
 import type { VideoInfo } from "@/lib/types"
 
@@ -24,7 +25,6 @@ import { AudioLanguageSelect, DisabledReason, SELECT_CONTENT, SELECT_TRIGGER } f
 import {
   embeddableTracks,
   ENQUEUE_MESSAGES,
-  formatSize,
   languageLocked,
   resolveEmbed,
   useDownloadState,
@@ -40,7 +40,7 @@ const EMBED_NONE = "none"
 /** ป้ายของตัวเลือกคุณภาพ: "1080p · 60 fps · H.264" (+ " · ประมาณ 268 MB" เมื่อรู้ขนาด) */
 function optionLabel(option: QualityOption, size: number | undefined): string {
   const values = { height: option.height, fps: option.fps, codec: option.codec }
-  return size === undefined ? fill(t.option, values) : fill(t.optionSize, { ...values, size: formatSize(size) })
+  return size === undefined ? fill(t.option, values) : fill(t.optionSize, { ...values, size: formatBytes(size) })
 }
 
 /** กรอบของแท็บวิดีโอ/เสียง: Card หัวข้อ h2 (แบบเดียวกับแท็บซับ) */
@@ -95,15 +95,28 @@ export function NoFormats({ title }: { title: string }) {
   )
 }
 
-type SwitchRowProps = { label: string; hint: string; checked: boolean; onChange: (checked: boolean) => void }
+type SwitchRowProps = {
+  label: string
+  hint: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+  disabled?: boolean
+}
 
 /** สวิตช์พร้อมคำอธิบายใต้ชื่อ (คำอธิบายผูกกับสวิตช์ผ่าน aria-describedby) */
-function SwitchRow({ label, hint, checked, onChange }: SwitchRowProps) {
+function SwitchRow({ label, hint, checked, onChange, disabled = false }: SwitchRowProps) {
   const id = useId()
   const hintId = useId()
   return (
-    <Field orientation="horizontal" className="items-start">
-      <Switch id={id} checked={checked} onCheckedChange={onChange} aria-describedby={hintId} className="mt-0.5" />
+    <Field orientation="horizontal" className="items-start" data-disabled={disabled || undefined}>
+      <Switch
+        id={id}
+        checked={checked}
+        onCheckedChange={onChange}
+        disabled={disabled}
+        aria-describedby={hintId}
+        className="mt-0.5"
+      />
       <FieldContent>
         <FieldLabel htmlFor={id}>{label}</FieldLabel>
         <FieldDescription id={hintId}>{hint}</FieldDescription>
@@ -124,14 +137,16 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
   const qualityLabelId = useId()
   const embedLabelId = useId()
   const embedHintId = useId()
-  const embedReasonId = useId()
   const { state, languages, remember } = useDownloadState(video, choices)
   const subSettings = useSubSettings()
   const subtitles = useQuery(subtitlesQuery(video.videoId, enabled))
   const { enqueue, pending } = useEnqueue(ENQUEUE_MESSAGES)
 
   const options = qualityOptions(video, state.maxQuality)
-  const labels = new Map<string, string>([[AUTO_QUALITY, t.auto]])
+  // ความละเอียดสูงสุดเปิดอยู่: "อัตโนมัติ" = ภาพดีที่สุดของคลิป (อาจเป็น VP9/AV1) ไม่ใช่ "เปิดได้ทุกที่ 1080p"
+  const autoLabel = state.maxQuality ? t.autoMax : t.auto
+  const autoNotCompat = state.maxQuality && options.length > 0 && !options[0].compat
+  const labels = new Map<string, string>([[AUTO_QUALITY, autoLabel]])
   for (const option of options) {
     labels.set(option.value, optionLabel(option, videoSizeEstimate(video, option.value, state.noAudio, state.maxQuality)))
   }
@@ -154,7 +169,7 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
       subOptions: subSettings.options,
     })
     const ok = await enqueue([{ videoId: video.videoId, kind: "video", params, title: video.title }])
-    if (ok) remember(videoPrefsPatch(state, video))
+    if (ok) remember(videoPrefsPatch(state, video, languages))
   }
 
   return (
@@ -173,7 +188,10 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
             <SelectValue>{(value: string | null) => (value ? (labels.get(value) ?? value) : "")}</SelectValue>
           </SelectTrigger>
           <SelectContent alignItemWithTrigger={false} align="start" className={SELECT_CONTENT}>
-            <SelectItem value={AUTO_QUALITY}>{t.auto}</SelectItem>
+            <SelectItem value={AUTO_QUALITY}>
+              {autoLabel}
+              {autoNotCompat && <Badge variant="outline">{t.notCompat}</Badge>}
+            </SelectItem>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {labels.get(option.value)}
@@ -198,13 +216,20 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
         disabled={languageLocked(state)}
       />
 
-      <SwitchRow label={t.noAudio} hint={t.noAudioHint} checked={state.noAudio} onChange={(noAudio) => choose({ noAudio })} />
+      {/* คลิปไม่มีเสียงเลย: "ไม่เอาเสียง" เปิดไว้และกดไม่ได้ (ได้ไฟล์ภาพอย่างเดียวอยู่แล้ว) */}
+      <SwitchRow
+        label={t.noAudio}
+        hint={t.noAudioHint}
+        checked={state.noAudio}
+        disabled={video.audio.length === 0}
+        onChange={(noAudio) => choose({ noAudio })}
+      />
 
       <div className="flex flex-col gap-2">
         <div id={embedLabelId} className="text-sm font-medium">
           {t.embedSubs}
         </div>
-        <DisabledReason reason={embedReason} reasonId={embedReasonId}>
+        <DisabledReason reason={embedReason}>
           <Select<string>
             value={embedSubs ?? EMBED_NONE}
             disabled={embedDisabled}
@@ -214,7 +239,7 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
           >
             <SelectTrigger
               aria-labelledby={embedLabelId}
-              aria-describedby={embedReason ? embedReasonId : embedDisabled ? undefined : embedHintId}
+              aria-describedby={embedHintId}
               className={SELECT_TRIGGER}
             >
               <SelectValue>
@@ -234,20 +259,19 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
             </SelectContent>
           </Select>
         </DisabledReason>
-        {!embedDisabled && (
-          <p id={embedHintId} className="text-sm text-muted-foreground">
-            {t.embedHint}
-          </p>
-        )}
+        {/* ช่องคำอธิบาย: กดไม่ได้ = เหตุผล (เห็นได้โดยไม่ต้องชี้เมาส์) · กดได้หรือรอรายการซับ = วิธีใช้ */}
+        <p id={embedHintId} className="text-sm text-muted-foreground">
+          {embedReason ?? t.embedHint}
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <Button className="max-sm:h-11" disabled={pending} focusableWhenDisabled onClick={() => void submit()}>
+        <Button disabled={pending} focusableWhenDisabled onClick={() => void submit()}>
           {pending ? <Spinner aria-hidden /> : <Download aria-hidden />}
           {t.download}
         </Button>
         {size !== undefined && (
-          <span className="text-sm text-muted-foreground">{fill(t.estimate, { size: formatSize(size) })}</span>
+          <span className="text-sm text-muted-foreground">{fill(t.estimate, { size: formatBytes(size) })}</span>
         )}
       </div>
     </DownloadCard>

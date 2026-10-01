@@ -42,6 +42,19 @@ const combobox = (page: Page, name: string) => page.getByRole("combobox", { name
 const downloadMp4 = (page: Page) => page.getByRole("button", { name: DOWNLOAD_MP4, exact: true })
 const downloadAudio = (page: Page) => page.getByRole("button", { name: DOWNLOAD_AUDIO, exact: true })
 const tooltip = (page: Page) => page.locator('[data-slot="tooltip-content"]')
+// ข้อความในแผงของแท็บ (Tooltip อยู่นอกแผง จึงไม่ปนกัน)
+const panelText = (page: Page, text: string) => page.getByRole("tabpanel").getByText(text, { exact: true })
+
+/** แก้ข้อมูลคลิปที่ backend ส่งมาบางช่อง ส่วนอื่นมาจากชุดทดสอบตามปกติ */
+async function withVideo(page: Page, videoId: string, patch: Record<string, unknown>) {
+  await page.route(
+    (url) => url.pathname === `/api/videos/${videoId}`,
+    async (route) => {
+      const response = await route.fetch()
+      await route.fulfill({ response, json: { ...((await response.json()) as object), ...patch } })
+    },
+  )
+}
 
 /** เปิดหน้าคลิปที่แท็บนั้นแล้วรอให้ตัวเลือกพร้อม (ปุ่มโหลดขึ้น = ข้อมูลคลิปมาแล้ว) */
 async function openTab(page: Page, videoId: string, which: "video" | "audio") {
@@ -134,14 +147,37 @@ test.describe("W2 แท็บวิดีโอ", () => {
     await expect(combobox(page, LANGUAGE)).toHaveCount(0)
   })
 
-  test("เปิด 'ไม่เอาเสียง' → ส่ง noAudio: true และช่องภาษาเสียงกดไม่ได้พร้อม Tooltip บอกเหตุผล", async ({ page }) => {
+  test("เปิด 'ไม่เอาเสียง' → ส่ง noAudio: true · ช่องภาษาเสียงกดไม่ได้ พร้อมเหตุผลใต้ช่องและใน Tooltip · ไม่จำข้ามการโหลดหน้าใหม่", async ({
+    page,
+  }) => {
+    const reason = "ปิด 'ไม่เอาเสียง' ก่อนถึงจะเลือกภาษาเสียงได้"
     const { bodies } = await mockEnqueue(page)
     await openTab(page, DUB, "video")
+    const noAudio = page.getByRole("switch", { name: "ไม่เอาเสียง" })
     await expect(combobox(page, LANGUAGE)).toBeEnabled()
-    await page.getByRole("switch", { name: "ไม่เอาเสียง" }).click()
-    await expect(page.getByRole("switch", { name: "ไม่เอาเสียง" })).toBeChecked()
+    await expect(panelText(page, reason)).toHaveCount(0)
+    await noAudio.click()
+    await expect(noAudio).toBeChecked()
     await expect(combobox(page, LANGUAGE)).toBeDisabled()
-    await expect(await hoverDisabled(page, LANGUAGE)).toHaveText("ปิด 'ไม่เอาเสียง' ก่อนถึงจะเลือกภาษาเสียงได้")
+    await expect(panelText(page, reason)).toBeVisible()
+    await expect(await hoverDisabled(page, LANGUAGE)).toHaveText(reason)
+    await downloadMp4(page).click()
+    await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
+    expect((bodies[0][0].params as VideoJobParams).noAudio).toBe(true)
+    // ไม่เอาเสียงไม่ถูกจำ: คลิปถัดไป (หรือโหลดหน้าใหม่) เริ่มที่มีเสียงเสมอ ผู้ใช้จะได้ไม่ได้ไฟล์เงียบโดยไม่รู้ตัว
+    await page.reload()
+    await expect(downloadMp4(page)).toBeVisible()
+    await expect(noAudio).not.toBeChecked()
+    await expect(combobox(page, LANGUAGE)).toBeEnabled()
+  })
+
+  test("คลิปไม่มีเสียงเลย → 'ไม่เอาเสียง' เปิดอยู่และกดไม่ได้ · ส่ง noAudio: true", async ({ page }) => {
+    await withVideo(page, BBB, { audio: [] })
+    const { bodies } = await mockEnqueue(page)
+    await openTab(page, BBB, "video")
+    const noAudio = page.getByRole("switch", { name: "ไม่เอาเสียง" })
+    await expect(noAudio).toBeChecked()
+    await expect(noAudio).toBeDisabled()
     await downloadMp4(page).click()
     await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
     expect((bodies[0][0].params as VideoJobParams).noAudio).toBe(true)
@@ -180,7 +216,12 @@ test.describe("W2 แท็บวิดีโอ", () => {
     await page.keyboard.press("Escape")
 
     await page.getByRole("switch", { name: "ความละเอียดสูงสุด" }).click()
+    // ตัวเลือกอัตโนมัติเปลี่ยนชื่อเป็นภาพดีที่สุดของคลิป (BBB = 2160p VP9 จึงมีป้ายเตือนด้วย)
+    await expect(combobox(page, "คุณภาพ")).toHaveText("สูงสุดที่คลิปนี้มี")
     await combobox(page, "คุณภาพ").click()
+    const auto = page.getByRole("option").first()
+    await expect(auto).toContainText("สูงสุดที่คลิปนี้มี")
+    await expect(auto).toContainText("บางโปรแกรมเปิดไม่ได้")
     const uhd = page.getByRole("option", { name: /^2160p · 60 fps · VP9/ })
     await expect(uhd).toContainText("บางโปรแกรมเปิดไม่ได้")
     // ตัวเลือก H.264 ไม่มีป้าย
@@ -201,10 +242,11 @@ test.describe("W2 แท็บวิดีโอ", () => {
     await expect(combobox(page, "คุณภาพ")).toHaveText(/^720p · 60 fps · H\.264/)
   })
 
-  test("ฝังซับ: BBB ไม่มีซับ → กดไม่ได้พร้อม Tooltip 'คลิปนี้ไม่มีซับให้ฝัง'", async ({ page }) => {
+  test("ฝังซับ: BBB ไม่มีซับ → กดไม่ได้ พร้อมเหตุผล 'คลิปนี้ไม่มีซับให้ฝัง' ใต้ช่องและใน Tooltip", async ({ page }) => {
     await openTab(page, BBB, "video")
     await expect(combobox(page, EMBED)).toHaveText("ไม่ฝัง")
     await expect(combobox(page, EMBED)).toBeDisabled()
+    await expect(panelText(page, "คลิปนี้ไม่มีซับให้ฝัง")).toBeVisible()
     await expect(await hoverDisabled(page, EMBED)).toHaveText("คลิปนี้ไม่มีซับให้ฝัง")
   })
 
@@ -213,6 +255,8 @@ test.describe("W2 แท็บวิดีโอ", () => {
     await openTab(page, THAI, "video")
     await expect(combobox(page, EMBED)).toBeEnabled()
     await expect(combobox(page, EMBED)).toHaveText("ไม่ฝัง")
+    await expect(panelText(page, "ผู้ชมเปิดหรือปิดซับได้จากโปรแกรมเล่น ความยาวซับตามที่ตั้งไว้ในแท็บซับ")).toBeVisible()
+    await expect(panelText(page, "คลิปนี้ไม่มีซับให้ฝัง")).toHaveCount(0)
     await combobox(page, EMBED).click()
     await expect(page.getByRole("option").first()).toHaveText("ไม่ฝัง")
     // ซับแปลอัตโนมัติไม่อยู่ในรายการฝังซับ
@@ -306,9 +350,9 @@ test.describe("W2 แท็บวิดีโอและเสียง: กา
   })
 
   for (const which of ["video", "audio"] as const) {
-    test(`จอ 640 × 800: แท็บ ${which} ไม่ล้นแนวนอน`, async ({ page }) => {
+    test(`จอ 640 × 800: แท็บ ${which} ไม่ล้นแนวนอน (BBB, คลิปพากย์, คลิปที่มีซับให้ฝัง)`, async ({ page }) => {
       await page.setViewportSize({ width: 640, height: 800 })
-      for (const videoId of [BBB, DUB]) {
+      for (const videoId of [BBB, DUB, THAI]) {
         await openTab(page, videoId, which)
         if (which === "audio") await page.getByRole("button", { name: "mp3", exact: true }).click()
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(640)

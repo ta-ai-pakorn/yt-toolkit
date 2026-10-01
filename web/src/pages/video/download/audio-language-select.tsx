@@ -16,27 +16,21 @@ export const SELECT_CONTENT = "w-auto min-w-(--anchor-width) max-w-[calc(100vw-2
 type ReasonProps = {
   /** เหตุผลที่กดไม่ได้ (null = กดได้ ไม่มี Tooltip) */
   reason: string | null
-  /** id ของข้อความเหตุผลที่ซ่อนไว้ ให้ช่องที่กดไม่ได้อ้างผ่าน aria-describedby (โปรแกรมอ่านหน้าจอได้ยินเหตุผล) */
-  reasonId: string
   children: ReactNode
 }
 
 /**
  * ครอบช่องที่อาจกดไม่ได้: ชี้เมาส์ที่ช่องที่กดไม่ได้แล้วขึ้น Tooltip บอกเหตุผล (PRD W2 "ปิดใช้ … พร้อม Tooltip บอกเหตุผล")
+ * ผู้เรียกแสดงเหตุผลเดียวกันเป็นข้อความจางใต้ช่องด้วย (เห็นได้โดยไม่ต้องชี้เมาส์ และผูกกับช่องผ่าน aria-describedby)
  * ปุ่มที่ disabled ไม่รับเมาส์ (pointer-events-none) เมาส์จึงตกที่กรอบนี้แทน · โครงสร้างคงเดิมทั้งตอนกดได้และไม่ได้
  */
-export function DisabledReason({ reason, reasonId, children }: ReasonProps) {
+export function DisabledReason({ reason, children }: ReasonProps) {
   return (
     <Tooltip disabled={reason === null}>
       <TooltipTrigger render={<div className="w-full min-w-0 sm:w-fit [&_button:disabled]:pointer-events-none" />}>
         {children}
       </TooltipTrigger>
       <TooltipContent>{reason}</TooltipContent>
-      {reason !== null && (
-        <span id={reasonId} className="sr-only">
-          {reason}
-        </span>
-      )}
     </Tooltip>
   )
 }
@@ -65,7 +59,7 @@ export function AudioLanguageSelect({ options, value, onChange, disabled = false
       <div id={labelId} className="text-sm font-medium">
         {t.audioLanguage}
       </div>
-      <DisabledReason reason={disabled ? t.languageDisabled : null} reasonId={reasonId}>
+      <DisabledReason reason={disabled ? t.languageDisabled : null}>
         <Select<string>
           value={value}
           disabled={disabled}
@@ -89,6 +83,11 @@ export function AudioLanguageSelect({ options, value, onChange, disabled = false
           </SelectContent>
         </Select>
       </DisabledReason>
+      {disabled && (
+        <p id={reasonId} className="text-sm text-muted-foreground">
+          {t.languageDisabled}
+        </p>
+      )}
     </div>
   )
 }
