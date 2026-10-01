@@ -167,11 +167,25 @@
   }
 }
 
-/* ตัวเล่นคลิป (M3.5): ตัวเล่นลอยมุมจอยกขึ้นจากขอบล่างเท่านี้ (เผื่อแถบคิวของ M4) */
+/*
+ * ของที่ลอยติดขอบล่างของจอ ซ้อนกันจากล่างขึ้นบน: แถบคิว (M4) → ตัวเล่นลอย (M3.5) → toast
+ * --dock-bottom-offset = ความสูงของแถบคิวของ M4 (ตั้งที่ :root) ทุกอย่างข้างบนขยับขึ้นตามเอง
+ */
 :root {
   --dock-bottom-offset: 0px;
+  /* toast (sonner) ห่างขอบล่างเท่านี้: ค่าเริ่มต้นของ sonner (24px จอกว้าง / 16px จอ ≤ 600px) + แถบคิว */
+  --toast-bottom-offset: calc(24px + var(--dock-bottom-offset));
+  --toast-mobile-bottom-offset: calc(16px + var(--dock-bottom-offset));
 }
 /* ตอนตัวเล่นลอย เว้นที่ท้ายหน้าเท่าความสูงตัวเล่น เนื้อหาล่างสุดจึงไม่ถูกบัง (--player-dock-h ตั้งจาก player-slot.tsx) */
 html[data-player-docked] body {
   padding-bottom: calc(var(--player-dock-h, 0px) + var(--dock-bottom-offset) + 1rem);
+}
+/*
+ * ตอนตัวเล่นลอย toast ขึ้นเหนือตัวเล่น ไม่ทับกัน
+ * จอกว้าง: ตัวเล่นลอยอยู่สูงจากขอบ 1rem (+ แถบคิว) · จอแคบ: ตัวเล่นเป็นแถบติดขอบล่าง (+ แถบคิว)
+ */
+html[data-player-docked] {
+  --toast-bottom-offset: calc(var(--dock-bottom-offset) + 1rem + var(--player-dock-h, 0px) + 0.75rem);
+  --toast-mobile-bottom-offset: calc(var(--dock-bottom-offset) + var(--player-dock-h, 0px) + 0.75rem);
 }

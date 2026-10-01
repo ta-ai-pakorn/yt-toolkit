@@ -1,6 +1,6 @@
 import { cn } from "cn"
 import { ArrowUpToLine, Play, X } from "lucide-react"
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -10,8 +10,7 @@ import { Thumbnail } from "@/pages/home/thumbnail"
 
 import { PlayerErrorView } from "./player-error"
 import { playerActions, playerAdapterHooks, usePlayerValue, type PlayerStatus } from "./player-store"
-import { stopReel, useReelStatus } from "./reel"
-import { ReelButton } from "./reel-button"
+import { ReelStatus } from "./reel-button"
 import { Timeline } from "./timeline"
 import { createPlayerIframe, createYouTubeAdapter, type YouTubeAdapter } from "./youtube-adapter"
 import { loadYouTubeApi } from "./youtube-api"
@@ -27,26 +26,6 @@ const reducedMotion = () => typeof window.matchMedia === "function" && window.ma
 function scrollToHeader(box: HTMLElement | null) {
   window.scrollTo({ top: 0, behavior: reducedMotion() ? "auto" : "smooth" })
   box?.focus({ preventScroll: true })
-}
-
-/** เห็นช่องตัวเล่นน้อยกว่าครึ่งหนึ่ง = ลอย (ช่องที่เหลือในจอจึงเห็นปกจาง ๆ "กำลังเล่นที่มุมจอ" ให้กดกลับได้) */
-const VISIBLE_RATIO = 0.5
-
-/** ช่องตัวเล่นอยู่ในจอหรือไม่ (IntersectionObserver) · เบราว์เซอร์ไม่มี IO = ถือว่าอยู่ในจอ (ไม่ลอย) */
-function useInView(ref: RefObject<HTMLElement | null>): boolean {
-  const [inView, setInView] = useState(true)
-  useEffect(() => {
-    const node = ref.current
-    if (!node || typeof IntersectionObserver === "undefined") return
-    // ช่องสูงคงที่ตอนลอย (ตัวเล่นออกไปเป็น position: fixed) สัดส่วนจึงขึ้นกับการเลื่อนจออย่างเดียว ไม่สลับไปมาเอง
-    const observer = new IntersectionObserver(
-      ([entry]) => setInView(entry.isIntersecting && entry.intersectionRatio >= VISIBLE_RATIO),
-      { threshold: [0, VISIBLE_RATIO, 1] },
-    )
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [ref])
-  return inView
 }
 
 /**
@@ -120,9 +99,9 @@ type FrameProps = {
 function PlayerFrame({ videoId, title, thumbnailUrl, docked, loading, boxRef, onClose }: FrameProps) {
   const host = useRef<HTMLDivElement>(null)
   const wrapper = useRef<HTMLDivElement>(null)
+  const backToTop = useRef<HTMLButtonElement>(null)
   usePlayerIframe(host, videoId, title)
   useDockSpace(docked, wrapper)
-  const reelStatus = useReelStatus()
 
   return (
     <div
@@ -152,16 +131,9 @@ function PlayerFrame({ videoId, title, thumbnailUrl, docked, loading, boxRef, on
       </div>
       {docked && (
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 p-1.5 max-sm:flex-col max-sm:items-stretch max-sm:p-2">
-          {reelStatus && (
-            <span className="flex min-w-0 items-center gap-1 px-1 text-xs text-muted-foreground tabular">
-              {reelStatus}
-              <Button variant="ghost" size="xs" onClick={stopReel} className="max-sm:h-11">
-                {t.reelStop}
-              </Button>
-            </span>
-          )}
+          <ReelStatus size="xs" className="gap-1 px-1" buttonClassName="max-sm:h-11" fallbackFocus={() => backToTop.current} />
           <div className="ml-auto flex items-center gap-1 max-sm:ml-0 max-sm:justify-end">
-            <Button variant="ghost" size="sm" className="max-sm:h-11" onClick={() => scrollToHeader(boxRef.current)}>
+            <Button ref={backToTop} variant="ghost" size="sm" className="max-sm:h-11" onClick={() => scrollToHeader(boxRef.current)}>
               <ArrowUpToLine aria-hidden />
               {t.backToTop}
             </Button>
@@ -179,21 +151,38 @@ function PlayerFrame({ videoId, title, thumbnailUrl, docked, loading, boxRef, on
  * ช่องตัวเล่นที่หัวคลิป (แทนที่ปกเดิม ขนาดเท่าเดิม)
  * - ยังไม่เล่น: ปก + ปุ่ม ▶ "เล่นคลิป" ตรงกลาง (ยังไม่โหลดอะไรจากยูทูปจนกว่าจะกด)
  * - เล่นแล้ว: ตัวเล่นยูทูปในกล่องเดิม · เลื่อนจอจนช่องพ้นจอ = ตัวเล่นลอยมุมจอ ช่องว่างเหลือปกจาง ๆ "กำลังเล่นที่มุมจอ"
+ *   สั่งเล่นจากที่อื่น (ภาพเฟรม ทรานสคริปต์) ตอนช่องพ้นจออยู่แล้ว = ลอยทันทีตั้งแต่กำลังโหลด
  * - ผิดพลาด: ข้อความในช่อง (ดู PlayerErrorView)
- * ใต้ตัวเล่น: แถบไทม์ไลน์ (เฉพาะตอนอยู่ในหัวคลิปและเคยเล่นแล้ว) และปุ่ม "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย"
- * จอแคบ: ช่องอยู่คอลัมน์แคบข้างชื่อคลิป ส่วนแถบไทม์ไลน์กับปุ่มลงไปเต็มความกว้างแถวถัดไป (กดง่ายกว่า)
+ * แถวไทม์ไลน์ใต้ตัวเล่นแยกเป็น PlayerControls (หัวคลิปวางเองตามความกว้างจอ ให้ลำดับ DOM ตรงกับที่ตาเห็น)
+ * inView: ช่องนี้อยู่ในจอไหม หัวคลิปวัดเอง (useSlotInView กับกล่องที่ได้จาก onBox) แล้วส่งให้ทั้งช่องนี้และ PlayerControls
  */
-export function PlayerSlot({ video, className }: { video: VideoInfo; className?: string }) {
-  const { videoId, title, thumbnailUrl } = video
+export function PlayerSlot({
+  video,
+  inView,
+  onBox,
+  className,
+}: {
+  video: VideoInfo
+  inView: boolean
+  onBox?: (node: HTMLDivElement | null) => void
+  className?: string
+}) {
+  const { videoId, thumbnailUrl } = video
   const storeVideoId = usePlayerValue((s) => s.videoId)
   const status = usePlayerValue((s) => s.status)
   const started = usePlayerValue((s) => s.started)
   const error = usePlayerValue((s) => s.error)
   const mine = storeVideoId === videoId
   const active = mine && ACTIVE.has(status)
-  const boxRef = useRef<HTMLDivElement>(null)
+  const boxRef = useRef<HTMLDivElement | null>(null)
+  const setBox = useCallback(
+    (node: HTMLDivElement | null) => {
+      boxRef.current = node
+      onBox?.(node)
+    },
+    [onBox],
+  )
   const playRef = useRef<HTMLButtonElement>(null)
-  const inView = useInView(boxRef)
   const docked = active && started && !inView
   const failed = mine && status === "error" && error !== null
 
@@ -211,72 +200,87 @@ export function PlayerSlot({ video, className }: { video: VideoInfo; className?:
   }
 
   return (
-    <div className={cn("max-sm:contents sm:flex sm:w-72 sm:shrink-0 sm:flex-col sm:gap-2", className)}>
-      <div
-        ref={boxRef}
-        tabIndex={-1}
-        data-slot="player-slot"
-        className={cn("relative w-full rounded-md outline-none", failed ? "sm:aspect-video" : "aspect-video")}
-      >
-        {failed ? (
-          <div className="sm:absolute sm:inset-0">
-            <PlayerErrorView videoId={videoId} error={error} />
-          </div>
-        ) : !active ? (
-          <button
-            ref={playRef}
-            type="button"
-            aria-label={t.play}
-            data-slot="player-play"
-            onClick={() => playerActions.playFrom()}
-            className="group/play absolute inset-0 block cursor-pointer rounded-md outline-none hover:ring-2 hover:ring-ring/40 focus-visible:ring-3 focus-visible:ring-ring"
-          >
-            <Thumbnail src={thumbnailUrl} className="size-full" />
-            <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <span className="flex size-12 items-center justify-center rounded-full bg-black/70 text-white shadow-md transition-transform group-hover/play:scale-110 group-focus-visible/play:scale-110 motion-reduce:transition-none max-sm:size-10">
-                <Play className="ml-0.5 size-6 fill-current max-sm:size-5" />
-              </span>
+    <div
+      ref={setBox}
+      tabIndex={-1}
+      data-slot="player-slot"
+      className={cn("relative w-full rounded-md outline-none", failed ? "sm:aspect-video" : "aspect-video", className)}
+    >
+      {failed ? (
+        <div className="sm:absolute sm:inset-0">
+          <PlayerErrorView videoId={videoId} error={error} />
+        </div>
+      ) : !active ? (
+        <button
+          ref={playRef}
+          type="button"
+          aria-label={t.play}
+          data-slot="player-play"
+          onClick={() => playerActions.playFrom()}
+          className="group/play absolute inset-0 block cursor-pointer rounded-md outline-none hover:ring-2 hover:ring-ring/40 focus-visible:ring-3 focus-visible:ring-ring"
+        >
+          <Thumbnail src={thumbnailUrl} className="size-full" />
+          <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="flex size-12 items-center justify-center rounded-full bg-black/70 text-white shadow-md transition-transform group-hover/play:scale-110 group-focus-visible/play:scale-110 motion-reduce:transition-none max-sm:size-10">
+              <Play className="ml-0.5 size-6 fill-current max-sm:size-5" />
             </span>
-          </button>
-        ) : null}
-        {docked && (
-          <button
-            type="button"
-            data-slot="player-docked-placeholder"
-            onClick={() => scrollToHeader(boxRef.current)}
-            className="absolute inset-0 block cursor-pointer overflow-hidden rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring"
-          >
-            <Thumbnail src={thumbnailUrl} className="size-full opacity-35" />
-            <span className="absolute inset-0 flex items-center justify-center p-1 text-center text-sm font-medium text-foreground max-sm:text-xs">
-              {t.playingInCorner}
-            </span>
-          </button>
-        )}
-        {active && (
-          <PlayerFrame
-            videoId={videoId}
-            title={title}
-            thumbnailUrl={thumbnailUrl}
-            docked={docked}
-            loading={status === "loading"}
-            boxRef={boxRef}
-            onClose={close}
-          />
-        )}
-      </div>
-      <PlayerControls video={video} timeline={active && started && !docked} />
+          </span>
+        </button>
+      ) : null}
+      {docked && (
+        <button
+          type="button"
+          data-slot="player-docked-placeholder"
+          onClick={() => scrollToHeader(boxRef.current)}
+          className="absolute inset-0 block cursor-pointer overflow-hidden rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring"
+        >
+          <Thumbnail src={thumbnailUrl} className="size-full opacity-35" />
+          <span className="absolute inset-0 flex items-center justify-center p-1 text-center text-sm font-medium text-foreground max-sm:text-xs">
+            {t.playingInCorner}
+          </span>
+        </button>
+      )}
+      {active && (
+        <PlayerFrame
+          videoId={videoId}
+          title={video.title}
+          thumbnailUrl={thumbnailUrl}
+          docked={docked}
+          loading={status === "loading"}
+          boxRef={boxRef}
+          onClose={close}
+        />
+      )}
     </div>
   )
 }
 
-function PlayerControls({ video, timeline }: { video: VideoInfo; timeline: boolean }) {
+/**
+ * แถวใต้ตัวเล่นในหัวคลิป: แถบไทม์ไลน์ + "ช่วง i จาก n" กับปุ่มหยุด (ตอนเล่นช่วงไฮไลต์)
+ * มีเฉพาะหลังเริ่มเล่นและตัวเล่นอยู่ในหัวคลิป (ลอยอยู่ = ไม่มี สถานะช่วงไฮไลต์ไปอยู่บนตัวเล่นลอยแทน)
+ * ก่อนเล่นไม่จองที่ไว้ หัวคลิปก่อนเล่นจึงสูงเท่ากันทุกคลิป (ปุ่มช่วงไฮไลต์อยู่ในแถวปุ่มของหัวคลิป)
+ */
+export function PlayerControls({ video, inView, className }: { video: VideoInfo; inView: boolean; className?: string }) {
+  const storeVideoId = usePlayerValue((s) => s.videoId)
+  const status = usePlayerValue((s) => s.status)
+  const started = usePlayerValue((s) => s.started)
+  const reel = usePlayerValue((s) => s.reel !== null)
+  const row = useRef<HTMLDivElement>(null)
+  const active = storeVideoId === video.videoId && ACTIVE.has(status)
   const durationMs = Math.max(0, video.durationS) * 1000
-  const hasReel = (video.mostReplayed?.length ?? 0) > 0
-  if (!(timeline && durationMs > 0) && !hasReel) return null
+  const timeline = durationMs > 0
+  // ลอยอยู่ (เริ่มเล่นแล้วแต่ช่องพ้นจอ) = ไม่มีแถวนี้ · เงื่อนไขเดียวกับ docked ของ PlayerSlot
+  if (!active || !started || !inView || !(timeline || reel)) return null
   return (
-    <div className="flex flex-col gap-2 max-sm:col-span-2 max-sm:row-start-2">
-      <Timeline durationMs={durationMs} chapters={video.chapters} replayed={video.mostReplayed} visible={timeline} />
-      <ReelButton ranges={video.mostReplayed} />
+    <div ref={row} data-slot="player-controls" className={cn("flex flex-col gap-2", className)}>
+      {timeline && <Timeline durationMs={durationMs} chapters={video.chapters} replayed={video.mostReplayed} visible />}
+      <ReelStatus
+        buttonClassName="max-sm:h-11"
+        // ปุ่มหยุดหายไป: โฟกัสแถบไทม์ไลน์ในแถวเดียวกัน (ไม่มีแถบ = ปุ่มช่วงไฮไลต์ในแถวปุ่ม)
+        fallbackFocus={() =>
+          row.current?.querySelector<HTMLElement>('[role="slider"]') ?? document.querySelector<HTMLElement>('[data-slot="player-reel"]')
+        }
+      />
     </div>
   )
 }

@@ -475,7 +475,7 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(page.getByText("คัดลอกไม่สำเร็จ ลองอีกครั้ง")).toBeVisible()
   })
 
-  test("คีย์บอร์ด: หัวคลิป ชื่อคลิป → โน้ต → เปิดในยูทูป → ดูภาพปก → แท็บภาพเฟรม (ไม่มีจุด Tab ของคำอธิบาย/chapter แล้ว)", async ({ page }) => {
+  test("คีย์บอร์ด: หัวคลิป ชื่อคลิป → โน้ต → เปิดในยูทูป → ดูภาพปก → เล่นเฉพาะช่วงที่ดูซ้ำบ่อย → แท็บภาพเฟรม (ไม่มีจุด Tab ของคำอธิบาย/chapter แล้ว)", async ({ page }) => {
     await page.goto(`/v/${ZOO}`)
     const heading = page.getByRole("heading", { level: 1 })
     await expect(heading).toContainText("Me at the zoo")
@@ -487,6 +487,9 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     // M3.5: ปุ่ม "ดูภาพปก" ต่อท้ายแถวปุ่ม
     await page.keyboard.press("Tab")
     await expect(page.getByRole("button", { name: "ดูภาพปก", exact: true })).toBeFocused()
+    // M3.5 integration: คลิปที่มีช่วงดูซ้ำบ่อย มีปุ่ม "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" ท้ายแถวปุ่ม (ย้ายมาจากใต้ตัวเล่น)
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(tab(page, "ภาพเฟรม")).toBeFocused()
   })

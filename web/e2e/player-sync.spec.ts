@@ -45,6 +45,13 @@ async function setRate(page: Page, rate: number) {
   }, rate)
 }
 
+/** หยุดตัวเล่นปลอมเหมือนผู้ใช้กดหยุดในตัวเล่นยูทูป (เวลาหยุดนิ่ง สถานะเป็น paused ยังมีตำแหน่ง) */
+async function pauseFake(page: Page) {
+  await page.evaluate(() => {
+    ;(window as unknown as { __fakeYT: { players: { pauseVideo(): void }[] } }).__fakeYT.players[0].pauseVideo()
+  })
+}
+
 /** มี seek ไปเวลานี้ (วินาที) ในบันทึกของตัวเล่นปลอม */
 async function expectSeekTo(page: Page, seconds: number) {
   await expect
@@ -73,7 +80,7 @@ async function openFrames(page: Page, videoId: string) {
 }
 
 test.describe("M3.5 ภาพเฟรม: ปุ่ม ▶ และเมนู 'เล่นจากตรงนี้'", () => {
-  test("ปุ่ม ▶ มุมภาพเห็นเมื่อชี้เมาส์ และเมื่อโฟกัสอยู่ในภาพ · ชื่อ 'เล่นจากตรงนี้ HH:MM:SS'", async ({ page }) => {
+  test("ปุ่ม ▶ มุมภาพเห็นเมื่อชี้เมาส์ และเมื่อโฟกัสอยู่ในภาพ · ชื่อ 'เล่นจากตรงนี้ HH:MM:SS' · ไม่อยู่ในลำดับ Tab", async ({ page }) => {
     await installFakeYT(page, { rate: 1 })
     await openFrames(page, BBB)
     const corner = playCorner(page, "00:00:09")
@@ -82,12 +89,28 @@ test.describe("M3.5 ภาพเฟรม: ปุ่ม ▶ และเมน�
     await frameButton(page, "00:00:09").hover()
     await expect(corner).toHaveCSS("opacity", "1")
 
-    // ย้ายเมาส์ออก แล้วโฟกัสด้วยคีย์บอร์ด: ภาพแล้ว Tab ไปที่ปุ่ม ▶ ของภาพเดียวกัน
+    // ย้ายเมาส์ออก แล้วโฟกัสภาพด้วยคีย์บอร์ด: ปุ่ม ▶ ของภาพนั้นโผล่ (ให้เห็นว่ามี) แต่ Tab ข้ามไปภาพถัดไป
+    // ผู้ใช้คีย์บอร์ดเล่นจากภาพด้วยเมนู "เล่นจากตรงนี้" (Shift+F10)
     await page.mouse.move(0, 0)
     await frameButton(page, "00:00:04").focus()
     await page.keyboard.press("Tab")
-    await expect(playCorner(page, "00:00:04")).toBeFocused()
+    await page.keyboard.press("Shift+Tab")
+    await expect(frameButton(page, "00:00:04")).toBeFocused()
     await expect(playCorner(page, "00:00:04")).toHaveCSS("opacity", "1")
+    await expect(playCorner(page, "00:00:04")).toHaveAttribute("tabindex", "-1")
+    await page.keyboard.press("Tab")
+    await expect(frameButton(page, "00:00:09")).toBeFocused()
+  })
+
+  test("คีย์บอร์ด: Shift+F10 ที่ภาพ → 'เล่นจากตรงนี้' → ตัวเล่น seek ไปเวลาของภาพ", async ({ page }) => {
+    await installFakeYT(page, { rate: 1 })
+    await openFrames(page, THAI)
+    await frameButton(page, "00:00:09").focus()
+    await page.keyboard.press("Shift+F10")
+    await expect(page.getByRole("menu")).toBeVisible()
+    await page.getByRole("menuitem", { name: "เล่นจากตรงนี้" }).focus()
+    await page.keyboard.press("Enter")
+    await expectSeekTo(page, (2 * FRAME_STEP_MS) / 1000)
   })
 
   test("กด ▶ ไม่เปิดภาพใหญ่และไม่เปลี่ยน URL · คลิกตัวภาพยังเปิดภาพใหญ่เหมือนเดิม", async ({ page }) => {
@@ -270,10 +293,35 @@ test.describe("M3.5 ทรานสคริปต์ตามการเล่
     await page.waitForTimeout(500)
     expect(await inListView(lineItems(page).first())).toBe(true)
 
+    // หยุดคลิปไว้ก่อนกด (ยังมีตำแหน่ง ปุ่มยังอยู่): ที่ 20 เท่า บรรทัดที่กำลังเล่นเปลี่ยนทุกไม่กี่ร้อย ms
+    // โฟกัสไปอยู่ที่บรรทัดที่เล่นอยู่ตอนกด และไม่วิ่งตามบรรทัดต่อ ๆ ไป (ย้ายโฟกัสเองระหว่างเล่นจะรบกวนผู้ใช้)
+    // ถ้าไม่หยุด aria-current ย้ายไปบรรทัดถัดไปก่อนตรวจ เทสต์จะเทียบกับเป้าที่ขยับอยู่
+    await pauseFake(page)
+    await expect(backToPlaying(page)).toBeVisible()
+    const playingText = await playingLine(page).textContent()
     await backToPlaying(page).click()
     await expect(backToPlaying(page)).toHaveCount(0)
     await expect.poll(() => inListView(playingLine(page))).toBe(true)
     await expect(playingLine(page)).toBeFocused()
+    await expect(playingLine(page)).toHaveText(playingText ?? "")
+  })
+
+  test("กด 'กลับไปบรรทัดที่กำลังเล่น' ระหว่างเล่นอยู่: โฟกัสบรรทัดที่เล่นตอนกด แล้วเลื่อนตามต่อโดยโฟกัสไม่ตาม", async ({ page }) => {
+    await page.setViewportSize(TALL)
+    await installFakeYT(page, { rate: 1 })
+    await page.goto(`/v/${THAI}?tab=transcript`)
+    await expect(lineItems(page).first()).toBeVisible()
+    await lineItems(page).first().locator(".font-mono").click()
+    await expect(playingLine(page)).toHaveCount(1)
+    await lineList(page).hover()
+    await page.mouse.wheel(0, 600)
+    await expect(backToPlaying(page)).toBeVisible()
+    await backToPlaying(page).click()
+    await expect(backToPlaying(page)).toHaveCount(0)
+    // โฟกัสอยู่บนปุ่มข้อความของบรรทัดในรายการ (ไม่หลุดไป body ทั้งที่ปุ่มหายไป)
+    expect(await page.evaluate(() => document.activeElement?.closest('[aria-label="บรรทัดในทรานสคริปต์"]') !== null)).toBe(true)
+    await setRate(page, 20)
+    await expect.poll(() => inListView(playingLine(page))).toBe(true)
   })
 
   test("คีย์บอร์ด: ลูกศรลงในรายการ = เลื่อนเอง (หยุดเลื่อนตาม) · กดเวลาของบรรทัดอื่น = กลับมาเลื่อนตาม", async ({ page }) => {

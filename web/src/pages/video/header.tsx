@@ -13,11 +13,14 @@ import { downloadFile } from "@/lib/download"
 import { youtubeWatchUrl } from "@/lib/format"
 import { notePath } from "@/lib/sub-options"
 import type { SubtitleTrack, VideoInfo } from "@/lib/types"
+import { useNarrowScreen } from "@/lib/use-narrow-screen"
 
 import { errorMessage } from "./errors"
 import { Lightbox } from "./lightbox"
 import { LoadError } from "./load-error"
-import { PlayerSlot } from "./player/player-slot"
+import { PlayerControls, PlayerSlot } from "./player/player-slot"
+import { ReelButton } from "./player/reel-button"
+import { useSlotInView } from "./player/slot-visibility"
 import { useTrackWarming } from "./session-warming"
 import { StatTiles } from "./stats"
 import { subtitlesQuery } from "./subs-queries"
@@ -34,6 +37,8 @@ const t = th.video
 // ข้อมูลที่มาทีหลัง (ป้ายแทร็กซับ) จึงไม่ดันแถบแท็บลงหลังหน้าโผล่
 const LAYOUT = "grid grid-cols-[8rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 sm:flex sm:flex-row sm:gap-4"
 const COVER = "w-full sm:w-72"
+/** คอลัมน์ซ้ายของจอกว้าง: ช่องตัวเล่น + แถวไทม์ไลน์ใต้ตัวเล่น (จอแคบ = contents ช่องตัวเล่นวางในกริดเอง) */
+const PLAYER_COLUMN = "max-sm:contents sm:flex sm:w-72 sm:shrink-0 sm:flex-col sm:gap-2"
 /** ส่วนของคอลัมน์ข้อมูลที่จอแคบต้องเต็มความกว้าง (ใต้ปกกับชื่อคลิป) */
 const FULL_ROW = "max-sm:col-span-2"
 // จอแคบ (มือถือ) ปุ่มสูง 44 px ให้นิ้วกดได้ง่าย
@@ -45,10 +50,9 @@ function HeaderSkeleton() {
       <span className="sr-only" role="status">
         {t.loading}
       </span>
-      {/* ช่องตัวเล่น + ปุ่ม "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" ใต้ตัวเล่น (จอแคบ: ปุ่มเต็มแถวใต้ชื่อคลิป) */}
-      <div className="max-sm:contents sm:flex sm:w-72 sm:shrink-0 sm:flex-col sm:gap-2">
+      {/* ช่องตัวเล่น (แถวไทม์ไลน์มีหลังกดเล่นเท่านั้น ไม่จองที่) */}
+      <div className={PLAYER_COLUMN}>
         <Skeleton className={`aspect-video ${COVER}`} />
-        <Skeleton className="h-7 w-52 max-sm:col-span-2 max-sm:row-start-2 max-sm:h-11 max-sm:w-60" />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:contents">
         <div className="flex flex-col gap-2 max-sm:self-center">
@@ -63,9 +67,11 @@ function HeaderSkeleton() {
             </li>
           ))}
         </ul>
+        {/* แถวปุ่ม: โน้ต · เปิดในยูทูป · ดูภาพปก (จอแคบเหลือไอคอน) */}
         <div className={`flex flex-wrap items-center gap-2 ${FULL_ROW}`}>
           <Skeleton className="h-8 w-40 max-sm:h-11" />
-          <Skeleton className="h-8 w-32 max-sm:h-11" />
+          <Skeleton className="h-8 w-28 max-sm:h-11" />
+          <Skeleton className="h-8 w-24 max-sm:h-11 max-sm:w-11" />
         </div>
       </div>
     </div>
@@ -230,8 +236,9 @@ function NoteButton({ videoId, trackId }: { videoId: string; trackId: string | n
 const focusLost = () => document.activeElement === null || document.activeElement === document.body
 
 /**
- * หัวคลิปของ W2 (สูงคงที่): ช่องตัวเล่น (ปก + ▶) ชื่อ แถวป้าย (ช่อง หมวดหมู่ แทร็กซับ) ช่องตัวเลข
- * และปุ่ม "บันทึกเป็นโน้ต (.md)" "เปิดในยูทูป" "ดูภาพปก" · คำอธิบาย chapter คอมเมนต์ปักหมุด แท็ก อยู่ในแท็บข้อมูลคลิป
+ * หัวคลิปของ W2 (สูงคงที่ก่อนเล่น): ช่องตัวเล่น (ปก + ▶) ชื่อ แถวป้าย (ช่อง หมวดหมู่ แทร็กซับ) ช่องตัวเลข
+ * และปุ่ม "บันทึกเป็นโน้ต (.md)" "เปิดในยูทูป" "ดูภาพปก" "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" (ถ้ามี) · คำอธิบาย chapter คอมเมนต์ปักหมุด แท็ก อยู่ในแท็บข้อมูลคลิป
+ * หลังกดเล่น มีแถวไทม์ไลน์ใต้ตัวเล่น (จอแคบ: ใต้ชื่อคลิป)
  * (โหลดอยู่ = Skeleton รูปเดียวกัน, ผิดพลาด = Alert)
  */
 export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error> }) {
@@ -240,6 +247,10 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
   const headingRef = useRef<HTMLHeadingElement>(null)
   const videoId = data?.videoId
   const track = useTrack(videoId)
+  // ช่องตัวเล่นอยู่ในจอไหม (พ้นจอหลังเริ่มเล่น = ลอย แถวไทม์ไลน์ซ่อน) · จอแคบ: แถวไทม์ไลน์อยู่ใต้ชื่อคลิปใน DOM ด้วย
+  const [slotBox, setSlotBox] = useState<HTMLDivElement | null>(null)
+  const slotInView = useSlotInView(slotBox)
+  const narrow = useNarrowScreen()
   // เปิดหน้านี้จากลิงก์ (กด Enter ที่ "เปิดดู") โฟกัสหลุดไปที่ body: ย้ายมาที่ชื่อคลิป
   // โปรแกรมอ่านหน้าจอจะอ่านชื่อคลิปให้ และกด Tab ต่อจากตรงนี้ได้เลย · ถ้าผู้ใช้โฟกัสที่อื่นอยู่แล้วไม่ยุ่ง
   useEffect(() => {
@@ -267,8 +278,13 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
   }
   return (
     <div className={LAYOUT}>
-      {/* ช่องตัวเล่น (ปก + ▶ ก่อนเล่น) · key: เปิดคลิปถัดไปแล้วเริ่มใหม่ */}
-      <PlayerSlot key={data.videoId} video={data} />
+      {/* ช่องตัวเล่น (ปก + ▶ ก่อนเล่น) · key: เปิดคลิปถัดไปแล้วเริ่มใหม่
+          แถวไทม์ไลน์ (หลังกดเล่น): จอกว้างอยู่ใต้ตัวเล่นในคอลัมน์ซ้าย · จอแคบอยู่ใต้ชื่อคลิปเต็มความกว้าง
+          วางคนละที่ใน DOM (ไม่ใช้ CSS order) ลำดับ Tab และโปรแกรมอ่านหน้าจอจึงตรงกับที่ตาเห็นทั้งสองแบบ */}
+      <div className={PLAYER_COLUMN}>
+        <PlayerSlot key={data.videoId} video={data} inView={slotInView} onBox={setSlotBox} />
+        {!narrow && <PlayerControls key={data.videoId} video={data} inView={slotInView} />}
+      </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:contents">
         {/* จอแคบ (< 640 px) ตัดชื่อที่ 3 บรรทัด ไม่ให้ชื่อยาวดันแถบแท็บพ้นจอแรก (review I-3: ชื่อไทย 100 ตัวดันไป 805 px)
             ชื่อเต็มยังอยู่ใน title (ชี้เมาส์) และโปรแกรมอ่านหน้าจออ่านครบ (ตัดแค่ที่ตาเห็น) */}
@@ -280,6 +296,7 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
         >
           {data.title}
         </h1>
+        {narrow && <PlayerControls key={data.videoId} video={data} inView={slotInView} className={FULL_ROW} />}
         <Meta video={data} trackName={track ? trackLabel(track) : null} />
         <StatTiles video={data} className={FULL_ROW} />
         <div className={`flex flex-wrap items-center gap-2 ${FULL_ROW}`}>
@@ -287,6 +304,8 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
           <YoutubeLink videoId={data.videoId} />
           {/* key: เปิดคลิปถัดไปแล้วกล่องภาพปกปิดเสมอ */}
           <CoverButton key={data.videoId} src={data.thumbnailUrl} />
+          {/* เฉพาะคลิปที่มีช่วงดูซ้ำบ่อย: อยู่ในแถวปุ่ม (ไม่ใช่ใต้ตัวเล่น) หัวคลิปก่อนเล่นจึงสูงไม่ขึ้นกับ mostReplayed */}
+          <ReelButton ranges={data.mostReplayed} />
         </div>
       </div>
     </div>
