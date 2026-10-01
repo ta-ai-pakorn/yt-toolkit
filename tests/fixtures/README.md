@@ -118,6 +118,33 @@
 
 path ในตารางอยู่ใต้ `.venv/Lib/site-packages/yt_dlp/`
 
+## media/ (ไฟล์สื่อจิ๋วของ M4)
+ไฟล์สื่อสร้างเองในเครื่องด้วย ffmpeg 8.1 (ไม่ได้โหลดจากที่ไหน) ใช้เทส `core/media.py` กับ ffmpeg จริง (`tests/integration/test_media_ffmpeg.py`) และเป็นไฟล์ที่ `FakeMediaTools` คัดลอกให้ (`video.mp4`, `audio.m4a`, `audio.mp3`, `audio.wav`) ทุกไฟล์เล็กกว่า 60 KB ภาพคือ test pattern ของ ffmpeg เสียงคือโทน 440 Hz ไม่มีเนื้อหาของบุคคลที่สาม
+
+สร้างด้วยคำสั่งนี้ (รันในโฟลเดอร์ `tests/fixtures/media`):
+
+```bash
+ffmpeg -hide_banner -y -f lavfi -i testsrc=size=160x90:rate=10 -f lavfi -i sine=frequency=440:sample_rate=44100 -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 64k -shortest video.mp4
+ffmpeg -hide_banner -y -f lavfi -i testsrc=size=160x90:rate=10 -t 2 -c:v libx264 -pix_fmt yuv420p video-noaudio.mp4
+ffmpeg -hide_banner -y -f lavfi -i sine=frequency=440:sample_rate=44100 -t 2 -c:a aac -b:a 64k audio.m4a
+ffmpeg -hide_banner -y -f lavfi -i sine=frequency=440:sample_rate=44100 -t 2 -c:a libmp3lame -b:a 128k audio.mp3
+ffmpeg -hide_banner -y -f lavfi -i sine=frequency=440:sample_rate=22050 -t 0.5 -ac 1 -c:a pcm_s16le audio.wav
+ffmpeg -hide_banner -y -f lavfi -i testsrc=size=160x90 -frames:v 1 cover.jpg
+```
+
+| ไฟล์ | ขนาดประมาณ | ใช้ทำอะไร |
+|---|---|---|
+| `video.mp4` | 24 KB | h264 160×90 10 fps 2 วินาที + เสียง aac 64k |
+| `video-noaudio.mp4` | 6 KB | ภาพอย่างเดียว (เทสคลิปไม่มีเสียง) |
+| `audio.m4a` | 18 KB | aac 44.1 kHz 2 วินาที (ต้นทางของ mp3 / wav / ใส่ปก) |
+| `audio.mp3` | 33 KB | mp3 128k (สิ่งที่ `FakeMediaTools.to_mp3` เขียนออกมา) |
+| `audio.wav` | 22 KB | pcm_s16le mono 22.05 kHz 0.5 วินาที (สิ่งที่ `FakeMediaTools.to_wav` เขียนออกมา) |
+| `cover.jpg` | 5 KB | ภาพปก 160×90 |
+
+เทส real-ffmpeg ใช้ `requires_ffmpeg` (`tests/helpers_ffmpeg.py`) จะถูกข้ามเมื่อเครื่องไม่มี ffmpeg
+
+หมายเหตุ `license`: ไฟล์ `probe/88o5Sk8_m1Y.json` ไม่มีฟิลด์ `license` (ตัวตัด probe ไม่เก็บ) แต่คลิปนี้เผยแพร่แบบ CC BY ตามหัวข้อ "ลิขสิทธิ์" ด้านล่าง เทสที่ต้องการข้อความเครดิตของคลิปนี้ต้องอ้างจากสถานะนั้น ไม่ใช่จากฟิลด์ในไฟล์
+
 ## ลิขสิทธิ์
 Big Buck Bunny © Blender Foundation | www.bigbuckbunny.org
 เผยแพร่ภายใต้ [Creative Commons Attribution 3.0](https://creativecommons.org/licenses/by/3.0/)
