@@ -228,7 +228,9 @@ export function buildCues(tokens: readonly SubToken[], o: SubOptions): Cue[] {
     // เครื่องหมายเปิดตัดสินพร้อมคำที่มันเกาะ (ช่วง i..j): ถ้าคำนั้นต้องขึ้นซับใหม่ เครื่องหมายก็ขึ้นไปด้วย
     const j = kinds[i] === FORWARD ? chainEnd(i) : i
     // ทุก token (รวมเครื่องหมาย) ต้องไม่ทำให้เกินขีดจำกัดตัวอักษร/เวลานานสุด (fix round 2, review #1)
-    const capped = !fits(m, curFrom, j + 1, o, o.maxChars) || tokens[j].e - tokens[curFrom].s > o.maxMs
+    // เครื่องหมายที่เกาะคำก่อนหน้า (BACK) ดูแค่เวลาเริ่ม แล้วตัดเวลาจบของซับให้เหลือ maxMs (fix round 3)
+    const reach = kinds[i] === BACK ? tok.s : tokens[j].e
+    const capped = !fits(m, curFrom, j + 1, o, o.maxChars) || reach - tokens[curFrom].s > o.maxMs
     // กฎจำนวนคำใช้กับคำและเครื่องหมายเปิดเท่านั้น (เหมือนฝั่ง Python)
     const counted = kinds[i] !== BACK && kinds[i - 1] !== FORWARD
     const close = gap || capped || (tokensMode && counted && words(curFrom, i) >= perCue)
@@ -238,6 +240,10 @@ export function buildCues(tokens: readonly SubToken[], o: SubOptions): Cue[] {
     }
   }
   if (tokens.length > 0) drafts.push(draft(curFrom, tokens.length))
+  // ซับที่จบด้วยเครื่องหมายที่เกาะมา (มี token >= 2) แสดงไม่เกิน maxMs (fix round 3)
+  for (const d of drafts) {
+    if (kinds[d.to - 1] === BACK && d.to - d.from > 1) d.endMs = Math.min(d.endMs, d.startMs + o.maxMs)
+  }
 
   // 2. เวลาขั้นต่ำ: ยืดไปได้ถึงต้นซับถัดไป ถ้ายังสั้นอยู่ลองรวมกับตัวถัดไป แล้วตรวจตัวเดิมซ้ำ
   let i = 0

@@ -310,10 +310,10 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
             j = chain_end(i) if kinds[i] == _FORWARD else i
             # ทุก token (รวมเครื่องหมาย) ต้องไม่ทำให้เกินขีดจำกัดตัวอักษร/เวลานานสุด (fix round 2, review #1)
             # เกินเมื่อไรก็ขึ้นซับใหม่ตามปกติ แม้จะได้ซับที่ขึ้นต้นด้วยเครื่องหมาย
-            capped = (
-                not _fits([*cur, *tokens[i : j + 1]], opts, opts.max_chars)
-                or tokens[j].e - cur[0].s > opts.max_ms
-            )
+            # เครื่องหมายที่เกาะคำก่อนหน้า (_BACK) ดูแค่เวลาเริ่ม (fix round 3): เริ่มภายใน maxMs ก็เกาะได้
+            # แม้เวลาจบจะเลยไป แล้วตัดเวลาจบของซับให้เหลือ maxMs หลังจากนี้ (เช่น "." ที่ยาว 6 วินาที)
+            reach = tok.s if kinds[i] == _BACK else tokens[j].e
+            capped = not _fits([*cur, *tokens[i : j + 1]], opts, opts.max_chars) or reach - cur[0].s > opts.max_ms
             # กฎจำนวนคำใช้กับคำและเครื่องหมายเปิดเท่านั้น: เครื่องหมายที่เกาะคำก่อนหน้า และคำที่มีเครื่องหมายเปิด
             # นำหน้าอยู่แล้ว ไม่ขึ้นซับใหม่เพราะจำนวนคำ (ซับที่มีแต่เครื่องหมายนำหน้ามีคำ 0 จึงไม่ถึงเกณฑ์เอง)
             counted = kinds[i] != _BACK and kinds[i - 1] != _FORWARD
@@ -331,6 +331,9 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
     for d in drafts:
         first.append(pos)
         pos += len(d.tokens)
+        # ซับที่จบด้วยเครื่องหมายที่เกาะมา (มี token >= 2) แสดงไม่เกิน maxMs (fix round 3)
+        if kinds[pos - 1] == _BACK and len(d.tokens) > 1:
+            d.end_ms = min(d.end_ms, d.start_ms + opts.max_ms)
 
     # 2. เวลาขั้นต่ำ: ยืดไปได้ถึงต้นซับถัดไป ถ้ายังสั้นอยู่ลองรวมกับตัวถัดไป แล้วตรวจตัวเดิมซ้ำ
     i = 0

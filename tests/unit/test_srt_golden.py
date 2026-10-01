@@ -182,8 +182,8 @@ def test_word_goldens_have_one_token_per_cue():
         tokens = [Token(**t) for t in stored["tokens"]]
         cues = build_cues(tokens, PRESETS["word"])
         # owner round 3: เครื่องหมายล้วน ("." "," ...) ไม่นับเป็นคำ เกาะคำข้างเคียง จึงได้ไม่เกิน 1 คำต่อซับ
-        # fix round 2 (review #1): ซับที่มีแต่เครื่องหมายเกิดได้เฉพาะเมื่อเกาะแล้วเกินเวลานานสุดหรือตัวอักษรสูงสุด
-        # (en-asr มี 2 ซับ: "." ที่ยาวราว 6 และ 3 วินาที)
+        # ซับที่มีแต่เครื่องหมายเกิดได้เฉพาะเมื่อเกาะแล้วเกินขีดจำกัด (fix round 3: "." ที่ยาวเกิน maxMs ยังเกาะได้
+        # แล้วตัดเวลาจบ en-asr จึงไม่มีซับแบบนี้แล้ว) · ทุกซับยาวไม่เกิน maxMs ยกเว้นซับที่มี token เดียว
         words = [t for t in tokens if not is_punct_only(t)]
         opts = PRESETS["word"]
         alone = 0
@@ -195,7 +195,13 @@ def test_word_goldens_have_one_token_per_cue():
                 prev = cues[k - 1]
                 assert c.end_ms - prev.start_ms > opts.max_ms or display_len(prev.lines[-1] + text) > opts.max_chars
         assert len(cues) == len(words) + alone
-        assert alone <= 2
+        assert alone == 0
+        # คำ + เครื่องหมายที่เกาะท้าย (เช่น "sticks." ที่ "." ยาว 6 วินาที) แสดงไม่เกิน maxMs
+        # (เฉพาะ en-asr: th-asr มี token เดียวอย่าง "[เพลง]" ที่ยาวเกินได้ตามกฎคำเดียว)
+        if name == "en-asr":
+            tailed = [c for c in cues if len(c.lines[-1]) > 1 and is_punct_only(Token(c.lines[-1][-1], 0, 0))]
+            assert tailed
+            assert all(c.end_ms - c.start_ms <= opts.max_ms for c in tailed)
         # ต่อข้อความทุกซับกลับได้ทั้งแทร็ก (ไม่มีอะไรหาย)
         assert " ".join(" ".join(c.lines) for c in cues).replace(" ", "") == cue_text(tokens).replace(" ", "")
 
