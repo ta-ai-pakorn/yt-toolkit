@@ -14,8 +14,6 @@ from pathlib import Path
 import pytest
 
 from yttoolkit import lifecycle
-from yttoolkit.api.subtitles import export_filenames
-from yttoolkit.api.videos import safe_title
 from yttoolkit.core.db import Database
 from yttoolkit.core.extractor import FakeExtractor
 from yttoolkit.core.srt_builder import PRESETS, SubOptions
@@ -343,18 +341,10 @@ def test_export_srt_bytes(make):
     assert all(a[1] <= b[0] for a, b in zip(times, times[1:], strict=False))
 
 
-def test_export_filename_parts(make):
+def test_export_result_carries_title_and_lang(make):
     service, *_ = make()
     result = service.export(THAI, TRACK, "srt", PRESETS["medium"])
     assert (result.title, result.lang) == (THAI_TITLE, "th")
-    filename, fallback = export_filenames(result.title, THAI, result.lang, "srt")
-    assert filename == f"{safe_title(THAI_TITLE)}.th.srt"
-    assert filename == "Thai Listening Practice EP.1 Beginner.th.srt"
-    assert fallback == "subtitles.th.srt"
-
-
-def test_export_filename_falls_back_to_video_id():
-    assert export_filenames("|||", THAI, "th", "md")[0] == f"{THAI}.th.md"
 
 
 def test_export_txt_and_md(make):

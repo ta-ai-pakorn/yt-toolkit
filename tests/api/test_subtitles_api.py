@@ -1,4 +1,4 @@
-"""API ซับของ M3 (C4): รายการแทร็ก, token และโหลดไฟล์ซับ
+"""API ซับ (C4): รายการแทร็ก, token และโน้ต .md (ไฟล์ซับย้ายเข้าคิวงานแล้ว)
 
 ใช้ FakeExtractor + ฐานข้อมูลและโฟลเดอร์ cache ชั่วคราว ไม่แตะเครือข่าย
 """
@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import quote
 
 import pytest
 
@@ -42,10 +41,6 @@ def _error(resp) -> dict:
     return resp.json()["error"]
 
 
-def _export(client, query: str, track: str = TRACK, video: str = THAI):
-    return client.get(f"/api/videos/{video}/subtitles/{track}/export?{query}")
-
-
 # ---------- happy path ----------
 
 
@@ -77,38 +72,11 @@ def test_tokens_shape(client):
         assert type(tok["s"]) is int and type(tok["e"]) is int
 
 
-@pytest.mark.parametrize(
-    ("fmt", "media_type"),
-    [
-        ("srt", "application/x-subrip; charset=utf-8"),
-        ("txt", "text/plain; charset=utf-8"),
-        ("md", "text/markdown; charset=utf-8"),
-    ],
-)
-def test_export_file(client, fmt, media_type):
-    resp = _export(client, f"format={fmt}&{MEDIUM}")
-    assert resp.status_code == 200
-    assert resp.headers["content-type"] == media_type
-    disposition = resp.headers["content-disposition"]
-    assert disposition.startswith("attachment;")
-    assert f'filename="subtitles.th.{fmt}"' in disposition
-    assert "filename*=UTF-8''" + quote(f"Thai Listening Practice EP.1 Beginner.th.{fmt}", safe="") in disposition
-    assert not resp.content.startswith(b"\xef\xbb\xbf")
-    assert resp.content.count(b"\n") == resp.content.count(b"\r\n") > 0
-
-
-def test_export_srt_content(client):
-    body = _export(client, f"format=srt&{MEDIUM}").content.decode("utf-8")
-    assert body.startswith("1\r\n00:00:")
-
-
-def test_export_tokens_mode(client):
-    resp = _export(client, "format=srt&maxChars=25&lines=1&minMs=1200&maxMs=5000&mode=tokens&tokensPerCue=3")
-    assert resp.status_code == 200
-
-
-def test_export_defaults_to_medium_preset(client):
-    assert _export(client, "format=srt").content == _export(client, f"format=srt&{MEDIUM}").content
+def test_removed_export_endpoint_answers_404(client):
+    # M4 (Q3): ไฟล์ซับโหลดผ่านคิวงานแล้ว endpoint เดิมถูกถอดออก (โน้ต .md ยังอยู่)
+    resp = client.get(f"/api/videos/{THAI}/subtitles/{TRACK}/export?format=srt&{MEDIUM}")
+    assert resp.status_code == 404
+    assert _error(resp)["code"] == "E_NOT_FOUND"
 
 
 # ---------- errors ----------
@@ -123,38 +91,12 @@ def test_tokens_unknown_track_is_404(client, track):
     assert error["message"] == "คลิปนี้ไม่มีซับ" == MESSAGES["E_NO_SUBTITLES"]
 
 
-def test_export_unknown_track_is_404(client):
-    resp = _export(client, f"format=srt&{MEDIUM}", track="zz.bad")
-    assert resp.status_code == 404
-    assert _error(resp)["code"] == "E_NO_SUBTITLES"
-
-
-@pytest.mark.parametrize(
-    "query",
-    [
-        f"format=srt&{MEDIUM}".replace("maxChars=25", "maxChars=5"),
-        "format=srt&maxChars=25&lines=1&minMs=5000&maxMs=3000&mode=chars",
-        "format=srt&maxChars=25&lines=1&minMs=1200&maxMs=5000&mode=tokens",
-        f"format=docx&{MEDIUM}",
-        MEDIUM,
-        f"format=srt&{MEDIUM}".replace("lines=1", "lines=3"),
-        f"format=srt&{MEDIUM}".replace("maxChars=25", "maxChars=25.5"),
-        f"format=srt&{MEDIUM}".replace("mode=chars", "mode=words"),
-        f"format=srt&{MEDIUM}&tokensPerCue=99",
-    ],
-)
-def test_export_bad_options_are_422(client, query):
-    resp = _export(client, query)
-    assert resp.status_code == 422
-    assert _error(resp)["code"] == "E_BAD_REQUEST"
-
-
 @pytest.mark.parametrize(
     "path",
     [
         f"/api/videos/{LIVE}/subtitles",
         f"/api/videos/{LIVE}/subtitles/{TRACK}/tokens",
-        f"/api/videos/{LIVE}/subtitles/{TRACK}/export?format=srt&{MEDIUM}",
+        f"/api/videos/{LIVE}/note?{MEDIUM}",
     ],
 )
 def test_live_not_ready_is_409(client, path):
@@ -168,7 +110,7 @@ def test_live_not_ready_is_409(client, path):
     [
         f"/api/videos/{PRIVATE}/subtitles",
         f"/api/videos/{PRIVATE}/subtitles/{TRACK}/tokens",
-        f"/api/videos/{PRIVATE}/subtitles/{TRACK}/export?format=srt&{MEDIUM}",
+        f"/api/videos/{PRIVATE}/note?{MEDIUM}",
     ],
 )
 def test_private_is_404(client, path):
@@ -194,7 +136,7 @@ def test_translated_track_blocked_is_503_not_bot_check(make_client, tmp_path):
     try:
         for path in (
             f"/api/videos/{THAI}/subtitles/t.en/tokens",
-            f"/api/videos/{THAI}/subtitles/t.en/export?format=srt&{MEDIUM}",
+            f"/api/videos/{THAI}/note?trackId=t.en&{MEDIUM}",
         ):
             resp = client.get(path)
             assert resp.status_code == 503
@@ -252,7 +194,6 @@ def warming(make_client, tmp_path):
     "path",
     [
         f"/api/videos/{THAI}/subtitles/t.en/tokens",
-        f"/api/videos/{THAI}/subtitles/t.en/export?format=srt&{MEDIUM}",
         f"/api/videos/{THAI}/note?trackId=t.en&{MEDIUM}",
     ],
 )
@@ -286,3 +227,46 @@ def test_other_errors_have_no_retry_after(client):
     resp = client.get(f"/api/videos/{PRIVATE}/subtitles/{TRACK}/tokens")
     assert "Retry-After" not in resp.headers
     assert "retryAfterSeconds" not in _error(resp)
+
+
+# ---------- M4: ตัวพักคิว (ctx.on_bot_check) ----------
+
+
+def test_translation_blocked_does_not_call_brake_but_real_bot_check_does(make_client, tmp_path):
+    db = Database(tmp_path / "brake.db")
+    db.migrate()
+    fake = FakeExtractor(FIXTURES)
+    videos = VideoService(db, fake, now=lambda: datetime(2026, 9, 30, 12, tzinfo=UTC))
+
+    def fetch(url: str) -> bytes:
+        if "tlang=" in url:
+            raise YtError("E_BOT_CHECK", "HTTP Error 429: Too Many Requests")
+        return fake.fetch_subtitle(url)
+
+    calls: list[int] = []
+    cache_root = tmp_path / "cache"
+    subtitles = SubtitleService(videos, fetch, cache_root, sleep=lambda seconds: None)
+    client = make_client(
+        videos=videos,
+        extractor=fake,
+        cache_root=cache_root,
+        subtitles=subtitles,
+        on_bot_check=lambda: calls.append(1),
+    )
+    try:
+        resp = client.get(f"/api/videos/{THAI}/subtitles/t.en/tokens")
+        assert resp.status_code == 503
+        assert _error(resp)["code"] == "E_TRANSLATION_BLOCKED"
+        assert calls == []
+
+        # ยูทูปขอยืนยันบอทตอนอ่านรายการแทร็ก (ดึงข้อมูลคลิป) = พักคิว
+        def blocked(video_id: str) -> dict:
+            raise YtError("E_BOT_CHECK", "Sign in to confirm you're not a bot")
+
+        fake.probe = blocked  # type: ignore[method-assign]
+        resp = client.get(f"/api/videos/{BBB}/subtitles")
+        assert resp.status_code == 429
+        assert _error(resp)["code"] == "E_BOT_CHECK"
+        assert calls == [1]
+    finally:
+        db.close()
