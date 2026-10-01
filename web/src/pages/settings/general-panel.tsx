@@ -56,6 +56,19 @@ export function GeneralPanel() {
     onError: (error) => toast.error(serverMessage(error)),
   })
 
+  // บันทึกล่าสุดที่ยังรออยู่: "เปิดโฟลเดอร์" รอให้บันทึกจบก่อน จะได้เปิดโฟลเดอร์ที่เพิ่งตั้ง (ไม่ปิดปุ่ม เพราะกดปุ่มทำให้ช่องเสียโฟกัสและบันทึกอัตโนมัติ)
+  const lastSave = useRef<Promise<boolean>>(Promise.resolve(true))
+
+  /** ส่งค่าไปบันทึก คืนผลว่าสำเร็จหรือไม่ (ข้อความผิดพลาดแสดงใน onError แล้ว) */
+  function submit(patch: GeneralPatch): Promise<boolean> {
+    const done = save.mutateAsync(patch).then(
+      () => true,
+      () => false
+    )
+    lastSave.current = done
+    return done
+  }
+
   if (settings.isPending) {
     return (
       <div className="flex max-w-xl flex-col gap-5" aria-busy="true">
@@ -73,7 +86,7 @@ export function GeneralPanel() {
         <AlertTitle>{t.loadError}</AlertTitle>
         <AlertDescription>{settings.error.message}</AlertDescription>
         <AlertAction>
-          <Button variant="outline" size="sm" onClick={() => void settings.refetch()}>
+          <Button variant="outline" size="sm" disabled={settings.isFetching} onClick={() => void settings.refetch()}>
             {th.common.retry}
           </Button>
         </AlertAction>
@@ -84,7 +97,7 @@ export function GeneralPanel() {
   const shown = displayed(settings.data, save.isPending ? save.variables : null)
 
   function choose(patch: GeneralPatch | null) {
-    if (patch) save.mutate(patch)
+    if (patch) void submit(patch)
   }
 
   return (
@@ -93,8 +106,8 @@ export function GeneralPanel() {
         saved={settings.data.outputDir}
         error={dirError}
         onClearError={() => setDirError(null)}
-        onSave={(patch) => save.mutate(patch)}
-        onOpen={() => open.mutate()}
+        onSave={submit}
+        onOpen={() => void lastSave.current.then(() => open.mutate())}
         opening={open.isPending}
       />
 
@@ -109,7 +122,7 @@ export function GeneralPanel() {
           value={[String(shown.concurrency)]}
           onValueChange={(value) => {
             const next = CONCURRENCY_CHOICES.find((n) => String(n) === value[0])
-            if (next) choose(choicePatch("concurrency", next, settings.data))
+            if (next) choose(choicePatch("concurrency", next, shown))
           }}
         >
           {CONCURRENCY_CHOICES.map((n) => (
@@ -128,7 +141,7 @@ export function GeneralPanel() {
           hintId="general-language-hint"
           value={shown.audioLanguage}
           options={languageOptions(shown.audioLanguage)}
-          onChange={(value) => choose(choicePatch("audioLanguage", value, settings.data))}
+          onChange={(value) => choose(choicePatch("audioLanguage", value, shown))}
         />
         <FieldDescription id="general-language-hint">{t.audioLanguageHint}</FieldDescription>
       </Field>
@@ -141,7 +154,7 @@ export function GeneralPanel() {
           options={VIDEO_DEFAULTS.map((value) => ({ value, label: t.videoDefaults[value] }))}
           onChange={(value) => {
             const next = VIDEO_DEFAULTS.find((v) => v === value)
-            if (next) choose(choicePatch("videoDefault", next, settings.data))
+            if (next) choose(choicePatch("videoDefault", next, shown))
           }}
         />
       </Field>
@@ -155,7 +168,7 @@ export function GeneralPanel() {
           value={[shown.audioDefault]}
           onValueChange={(value) => {
             const next = AUDIO_FORMATS.find((f) => f === value[0])
-            if (next) choose(choicePatch("audioDefault", next, settings.data))
+            if (next) choose(choicePatch("audioDefault", next, shown))
           }}
         >
           {AUDIO_FORMATS.map((format) => (
@@ -199,7 +212,7 @@ type OutputDirFieldProps = {
   saved: string
   error: string | null
   onClearError: () => void
-  onSave: (patch: GeneralPatch) => void
+  onSave: (patch: GeneralPatch) => Promise<boolean>
   onOpen: () => void
   opening: boolean
 }
@@ -218,8 +231,12 @@ function OutputDirField({ saved, error, onClearError, onSave, onOpen, opening }:
     if (draft === null || draft === attempted.current) return
     const patch = outputDirPatch(draft, saved)
     if (!patch) return
-    attempted.current = draft
-    onSave(patch)
+    const submitted = draft
+    attempted.current = submitted
+    // บันทึกสำเร็จ: คืนช่องให้แสดงค่าที่เซิร์ฟเวอร์เก็บจริง (อาจปรับรูปแบบที่อยู่แล้ว) ถ้าระหว่างรอยังไม่ได้พิมพ์ต่อ
+    void onSave(patch).then((ok) => {
+      if (ok) setDraft((current) => (current === submitted ? null : current))
+    })
   }
 
   return (

@@ -5,22 +5,19 @@ import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test"
 
 // W6 แท็บทั่วไป (M4 T17) · ใช้ backend ตัวเดียวกับ spec อื่นใน project chromium
-// spec นี้แก้เฉพาะการตั้งค่า (PATCH /api/settings) ไม่สร้างงาน และคืนค่าเดิมใน afterAll
+// ค่าตั้งเป็นของส่วนกลาง (spec อื่น เช่น download-tabs อ่านไปสร้างคำขอ) จึงเขียนค่าจริงเฉพาะที่ AC-SET-01 ต้องโหลดหน้าใหม่ดู
+// (จำนวนงานพร้อมกัน, โฟลเดอร์ผลลัพธ์) และคืนค่าเดิมใน finally · ที่เหลือใช้ page.route แทน backend
 test.describe.configure({ mode: "serial" })
 
-const KEYS = ["outputDir", "concurrency", "audioLanguage", "videoDefault", "audioDefault"] as const
-type Original = Record<(typeof KEYS)[number], unknown>
+type Stored = Record<string, unknown>
 
-let original: Original
-
-async function readSettings(request: APIRequestContext): Promise<Original> {
+async function readSettings(request: APIRequestContext): Promise<Stored> {
   const response = await request.get("/api/settings")
   expect(response.ok()).toBe(true)
-  const all = (await response.json()) as Record<string, unknown>
-  return Object.fromEntries(KEYS.map((key) => [key, all[key]])) as Original
+  return (await response.json()) as Stored
 }
 
-async function writeSettings(request: APIRequestContext, data: Partial<Original>) {
+async function writeSettings(request: APIRequestContext, data: Stored) {
   const page = await request.get("/")
   const match = /<meta name="yt-token" content="([^"]+)"/.exec(await page.text())
   if (!match) throw new Error("อ่าน token จากหน้าแรกไม่ได้")
@@ -32,18 +29,36 @@ async function writeSettings(request: APIRequestContext, data: Partial<Original>
   expect(response.ok(), `PATCH /api/settings ตอบ ${response.status()}`).toBe(true)
 }
 
-test.beforeAll(async ({ request }) => {
-  original = await readSettings(request)
-})
+/** เขียนค่าจริงชั่วคราว: คืนเฉพาะคีย์ที่แก้กลับเป็นค่าเดิมเมื่อจบ แม้เทสล้ม */
+async function withRealSettings(
+  request: APIRequestContext,
+  keys: string[],
+  body: (original: Stored) => Promise<void>
+) {
+  const original = await readSettings(request)
+  try {
+    await body(original)
+  } finally {
+    await writeSettings(request, Object.fromEntries(keys.map((key) => [key, original[key]])))
+  }
+}
 
-test.afterAll(async ({ request }) => {
-  await writeSettings(request, original)
-})
+type Stub = { patches: Stored[] }
 
-// ทุกเทสเริ่มจากค่าเดิมของเครื่องเทส (ยกเว้นพื้นฐานที่เทสต้องรู้: จำนวนงานพร้อมกัน = 2)
-test.beforeEach(async ({ request }) => {
-  await writeSettings(request, { ...original, concurrency: 2 })
-})
+/** แทน GET/PATCH /api/settings ด้วยค่าในหน้า (เริ่มจากค่าจริงที่อ่านมา) ไม่เขียนอะไรที่ backend · เก็บเนื้อ PATCH ไว้นับ */
+async function stubSettings(page: Page, request: APIRequestContext): Promise<Stub> {
+  let state = await readSettings(request)
+  const stub: Stub = { patches: [] }
+  await page.route("**/api/settings", (route) => {
+    if (route.request().method() === "PATCH") {
+      const body = route.request().postDataJSON() as Stored
+      stub.patches.push(body)
+      state = { ...state, ...body }
+    }
+    return route.fulfill({ json: state })
+  })
+  return stub
+}
 
 const saved = (page: Page) => page.locator("[data-sonner-toast]", { hasText: "บันทึกแล้ว" })
 
@@ -67,36 +82,46 @@ test("/settings เปิดที่แท็บทั่วไป พร้อ
   await expect(page.getByRole("button", { name: /^บันทึก/ })).toHaveCount(0)
 })
 
-test("AC-SET-01 E: เปลี่ยนจำนวนงานพร้อมกันเป็น 1 → แจ้งบันทึกแล้ว และโหลดหน้าใหม่ยังเป็น 1", async ({ page }) => {
-  await page.goto("/settings/general")
-  const group = page.getByRole("group", { name: "จำนวนงานพร้อมกัน" })
-  await expect(group.getByRole("button", { name: "2", exact: true })).toHaveAttribute("aria-pressed", "true")
-  await group.getByRole("button", { name: "1", exact: true }).click()
-  await expect(saved(page)).toBeVisible()
-  await expect(group.getByRole("button", { name: "1", exact: true })).toHaveAttribute("aria-pressed", "true")
-  await page.reload()
-  await expect(
-    page.getByRole("group", { name: "จำนวนงานพร้อมกัน" }).getByRole("button", { name: "1", exact: true })
-  ).toHaveAttribute("aria-pressed", "true")
+test("AC-SET-01 E: เปลี่ยนจำนวนงานพร้อมกันเป็น 1 → แจ้งบันทึกแล้ว และโหลดหน้าใหม่ยังเป็น 1", async ({
+  page,
+  request,
+}) => {
+  await withRealSettings(request, ["concurrency"], async () => {
+    await writeSettings(request, { concurrency: 2 })
+    await page.goto("/settings/general")
+    const group = page.getByRole("group", { name: "จำนวนงานพร้อมกัน" })
+    await expect(group.getByRole("button", { name: "2", exact: true })).toHaveAttribute("aria-pressed", "true")
+    await group.getByRole("button", { name: "1", exact: true }).click()
+    await expect(saved(page)).toBeVisible()
+    await expect(group.getByRole("button", { name: "1", exact: true })).toHaveAttribute("aria-pressed", "true")
+    await page.reload()
+    await expect(
+      page.getByRole("group", { name: "จำนวนงานพร้อมกัน" }).getByRole("button", { name: "1", exact: true })
+    ).toHaveAttribute("aria-pressed", "true")
+  })
 })
 
-test("โฟลเดอร์ผลลัพธ์: ที่อยู่เต็ม + Enter → บันทึกแล้ว โหลดหน้าใหม่ยังอยู่", async ({ page }) => {
+test("โฟลเดอร์ผลลัพธ์: ที่อยู่เต็ม + Enter → บันทึกแล้ว โหลดหน้าใหม่ยังอยู่", async ({ page, request }) => {
   const target = path.join(os.tmpdir(), "yt-toolkit-e2e-general-out")
-  await page.goto("/settings/general")
-  const input = page.getByLabel("โฟลเดอร์ผลลัพธ์")
-  await input.fill(target)
-  await input.press("Enter")
-  await expect(saved(page)).toBeVisible()
-  await page.reload()
-  await expect(page.getByLabel("โฟลเดอร์ผลลัพธ์")).toHaveValue(target)
+  await withRealSettings(request, ["outputDir"], async () => {
+    await page.goto("/settings/general")
+    const input = page.getByLabel("โฟลเดอร์ผลลัพธ์")
+    await input.fill(target)
+    await input.press("Enter")
+    await expect(saved(page)).toBeVisible()
+    await page.reload()
+    await expect(page.getByLabel("โฟลเดอร์ผลลัพธ์")).toHaveValue(target)
+  })
 })
 
 test("โฟลเดอร์ผลลัพธ์: ที่อยู่ไม่เต็ม (abc) → ข้อความจากเซิร์ฟเวอร์ใต้ช่อง และโหลดหน้าใหม่ค่าเดิมไม่เปลี่ยน", async ({
   page,
+  request,
 }) => {
+  const { outputDir } = await readSettings(request)
   await page.goto("/settings/general")
   const input = page.getByLabel("โฟลเดอร์ผลลัพธ์")
-  await expect(input).toHaveValue(String(original.outputDir))
+  await expect(input).toHaveValue(String(outputDir))
   await input.fill("abc")
   await input.press("Enter")
   const message = page.getByText("ใส่ที่อยู่โฟลเดอร์แบบเต็ม", { exact: false })
@@ -104,25 +129,52 @@ test("โฟลเดอร์ผลลัพธ์: ที่อยู่ไม
   await expect(input).toHaveAttribute("aria-invalid", "true")
   await expect(saved(page)).toHaveCount(0)
   await page.reload()
-  await expect(page.getByLabel("โฟลเดอร์ผลลัพธ์")).toHaveValue(String(original.outputDir))
+  await expect(page.getByLabel("โฟลเดอร์ผลลัพธ์")).toHaveValue(String(outputDir))
   await expect(message).toHaveCount(0)
 })
 
-test("โฟลเดอร์ผลลัพธ์: ออกจากช่องโดยไม่แก้ไม่ส่งอะไร · Esc คืนค่าที่บันทึกไว้", async ({ page }) => {
-  let patches = 0
-  await page.route("**/api/settings", (route) => {
-    if (route.request().method() === "PATCH") patches += 1
-    return route.continue()
-  })
+test("โฟลเดอร์ผลลัพธ์: ออกจากช่องโดยไม่แก้ไม่ส่งอะไร · Esc คืนค่าที่บันทึกไว้", async ({ page, request }) => {
+  const stub = await stubSettings(page, request)
+  const { outputDir } = await readSettings(request)
   await page.goto("/settings/general")
   const input = page.getByLabel("โฟลเดอร์ผลลัพธ์")
   await input.focus()
   await input.blur()
   await input.fill("abc")
   await input.press("Escape")
-  await expect(input).toHaveValue(String(original.outputDir))
+  await expect(input).toHaveValue(String(outputDir))
   await input.blur()
-  expect(patches).toBe(0)
+  expect(stub.patches).toHaveLength(0)
+})
+
+test("M5 นับ PATCH ของช่องโฟลเดอร์: Enter แล้วออกจากช่อง = 1 · ออกจากช่องอย่างเดียว = 1 · แก้อีกแล้วออก = 2", async ({
+  page,
+  request,
+}) => {
+  const stub = await stubSettings(page, request)
+  const first = path.join(os.tmpdir(), "yt-toolkit-e2e-count-a")
+  const second = path.join(os.tmpdir(), "yt-toolkit-e2e-count-b")
+  await page.goto("/settings/general")
+  const input = page.getByLabel("โฟลเดอร์ผลลัพธ์")
+
+  // Enter ตามด้วยออกจากช่องทันที: ส่งครั้งเดียว
+  await input.fill(first)
+  await input.press("Enter")
+  await input.blur()
+  await expect(saved(page)).toBeVisible()
+  expect(stub.patches).toEqual([{ outputDir: first }])
+
+  // แก้ค่าแล้วออกจากช่องโดยไม่กด Enter: บันทึกเอง ได้ครั้งที่สอง
+  await input.fill(second)
+  await input.blur()
+  await expect.poll(() => stub.patches.length).toBe(2)
+  expect(stub.patches[1]).toEqual({ outputDir: second })
+
+  // ออกจากช่องซ้ำโดยไม่แก้: ไม่ส่งเพิ่ม
+  await input.focus()
+  await input.blur()
+  await page.waitForTimeout(300)
+  expect(stub.patches).toHaveLength(2)
 })
 
 test("เปิดโฟลเดอร์ → ไม่มีข้อความผิดพลาด (โหมดข้อมูลปลอมไม่เปิดโฟลเดอร์จริง)", async ({ page }) => {
@@ -135,7 +187,11 @@ test("เปิดโฟลเดอร์ → ไม่มีข้อควา
   await expect(page.locator('[data-sonner-toast][data-type="error"]')).toHaveCount(0)
 })
 
-test("คุณภาพวิดีโอเริ่มต้นและรูปแบบเสียงเริ่มต้น เปลี่ยนแล้วบันทึกและคงอยู่", async ({ page }) => {
+test("คุณภาพวิดีโอเริ่มต้นและรูปแบบเสียงเริ่มต้น เปลี่ยนแล้วบันทึกและคงอยู่ (ใช้ค่าจำลอง ไม่เขียน backend)", async ({
+  page,
+  request,
+}) => {
+  const stub = await stubSettings(page, request)
   await page.goto("/settings/general")
   await page.getByRole("combobox", { name: "คุณภาพวิดีโอเริ่มต้น" }).click()
   await page.getByRole("option", { name: "เปิดได้ทุกที่ 720p" }).click()
@@ -143,6 +199,8 @@ test("คุณภาพวิดีโอเริ่มต้นและร�
   await page.getByRole("group", { name: "รูปแบบเสียงเริ่มต้น" }).getByRole("button", { name: "wav" }).click()
   await page.getByRole("combobox", { name: "ภาษาเสียงเริ่มต้น" }).click()
   await page.getByRole("option", { name: "ไทย", exact: true }).click()
+  await expect.poll(() => stub.patches.length).toBe(3)
+  expect(stub.patches).toEqual([{ videoDefault: "compat-720" }, { audioDefault: "wav" }, { audioLanguage: "th" }])
   await page.reload()
   await expect(page.getByRole("combobox", { name: "คุณภาพวิดีโอเริ่มต้น" })).toContainText("เปิดได้ทุกที่ 720p")
   await expect(page.getByRole("combobox", { name: "ภาษาเสียงเริ่มต้น" })).toContainText("ไทย")
