@@ -8,11 +8,12 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/u
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { fill, th } from "@/i18n/th"
-import type { Cue, SubtitleTrack, SubtitleTracks } from "@/lib/types"
+import type { Cue, ReplaySegment, SubtitleTrack, SubtitleTracks } from "@/lib/types"
 
 import { hasCode } from "./errors"
 import { cueIndexAt } from "./frame-target"
 import { LoadError } from "./load-error"
+import { cueInReplayed } from "./most-replayed"
 import { TranslationBlocked } from "./subs/translation-blocked"
 import { tokensQuery } from "./subs-queries"
 import { useSubSettings } from "./subs-settings"
@@ -109,15 +110,17 @@ function SearchBox({ query, onQueryChange }: SearchBoxProps) {
   )
 }
 
-type LinesProps = { cues: Cue[]; at: number | null; onPick: (cue: Cue) => void }
+type LinesProps = { cues: Cue[]; at: number | null; segments?: ReplaySegment[]; onPick: (cue: Cue) => void }
 
 /** ค้นหา + ผลค้นหา + รายการบรรทัด */
-function TranscriptLines({ cues, at, onPick }: LinesProps) {
+function TranscriptLines({ cues, at, segments, onPick }: LinesProps) {
   const [query, setQuery] = useState("")
   // ช่องค้นหาตอบสนองทันที ส่วนการกรองรายการ (คลิปยาวเป็นพันบรรทัด) ตามมาทีหลังได้โดยไม่หน่วงการพิมพ์
   const deferredQuery = useDeferredValue(query)
   // เตรียมข้อความสำหรับค้นหาครั้งเดียวต่อชุดบรรทัด (เปลี่ยนแทร็กหรือความยาวซับ) ไม่ใช่ทุกครั้งที่พิมพ์
   const lines = useMemo(() => prepareLines(cues), [cues])
+  // บรรทัดที่อยู่ในช่วงที่คนดูซ้ำมากที่สุด (มีป้ายเล็กหลังเวลา) คำนวณครั้งเดียวต่อชุดบรรทัด
+  const replayed = useMemo(() => cues.map((cue) => cueInReplayed(cue, segments)), [cues, segments])
   const visible = useMemo(() => searchPrepared(lines, deferredQuery), [lines, deferredQuery])
   const needle = searchNeedle(deferredQuery)
   const searching = needle !== ""
@@ -138,6 +141,7 @@ function TranscriptLines({ cues, at, onPick }: LinesProps) {
         visible={visible}
         needle={needle}
         current={current}
+        replayed={replayed}
         revealKey={at}
         onPick={onPick}
       />
@@ -149,6 +153,7 @@ type TrackProps = {
   videoId: string
   track: SubtitleTrack
   at: number | null
+  segments?: ReplaySegment[]
   onPick: (cue: Cue) => void
   /** ปุ่ม "ใช้ซับภาษาต้นฉบับ" เมื่อยูทูปไม่ให้โหลดซับแปล null = คลิปไม่มีแทร็กเริ่มต้น (ไม่มีปุ่ม) */
   onUseOriginal: ((button: HTMLButtonElement) => void) | null
@@ -158,7 +163,7 @@ type TrackProps = {
  * ทรานสคริปต์ของแทร็กที่ใช้อยู่ แบ่งบรรทัดตามความยาวซับที่เลือกในแท็บซับ (เห็นอะไรที่นี่ ได้แบบนั้นในไฟล์ .srt)
  * สถานะเดียวกับตัวอย่างในแท็บซับ: แทร็กไม่มีข้อความ = Empty · ยูทูปไม่ให้โหลดซับแปล = ปุ่มใช้ซับภาษาต้นฉบับ
  */
-function TrackTranscript({ videoId, track, at, onPick, onUseOriginal }: TrackProps) {
+function TrackTranscript({ videoId, track, at, segments, onPick, onUseOriginal }: TrackProps) {
   const tokens = useQuery(tokensQuery(videoId, track.id))
   const { options } = useSubSettings()
   const cues = useCues(tokens.data?.tokens, options)
@@ -170,7 +175,7 @@ function TrackTranscript({ videoId, track, at, onPick, onUseOriginal }: TrackPro
     body = <LoadError title={th.subs.loadError} error={tokens.error} onRetry={() => void tokens.refetch()} />
   } else if (!tokens.isSuccess) body = <LinesSkeleton />
   else if (cues.length === 0) body = <NoLines />
-  else body = <TranscriptLines cues={cues} at={at} onPick={onPick} />
+  else body = <TranscriptLines cues={cues} at={at} segments={segments} onPick={onPick} />
 
   return (
     <div className="flex flex-col gap-4">
@@ -180,7 +185,7 @@ function TrackTranscript({ videoId, track, at, onPick, onUseOriginal }: TrackPro
   )
 }
 
-function Transcript({ videoId, data }: { videoId: string; data: SubtitleTracks }) {
+function Transcript({ videoId, data, segments }: { videoId: string; data: SubtitleTracks; segments?: ReplaySegment[] }) {
   const { trackId, at, update } = useVideoParams()
   const track = trackInEffect(data, trackId)
   // เปลี่ยนแท็บแล้วล้างเวลาที่ไฮไลต์ไว้ เหมือนกดแถบแท็บ
@@ -191,6 +196,7 @@ function Transcript({ videoId, data }: { videoId: string; data: SubtitleTracks }
       videoId={videoId}
       track={track}
       at={at}
+      segments={segments}
       // FR-SUB-8: กดบรรทัด → แท็บภาพเฟรม ไฮไลต์ภาพของเวลานั้น (patch เดียว: update อ่าน URL ตอนสร้าง)
       onPick={(cue) => update({ tab: "frames", at: cue.startMs })}
       // ยูทูปไม่ให้โหลดซับแปล: กลับไปแทร็กเริ่มต้นของคลิป (เปลี่ยนแค่แทร็กใน patch เดียว)
@@ -207,12 +213,20 @@ function Transcript({ videoId, data }: { videoId: string; data: SubtitleTracks }
   )
 }
 
+type PanelProps = {
+  videoId: string
+  enabled: boolean
+  /** ช่วงที่คนดูซ้ำมากที่สุดจากข้อมูลคลิป (บรรทัดในช่วงมีป้าย) */
+  mostReplayed?: ReplaySegment[]
+}
+
 /**
  * แท็บทรานสคริปต์ (Q4 = ก): ข้อความจากแทร็กเดียวกับแท็บซับ แบ่งบรรทัดตามความยาวซับที่เลือก
  * ค้นหาคำได้ (คำที่ตรงถูกเน้น บรรทัดอื่นซ่อน) · กดบรรทัดไปภาพเฟรมของช่วงนั้น
  * มาจาก "ดูซับช่วงนี้" (?at=) = บรรทัดของเวลานั้นมีกรอบ เลื่อนมาให้เห็น และได้โฟกัส
+ * บรรทัดในช่วงที่คนดูซ้ำมากที่สุดมีป้ายเล็ก "ดูซ้ำบ่อย" หลังเวลา
  */
-export function TranscriptPanel({ videoId, enabled }: { videoId: string; enabled: boolean }) {
+export function TranscriptPanel({ videoId, enabled, mostReplayed }: PanelProps) {
   const titleId = useId()
   return (
     <section aria-labelledby={titleId}>
@@ -226,7 +240,7 @@ export function TranscriptPanel({ videoId, enabled }: { videoId: string; enabled
         </CardHeader>
         <CardContent>
           <SubtitleGate videoId={videoId} enabled={enabled}>
-            {(data) => <Transcript videoId={videoId} data={data} />}
+            {(data) => <Transcript videoId={videoId} data={data} segments={mostReplayed} />}
           </SubtitleGate>
         </CardContent>
       </Card>

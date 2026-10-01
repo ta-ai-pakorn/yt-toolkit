@@ -64,7 +64,7 @@ export function VideoPage() {
       </div>
       <VideoHeader video={video} />
       {/* คลิปเปิดไม่ได้ (ส่วนตัว/ไลฟ์/ถูกลบ) ก็ไม่มีภาพเฟรมหรือซับให้ขอ ซ่อนแถบแท็บทั้งแถบ */}
-      {(hasData || !video.isError) && <VideoTabs videoId={videoId} enabled={hasData} />}
+      {(hasData || !video.isError) && <VideoTabs videoId={videoId} enabled={hasData} mostReplayed={video.data?.mostReplayed} />}
       {dialog}
     </div>
   )

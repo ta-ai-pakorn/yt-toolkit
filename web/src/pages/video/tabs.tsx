@@ -1,5 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { th } from "@/i18n/th"
+import type { ReplaySegment } from "@/lib/types"
 
 import { FramesSection } from "./frames"
 import { SubsPanel } from "./subs-panel"
@@ -26,14 +27,19 @@ const LIST =
 // แผงของแท็บรับโฟกัสได้ (Base UI ตั้ง tabIndex 0) จึงต้องมีวงโฟกัสให้เห็น แบบเดียวกับ breadcrumb
 const PANEL = "rounded-md pt-2 focus-visible:ring-3 focus-visible:ring-ring/50"
 
-type Props = { videoId: string; enabled: boolean }
+type Props = {
+  videoId: string
+  enabled: boolean
+  /** ช่วงที่คนดูซ้ำมากที่สุดจากข้อมูลคลิป (ป้ายที่ภาพเฟรมและบรรทัดทรานสคริปต์) ไม่มี = ไม่มีป้าย */
+  mostReplayed?: ReplaySegment[]
+}
 
 /**
  * แถบแท็บของ W2 ใต้หัวคลิป: ภาพเฟรม · ซับ · ทรานสคริปต์ (แท็บที่เปิดอยู่เก็บใน URL ?tab=…)
  * เปลี่ยนแท็บแบบแทนที่ประวัติ ปุ่ม back จึงกลับหน้าก่อนหน้าในก้าวเดียว และล้างเวลาที่ไฮไลต์ไว้ (at)
  * จอแคบแถวแท็บเลื่อนแนวนอนได้ ไม่ตัดขึ้นบรรทัดใหม่ · แท็บที่ไม่ได้เปิดไม่ถูกเรนเดอร์ (ข้อมูลอยู่ใน cache)
  */
-export function VideoTabs({ videoId, enabled }: Props) {
+export function VideoTabs({ videoId, enabled, mostReplayed }: Props) {
   const { tab, update } = useVideoParams()
 
   function onValueChange(value: unknown) {
@@ -54,14 +60,14 @@ export function VideoTabs({ videoId, enabled }: Props) {
       </TabsList>
       {/* แท็บภาพเฟรมเริ่มด้วยปุ่มโหลดและภาพที่โฟกัสได้อยู่แล้ว: ไม่ให้แผงเป็นจุด Tab เพิ่ม (ลำดับ Tab เหมือน M2) */}
       <TabsContent value="frames" tabIndex={-1} className={PANEL}>
-        <FramesSection videoId={videoId} enabled={enabled} />
+        <FramesSection videoId={videoId} enabled={enabled} mostReplayed={mostReplayed} />
       </TabsContent>
       <TabsContent value="subs" className={PANEL}>
         <SubsPanel videoId={videoId} enabled={enabled} />
       </TabsContent>
       {/* แท็บทรานสคริปต์เริ่มด้วยช่องค้นหา (หรือปุ่มไปแท็บซับ) ที่โฟกัสได้อยู่แล้ว: แผงไม่เป็นจุด Tab เพิ่ม */}
       <TabsContent value="transcript" tabIndex={-1} className={PANEL}>
-        <TranscriptPanel videoId={videoId} enabled={enabled} />
+        <TranscriptPanel videoId={videoId} enabled={enabled} mostReplayed={mostReplayed} />
       </TabsContent>
     </Tabs>
   )

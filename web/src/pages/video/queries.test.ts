@@ -1,0 +1,57 @@
+import { QueryClient, QueryObserver } from "@tanstack/react-query"
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+import { pinnedCommentQuery } from "./queries"
+
+afterEach(() => vi.unstubAllGlobals())
+
+function stubFetch(status: number, body: unknown) {
+  const fetch = vi.fn(async () => new Response(JSON.stringify(body), { status }))
+  vi.stubGlobal("fetch", fetch)
+  return fetch
+}
+
+const envelope = (code: string) => ({ error: { code, message: "ข้อความ", detail: null } })
+
+/** กางแถวคอมเมนต์ปักหมุด (mount observer ใหม่) แล้วรอจนคำขอที่อาจยิงเสร็จ คืนสถานะที่แถวเห็น */
+async function open(client: QueryClient, enabled = true) {
+  const observer = new QueryObserver(client, pinnedCommentQuery("88o5Sk8_m1Y", enabled))
+  const unsubscribe = observer.subscribe(() => undefined)
+  await vi.waitFor(() => expect(observer.getCurrentResult().isFetching).toBe(false))
+  const result = observer.getCurrentResult()
+  unsubscribe()
+  return result
+}
+
+describe("pinnedCommentQuery", () => {
+  it("ยังไม่กาง (enabled false) ไม่ยิงคำขอ", async () => {
+    const fetch = stubFetch(200, { comment: null })
+    await open(new QueryClient(), false)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("ยิง /api/videos/<id>/pinned-comment ครั้งเดียว กางซ้ำใช้ผลเดิม", async () => {
+    const fetch = stubFetch(200, { comment: { text: "สวัสดี\nบรรทัดสอง", likes: 12 } })
+    const client = new QueryClient()
+    expect((await open(client)).data).toEqual({ comment: { text: "สวัสดี\nบรรทัดสอง", likes: 12 } })
+    await open(client)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledWith("/api/videos/88o5Sk8_m1Y/pinned-comment", expect.anything())
+  })
+
+  it("E_BOT_CHECK ลองใหม่ไม่ช่วย: กางใหม่ไม่ยิงซ้ำ", async () => {
+    const fetch = stubFetch(429, envelope("E_BOT_CHECK"))
+    const client = new QueryClient()
+    expect((await open(client)).error).toMatchObject({ code: "E_BOT_CHECK" })
+    expect((await open(client)).error).toMatchObject({ code: "E_BOT_CHECK" })
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("เน็ตหลุด (E_NETWORK) กางใหม่แล้วยิงใหม่ให้เอง", async () => {
+    const fetch = stubFetch(502, envelope("E_NETWORK"))
+    const client = new QueryClient()
+    await open(client)
+    await open(client)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+})
