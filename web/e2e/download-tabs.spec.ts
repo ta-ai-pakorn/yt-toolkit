@@ -266,7 +266,9 @@ test.describe("W2 แท็บวิดีโอ", () => {
     await page.keyboard.press("Escape")
 
     // เลือก "อัตโนมัติ" (ตัวแรกของรายการ) แล้วส่ง: คำขอมี maxHeight 720 และไม่มี formatId
-    await choose(page, "คุณภาพ", /^เปิดได้ทุกที่ สูงสุด 1080p/)
+    // ป้ายต้องบอกเพดานจริง (720p) ไม่ใช่ 1080p
+    await choose(page, "คุณภาพ", /^เปิดได้ทุกที่ สูงสุด 720p \(แนะนำ\)$/)
+    await expect(selectedValue(page, "คุณภาพ")).toHaveText("เปิดได้ทุกที่ สูงสุด 720p (แนะนำ)")
     await downloadMp4(page).click()
     await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
     expect(bodies).toHaveLength(1)

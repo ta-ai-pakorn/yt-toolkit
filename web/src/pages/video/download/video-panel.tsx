@@ -144,7 +144,7 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
 
   const options = qualityOptions(video, state.maxQuality, cap)
   // ความละเอียดสูงสุดเปิดอยู่: "อัตโนมัติ" = ภาพดีที่สุดของคลิป (อาจเป็น VP9/AV1) ไม่ใช่ "เปิดได้ทุกที่ 1080p"
-  const autoLabel = state.maxQuality ? t.autoMax : t.auto
+  const autoLabel = state.maxQuality ? t.autoMax : fill(t.auto, { h: cap })
   const autoNotCompat = state.maxQuality && options.length > 0 && !options[0].compat
   const labels = new Map<string, string>([[AUTO_QUALITY, autoLabel]])
   for (const option of options) {

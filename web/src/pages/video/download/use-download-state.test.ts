@@ -134,6 +134,27 @@ describe("resolveDownloadState: ค่าที่จำไว้ → ค่า�
   })
 })
 
+describe("เพดาน compat-720 ในการเลือกคุณภาพของคลิป", () => {
+  it("ความสูงที่จำไว้เกินเพดาน (1080) = อัตโนมัติ · 720 เริ่มที่ 720p", () => {
+    expect(resolveDownloadState(prefs({ quality: 1080 }), clip(), null, {}, 720).quality).toBe("auto")
+    expect(resolveDownloadState(prefs({ quality: 720 }), clip(), null, {}, 720).quality).toBe("298")
+  })
+
+  it("เลือกตัวเลือกที่เกินเพดานค้างไว้ = ไม่ถูกส่ง กลับไปใช้ค่าที่จำไว้", () => {
+    expect(resolveDownloadState(prefs({ quality: 720 }), clip(), null, { quality: "299" }, 720).quality).toBe("298")
+    expect(resolveDownloadState(prefs(), clip(), null, { quality: "299" }, 720).quality).toBe("auto")
+  })
+
+  it("ความละเอียดสูงสุดเปิด = เพดานไม่มีผล", () => {
+    expect(resolveDownloadState(prefs(), clip(), null, { maxQuality: true, quality: "299" }, 720).quality).toBe("299")
+  })
+
+  it("จำความสูงตามรายการที่ถูกเพดานตัดแล้ว", () => {
+    const state = resolveDownloadState(prefs(), clip(), null, { quality: "298" }, 720)
+    expect(videoPrefsPatch(state, clip(), null, 720).quality).toBe(720)
+  })
+})
+
 describe("ภาษาเสียงใช้ร่วมกันระหว่างแท็บวิดีโอและเสียง", () => {
   it("คลิปเสียงภาษาเดียวไม่มีตัวเลือกภาษา (ซ่อนช่อง) · คลิปพากย์: ต้นฉบับ (ไทย) แล้วตามด้วยอังกฤษ (สหรัฐอเมริกา)", () => {
     expect(languageOptions(clip())).toBeNull()
