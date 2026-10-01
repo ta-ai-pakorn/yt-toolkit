@@ -19,9 +19,10 @@ import uvicorn
 from . import __version__, runstate
 from .app import AppContext, create_app
 from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
-from .core import tools
+from .core import thai_fallback, tools
 from .core.db import Database, purge_stale_cache
-from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor
+from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, visitor_session
+from .core.subtitles import SubtitleService
 from .core.videos import VideoService
 from .platform import LockFileError, Platform, current
 
@@ -32,6 +33,8 @@ log = logging.getLogger("yttoolkit")
 
 DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 PURGE_INTERVAL_S = 24 * 60 * 60  # ล้าง cache เก่าซ้ำทุก 24 ชม. สำหรับเครื่องที่เปิดโปรแกรมทิ้งไว้หลายวัน
+# ชื่อเก่าของตัวแปรโฟลเดอร์ข้อมูล PyThaiNLP ถ้าตั้งไว้คู่กับ PYTHAINLP_DATA PyThaiNLP จะโยน ValueError
+LEGACY_PYTHAINLP_ENV = "PYTHAINLP_DATA_DIR"
 
 
 def default_output_dir(plat: Platform) -> Path:
@@ -129,17 +132,32 @@ def warm_up_in_background(extractor: Extractor) -> threading.Thread | None:
     return thread
 
 
-def open_services(paths: Paths, fake: bool = False) -> tuple[Database, VideoService, Extractor]:
-    """เปิดฐานข้อมูล (สร้างตารางถ้ายังไม่มี) ล้าง cache เก่า และเลือก extractor
+def configure_thai(paths: Paths) -> None:
+    """ให้ PyThaiNLP เก็บข้อมูลใน <data_root>/pythainlp แทน ~/pythainlp-data (ต้องเรียกก่อนแยกคำไทยครั้งแรก)
+
+    ผู้ใช้ตั้ง PYTHAINLP_DATA ไว้เองก็ใช้ของผู้ใช้ ตั้งชื่อเก่า PYTHAINLP_DATA_DIR ไว้ก็ไม่ตั้งซ้ำ (ตั้งคู่กัน = ValueError)
+    """
+    if os.environ.get(LEGACY_PYTHAINLP_ENV):
+        return
+    thai_fallback.configure(paths.data_root / "pythainlp")
+
+
+def open_services(
+    paths: Paths, fake: bool = False
+) -> tuple[Database, VideoService, Extractor, SubtitleService]:
+    """เปิดฐานข้อมูล (สร้างตารางถ้ายังไม่มี) ล้าง cache เก่า เลือก extractor และสร้างบริการซับ
 
     fake=True = ใช้ข้อมูลทดสอบใน tests/fixtures แทนยูทูปจริง (serve ส่งมาเมื่อ YT_TOOLKIT_FAKE=1 ใช้กับ E2E)
     ล้าง cache ไม่สำเร็จแค่บันทึก log แล้วเปิดโปรแกรมต่อ ส่วนฐานข้อมูลเปิดไม่ได้จะโยนต่อ
     """
+    session = None
     if fake:
         log.warning("โหมดข้อมูลปลอม (YT_TOOLKIT_FAKE): ใช้ข้อมูลทดสอบใน tests/fixtures ไม่ต่อยูทูปจริง")
         extractor: Extractor = FakeExtractor(CODE_ROOT / "tests" / "fixtures")
     else:
-        extractor = YtDlpExtractor()
+        # เซสชันผู้ชมแบบไม่ระบุตัวตน (<data>/visitor-session.txt) ที่ probe และซับใช้ร่วมกัน ซับแปลต้องใช้
+        session = visitor_session(paths.data)
+        extractor = YtDlpExtractor(session=session)
     paths.db.parent.mkdir(parents=True, exist_ok=True)
     db = Database(paths.db)
     try:
@@ -148,7 +166,9 @@ def open_services(paths: Paths, fake: bool = False) -> tuple[Database, VideoServ
         db.close()
         raise
     purge_cache_once(db, paths.cache)
-    return db, VideoService(db, extractor), extractor
+    configure_thai(paths)
+    videos = VideoService(db, extractor)
+    return db, videos, extractor, SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
 
 
 def purge_cache_once(db: Database, cache_root: Path) -> None:
@@ -188,7 +208,7 @@ def run_app(
     fake: bool = False,
 ) -> int:
     try:
-        db, videos, extractor = open_services(paths, fake=fake)
+        db, videos, extractor, subtitles = open_services(paths, fake=fake)
     except Exception:
         log.exception("เปิดฐานข้อมูลไม่สำเร็จ (%s)", paths.db)
         return 1
@@ -204,6 +224,7 @@ def run_app(
             db=db,
             videos=videos,
             extractor=extractor,
+            subtitles=subtitles,
             fake=fake,
         )
     finally:
@@ -234,6 +255,7 @@ def _run_server(
     db: Database,
     videos: VideoService,
     extractor: Extractor,
+    subtitles: SubtitleService | None = None,
     fake: bool = False,
 ) -> int:
     token = runstate.new_token()
@@ -260,6 +282,7 @@ def _run_server(
         extractor=extractor,
         cache_root=paths.cache,
         fake=fake,
+        subtitles=subtitles,
     )
     server = Server(ctx)
     server.start()

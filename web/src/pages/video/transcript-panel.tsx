@@ -1,0 +1,252 @@
+import { useQuery } from "@tanstack/react-query"
+import { CaptionsOff, Search, X } from "lucide-react"
+import { useDeferredValue, useId, useMemo, useRef, useState, type KeyboardEvent } from "react"
+
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group"
+import { Skeleton } from "@/components/ui/skeleton"
+import { fill, th } from "@/i18n/th"
+import type { Cue, ReplaySegment, SubtitleTrack, SubtitleTracks } from "@/lib/types"
+
+import { hasCode } from "./errors"
+import { cueIndexAt } from "./frame-target"
+import { LoadError } from "./load-error"
+import { cueInReplayed } from "./most-replayed"
+import { isWarming } from "./session-warming"
+import { SessionWarming } from "./subs/session-warming"
+import { TranslationBlocked } from "./subs/translation-blocked"
+import { tokensQuery } from "./subs-queries"
+import { useSubSettings } from "./subs-settings"
+import { SubtitleGate } from "./subtitle-gate"
+import { trackInEffect, trackLabel } from "./track-label"
+import { LineList } from "./transcript/line-list"
+import { prepareLines, searchNeedle, searchPrepared } from "./transcript/search"
+import { useCues } from "./use-cues"
+import { useVideoParams } from "./url-state"
+
+const t = th.transcript
+
+const SKELETON_ROWS = 6
+
+function LinesSkeleton() {
+  return (
+    <div className="flex flex-col gap-2" aria-busy="true">
+      <span className="sr-only" role="status">
+        {th.subs.loading}
+      </span>
+      {Array.from({ length: SKELETON_ROWS }, (_, index) => (
+        <Skeleton key={index} className="h-7 w-full" />
+      ))}
+    </div>
+  )
+}
+
+function NoLines() {
+  return (
+    <Empty className="border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <CaptionsOff aria-hidden />
+        </EmptyMedia>
+        <EmptyDescription>{th.subs.none}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  )
+}
+
+/** ไม่มีแทร็กที่ใช้อยู่ (คลิปมีแต่ซับแปลอัตโนมัติ) ผู้ใช้ต้องเลือกแทร็กเองที่แท็บซับก่อน */
+function NoTrack({ onGoToSubs }: { onGoToSubs: () => void }) {
+  return (
+    <div className="flex flex-col items-start gap-3">
+      <p className="text-sm text-muted-foreground">{th.subs.pickHint}</p>
+      <Button variant="secondary" onClick={onGoToSubs}>
+        {t.goToSubs}
+      </Button>
+    </div>
+  )
+}
+
+type SearchBoxProps = { query: string; onQueryChange: (query: string) => void }
+
+/** ช่องค้นหาคำ: ปุ่มล้างคำค้นขึ้นเมื่อมีคำค้น · Esc ในช่องก็ล้างได้ */
+function SearchBox({ query, onQueryChange }: SearchBoxProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  function clear() {
+    onQueryChange("")
+    inputRef.current?.focus()
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape" && query !== "") {
+      event.preventDefault()
+      clear()
+    }
+  }
+
+  return (
+    <InputGroup className="h-10">
+      <InputGroupAddon>
+        <Search aria-hidden />
+      </InputGroupAddon>
+      <InputGroupInput
+        ref={inputRef}
+        type="text"
+        value={query}
+        onChange={(event) => onQueryChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        aria-label={t.searchLabel}
+        placeholder={t.searchPlaceholder}
+        autoComplete="off"
+      />
+      {query !== "" && (
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton size="icon-sm" aria-label={t.clearSearch} onClick={clear}>
+            <X aria-hidden />
+          </InputGroupButton>
+        </InputGroupAddon>
+      )}
+    </InputGroup>
+  )
+}
+
+type LinesProps = { cues: Cue[]; at: number | null; segments?: ReplaySegment[]; onPick: (cue: Cue) => void }
+
+/** ค้นหา + ผลค้นหา + รายการบรรทัด */
+function TranscriptLines({ cues, at, segments, onPick }: LinesProps) {
+  const [query, setQuery] = useState("")
+  // ช่องค้นหาตอบสนองทันที ส่วนการกรองรายการ (คลิปยาวเป็นพันบรรทัด) ตามมาทีหลังได้โดยไม่หน่วงการพิมพ์
+  const deferredQuery = useDeferredValue(query)
+  // เตรียมข้อความสำหรับค้นหาครั้งเดียวต่อชุดบรรทัด (เปลี่ยนแทร็กหรือความยาวซับ) ไม่ใช่ทุกครั้งที่พิมพ์
+  const lines = useMemo(() => prepareLines(cues), [cues])
+  // บรรทัดที่อยู่ในช่วงที่คนดูซ้ำมากที่สุด (มีป้ายเล็กหลังเวลา) คำนวณครั้งเดียวต่อชุดบรรทัด
+  const replayed = useMemo(() => cues.map((cue) => cueInReplayed(cue, segments)), [cues, segments])
+  const visible = useMemo(() => searchPrepared(lines, deferredQuery), [lines, deferredQuery])
+  const needle = searchNeedle(deferredQuery)
+  const searching = needle !== ""
+  const current = at === null ? -1 : cueIndexAt(cues, at)
+
+  return (
+    <div className="flex flex-col gap-3">
+      <SearchBox query={query} onQueryChange={setQuery} />
+      {/* ประกาศจำนวนที่พบให้โปรแกรมอ่านหน้าจอ: กล่องนี้ต้องอยู่ตลอด ข้อความถึงจะถูกอ่านเมื่อเปลี่ยน */}
+      <p aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
+        {searching && (visible.length > 0 ? fill(t.found, { n: visible.length }) : t.notFound)}
+      </p>
+      {visible.length > 0 && <p className="text-sm text-muted-foreground">{t.hint}</p>}
+      {/* อยู่ตลอดแม้ค้นไม่เจอ (ไม่วาดอะไร): จำได้ว่าเลื่อนไปบรรทัดของ at แล้ว จึงไม่แย่งโฟกัสจากช่องค้นหาเมื่อผลกลับมา */}
+      <LineList
+        cues={cues}
+        lines={lines}
+        visible={visible}
+        needle={needle}
+        current={current}
+        replayed={replayed}
+        revealKey={at}
+        onPick={onPick}
+      />
+    </div>
+  )
+}
+
+type TrackProps = {
+  videoId: string
+  track: SubtitleTrack
+  at: number | null
+  segments?: ReplaySegment[]
+  onPick: (cue: Cue) => void
+  /** ปุ่ม "ใช้ซับภาษาต้นฉบับ" เมื่อยูทูปไม่ให้โหลดซับแปล null = คลิปไม่มีแทร็กเริ่มต้น (ไม่มีปุ่ม) */
+  onUseOriginal: ((button: HTMLButtonElement) => void) | null
+}
+
+/**
+ * ทรานสคริปต์ของแทร็กที่ใช้อยู่ แบ่งบรรทัดตามความยาวซับที่เลือกในแท็บซับ (เห็นอะไรที่นี่ ได้แบบนั้นในไฟล์ .srt)
+ * สถานะเดียวกับตัวอย่างในแท็บซับ: แทร็กไม่มีข้อความ = Empty · ยูทูปไม่ให้โหลดซับแปล = ปุ่มใช้ซับภาษาต้นฉบับ
+ */
+function TrackTranscript({ videoId, track, at, segments, onPick, onUseOriginal }: TrackProps) {
+  const tokens = useQuery(tokensQuery(videoId, track.id))
+  const { options } = useSubSettings()
+  const cues = useCues(tokens.data?.tokens, options)
+
+  let body
+  if (hasCode(tokens.error, "E_NO_SUBTITLES")) body = <NoLines />
+  else if (hasCode(tokens.error, "E_TRANSLATION_BLOCKED")) body = <TranslationBlocked onUseOriginal={onUseOriginal} />
+  else if (isWarming(tokens.error)) body = <SessionWarming key={tokens.errorUpdatedAt} query={tokens} onUseOriginal={onUseOriginal} />
+  else if (tokens.isError) {
+    body = <LoadError title={th.subs.loadError} error={tokens.error} onRetry={() => void tokens.refetch()} />
+  } else if (!tokens.isSuccess) body = <LinesSkeleton />
+  else if (cues.length === 0) body = <NoLines />
+  else body = <TranscriptLines cues={cues} at={at} segments={segments} onPick={onPick} />
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted-foreground">{fill(t.source, { name: trackLabel(track) })}</p>
+      {body}
+    </div>
+  )
+}
+
+function Transcript({ videoId, data, segments }: { videoId: string; data: SubtitleTracks; segments?: ReplaySegment[] }) {
+  const { trackId, at, update } = useVideoParams()
+  const track = trackInEffect(data, trackId)
+  // เปลี่ยนแท็บแล้วล้างเวลาที่ไฮไลต์ไว้ เหมือนกดแถบแท็บ
+  if (!track) return <NoTrack onGoToSubs={() => update({ tab: "subs", at: null })} />
+  const defaultTrackId = data.defaultTrackId
+  return (
+    <TrackTranscript
+      videoId={videoId}
+      track={track}
+      at={at}
+      segments={segments}
+      // FR-SUB-8: กดบรรทัด → แท็บภาพเฟรม ไฮไลต์ภาพของเวลานั้น (patch เดียว: update อ่าน URL ตอนสร้าง)
+      onPick={(cue) => update({ tab: "frames", at: cue.startMs })}
+      // ยูทูปไม่ให้โหลดซับแปล: กลับไปแทร็กเริ่มต้นของคลิป (เปลี่ยนแค่แทร็กใน patch เดียว)
+      // ปุ่มที่กดจะหายไป: โฟกัสแผงของแท็บทรานสคริปต์ก่อน (อยู่ต่อ ช่องค้นหายังไม่มีจนโหลดคำเสร็จ)
+      onUseOriginal={
+        defaultTrackId
+          ? (button) => {
+              button.closest<HTMLElement>('[role="tabpanel"]')?.focus()
+              update({ trackId: defaultTrackId })
+            }
+          : null
+      }
+    />
+  )
+}
+
+type PanelProps = {
+  videoId: string
+  enabled: boolean
+  /** ช่วงที่คนดูซ้ำมากที่สุดจากข้อมูลคลิป (บรรทัดในช่วงมีป้าย) */
+  mostReplayed?: ReplaySegment[]
+}
+
+/**
+ * แท็บทรานสคริปต์ (Q4 = ก): ข้อความจากแทร็กเดียวกับแท็บซับ แบ่งบรรทัดตามความยาวซับที่เลือก
+ * ค้นหาคำได้ (คำที่ตรงถูกเน้น บรรทัดอื่นซ่อน) · กดบรรทัดไปภาพเฟรมของช่วงนั้น
+ * มาจาก "ดูซับช่วงนี้" (?at=) = บรรทัดของเวลานั้นมีกรอบ เลื่อนมาให้เห็น และได้โฟกัส
+ * บรรทัดในช่วงที่คนดูซ้ำมากที่สุดมีป้ายเล็ก "ดูซ้ำบ่อย" หลังเวลา
+ */
+export function TranscriptPanel({ videoId, enabled, mostReplayed }: PanelProps) {
+  const titleId = useId()
+  return (
+    <section aria-labelledby={titleId}>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <h2 id={titleId} className="text-base font-medium">
+              {t.title}
+            </h2>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <SubtitleGate videoId={videoId} enabled={enabled}>
+            {(data) => <Transcript videoId={videoId} data={data} segments={mostReplayed} />}
+          </SubtitleGate>
+        </CardContent>
+      </Card>
+    </section>
+  )
+}

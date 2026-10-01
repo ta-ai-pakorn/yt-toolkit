@@ -32,7 +32,11 @@
 
 ---
 
-## Owner decisions needed (ถามพิธก่อนเริ่ม Wave 1)
+## Owner decisions (ANSWERED 2026-09-30)
+
+**พิธตอบ 2026-09-30: ตามที่แนะนำทั้งหมด ยกเว้น Q9 = ข** (controller แนะนำ: ซับ TED เป็น CC BY-NC-ND บริษัทใช้เสี่ยงเรื่องเงื่อนไขห้ามใช้เชิงพาณิชย์ จึงใช้ fixture ที่เขียนเอง `OWNERTHSUB1`) → Q1 ก · Q2 ก · Q3 ก · Q4 ก · Q5 ก · Q6 ก · Q7 ก · Q8 ก · Q9 ข · planner defaults ใช้ทั้งหมด · Network test ยังเปิดคลิป TED จริงได้ (ไม่ได้เก็บอะไรลงรีโป)
+
+### Questions as asked
 
 แต่ละข้อมีคำตอบที่แนะนำไว้ ถ้าพิธตอบ "ตามที่แนะนำ" ทั้งหมด แผนนี้ใช้ได้เลยโดยไม่ต้องแก้ controller บันทึกคำตอบลงในหัวข้อนี้ก่อนเริ่ม Wave 1 และ Task 15 ย้ายไปลงบันทึกการตัดสินใจใน BRD
 
@@ -307,6 +311,7 @@ PRESETS = {
   short:  { maxChars: 15, lines: 1, minMs: 800,  maxMs: 3000, mode: "chars" },
   medium: { maxChars: 25, lines: 1, minMs: 1200, maxMs: 5000, mode: "chars" },   // default
   long:   { maxChars: 42, lines: 2, minMs: 1500, maxMs: 7000, mode: "chars" },
+  word:   { maxChars: 15, lines: 1, minMs: 800,  maxMs: 3000, mode: "tokens", tokensPerCue: 1 },  // owner round 1 (2026-10-01, BRD #61)
 }
 LIMITS = { maxChars: [10, 60], lines: [1, 2], minMs: [300, 3000] /*step 100*/,
            maxMs: [1000, 10000] /*step 500*/, tokensPerCue: [1, 20] }
@@ -325,27 +330,61 @@ LIMITS = { maxChars: [10, 60], lines: [1, 2], minMs: [300, 3000] /*step 100*/,
 - Tokens are sorted by `s`, with `e >= s` and `e <= next.s`.
 - Every `t` contains at least one non-space character.
 - The only whitespace in any `t` is ASCII space `U+0020`.
+- **Zero-duration cues** (`startMs == endMs`) can only come from zero-length tokens (`e == s`): a cue ends up zero-length only when all its tokens have `s == e == startMs`, the next cue starts at that same ms, and the merge is refused.
+  - Real tokens should have `e > s`, but C6 does not rely on it and the builder tolerates `e == s`.
+  - T7's integer time spreading (a zero-length total → all tokens at `start`, or `dur` < token count) can produce `e == s`, so T7 should not claim otherwise.
 
 **Helpers**
-- `displayLen(text)` counts code points **except** Thai non-spacing marks: U+0E31, U+0E34–U+0E3A and U+0E47–U+0E4E (Q7 = ก). Under Q7 = ข it counts all code points.
-- `cueText(tokens)` = the concatenation of `t`, with every run of spaces collapsed to one space (`/ {2,}/g` → `" "`), then trimmed of spaces at both ends.
-- `limit = maxChars * lines`.
-- `MERGE_LIMIT_FACTOR = 1.0` (Q3 = ก; 1.2 if Q3 = ข).
+- `displayLen(text)` counts **code points** except the Thai non-spacing marks U+0E31, U+0E34–U+0E3A and U+0E47–U+0E4E (Q7 = ก). Under Q7 = ข it would count all code points.
+  - This set is exactly the Unicode `Mn` characters of the Thai block.
+  - Examples: `"ที่"` = 1, `"น้ำ"` = 2 (SARA AM U+0E33 is a spacing vowel and counts), `"ดี"` = 1, `"กัน"` = 2, `"😀"` = 1.
+  - (The Task 4 brief's "`ดี` = 2" is a typo. The `thai-display-len` case outcome is the same either way.)
+  - **TS:** iterate with `for…of` or `Array.from(text)` and never use `.length`, which counts UTF-16 units. T9 adds its own unit assertion `displayLen("😀") === 1`, since no shared case has an astral character.
+- `cueText(tokens)` = the concatenation of `t`, with every run of 2+ **U+0020** spaces collapsed to one (`/ {2,}/g` → `" "`), then trimmed of **U+0020 only** at both ends. Use Python `.strip(" ")`, and never JS `.trim()` here.
+- `lineLen(toks) = displayLen(cueText(toks))`. It never decreases as tokens are appended (or prepended), because `cueText` of a prefix is a prefix of `cueText` of the whole.
+- `MERGE_LIMIT_FACTOR = 1.0` (Q3 = ก; owner ruling 2026-09-30: no line may ever exceed maxChars).
+- **`fits(toks, cap)`** (owner ruling 2026-09-30: **no line may ever exceed maxChars**). It replaces the old whole-cue `limit = maxChars * lines` check:
+  ```
+  fits(toks, cap):
+      if len(toks) < 2:            return True    # one token is never cut (FR-SUB-9)
+      if lineLen(toks) <= cap:     return True    # fits on one line
+      return lines == 2 and some k in 1..n-1 has lineLen(toks[:k]) <= cap and lineLen(toks[k:]) <= cap
+  ```
+  - **Exemption for a token longer than maxChars (T4 choice, stricter than "single-token lines are exempt"):** only a cue made of that single token may exceed maxChars. A long token never shares a cue with a neighbour, even at `lines == 2`. So `WORD45 + " ok"` at the long preset gives two cues, not `[WORD45, "ok"]` (case `two-lines-long-token-alone`). This matches `lines == 1` and the `single-long-token` case.
+  - "Some k" may be found by any method. Python uses a binary search on the monotonic `lineLen` (`_has_split`, unit-tested against a full scan).
+- **Case options bypass validation:** `buildCues` does no range checks, and shared cases may sit outside LIMITS (`thai-display-len` uses `maxChars: 3`). Case runners build options directly, never through `options_from_dict` or a clamp.
+- **Tokens mode without `tokensPerCue`:** `buildCues` raises `ValueError` (Python) or throws (TS). This is the only validation it does.
 
-**1. Greedy grouping**
+- **`isPunctOnly(tok)`** (owner round 3, controller ruling 2026-10-01): the token's text trimmed of U+0020 is non-empty and **every** code point is in a Unicode `P*` or `S*` category. Python: `unicodedata.category(ch)[0] in "PS"`; TS: `/^[\p{P}\p{S}]+$/u` on `tidy(t)`. Examples: `"."`, `","`, `" ?"`, `"..."`, `"♪"`, `"--"`, `"("`, emoji count; `"a."`, `"1"`, `". ."` (inner space), `"ฯ"` (Lo) do not.
+- **`kind(tok)`** (tokens mode only; fix round 1, controller ruling 2026-10-01), computed right to left: `word` (not `isPunctOnly`), `forward` or `back`.
+  - A punctuation token is `forward` when there is a next token, the next token starts less than 1000 ms after it, the next token's kind is not `back`, **and** either:
+    - every code point is an **opener** `( [ { « “ ‘ ¿ ¡` or a full-width `（ ［ ｛`; or
+    - every code point is a **straight quote** `" '` (or full-width `＂ ＇`) and it reads as an opener: there is space before it (its text starts with U+0020, the previous token's text ends with U+0020, the previous token is all openers, it is the first token, or it starts ≥ 1000 ms after the previous token) **and** it is glued to the next token (its text does not end with U+0020 and the next token's text does not start with U+0020).
+  - Every other punctuation token is `back`.
+  - **Choice of the spacing rule over quote parity:** YouTube json3 tokens keep their leading space (`" movie"`, `" \""`, `"Dang"`), so spacing tells openers from closers directly. Parity would drift after one unbalanced quote. Known limit: two quotes glued together (`directly.""Do`) read as two closers, so the second quote stays with `directly.`.
+- **`words(range)`** = the number of tokens in the range whose kind is not `forward`/`back`. Only used in tokens mode; in chars mode every token is a word and nothing below changes.
+
+**1. Greedy grouping** (tokens mode still applies **all** close rules, the char/line rule included, to word tokens)
 ```
 cues = []; cur = []
 for tok in tokens:
     if cur:
-        close = displayLen(cueText(cur + [tok])) > limit
-             or tok.s - cur[-1].e >= 1000
-             or tok.e - cur[0].s > maxMs
-             or (mode == "tokens" and len(cur) >= tokensPerCue)
+        gap = tok.s - cur[-1].e >= 1000
+        j = (first token after tok whose kind is not "forward") if kind(tok) == "forward" else tok
+                                       # an opener decides together with the word it attaches to
+        reach = tok.s if kind(tok) == "back" else tokens[j].e      # back punctuation: its START must fit
+        capped = not fits(cur + tokens[tok..j], maxChars) or reach - cur[0].s > maxMs
+        counted = kind(tok) != "back" and kind(prev token) != "forward"
+                                       # back punctuation and a word right after its opener never close on count
+        close = gap or capped or (mode == "tokens" and counted and words(cur) >= tokensPerCue)
         if close: cues.append(Cue(cur)); cur = []
     cur.append(tok)
 if cur: cues.append(Cue(cur))
 # Cue(cur): startMs = cur[0].s, endMs = cur[-1].e
 ```
+- **Punctuation-only tokens in tokens mode (owner round 3; openers: fix round 1):** they never count toward `tokensPerCue`. `forward` openers move with the word after them (the opener decides with that word, so `(`/`“`/an opening `"` starts the word's cue); `back` tokens attach to the previous word's cue. They bypass **only the count rule**: since fix round 2 (review #1) the line-length (`fits`) and `maxMs` caps apply to every token, so when attaching would break a cap the cue closes as usual and a punctuation-only token may start a cue (only when a cap forces it). **Fix round 3:** for `back` punctuation the `maxMs` check uses the token's **start** (`tok.s - cur[0].s <= maxMs`); if its end runs past, it still attaches and, after grouping, every cue of ≥ 2 tokens whose last token is `back` gets `endMs = min(endMs, startMs + maxMs)`. So a word followed by a 6 s "." shows "sticks." for 3 s, then nothing until the next word (en-asr now has no punctuation-only cue). Case `word-preset-long-trailing-period`; "Hello" + 40 " ♪" now splits every 3.6 s with each cue clamped to 3 s. A leading one attaches to the next word's cue. Silence still splits: a gap of ≥ 1000 ms always starts a new cue. Reason: in ทีละคำ on English ASR, 13% of cues were a lone "." or ",".
+- Step 4 consequence: a 2-line cue may now have **no** valid split (an over-long word plus attached punctuation); it then stays on one line.
+- Shared cases: `word-preset-punctuation`, `word-preset-leading-punctuation-and-gap`, `tokens-mode-punctuation-two-lines`, `short-preset-punctuation-unchanged` (chars mode keeps the lone "." cue), and (fix round 1) `word-preset-openers`, `word-preset-straight-quotes`, `word-preset-trailing-opener` (an opener at the end of the track, or before ≥ 1 s of silence, attaches backward), `tokens-mode-opener-keeps-its-word`, and (fix round 2) `word-preset-punctuation-respects-max-duration` ("Hello" + 40 " ♪" 600 ms apart: maxMs closes the cues, so most cues hold only notes); `tokens-mode-punctuation-two-lines` now expects `internationally` / `, yes no.` (the comma would break maxChars). Goldens: only `en-asr.word.srt` changed (e.g. `movie "` / `Dang` became `movie` / `"Dang`); all other presets and `th-asr.custom-tokens.srt` are byte-identical.
 
 **2. Minimum duration** (index loop, re-check the same index after a merge)
 ```
@@ -357,9 +396,9 @@ while i < len(cues):
         c.endMs = min(want, nxt.startMs) if nxt else want
         if c.endMs - c.startMs < minMs and nxt is not None:
             merged = c.tokens + nxt.tokens
-            if (displayLen(cueText(merged)) <= limit * MERGE_LIMIT_FACTOR
+            if (fits(merged, maxChars * MERGE_LIMIT_FACTOR)
                     and nxt.endMs - c.startMs <= maxMs
-                    and (mode != "tokens" or len(merged) <= tokensPerCue)):
+                    and (mode != "tokens" or words(merged) <= tokensPerCue)):
                 cues[i:i+2] = [Cue(merged, startMs=c.startMs, endMs=nxt.endMs)]
                 continue
     i += 1
@@ -368,15 +407,20 @@ while i < len(cues):
 **3. Safety clamp:** for each cue except the last, `endMs = min(endMs, next.startMs)`.
 
 **4. Lines**
-- If `lines == 2`, `displayLen(text) > maxChars` and the cue has ≥ 2 tokens: split at the token boundary k (1..n−1) that minimises `|displayLen(cueText(tok[:k])) − displayLen(cueText(tok[k:]))|`. Ties go to the smaller k. The result is `lines = [cueText(tok[:k]), cueText(tok[k:])]`.
+- If `lines == 2`, `displayLen(text) > maxChars` and the cue has ≥ 2 tokens, split at a token boundary k.
+  - **Candidates:** the valid splits only, i.e. every k in 1..n−1 with `lineLen(tok[:k]) <= maxChars * MERGE_LIMIT_FACTOR` and `lineLen(tok[k:]) <= maxChars * MERGE_LIMIT_FACTOR`. Every multi-token cue that passed `fits` has at least one candidate; in tokens mode a word with attached punctuation may have none, and then the cue stays on one line (owner round 3).
+  - **Choice:** the k that minimises `|lineLen(tok[:k]) − lineLen(tok[k:])|`. **Ties go to the smaller k.**
+  - **Result:** `lines = [cueText(tok[:k]), cueText(tok[k:])]`.
+  - The two line lengths always sum to `T` or `T − 1`, where `T = lineLen(tokens)`. So when any valid split exists, the most balanced split overall is valid too. The filter never changes the pick, but it is kept for clarity.
 - Otherwise `lines = [cueText(tokens)]`.
-- A single token longer than the limit stays whole (FR-SUB-9).
+- A single token longer than maxChars stays whole in a cue of its own (FR-SUB-9).
+- **Shared cases for this rule:** `two-lines-per-line-cap`, `two-lines-thai-no-space`, `two-lines-long-token-alone`, `two-lines-merge-refused-per-line`. The pre-ruling algorithm fails all four.
 
 **Outputs**
 - **`toSrt(cues)`:**
   - Each block is `f"{n}\r\n{ts(start)} --> {ts(end)}\r\n" + "\r\n".join(lines) + "\r\n"`, with n starting at 1.
   - Blocks are joined with `"\r\n"`. No cues → `""`.
-  - `ts(ms)` = `HH:MM:SS,mmm`: zero-padded, hours at least 2 digits, floor division.
+  - `ts(ms)` = `HH:MM:SS,mmm`: zero-padded, floor division. Hours are **at least** 2 digits and may be more (`100:00:00,005`).
 - **`toTxt(tokens)`:**
   - Paragraphs split where `tok.s − prev.e >= 2000`.
   - Each paragraph is `cueText(paragraph tokens)`.
@@ -384,20 +428,39 @@ while i < len(cues):
 - **`toMd(tokens, {title, videoId, chapters:[{startMs, title}]})`:** build a list of lines, then join with `"\r\n"` + a trailing `"\r\n"`.
   - Line 1: `"# " + collapse(title)`, then `""`, then `f"https://www.youtube.com/watch?v={videoId}"`.
   - **Sections:**
-    - With chapters (sorted by `startMs`), a token belongs to the last chapter with `startMs <= tok.s` (tokens before the first chapter go to the first chapter).
+    - With chapters, sort them by `startMs` with a **stable** sort, so equal starts keep their input order.
+      - A token belongs to the **last** chapter in that order with `startMs <= tok.s`, so among equal starts the later one wins.
+      - Tokens before the first chapter go to the first chapter.
+    - A chapter section's heading time is **the chapter's own `startMs`**, not its first token's time. For example, `[00:10]` even when a token at 0 ms was pulled in (case `md-chapters`).
     - Without chapters, a token goes to section `floor(tok.s / 120000)`, whose start is `index * 120000`.
     - Empty sections are skipped.
   - For each section, append:
     - `""`, then `f"## [{mdTime(start)}] {collapse(chapterTitle)}"` (without chapters just `f"## [{mdTime(start)}]"`), then `""`;
-    - then the section's paragraphs (same 2 s rule), separated by `""`.
-  - `mdTime(ms)` = `mm:ss` when `ms < 3_600_000`, else `h:mm:ss`, with no leading zero on hours.
-  - `collapse(x)` = replace every `\s+` with one space and trim; for titles only.
+      - A chapter title that collapses to `""` keeps the trailing space (`"## [00:10] "`), because this is literally the f-string.
+    - then the section's paragraphs, separated by `""`.
+      - Paragraphs use the same 2 s rule but are computed **per section**, so a section boundary always starts a new paragraph even with a 0 ms gap.
+      - `.txt` does not have this rule and keeps such tokens in one paragraph (case `md-two-minute-sections`).
+  - `mdTime(ms)`:
+    - Seconds are floored: `total = floor(ms / 1000)`.
+    - The result is `mm:ss` (minutes always 2 digits) when `ms < 3_600_000`, else `h:mm:ss`.
+    - Hours are **never padded** and may exceed 2 digits (`1:00:00`, `100:00:00`).
+  - `collapse(x)`: replace every run of **JavaScript `\s`** characters with one space, then trim the same set. It is used for titles only.
+    - The set: TAB, LF, VT, FF, CR, U+0020, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000, U+FEFF.
+    - TS: `/\s+/g` plus `.trim()` (exactly this set).
+    - Python must **not** use `\s`: it adds U+001C–U+001F and U+0085 but lacks U+FEFF. Instead it uses an explicit class written with `\uXXXX` escapes, never literal invisible characters in source.
+    - Case `whitespace-collapse` puts a U+FEFF between two title words to lock this.
 - **`cueStats(cues)` (TS only, for the preview):** `{count, avgChars: one decimal of the mean displayLen(lines.join(" ")), underOneSecond: count of endMs − startMs < 1000}`.
 
 ### C7. Parser output (`core/subparse.py`, T7)
-- `ParsedTrack(tokens: list[Token], has_word_timing: bool, source: "json3" | "vtt")`
+- `ParsedTrack(tokens: tuple[Token, ...], has_word_timing: bool, source: "json3" | "vtt")` (frozen dataclass, so `tokens` is a tuple)
 - `PARSER_VERSION = 1`
 - `SubParseError(ValueError)` means the data is not usable, which triggers the vtt fallback.
+- **Untimed overlap rule (controller ruling 2026-09-30):** each kept untimed block is spread over `[start, max(start, min(end, next kept block's start))]`, so overlapping blocks never interleave words in the final stable sort. When the next block starts at the same ms, the result is zero-length tokens, which C6 allows.
+- **Review fixes (controller ruling 2026-09-30, round 2).** Where these differ from the Task 7 rules below, these win.
+  - **json3 word timing:** `has_word_timing` = any kept seg has `tOffsetMs`. It no longer counts events with ≥ 2 segs. Styled owner subtitles split one event into several `pPenId` segs without offsets, and those files stay untimed.
+  - **Block order:** untimed blocks are stably sorted by start before the repeat skip, the clip and the space prefix.
+  - **Parse errors:** a `RecursionError` from `json.loads` becomes `SubParseError`.
+  - **Direction marks:** `&lrm;` and `&rlm;` unescape to `""`.
 
 ### C8. Web contracts (T6 writes them; T9, T10, T13 and T14 consume them)
 **`web/src/lib/types.ts` additions:**
@@ -409,7 +472,7 @@ export type SubToken = { t: string; s: number; e: number }
 export type SubTokens = { hasWordTiming: boolean; tokens: SubToken[] }
 export type SubMode = "chars" | "tokens"
 export type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number; mode: SubMode; tokensPerCue?: number }
-export type SubPreset = "short" | "medium" | "long"
+export type SubPreset = "short" | "medium" | "long" | "word"  // "word" added in owner round 1
 export type Cue = { startMs: number; endMs: number; lines: string[] }
 export type SubExportFormat = "srt" | "txt" | "md"
 // VideoInfo gains: description?: string
@@ -520,7 +583,7 @@ If Q1 = ข, T5 still writes the whole block; the unused `download*` keys are re
 |---|---|
 | `tests/fixtures/probe/88o5Sk8_m1Y.json` | Real probe, trimmed like M2, plus `description` and caption dicts (see T1) |
 | `tests/fixtures/probe/8lpOfyoxcvU.json` | Real probe (two `-orig` tracks, Thai original audio) |
-| `tests/fixtures/probe/iG9CE55wbtY.json` | Real probe (Q9 = ก): owner `th`, `en` + auto `en-orig` only |
+| `tests/fixtures/probe/OWNERTHSUB1.json` | Synthetic (Q9 = ข): an English-language clip (`language: "en"`, English title "Owner Thai subtitle test", `duration: 240`) with owner `th`, `en` (json3 + vtt) + auto `en-orig`; no storyboard formats |
 | `tests/fixtures/probe/aqz-KE-bpKQ.json`, `jNQXAC9IVRw.json` | Existing; T1 adds `description`, `subtitles`, `automatic_captions` |
 | `tests/fixtures/probe/LONGTHAI1hr.json` | Synthetic, 3720 s, a 1 h Thai perf clip (json3 URL has `?repeat=10`) |
 | `tests/fixtures/probe/VTTFALLBAK1.json` | Synthetic: the json3 URL points at `broken.json3`, the vtt at the real 88o5 vtt |
@@ -528,7 +591,8 @@ If Q1 = ข, T5 still writes the whole block; the unused `download*` keys are re
 | `tests/fixtures/subs/88o5Sk8_m1Y/th-orig.json3`, `th-orig.vtt`, `tlang-en.json3` | Real Thai ASR (CC BY) + one translation |
 | `tests/fixtures/subs/8lpOfyoxcvU/en-US-orig.json3`, `th-orig.json3` | Real English ASR (dub) + Thai ASR (CC BY) |
 | `tests/fixtures/subs/jNQXAC9IVRw/en.json3`, `en.vtt`, `de.json3` | Real owner subtitles, no word timing |
-| `tests/fixtures/subs/iG9CE55wbtY/th.json3` | Real Thai owner subtitles, events with `tStartMs < 180000` only (Q9 = ก; if ข, T1 writes a hand-made `th.json3` of 20 Thai sentences instead, same path) |
+| `tests/fixtures/subs/OWNERTHSUB1/th.json3`, `en.json3` | Hand-written (Q9 = ข) in the exact shape of real YouTube owner json3 (one seg per event, no word timing, `wpWinPosId`/`wsWinStyleId` fields like `jNQXAC9IVRw/en.json3`): 20 Thai sentences written by us, including one event with an embedded `
+` line break, one sentence ≥ 110 characters, a translator-credit line ("แปลโดย ทีมทดสอบ"), and a gap ≥ 3 s; `en.json3` = the matching 20 English sentences |
 | `tests/fixtures/subs/VTTFALLBAK1/broken.json3` | The literal text `{"events": [` (truncated JSON) |
 | `tests/fixtures/storyboard/88o5Sk8_m1Y/M*.jpg` | Real sb0 grids (CC BY), so the transcript→frame E2E has frames |
 | `tests/fixtures/subs/builder-cases.json` | T4: hand-checked builder cases |
@@ -575,17 +639,17 @@ If Q1 = ข, T5 still writes the whole block; the unused `download*` keys are re
 - Consumes: `YtDlpExtractor().probe(id)` (existing) for probes, and `yt_dlp.YoutubeDL({"quiet": True}).urlopen(url).read()` for subtitle bytes. This is allowed in a scratch script; it mirrors what T3 will implement.
 - Produces: the C10 files, with the fake URL scheme.
 
-- [ ] **Step 1: Write the capture script in the scratchpad.** For each real clip (`88o5Sk8_m1Y`, `8lpOfyoxcvU`, `jNQXAC9IVRw`, `aqz-KE-bpKQ`, and `iG9CE55wbtY` if Q9 = ก):
+- [ ] **Step 1: Write the capture script in the scratchpad.** For each real clip (`88o5Sk8_m1Y`, `8lpOfyoxcvU`, `jNQXAC9IVRw`, `aqz-KE-bpKQ`):
   1. Probe it with `YtDlpExtractor().probe`.
   2. Keep the M2 field set listed in `tests/fixtures/README.md`, plus `description`, `subtitles` and `automatic_captions`.
   3. Inside `subtitles`/`automatic_captions`, keep per key only the entries with `ext` in `json3`/`vtt`, plus any `protocol: m3u8_native` entries (jNQ has them; keep them, rewritten to `https://fake.invalid/hls/<id>/<key>.m3u8`, so T8 can prove they are ignored).
   4. Keep entry fields `ext, url, name, protocol` (when present).
   5. Rewrite every timedtext URL to `https://fake.invalid/subs/<id>/<key>.<ext>`, keeping `?tlang=<code>` when the real URL had one.
   6. Limit translated auto keys to `en, ja, fr, ko, zh-Hans` (whichever exist).
-  7. For `iG9CE55wbtY`, keep owner keys `th`, `en` and auto `en-orig` only.
+  7. (Q9 = ข) No TED capture. `OWNERTHSUB1` is written by hand in Step 3; before writing it, look at the real owner json3 of `jNQXAC9IVRw` (and, read-only in the scratchpad, any real owner Thai json3) so the hand-made file copies the real field shape. Nothing from a third-party clip is committed.
   8. Rewrite storyboard fragment URLs exactly as M2 did (`https://fake.invalid/storyboard/<id>/M<n>.jpg` for sb0; other sb formats get `/sbN/` paths).
 - [ ] **Step 2: Download the subtitle files listed in C10** with the real (pre-rewrite) URLs, byte for byte:
-  - For `iG9CE55wbtY/th.json3`: load the JSON, keep `events` with `tStartMs < 180000`, and dump with `ensure_ascii=False, separators=(",", ":")`.
+  - (Q9 = ข) `OWNERTHSUB1/th.json3` and `en.json3` are hand-written in Step 3, not downloaded.
   - For `88o5Sk8_m1Y/tlang-en.json3`: take the json3 entry of auto key `en`, which has `tlang=en`.
   - Download the 88o5 sb0 grids to `tests/fixtures/storyboard/88o5Sk8_m1Y/M<n>.jpg`, the same way M2 captured BBB.
 - [ ] **Step 3: Write the synthetic probes** (same trimmed shape; `live_status: "not_live"`; no storyboard formats; `channel: "ชุดทดสอบ"`):
@@ -596,6 +660,7 @@ If Q1 = ข, T5 still writes the whole block; the unused `download*` keys are re
   | `VTTFALLBAK1.json` | `id: "VTTFALLBAK1"`, `duration: 372`. Auto `th-orig`: json3 → `https://fake.invalid/subs/VTTFALLBAK1/broken.json3`, vtt → `https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.vtt`. |
   | `NOORIGSUB01.json` | `id: "NOORIGSUB01"`, `duration: 372`, no `subtitles`. Auto: `yue` = `[{ext: json3, url: "https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.json3"}]`; `en` and `th` = json3 entries whose URL ends in `?tlang=en` / `?tlang=th` on the same base. |
   | `subs/VTTFALLBAK1/broken.json3` | `{"events": [` |
+| `OWNERTHSUB1.json` + `subs/OWNERTHSUB1/{th,en}.json3` | Q9 = ข, hand-written. See C10 for the exact contents. Owner `th`/`en` json3 entries use URLs `https://fake.invalid/subs/OWNERTHSUB1/<key>.json3`, and auto `en-orig` points at `…/en.json3`. |
 
 - [ ] **Step 4: Check the fixtures.** Run `uv run pytest -q -W error`: M2 tests must still pass, because the fixtures only gain fields. Also check:
   - `python -c` load every probe JSON;
@@ -604,7 +669,7 @@ If Q1 = ข, T5 still writes the whole block; the unused `download*` keys are re
   - every file is LF or binary as downloaded (vtt from YouTube is LF; do not convert).
 - [ ] **Step 5: Update `tests/fixtures/README.md`.** Add sections `subs/`, the new probes and the new storyboard folder:
   - capture date, yt-dlp version, the URL rewrite rules, the trimming rules, `tlang`, `repeat` and `broken.json3`;
-  - licenses: 88o5Sk8_m1Y and 8lpOfyoxcvU are CC BY (channel names from the probe, with links); "Me at the zoo" stays as before; TED `iG9CE55wbtY` © TED, CC BY-NC-ND 4.0, 3-minute excerpt, test-only, private repo (Q9 = ก).
+  - licenses: 88o5Sk8_m1Y and 8lpOfyoxcvU are CC BY (channel names from the probe, with links); "Me at the zoo" stays as before; `OWNERTHSUB1` is synthetic, written by the project (no third-party text); TED clip not stored. Old: test-only, private repo (Q9 = ก).
 - [ ] **Step 6: Commit.**
 ```bash
 git add tests/fixtures
@@ -762,8 +827,8 @@ Optionally a case also carries `"md": {"title", "videoId", "chapters": [{"startM
   4. **`max-duration`** (maxMs 3000; tokens every 1000 ms without gaps) → a split when `tok.e − cur[0].s > 3000`.
   5. **`tokens-mode`** (mode `tokens`, tokensPerCue 3; 7 short tokens) → cues of 3, 3 and 1 tokens (then the min-duration rules).
   6. **`single-long-token`** (a 40-char token at medium) → one cue with that token alone; the neighbours are in their own cues.
-  7. **`min-extend-adjacent`** → a short cue extended only up to the next cue's start, and left short because the merge would exceed the limit (allowed: adjacent).
-  8. **`min-merge`** → a short cue merged with the next when the merged length is ≤ limit × factor.
+  7. **`min-extend-adjacent`** → a short cue extended only up to the next cue's start, and left short because the merged cue would not `fits` maxChars (allowed: adjacent).
+  8. **`min-merge`** → a short cue merged with the next when the merged cue `fits` maxChars (C6).
   9. **`merge-refused-over-limit`** → a merge refused (length 26 at medium with factor 1.0).
   10. **`two-lines-middle`** (long preset; 50 chars across 8 tokens) → a split at the balanced boundary. Include a tie that must pick the smaller k.
   11. **`two-lines-fits-one`** (long preset; 30 chars) → a single line.
@@ -778,7 +843,7 @@ Optionally a case also carries `"md": {"title", "videoId", "chapters": [{"startM
     - cues partition the tokens in order;
     - no `end > next.start`;
     - `start < end` except zero-duration input;
-    - every line ≤ limit unless the cue has one token;
+    - every line ≤ maxChars unless the cue has exactly one token (owner ruling 2026-09-30, C6 `fits`);
     - a cue shorter than `min_ms` exists only when its `end_ms == next.start_ms` (AC-SUB-05);
     - numbering in SRT is 1..n;
     - `"\n"` appears only as part of `"\r\n"` (AC-SUB-08).
@@ -878,7 +943,7 @@ Optionally a case also carries `"md": {"title", "videoId", "chapters": [{"startM
 *json3:*
 1. **Load.** Decode UTF-8 (BOM allowed). JSON must be an object with list `events`, else `SubParseError`.
 2. **Skip events** with a truthy `aAppend`, without `segs`, or whose normalized joined text is blank.
-3. **Word timing.** `has_word_timing` = any kept event has ≥ 2 segs, or any seg has `tOffsetMs`.
+3. **Word timing.** `has_word_timing` = any kept seg has `tOffsetMs` (review ruling 2026-09-30, see C7).
 4. **Timed file** (`has_word_timing` true):
    - Every seg with non-blank normalized text becomes a token: `s = tStartMs + (tOffsetMs or 0)`, `e` = the next token's `s` within the event, and the last one gets `tStartMs + dDurationMs`.
    - A whitespace-only seg is glued as a leading space onto the next seg of the same event.
@@ -917,7 +982,7 @@ Optionally a case also carries `"md": {"title", "videoId", "chapters": [{"startM
   - **AC-SUB-04 (parser half):** `"".join(t.t for t in tokens).replace(" ", "")` equals the concatenation of every kept seg's normalized text with spaces removed.
   - **English `8lpOfyoxcvU/en-US-orig.json3`:** tokens keep their leading spaces (`" the"`), and `cue_text` of the first 5 tokens reads as English words separated by single spaces.
   - **Owner `jNQXAC9IVRw/en.json3`:** `has_word_timing` false, the first token is `"All"`, and the tokens of block 2 start with a space.
-  - **Owner Thai `iG9CE55wbtY/th.json3`:**
+  - **Owner Thai `OWNERTHSUB1/th.json3` (hand-written):**
     - rejoined text (spaces removed) equals the source (spaces removed);
     - no token boundary falls inside a newmm word: compare with `split_words` over each block;
     - the times are monotonic within each block, and the first and last tokens of each block hit the block start and end.
@@ -967,7 +1032,7 @@ def find_track(trimmed: dict, track_id: str) -> Track | None
     - `t.en` has json3 URL `https://fake.invalid/subs/88o5Sk8_m1Y/th-orig.json3?tlang=en`.
   - **`8lpOfyoxcvU`:** the original group has `en-US-orig` and `th-orig`; `original_language` = `th` (audio original); default = `a.th-orig`, not `a.en-US-orig`.
   - **`jNQXAC9IVRw`:** owner `o.en` and `o.de`; the HLS auto entries are ignored, so there is no original or translated group; default = `o.en`.
-  - **`iG9CE55wbtY`** (Q9 = ก): owner `th` and `en`, and original `en-orig`. With `prefer="th"` the default is `o.th`; with `prefer=None` it is `o.en` (Q8).
+  - **`OWNERTHSUB1`** (Q9 = ข, synthetic English clip): owner `th` and `en`, and original `en-orig`. With `prefer="th"` the default is `o.th`; with `prefer=None` it is `o.en` (Q8).
   - **`NOORIGSUB01` (AC-SUB-02):** the original group is `[a.yue]`, translated is `[t.en, t.th]`, and the default is `None`, so the payload has no `defaultTrackId`.
   - **`aqz-KE-bpKQ`:** `{"tracks": []}`.
   - **Synthetic:** `live_chat` dropped; a key whose entries are all `srv3` dropped; a mixed key (`th` with one tlang and one non-tlang entry) + `th-orig` → `th` dropped.
@@ -1288,7 +1353,7 @@ const golden = import.meta.glob("../../../tests/fixtures/subs/golden/*", { query
     2. Focus the maxChars slider thumb.
     3. In `page.evaluate`, install a `MutationObserver` on the stats element that resolves with `performance.now()` on the first change.
     4. Record `t0 = performance.now()` inside the same evaluate right before `thumb.dispatchEvent(new KeyboardEvent("keydown", {key: "ArrowRight", bubbles: true}))`.
-    5. Assert `t1 − t0 ≤ 200`. Take the median of 5 presses. Also assert the token count behind the page is ≥ 4000 (this checks the 1 h fixture is really 1 h).
+    5. Assert `t1 − t0 ≤ 200`. Take the median of 5 presses. Also assert the token count behind the page is ≥ 3400 and the last token ends at ≥ 3,600,000 ms (this checks the 1 h fixture is really 1 h). `LONGTHAI1hr` tiles the 342 tokens of 88o5 10 times, so it has 3420 tokens and runs about 62 minutes. (This line said "≥ 4000" before T15; that number was wrong.)
   - axe: no serious/critical issues on `?tab=subs` for 88o5, with "ปรับเอง" open and the translated dialog open, in both themes.
 - [ ] **Step 3: Implement** the components.
 - [ ] **Step 4: Run** `npm run typecheck && npm run lint && npm test`. Expected: PASS.

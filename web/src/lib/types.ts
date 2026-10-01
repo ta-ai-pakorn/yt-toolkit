@@ -11,7 +11,8 @@ export type ToolStatus = {
 export type Health = {
   version: string
   commit: string | null
-  tools: { ffmpeg: ToolStatus; ytdlp: ToolStatus; jsRuntime: ToolStatus }
+  // impersonation (owner round 3): yt-dlp ทำงานแบบเบราว์เซอร์ได้ไหม (curl_cffi) backend รุ่นก่อนไม่มีแถวนี้
+  tools: { ffmpeg: ToolStatus; ytdlp: ToolStatus; jsRuntime: ToolStatus; impersonation?: ToolStatus }
   disk: ToolStatus
   output: ToolStatus
   network: ToolStatus
@@ -37,6 +38,12 @@ export type AudioFormat = {
 
 export type Chapter = { startS: number; endS: number; title: string }
 
+/** ตัวเลขของคลิปตอนดึงข้อมูล (ไม่มีคีย์ไหน = ยูทูปไม่บอก) */
+export type VideoStats = { views?: number; likes?: number; comments?: number; channelFollowers?: number }
+
+/** ช่วงที่คนดูซ้ำมากที่สุด (มิลลิวินาที) จาก heatmap ของยูทูป */
+export type ReplaySegment = { startMs: number; endMs: number }
+
 export type VideoInfo = {
   videoId: string
   title: string
@@ -49,7 +56,27 @@ export type VideoInfo = {
   audio: AudioFormat[]
   hasStoryboard: boolean
   isLive: boolean
+  /** คำอธิบายคลิปตามที่ยูทูปให้มา (ข้อความดิบ) ไม่มีคีย์นี้เมื่อว่าง */
+  description?: string
+  /** ยอดดู ถูกใจ คอมเมนต์ (สัญญา C-A1) ไม่มีคีย์นี้เมื่อไม่รู้ */
+  stats?: VideoStats
+  /** แท็กของคลิป (ไม่เกิน 50) */
+  tags?: string[]
+  /** หมวดหมู่ของยูทูป เช่น "Education" */
+  categories?: string[]
+  /** ช่วงที่คนดูซ้ำมากที่สุด ไม่เกิน 3 ช่วง เรียงตามเวลา · คลิปที่ไม่มี heatmap ไม่มีคีย์นี้ */
+  mostReplayed?: ReplaySegment[]
 }
+
+/**
+ * คอมเมนต์ที่ปักหมุดไว้ (สัญญา C-A2 v2): เจ้าของช่องปักหมุดคอมเมนต์ของใครก็ได้
+ * byUploader = เจ้าของช่องเขียนเอง (true) หรือผู้ชมเขียน (false) · ไม่มีชื่อ รหัส หรือรูปผู้เขียน ตาม PDPA
+ * backend รุ่นก่อน (v1) อาจไม่ส่ง byUploader: หน้าเว็บถือว่าไม่ใช่เจ้าของช่อง (แสดงป้าย "ผู้ชม") เมื่อไม่มีคีย์นี้ (เป็น true เท่านั้นจึงเป็นเจ้าของ)
+ */
+export type PinnedComment = { text: string; likes?: number; publishedText?: string; byUploader: boolean }
+
+/** ผลของ GET /videos/{id}/pinned-comment · null = คลิปนี้ไม่มีคอมเมนต์ปักหมุด */
+export type PinnedCommentResult = { comment: PinnedComment | null }
 
 export type ResolveKind = "video" | "playlist" | "ambiguous" | "invalid"
 
@@ -100,3 +127,31 @@ export type HistoryItem = {
 }
 
 export type HistoryPage = { items: HistoryItem[]; total: number }
+
+export type SubtitleGroup = "owner" | "original" | "translated"
+
+export type SubtitleTrack = { id: string; lang: string; name: string; group: SubtitleGroup }
+
+export type SubtitleTracks = { tracks: SubtitleTrack[]; defaultTrackId?: string }
+
+/** คำหรือชิ้นข้อความหนึ่งชิ้นของซับ: t = ข้อความ, s/e = เวลาเริ่ม/จบ (มิลลิวินาที) */
+export type SubToken = { t: string; s: number; e: number }
+
+export type SubTokens = { hasWordTiming: boolean; tokens: SubToken[] }
+
+export type SubMode = "chars" | "tokens"
+
+export type SubOptions = {
+  maxChars: number
+  lines: 1 | 2
+  minMs: number
+  maxMs: number
+  mode: SubMode
+  tokensPerCue?: number
+}
+
+export type SubPreset = "short" | "medium" | "long" | "word"
+
+export type Cue = { startMs: number; endMs: number; lines: string[] }
+
+export type SubExportFormat = "srt" | "txt" | "md"

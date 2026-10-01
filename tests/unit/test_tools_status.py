@@ -248,7 +248,8 @@ def test_collect_health_shape(paths, fake_platform, monkeypatch):
         paths, fake_platform, paths.data_root / "out", network=lambda: ToolStatus("ok", name="network")
     )
     assert set(health) == {"tools", "disk", "output", "network"}
-    assert set(health["tools"]) == {"ffmpeg", "ytdlp", "jsRuntime"}
+    assert set(health["tools"]) == {"ffmpeg", "ytdlp", "jsRuntime", "impersonation"}
+    assert health["tools"]["impersonation"]["name"] == "curl_cffi"
     assert health["tools"]["ffmpeg"]["status"] == "error"
     assert health["network"] == {"status": "ok", "name": "network", "version": None, "message": None, "path": None}
 
@@ -312,3 +313,39 @@ def test_core_does_not_import_api_or_platform_at_runtime():
         if name.split(".")[:2] in (["yttoolkit", "api"], ["yttoolkit", "platform"])
     }
     assert offenders == {}
+
+
+# ---------- owner round 3: แถว "ทำงานแบบเบราว์เซอร์ (curl_cffi)" ----------
+
+
+def test_impersonation_status_ok_shows_the_curl_cffi_version():
+    status = tools.impersonation_status(lambda: (True, "0.16.3"))
+    assert status == ToolStatus("ok", name="curl_cffi", version="0.16.3")
+
+
+def test_impersonation_status_missing_package_is_a_warning():
+    status = tools.impersonation_status(lambda: (False, None))
+    assert status.status == "warn"
+    assert status.version is None
+    assert "ไม่มี curl_cffi" in (status.message or "")
+
+
+def test_impersonation_status_unsupported_version_is_a_warning():
+    status = tools.impersonation_status(lambda: (False, "0.17.0"))
+    assert (status.status, status.version) == ("warn", "0.17.0")
+    assert "ใช้ไม่ได้" in (status.message or "")
+
+
+def test_impersonation_status_survives_a_broken_check():
+    def boom():
+        raise RuntimeError("yt-dlp changed")
+
+    assert tools.impersonation_status(boom).status == "warn"
+
+
+def test_impersonation_status_real_check_runs_offline():
+    # curl_cffi เป็น dependency แล้ว (yt-dlp[curl-cffi]) ตรวจจริงต้องพร้อม และไม่มีอะไรเกี่ยวกับคุกกี้ในผล
+    status = tools.impersonation_status()
+    assert status.status == "ok"
+    assert status.version
+    assert "cookie" not in repr(status).lower()

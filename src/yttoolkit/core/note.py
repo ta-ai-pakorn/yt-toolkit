@@ -1,0 +1,165 @@
+"""โน้ตของคลิปแบบ Markdown สำหรับ Obsidian หรือแอพโน้ตอื่น (C-A3, owner round 2)
+
+ฟังก์ชันล้วน: รับ VideoInfo (คีย์ camelCase) + บรรทัดทรานสคริปต์ที่ทำไว้แล้ว คืนข้อความโน้ต
+- front matter แบบ YAML (ข้อความทุกช่องเป็น double-quoted ที่ escape แล้ว)
+- หัวข้อ คำอธิบาย / Chapter / คอมเมนต์ปักหมุด / ทรานสคริปต์ หัวข้อที่ไม่มีข้อมูลไม่ใส่
+- ขึ้นบรรทัดแบบ LF (Obsidian ชอบ LF) ต่างจากไฟล์ซับที่ใช้ CRLF
+"""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+from collections.abc import Sequence
+from typing import Any
+
+from .srt_builder import md_time, md_title
+
+SOURCE = "YT Toolkit"
+LF = "\n"
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+# escape ของ YAML double-quoted scalar (YAML 1.2 ข้อ 5.7) ตัวขึ้นบรรทัดของ YAML 1.1 (NEL, LS, PS) ก็ escape
+# เพราะตัวอ่าน YAML 1.1 (เช่น PyYAML) ถือว่าเป็นการขึ้นบรรทัด
+_YAML_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\0": "\\0",
+    "\a": "\\a",
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\v": "\\v",
+    "\f": "\\f",
+    "\r": "\\r",
+    "\x1b": "\\e",
+    "\x85": "\\N",
+    " ": "\\L",
+    " ": "\\P",
+}
+
+
+def _printable(cp: int) -> bool:
+    """อักขระที่ YAML ยอมให้อยู่ในไฟล์ตรง ๆ (c-printable) ไม่รวม BOM กลางข้อความ"""
+    return (
+        0x20 <= cp <= 0x7E
+        or 0xA0 <= cp <= 0xD7FF
+        or (0xE000 <= cp <= 0xFFFD and cp != 0xFEFF)
+        or 0x10000 <= cp <= 0x10FFFF
+    )
+
+
+def yaml_str(text: str) -> str:
+    """ข้อความ -> YAML double-quoted scalar บรรทัดเดียว (อ่านกลับได้ตรงตัวทุกอักขระ)"""
+    out = []
+    for ch in text:
+        cp = ord(ch)
+        if ch in _YAML_ESCAPES:
+            out.append(_YAML_ESCAPES[ch])
+        elif _printable(cp):
+            out.append(ch)
+        elif cp <= 0xFF:
+            out.append(f"\\x{cp:02X}")
+        elif cp <= 0xFFFF:
+            out.append(f"\\u{cp:04X}")
+        else:
+            out.append(f"\\U{cp:08X}")
+    return '"' + "".join(out) + '"'
+
+
+def hms(seconds: int) -> str:
+    """ความยาวคลิปแบบ H:MM:SS (ชั่วโมงไม่เติมศูนย์) เช่น 372 -> 0:06:12"""
+    h, rem = divmod(max(int(seconds), 0), 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}"
+
+
+def _lines(text: str) -> list[str]:
+    """ข้อความหลายบรรทัด -> รายการบรรทัด (CRLF/CR เป็น LF) ตัดบรรทัดว่างท้ายข้อความ"""
+    return text.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n").split("\n")
+
+
+_SPACE_RUN = re.compile(r"\s+")
+_DASH_RUN = re.compile(r"-{2,}")
+
+
+def obsidian_tag(tag: str) -> str:
+    """แท็กของยูทูป -> แท็กที่ Obsidian ใช้ได้ (review M-5): "me at the zoo" -> "me-at-the-zoo"
+
+    ตัดช่องว่างหัวท้าย ช่องว่างกลางเป็น "-" แล้วเหลือแค่ตัวอักษร (รวมสระ/วรรณยุกต์ไทย) ตัวเลข "_" "-" "/"
+    (Obsidian ไม่รับช่องว่าง, "#", ",", ":" ฯลฯ ในแท็ก) "-" ซ้อนกันยุบเหลือตัวเดียว ไม่มี "-" หรือ "/" หัวท้าย
+    ผลที่ไม่มีตัวอักษรเลย (ว่าง หรือมีแต่ตัวเลขกับขีด) = "" (Obsidian ไม่นับเป็นแท็ก ผู้เรียกทิ้งไป)
+    """
+    text = _SPACE_RUN.sub("-", tag.strip())
+    kept = "".join(ch for ch in text if ch in "_-/" or unicodedata.category(ch)[0] in "LNM")
+    kept = _DASH_RUN.sub("-", kept).strip("-/")
+    if not any(unicodedata.category(ch)[0] in "LM" for ch in kept):
+        return ""
+    return kept
+
+
+def note_tags(tags: Any) -> list[str]:
+    """แท็กทั้งหมดแบบ Obsidian ไม่ซ้ำ (เทียบแบบไม่สนตัวพิมพ์ เหมือน Obsidian) คงลำดับเดิม"""
+    out: list[str] = []
+    seen: set[str] = set()
+    for tag in tags if isinstance(tags, list) else []:
+        slug = obsidian_tag(tag) if isinstance(tag, str) else ""
+        if slug and slug.casefold() not in seen:
+            seen.add(slug.casefold())
+            out.append(slug)
+    return out
+
+
+def _front_matter(info: dict[str, Any], video_id: str) -> list[str]:
+    title = str(info.get("title") or "")
+    out = ["---", f"title: {yaml_str(title)}", f"url: https://www.youtube.com/watch?v={video_id}"]
+    channel = info.get("channel")
+    if isinstance(channel, str) and channel:
+        out.append(f"channel: {yaml_str(channel)}")
+    published = info.get("publishedAt")
+    if isinstance(published, str) and _DATE.fullmatch(published):
+        out.append(f"published: {published}")
+    duration = info.get("durationS")
+    if isinstance(duration, int) and not isinstance(duration, bool) and duration > 0:
+        out.append(f'duration: "{hms(duration)}"')
+    tags = note_tags(info.get("tags"))
+    if tags:
+        out.append("tags: [" + ", ".join(yaml_str(t) for t in tags) + "]")
+    stats = info.get("stats") or {}
+    for key, name in (("views", "views"), ("likes", "likes"), ("comments", "comments"), ("channelFollowers", "channel_followers")):
+        value = stats.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            out.append(f"{name}: {value}")
+    out += [f"source: {SOURCE}", "---"]
+    return out
+
+
+def build_note(
+    info: dict[str, Any],
+    video_id: str,
+    transcript: Sequence[str] | None,
+    pinned: dict[str, Any] | None = None,
+) -> str:
+    """ข้อความโน้ตทั้งไฟล์ (LF ปิดท้ายด้วย LF)
+
+    transcript = บรรทัดจาก srt_builder.md_sections(level=3) หรือ None/ว่าง = ไม่มีหัวข้อทรานสคริปต์
+    pinned = คอมเมนต์ปักหมุด {"text", "byUploader"} หรือ None/ไม่มีข้อความ = ไม่มีหัวข้อ (อยู่หลัง Chapter ก่อนทรานสคริปต์)
+    """
+    out = _front_matter(info, video_id)
+    out += ["", "# " + (md_title(str(info.get("title") or "")) or video_id)]
+    description = info.get("description")
+    if isinstance(description, str) and description.strip():
+        out += ["", "## คำอธิบาย", *_lines(description)]
+    chapters = [c for c in info.get("chapters") or [] if isinstance(c, dict)]
+    if chapters:
+        out += ["", "## Chapter"]
+        for chapter in sorted(chapters, key=lambda c: c.get("startS") or 0):
+            start_ms = round((chapter.get("startS") or 0) * 1000)
+            out.append(f"- [{md_time(start_ms)}] {md_title(str(chapter.get('title') or ''))}".rstrip(" "))
+    text = pinned.get("text") if isinstance(pinned, dict) else None
+    if isinstance(text, str) and text.strip():
+        who = "เจ้าของช่อง" if pinned.get("byUploader") is True else "ผู้ชม"
+        out += ["", f"## คอมเมนต์ปักหมุด ({who})", *_lines(text)]
+    if transcript:
+        out += ["", "## ทรานสคริปต์", *transcript]
+    return LF.join(out) + LF

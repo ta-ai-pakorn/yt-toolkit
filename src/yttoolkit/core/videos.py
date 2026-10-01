@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import threading
 from collections.abc import Callable
@@ -22,6 +23,30 @@ from .yterrors import YtError
 log = logging.getLogger("yttoolkit")
 
 CACHE_TTL = timedelta(hours=24)
+# รุ่นของรูปแบบ probe_json ที่เก็บไว้ แถวรุ่นอื่น (เช่น M2 ที่ยังไม่มี captions) นับว่าเก่า -> probe ใหม่
+# แต่ยังใช้เป็นข้อมูลสำรองตอนออฟไลน์ได้ (_stored_hit)
+# 3 = owner round 2 (2026-10-01): เก็บยอดวิว/ไลก์/คอมเมนต์/ผู้ติดตาม, แท็ก, หมวดหมู่ และ heatmap เพิ่ม
+# 4 = owner round 3 (2026-10-01): mostReplayed คิดแบบใหม่ (review I-2) แถวรุ่น 3 เก็บช่วงแบบเก่าไว้ จึงต้อง probe ใหม่
+PROBE_VERSION = 4
+# ข้อมูลคลิป (C-A1): แท็กเก็บไม่เกินเท่านี้ ช่วงดูซ้ำบ่อยเอาไม่เกินเท่านี้ ห่างกันอย่างน้อยกี่วินาที
+# และรวมช่วงข้างเคียงที่ค่าไม่ต่ำกว่ากี่เท่าของยอด
+TAGS_MAX = 50
+MOST_REPLAYED_MAX = 3
+MOST_REPLAYED_GAP_S = 10
+MOST_REPLAYED_MERGE = 0.9
+# owner round 3 (review I-2): ยอดที่ต่ำกว่าครึ่งของยอดสูงสุดไม่นับ (ที่ราบเตี้ย ๆ ไม่ใช่ "ดูซ้ำบ่อย")
+# และช่วงที่รวมแล้วกว้างไม่เกิน max(10 วินาที, 2% ของความยาวคลิป)
+MOST_REPLAYED_MIN_SHARE = 0.5
+MOST_REPLAYED_WIDTH_MIN_S = 10
+MOST_REPLAYED_WIDTH_SHARE = 0.02
+_TOUCH_S = 0.001  # รายการ heatmap ห่างกันไม่เกินนี้ (วินาที) นับว่าติดกัน (กันเศษทศนิยม)
+# ฟิลด์ตัวเลขของ yt-dlp -> คีย์ใน stats
+_STAT_FIELDS = (
+    ("views", "view_count"),
+    ("likes", "like_count"),
+    ("comments", "comment_count"),
+    ("channelFollowers", "channel_follower_count"),
+)
 # probe ใหม่พลาดด้วยรหัสเหล่านี้ (ไม่มีเน็ต / ยูทูปให้รอก่อน) แต่มีข้อมูลเดิมในเครื่อง = ใช้ข้อมูลเดิมไปก่อน
 STALE_OK_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK"})
 # นาฬิกาเครื่องเลื่อนถอยได้ไม่เกินนี้ยังถือว่า probe ล่าสุดยังใหม่
@@ -101,6 +126,139 @@ def _published_at(raw: dict) -> str | None:
         except (OverflowError, OSError, ValueError):
             return None
     return None
+
+
+def _description(raw: dict) -> str | None:
+    """คำอธิบายคลิปแบบดิบ (ไม่ตัดช่องว่าง) หรือ None ถ้าว่าง/มีแต่ช่องว่าง"""
+    value = raw.get("description")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value
+
+
+def _count(value: Any) -> int | None:
+    """ยอดนับจาก yt-dlp: จำนวนเต็มไม่ติดลบ (float ที่เป็นจำนวนเต็มก็รับ) อย่างอื่น = ไม่รู้ (None)"""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    if isinstance(value, float) and not (value.is_integer() and value >= 0):
+        return None
+    return int(value) if value >= 0 else None
+
+
+def _stats(raw: dict) -> dict[str, int]:
+    return {key: n for key, field in _STAT_FIELDS if (n := _count(raw.get(field))) is not None}
+
+
+def _strings(value: Any, limit: int | None = None) -> list[str]:
+    """รายการข้อความ (แท็ก/หมวดหมู่): ตัดช่องว่างหัวท้าย ทิ้งอันว่างและอันซ้ำ (คงลำดับเดิม) ไม่เกิน limit"""
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if text and text not in result:
+            result.append(text)
+            if limit is not None and len(result) >= limit:
+                break
+    return result
+
+
+def _heatmap(value: Any) -> list[tuple[float, float, float]]:
+    """heatmap ของ yt-dlp [{start_time, end_time, value}] -> [(start, end, value)] เรียงตามเวลาเริ่ม
+    ทิ้งรายการที่ตัวเลขไม่ครบหรือจบไม่หลังเริ่ม"""
+    if not isinstance(value, list):
+        return []
+    entries = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        numbers = [item.get(k) for k in ("start_time", "end_time", "value")]
+        if not all(isinstance(n, int | float) and not isinstance(n, bool) for n in numbers):
+            continue
+        start, end, score = (float(n) for n in numbers)
+        if all(math.isfinite(n) for n in (start, end, score)) and 0 <= start < end:
+            entries.append((start, end, score))
+    return sorted(entries)
+
+
+def most_replayed(heatmap: Any, duration: Any = None) -> list[dict]:
+    """ช่วงที่คนดูซ้ำมากที่สุด (C-A1) สูงสุด 3 ช่วง เรียงตามเวลาเริ่ม หน่วย ms (จำนวนเต็ม)
+
+    0. ไม่ดูรายการแรกของ heatmap: ค่าพุ่งตอนต้นคลิปมาจากคนกดเล่น ไม่ใช่การดูซ้ำ (review I-2)
+    1. ไล่รายการจากค่าสูงไปต่ำ (ค่าเท่ากัน = อันที่มาก่อน) หยุดเมื่อค่าต่ำกว่าครึ่งของค่าสูงสุด
+       ข้ามอันที่ห่างจากช่วงที่เลือกแล้วไม่ถึง 10 วินาที
+    2. รวมรายการที่ติดกัน (ไม่มีช่องว่างเวลา) ที่ค่า >= 90% ของยอดนั้น ทีละอัน เลือกข้างที่ค่าสูงกว่าก่อน (เท่ากัน = ซ้าย)
+       จนช่วงกว้างถึง max(10 วินาที, 2% ของความยาวคลิป) หยุดเมื่อเจออันที่เข้าใกล้ช่วงที่เลือกแล้วไม่ถึง 10 วินาที
+       (ช่วงที่ได้จึงไม่ซ้อนกันและห่างกันเสมอ)
+    duration = ความยาวคลิป (วินาที) ไม่มี = ใช้เวลาจบของ heatmap · คลิปที่ไม่มี heatmap = []
+    """
+    entries = _heatmap(heatmap)[1:]
+    picks: list[tuple[float, float]] = []
+    if not entries:
+        return []
+    top = max(value for _, _, value in entries)
+    if top <= 0:
+        return []
+    minimum = top * MOST_REPLAYED_MIN_SHARE
+    total = _seconds(duration) or entries[-1][1]
+    width_cap = max(MOST_REPLAYED_WIDTH_MIN_S, total * MOST_REPLAYED_WIDTH_SHARE)
+
+    def clear(start: float, end: float) -> bool:
+        return all(
+            start - p_end >= MOST_REPLAYED_GAP_S or p_start - end >= MOST_REPLAYED_GAP_S
+            for p_start, p_end in picks
+        )
+
+    order = sorted(range(len(entries)), key=lambda i: (-entries[i][2], entries[i][0]))
+    for i in order:
+        if len(picks) >= MOST_REPLAYED_MAX:
+            break
+        start, end, peak = entries[i]
+        if peak < minimum:
+            break  # เรียงจากสูงไปต่ำ ที่เหลือต่ำกว่าเกณฑ์ทั้งหมด
+        if not clear(start, end):
+            continue
+        floor = peak * MOST_REPLAYED_MERGE
+
+        def joins(left: int, right: int, other: int) -> bool:
+            # สองรายการติดกันจริง (ไม่มีช่องว่างเวลา) อันที่จะรวม (other) ค่าถึงเกณฑ์ และไม่เข้าใกล้ช่วงที่เลือกแล้ว
+            o_start, o_end, o_value = entries[other]
+            touching = entries[right][0] - entries[left][1] <= _TOUCH_S
+            return touching and o_value >= floor and clear(o_start, o_end)
+
+        lo = hi = i
+        while True:
+            left = lo > 0 and joins(lo - 1, lo, lo - 1) and entries[hi][1] - entries[lo - 1][0] <= width_cap
+            right = (
+                hi + 1 < len(entries)
+                and joins(hi, hi + 1, hi + 1)
+                and entries[hi + 1][1] - entries[lo][0] <= width_cap
+            )
+            if not (left or right):
+                break
+            if left and (not right or entries[lo - 1][2] >= entries[hi + 1][2]):
+                lo -= 1
+            else:
+                hi += 1
+        picks.append((entries[lo][0], entries[hi][1]))
+    return [{"startMs": round(s * 1000), "endMs": round(e * 1000)} for s, e in sorted(picks)]
+
+
+def _stored_replayed(value: Any) -> list[dict]:
+    """mostReplayed ที่ trim_probe คำนวณเก็บไว้ (ผิดรูปแบบ = [] แล้วคำนวณจาก heatmap ถ้ามี)"""
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value[:MOST_REPLAYED_MAX]:
+        if not isinstance(item, dict):
+            return []
+        start, end = item.get("startMs"), item.get("endMs")
+        if not all(type(n) is int for n in (start, end)) or not 0 <= start < end:
+            return []
+        result.append({"startMs": start, "endMs": end})
+    return result
 
 
 def _chapters(raw: dict) -> list[dict]:
@@ -251,12 +409,34 @@ def to_video_info(raw: dict) -> dict:
     info["audio"] = _audio_formats(formats)
     info["hasStoryboard"] = any(_is_storyboard(f) for f in formats)
     info["isLive"] = raw.get("live_status") == "is_live"
+    description = _description(raw)
+    if description is not None:
+        info["description"] = description
+    # ข้อมูลคลิป (C-A1) ไม่รู้ค่า = ไม่ใส่คีย์ (หน้าเว็บซ่อนเอง)
+    stats = _stats(raw)
+    if stats:
+        info["stats"] = stats
+    tags = _strings(raw.get("tags"), TAGS_MAX)
+    if tags:
+        info["tags"] = tags
+    categories = _strings(raw.get("categories"))
+    if categories:
+        info["categories"] = categories
+    replayed = _stored_replayed(raw.get("mostReplayed")) or most_replayed(raw.get("heatmap"), raw.get("duration"))
+    if replayed:
+        info["mostReplayed"] = replayed
     return info
 
 
 def trim_probe(raw: dict) -> dict:
     """ตัดข้อมูลดิบให้เหลือที่งานถัดไปต้องใช้: ฟิลด์ของ VideoInfo, format วิดีโอ/เสียงล้วน
-    และ storyboard (พร้อม fragments/rows/columns/fps/width/height) ไม่เก็บ URL ตรงของสื่อ"""
+    และ storyboard (พร้อม fragments/rows/columns/fps/width/height) ไม่เก็บ URL ตรงของสื่อ
+
+    เพิ่ม probeVersion, description (ถ้ามี) และ captions (กลุ่มซับตาม tracks.trim_captions)
+    """
+    # import ในฟังก์ชัน: tracks import _audio_formats จากโมดูลนี้ (กัน import วนตอนโหลดโมดูล)
+    from .tracks import trim_captions
+
     formats: list[dict] = []
     for fmt in raw.get("formats") or []:
         if not isinstance(fmt, dict):
@@ -271,7 +451,8 @@ def trim_probe(raw: dict) -> dict:
             formats.append(kept)
         elif fmt.get("vcodec") == "none" or fmt.get("acodec") in (None, "none"):
             formats.append({k: fmt[k] for k in _MEDIA_FIELDS if fmt.get(k) is not None})
-    trimmed: dict[str, Any] = {
+    trimmed: dict[str, Any] = {"probeVersion": PROBE_VERSION}
+    trimmed |= {
         key: raw[key]
         for key in (
             "id",
@@ -292,6 +473,20 @@ def trim_probe(raw: dict) -> dict:
         if isinstance(c, dict)
     ]
     trimmed["formats"] = formats
+    description = _description(raw)
+    if description is not None:
+        trimmed["description"] = description
+    trimmed["captions"] = trim_captions(raw)
+    # ข้อมูลคลิป (C-A1): เก็บแบบดิบที่ทำความสะอาดแล้ว to_video_info คำนวณ stats/mostReplayed ทุกครั้งที่อ่าน
+    for _, field in _STAT_FIELDS:
+        if (count := _count(raw.get(field))) is not None:
+            trimmed[field] = count
+    for field, limit in (("tags", TAGS_MAX), ("categories", None)):
+        if values := _strings(raw.get(field), limit):
+            trimmed[field] = values
+    # heatmap ดิบมี ~100 รายการ เก็บเฉพาะช่วงที่คำนวณแล้ว (ไม่เกิน 3 ช่วง) ให้ probe_json เล็ก
+    if replayed := most_replayed(raw.get("heatmap"), raw.get("duration")):
+        trimmed["mostReplayed"] = replayed
     return trimmed
 
 
@@ -455,7 +650,10 @@ class VideoService:
             # อายุติดลบเกิน CLOCK_SKEW = นาฬิกาถอยหลังมาก ถือว่าเก่า
             if not -CLOCK_SKEW <= age < CACHE_TTL:
                 return None
-            return to_video_info(json.loads(rows[0]["probe_json"]))
+            data = json.loads(rows[0]["probe_json"])
+            if data.get("probeVersion") != PROBE_VERSION:
+                return None  # แถวรุ่นเก่า (เช่น M2 ไม่มี captions): probe ใหม่แล้วเขียนทับ
+            return to_video_info(data)
         except (ValueError, TypeError, AttributeError, KeyError):
             return None  # แถวเสีย: probe ใหม่แล้วเขียนทับ
 

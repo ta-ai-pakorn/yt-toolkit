@@ -1,0 +1,37 @@
+{
+  "wireMagic": "pb3",
+  "pens": [ {
+  
+  } ],
+  "wsWinStyles": [ {
+  
+  } ],
+  "wpWinPositions": [ {
+  
+  } ],
+  "events": [ {
+    "tStartMs": 0,
+    "dDurationMs": 5067,
+    "segs": [ {
+      "utf8": "Also hier sind wir vor den Elefanten."
+    } ]
+  }, {
+    "tStartMs": 5067,
+    "dDurationMs": 7400,
+    "segs": [ {
+      "utf8": "Das Coole an den Typen ist dass sie sehr, sehr, sehr, lange Rüssel haben."
+    } ]
+  }, {
+    "tStartMs": 12467,
+    "dDurationMs": 1800,
+    "segs": [ {
+      "utf8": "Und das ist cool."
+    } ]
+  }, {
+    "tStartMs": 17067,
+    "dDurationMs": 3933,
+    "segs": [ {
+      "utf8": "Ansonsten gibt es nicht wirklich viel zu sagen."
+    } ]
+  } ]
+}

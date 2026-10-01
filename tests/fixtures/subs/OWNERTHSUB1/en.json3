@@ -1,0 +1,133 @@
+{
+  "wireMagic": "pb3",
+  "pens": [ {
+  
+  } ],
+  "wsWinStyles": [ {
+  
+  } ],
+  "wpWinPositions": [ {
+  
+  } ],
+  "events": [ {
+    "tStartMs": 0,
+    "dDurationMs": 2500,
+    "segs": [ {
+      "utf8": "Translated by the test team"
+    } ]
+  }, {
+    "tStartMs": 3000,
+    "dDurationMs": 4200,
+    "segs": [ {
+      "utf8": "Hello everyone, today we are talking about\nmaking business tutorial videos"
+    } ]
+  }, {
+    "tStartMs": 8000,
+    "dDurationMs": 5000,
+    "segs": [ {
+      "utf8": "Many people think you need expensive equipment to get started"
+    } ]
+  }, {
+    "tStartMs": 14000,
+    "dDurationMs": 4500,
+    "segs": [ {
+      "utf8": "But in fact a single phone is enough"
+    } ]
+  }, {
+    "tStartMs": 20000,
+    "dDurationMs": 6000,
+    "segs": [ {
+      "utf8": "What matters more is the story you tell and the order you tell it in"
+    } ]
+  }, {
+    "tStartMs": 27000,
+    "dDurationMs": 5500,
+    "segs": [ {
+      "utf8": "Start with the three questions customers ask most often"
+    } ]
+  }, {
+    "tStartMs": 33500,
+    "dDurationMs": 4000,
+    "segs": [ {
+      "utf8": "Answer directly and briefly, with no beating around the bush"
+    } ]
+  }, {
+    "tStartMs": 38500,
+    "dDurationMs": 7000,
+    "segs": [ {
+      "utf8": "Once you have a script, read it aloud once to hear which sentences run too long"
+    } ]
+  }, {
+    "tStartMs": 46500,
+    "dDurationMs": 5000,
+    "segs": [ {
+      "utf8": "Split any sentence that runs too long into two parts"
+    } ]
+  }, {
+    "tStartMs": 55000,
+    "dDurationMs": 5500,
+    "segs": [ {
+      "utf8": "Then shoot the video at an angle with natural light"
+    } ]
+  }, {
+    "tStartMs": 61500,
+    "dDurationMs": 4500,
+    "segs": [ {
+      "utf8": "Sound matters more than picture, so check the audio before you press record"
+    } ]
+  }, {
+    "tStartMs": 67000,
+    "dDurationMs": 9500,
+    "segs": [ {
+      "utf8": "If you plan to publish tutorial videos every week, fix the shooting day and time in advance, and prepare the topics for the whole month in one sitting so you never have to invent a new topic each time"
+    } ]
+  }, {
+    "tStartMs": 77500,
+    "dDurationMs": 4500,
+    "segs": [ {
+      "utf8": "Editing does not need to be complicated, just cut out the mistakes"
+    } ]
+  }, {
+    "tStartMs": 82500,
+    "dDurationMs": 5000,
+    "segs": [ {
+      "utf8": "Add subtitles so viewers can follow even with the sound off"
+    } ]
+  }, {
+    "tStartMs": 88500,
+    "dDurationMs": 6000,
+    "segs": [ {
+      "utf8": "Good subtitles are short, easy to read, and appear in time with the speech"
+    } ]
+  }, {
+    "tStartMs": 95000,
+    "dDurationMs": 5500,
+    "segs": [ {
+      "utf8": "After publishing, look at where most viewers stop watching"
+    } ]
+  }, {
+    "tStartMs": 101000,
+    "dDurationMs": 5000,
+    "segs": [ {
+      "utf8": "That point is the lesson for your next video"
+    } ]
+  }, {
+    "tStartMs": 107000,
+    "dDurationMs": 6500,
+    "segs": [ {
+      "utf8": "Repeat this consistently and you will see results within a few months"
+    } ]
+  }, {
+    "tStartMs": 114500,
+    "dDurationMs": 4500,
+    "segs": [ {
+      "utf8": "Start today, there is no need to wait until everything is ready"
+    } ]
+  }, {
+    "tStartMs": 120500,
+    "dDurationMs": 4000,
+    "segs": [ {
+      "utf8": "Thank you for watching, see you next time"
+    } ]
+  } ]
+}

@@ -10,10 +10,13 @@ from .api.errors import install_error_handlers
 from .api.routes import build_router
 from .api.security import LocalOnlyMiddleware
 from .api.static import mount_web
+from .api.subtitles import build_subtitles_router
 from .api.videos import build_videos_router
 from .config import APP_NAME, Paths
+from .core.comments import PinnedCommentService
 from .core.db import Database
 from .core.extractor import Extractor
+from .core.subtitles import SubtitleService
 from .core.videos import VideoService
 from .platform import Platform
 
@@ -41,6 +44,10 @@ class AppContext:
     extractor: Extractor | None = None
     cache_root: Path | None = None
     fake: bool = False  # โหมดข้อมูลปลอม (serve + YT_TOOLKIT_FAKE=1) หน้าตรวจสุขภาพจะบอกไว้
+    # บริการซับของ M3 (run_app สร้างให้) ไม่มี = ไม่เปิด API ซับ
+    subtitles: SubtitleService | None = None
+    # บริการคอมเมนต์ปักหมุด: router ข้อมูลคลิปสร้างให้ แล้ว router โน้ตใช้ตัวเดียวกัน (ใช้ cache ร่วมกัน)
+    pinned: PinnedCommentService | None = None
 
 
 def create_app(ctx: AppContext) -> FastAPI:
@@ -50,6 +57,8 @@ def create_app(ctx: AppContext) -> FastAPI:
     app.include_router(build_router(ctx), prefix="/api")
     if ctx.videos is not None:
         app.include_router(build_videos_router(ctx), prefix="/api")
+    if ctx.subtitles is not None:
+        app.include_router(build_subtitles_router(ctx), prefix="/api")
     mount_web(app, ctx.paths.web_dist, ctx.token)
     app.add_middleware(LocalOnlyMiddleware, port=ctx.port, token=ctx.token, extra_origins=ctx.extra_origins)
     return app

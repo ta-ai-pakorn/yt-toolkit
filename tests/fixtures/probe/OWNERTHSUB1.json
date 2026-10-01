@@ -1,0 +1,577 @@
+{
+ "id": "OWNERTHSUB1",
+ "title": "Owner Thai subtitle test",
+ "channel": "ชุดทดสอบ",
+ "uploader": "ชุดทดสอบ",
+ "duration": 240,
+ "upload_date": "20260930",
+ "timestamp": 1790740800,
+ "live_status": "not_live",
+ "availability": "public",
+ "thumbnail": "https://fake.invalid/thumb/OWNERTHSUB1.jpg",
+ "chapters": null,
+ "view_count": 4321,
+ "like_count": 210,
+ "comment_count": 12,
+ "channel_follower_count": 999,
+ "tags": [
+  "ซับไทย",
+  "test: \"quotes\"",
+  "#hashtag",
+  "back\\slash",
+  "  padded tag  ",
+  ""
+ ],
+ "categories": [
+  "Education"
+ ],
+ "heatmap": [
+  {
+   "start_time": 0.0,
+   "end_time": 2.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 2.4,
+   "end_time": 4.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 4.8,
+   "end_time": 7.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 7.2,
+   "end_time": 9.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 9.6,
+   "end_time": 12.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 12.0,
+   "end_time": 14.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 14.4,
+   "end_time": 16.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 16.8,
+   "end_time": 19.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 19.2,
+   "end_time": 21.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 21.6,
+   "end_time": 24.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 24.0,
+   "end_time": 26.4,
+   "value": 0.5273
+  },
+  {
+   "start_time": 26.4,
+   "end_time": 28.8,
+   "value": 0.8521
+  },
+  {
+   "start_time": 28.8,
+   "end_time": 31.2,
+   "value": 1.0
+  },
+  {
+   "start_time": 31.2,
+   "end_time": 33.6,
+   "value": 0.8521
+  },
+  {
+   "start_time": 33.6,
+   "end_time": 36.0,
+   "value": 0.5273
+  },
+  {
+   "start_time": 36.0,
+   "end_time": 38.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 38.4,
+   "end_time": 40.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 40.8,
+   "end_time": 43.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 43.2,
+   "end_time": 45.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 45.6,
+   "end_time": 48.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 48.0,
+   "end_time": 50.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 50.4,
+   "end_time": 52.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 52.8,
+   "end_time": 55.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 55.2,
+   "end_time": 57.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 57.6,
+   "end_time": 60.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 60.0,
+   "end_time": 62.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 62.4,
+   "end_time": 64.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 64.8,
+   "end_time": 67.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 67.2,
+   "end_time": 69.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 69.6,
+   "end_time": 72.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 72.0,
+   "end_time": 74.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 74.4,
+   "end_time": 76.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 76.8,
+   "end_time": 79.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 79.2,
+   "end_time": 81.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 81.6,
+   "end_time": 84.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 84.0,
+   "end_time": 86.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 86.4,
+   "end_time": 88.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 88.8,
+   "end_time": 91.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 91.2,
+   "end_time": 93.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 93.6,
+   "end_time": 96.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 96.0,
+   "end_time": 98.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 98.4,
+   "end_time": 100.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 100.8,
+   "end_time": 103.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 103.2,
+   "end_time": 105.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 105.6,
+   "end_time": 108.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 108.0,
+   "end_time": 110.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 110.4,
+   "end_time": 112.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 112.8,
+   "end_time": 115.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 115.2,
+   "end_time": 117.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 117.6,
+   "end_time": 120.0,
+   "value": 0.275
+  },
+  {
+   "start_time": 120.0,
+   "end_time": 122.4,
+   "value": 0.5357
+  },
+  {
+   "start_time": 122.4,
+   "end_time": 124.8,
+   "value": 0.7576
+  },
+  {
+   "start_time": 124.8,
+   "end_time": 127.2,
+   "value": 0.7781
+  },
+  {
+   "start_time": 127.2,
+   "end_time": 129.6,
+   "value": 0.5803
+  },
+  {
+   "start_time": 129.6,
+   "end_time": 132.0,
+   "value": 0.3142
+  },
+  {
+   "start_time": 132.0,
+   "end_time": 134.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 134.4,
+   "end_time": 136.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 136.8,
+   "end_time": 139.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 139.2,
+   "end_time": 141.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 141.6,
+   "end_time": 144.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 144.0,
+   "end_time": 146.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 146.4,
+   "end_time": 148.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 148.8,
+   "end_time": 151.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 151.2,
+   "end_time": 153.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 153.6,
+   "end_time": 156.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 156.0,
+   "end_time": 158.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 158.4,
+   "end_time": 160.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 160.8,
+   "end_time": 163.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 163.2,
+   "end_time": 165.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 165.6,
+   "end_time": 168.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 168.0,
+   "end_time": 170.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 170.4,
+   "end_time": 172.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 172.8,
+   "end_time": 175.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 175.2,
+   "end_time": 177.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 177.6,
+   "end_time": 180.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 180.0,
+   "end_time": 182.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 182.4,
+   "end_time": 184.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 184.8,
+   "end_time": 187.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 187.2,
+   "end_time": 189.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 189.6,
+   "end_time": 192.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 192.0,
+   "end_time": 194.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 194.4,
+   "end_time": 196.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 196.8,
+   "end_time": 199.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 199.2,
+   "end_time": 201.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 201.6,
+   "end_time": 204.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 204.0,
+   "end_time": 206.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 206.4,
+   "end_time": 208.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 208.8,
+   "end_time": 211.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 211.2,
+   "end_time": 213.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 213.6,
+   "end_time": 216.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 216.0,
+   "end_time": 218.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 218.4,
+   "end_time": 220.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 220.8,
+   "end_time": 223.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 223.2,
+   "end_time": 225.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 225.6,
+   "end_time": 228.0,
+   "value": 0.25
+  },
+  {
+   "start_time": 228.0,
+   "end_time": 230.4,
+   "value": 0.25
+  },
+  {
+   "start_time": 230.4,
+   "end_time": 232.8,
+   "value": 0.25
+  },
+  {
+   "start_time": 232.8,
+   "end_time": 235.2,
+   "value": 0.25
+  },
+  {
+   "start_time": 235.2,
+   "end_time": 237.6,
+   "value": 0.25
+  },
+  {
+   "start_time": 237.6,
+   "end_time": 240.0,
+   "value": 0.25
+  }
+ ],
+ "description": "Synthetic clip: an English video with owner-uploaded Thai and English subtitles.",
+ "subtitles": {
+  "th": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/OWNERTHSUB1/th.json3",
+    "name": "Thai"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://fake.invalid/subs/OWNERTHSUB1/th.vtt",
+    "name": "Thai"
+   }
+  ],
+  "en": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/OWNERTHSUB1/en.json3",
+    "name": "English"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://fake.invalid/subs/OWNERTHSUB1/en.vtt",
+    "name": "English"
+   }
+  ]
+ },
+ "automatic_captions": {
+  "en-orig": [
+   {
+    "ext": "json3",
+    "url": "https://fake.invalid/subs/OWNERTHSUB1/en.json3",
+    "name": "English (Original)"
+   }
+  ]
+ },
+ "formats": [
+  {
+   "format_id": "140",
+   "format_note": "English original (default), medium",
+   "ext": "m4a",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2",
+   "language": "en",
+   "language_preference": 10
+  }
+ ]
+}

@@ -17,6 +17,11 @@ MESSAGES: dict[str, str] = {
     "E_AGE_RESTRICTED": "คลิปนี้จำกัดอายุ ต้องล็อกอินถึงจะโหลดได้ ซึ่งเวอร์ชันนี้ยังไม่รองรับ",
     "E_LIVE_NOT_READY": "คลิปนี้ยังถ่ายทอดสดอยู่หรือยังไม่เผยแพร่ ลองใหม่หลังจบไลฟ์",
     "E_NO_STORYBOARD": "คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว ภาพคมจะใช้ได้ในเวอร์ชันถัดไป",
+    "E_NO_SUBTITLES": "คลิปนี้ไม่มีซับ",
+    # ยูทูปตอบ 429 เฉพาะคำขอซับแปล (tlang) ไม่ใช่การขอยืนยันว่าไม่ใช่บอท จึงไม่พักคิว (M4)
+    "E_TRANSLATION_BLOCKED": "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน",
+    # เซสชันผู้ชมยังอายุไม่ถึง 75 วินาที (owner round 3) หน้าเว็บนับถอยหลังจาก retryAfterSeconds แล้วโหลดให้เอง
+    "E_SESSION_WARMING": "กำลังเตรียมซับแปลจากยูทูป รอสักครู่แล้วโหลดใหม่",
     "E_NETWORK": "เน็ตหลุด ลองใหม่อีกครั้ง",
     "E_UNKNOWN": "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล",
 }
@@ -93,14 +98,19 @@ def classify(message: str) -> str:
 
 
 class YtError(Exception):
-    """error ที่มาจากการดึงข้อมูลยูทูป: code = รหัสใน PRD ข้อ 7, detail = ข้อความเทคนิคดิบ"""
+    """error ที่มาจากการดึงข้อมูลยูทูป: code = รหัสใน PRD ข้อ 7, detail = ข้อความเทคนิคดิบ
+
+    retry_after = อีกกี่วินาทีลองใหม่ได้ (มีเฉพาะ E_SESSION_WARMING) API ส่งเป็น retryAfterSeconds และ Retry-After
+    """
 
     code: str
     detail: str
+    retry_after: int | None
 
-    def __init__(self, code: str, detail: str = "") -> None:
+    def __init__(self, code: str, detail: str = "", *, retry_after: int | None = None) -> None:
         self.code = code
         self.detail = detail
+        self.retry_after = retry_after
         super().__init__(f"{code}: {detail or self.message}")
 
     @property

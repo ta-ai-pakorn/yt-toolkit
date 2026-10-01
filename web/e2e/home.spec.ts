@@ -922,9 +922,17 @@ test.describe("ปรับจากการเดินตามเส้น�
     const heading = page.getByRole("heading", { level: 1 })
     await expect(heading).toContainText("Big Buck Bunny")
     await expect(heading).toBeFocused()
-    // Tab ต่อไปถึงปุ่มในส่วนภาพเฟรมเลย ไม่ต้องย้อนผ่านเมนูบนหัว
+    // Tab ต่อไปเดินหน้าจากชื่อคลิป ไม่ต้องย้อนผ่านเมนูบนหัว: บันทึกเป็นโน้ต → เปิดในยูทูป → แท็บภาพเฟรม → ปุ่มในส่วนภาพเฟรม
+    // (owner round 4: คำอธิบาย คอมเมนต์ปักหมุด chapter แท็ก ย้ายไปแท็บข้อมูลคลิป หัวคลิปจึงไม่มีจุด Tab ที่ขึ้นกับข้อมูลคลิปแล้ว)
     await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(128)
     await page.keyboard.press("Tab")
-    await expect(page.getByRole("button", { name: "โหลดภาพรวมเฟรม" })).toBeFocused()
+    await expect(page.getByRole("button", { name: "บันทึกเป็นโน้ต (.md)", exact: true })).toBeFocused()
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("link", { name: /^เปิดในยูทูป/ })).toBeFocused()
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("tab", { name: "ภาพเฟรม", exact: true })).toBeFocused()
+    await page.keyboard.press("Tab")
+    // owner round 5: BBB มีช่วงดูซ้ำบ่อย ปุ่มตัวกรองจึงเป็นปุ่มแรกของส่วนภาพเฟรม
+    await expect(page.getByRole("button", { name: /^ดูซ้ำบ่อย \(\d+ ภาพ\)$/ })).toBeFocused()
   })
 })

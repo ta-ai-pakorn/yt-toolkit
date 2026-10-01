@@ -22,13 +22,14 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from ..core.comments import PinnedCommentService
 from ..core.frames import contact_sheet, file_timecode, frames_zip
 from ..core.inputs import VIDEO_ID, InputItem, scan_text
 from ..core.storyboard import FOLDER as STORYBOARD_FOLDER
 from ..core.storyboard import INDEX as STORYBOARD_INDEX
 from ..core.storyboard import get_storyboard
 from ..core.yterrors import MESSAGES, YtError
-from .errors import error_response
+from .errors import error_body, error_response
 from .safepath import safe_parts
 
 if TYPE_CHECKING:
@@ -49,10 +50,16 @@ STATUS_BY_CODE: dict[str, int] = {
     "E_VIDEO_UNAVAILABLE": 404,
     "E_VIDEO_PRIVATE": 404,
     "E_NO_STORYBOARD": 404,
+    "E_NO_SUBTITLES": 404,
     "E_LIVE_NOT_READY": 409,
     "E_AGE_RESTRICTED": 409,
     "E_GEO_BLOCKED": 409,
     "E_BOT_CHECK": 429,
+    # ซับแปลถูกยูทูปปิดชั่วคราว (ต้นทางตอบ 429) ใช้ 503 ให้ต่างจาก E_BOT_CHECK ที่หมายถึงพักทั้งคิว
+    "E_TRANSLATION_BLOCKED": 503,
+    # เซสชันผู้ชมยังไม่พร้อมสำหรับซับแปล: 503 + Retry-After (มาตรฐาน HTTP ของ "กลับมาใหม่ในอีก N วินาที")
+    # ไม่ใช้ 425 Too Early เพราะรหัสนั้นหมายถึงคำขอแบบ TLS early data ไม่ใช่ทรัพยากรที่ยังไม่พร้อม
+    "E_SESSION_WARMING": 503,
     "E_NETWORK": 502,
 }
 
@@ -117,7 +124,13 @@ def yt_error_response(exc: YtError, subject: str) -> JSONResponse:
         exc.detail,
         exc_info=exc if unexpected else None,
     )
-    return error_response(status, code, exc.message, exc.detail or None)
+    if exc.retry_after is None:
+        return error_response(status, code, exc.message, exc.detail or None)
+    # ช่องเพิ่มใน envelope: error.retryAfterSeconds (วินาทีเต็ม >= 1) หน้าเว็บนับถอยหลังจากค่านี้
+    seconds = max(1, int(exc.retry_after))
+    body = error_body(code, exc.message, exc.detail or None)
+    body["error"]["retryAfterSeconds"] = seconds
+    return JSONResponse(status_code=status, content=body, headers={"Retry-After": str(seconds)})
 
 
 def _maps_yt_errors(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -157,6 +170,9 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
         raise ValueError("ต้องมี videos, extractor และ cache_root ครบถึงจะเปิด API ข้อมูลคลิปได้")
     cache_root = Path(cache_root)
     router = APIRouter()
+    # เรียกผ่าน lambda: extractor ทดสอบบางตัวไม่มี pinned_comment และไม่ต้องมีถ้าไม่ได้เรียก route นี้
+    pinned = PinnedCommentService(videos, lambda vid: extractor.pinned_comment(vid), cache_root)
+    ctx.pinned = pinned
 
     def storyboard_index(video_id: str) -> dict:
         return get_storyboard(video_id, videos, cache_root, extractor.fetch)
@@ -182,6 +198,12 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
     def video_info(video_id: str, refresh: bool = False, peek: bool = False) -> dict:
         # peek=1: หน้าเว็บขอแค่ชื่อ/ภาพปก (รายการผล W1) ไม่นับว่าเปิดคลิป จึงไม่ขึ้น "ล่าสุด"
         return videos.get(video_id, refresh=refresh, peek=peek)
+
+    @router.get("/videos/{video_id}/pinned-comment", response_model=None)
+    @_maps_yt_errors
+    def pinned_comment(video_id: str) -> dict:
+        # C-A2: ดึงเมื่อผู้ใช้เปิดดูเท่านั้น null = ไม่มีคอมเมนต์ปักหมุดจากเจ้าของช่อง
+        return {"comment": pinned.get(video_id)}
 
     @router.get("/videos/{video_id}/storyboard", response_model=None)
     @_maps_yt_errors

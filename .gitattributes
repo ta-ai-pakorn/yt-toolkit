@@ -5,3 +5,4 @@
 *.woff binary
 *.woff2 binary
 *.ico binary
+tests/fixtures/subs/golden/** -text

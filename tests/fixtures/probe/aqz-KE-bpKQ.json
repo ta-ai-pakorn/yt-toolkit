@@ -10,6 +10,525 @@
  "availability": "public",
  "thumbnail": "https://i.ytimg.com/vi_webp/aqz-KE-bpKQ/maxresdefault.webp",
  "chapters": null,
+ "view_count": 1234567,
+ "like_count": 23456,
+ "comment_count": 3210,
+ "channel_follower_count": 1870000,
+ "tags": [
+  "Big Buck Bunny",
+  "Blender",
+  "open movie",
+  "animation",
+  "Creative Commons"
+ ],
+ "categories": [
+  "Film & Animation"
+ ],
+ "heatmap": [
+  {
+   "start_time": 0.0,
+   "end_time": 6.35,
+   "value": 0.4599
+  },
+  {
+   "start_time": 6.35,
+   "end_time": 12.7,
+   "value": 0.1805
+  },
+  {
+   "start_time": 12.7,
+   "end_time": 19.05,
+   "value": 0.1805
+  },
+  {
+   "start_time": 19.05,
+   "end_time": 25.4,
+   "value": 0.1805
+  },
+  {
+   "start_time": 25.4,
+   "end_time": 31.75,
+   "value": 0.1805
+  },
+  {
+   "start_time": 31.75,
+   "end_time": 38.1,
+   "value": 0.1805
+  },
+  {
+   "start_time": 38.1,
+   "end_time": 44.45,
+   "value": 0.1805
+  },
+  {
+   "start_time": 44.45,
+   "end_time": 50.8,
+   "value": 0.1805
+  },
+  {
+   "start_time": 50.8,
+   "end_time": 57.15,
+   "value": 0.1805
+  },
+  {
+   "start_time": 57.15,
+   "end_time": 63.5,
+   "value": 0.1805
+  },
+  {
+   "start_time": 63.5,
+   "end_time": 69.85,
+   "value": 0.2922
+  },
+  {
+   "start_time": 69.85,
+   "end_time": 76.2,
+   "value": 0.7152
+  },
+  {
+   "start_time": 76.2,
+   "end_time": 82.55,
+   "value": 1.0
+  },
+  {
+   "start_time": 82.55,
+   "end_time": 88.9,
+   "value": 0.7986
+  },
+  {
+   "start_time": 88.9,
+   "end_time": 95.25,
+   "value": 0.3643
+  },
+  {
+   "start_time": 95.25,
+   "end_time": 101.6,
+   "value": 0.1805
+  },
+  {
+   "start_time": 101.6,
+   "end_time": 107.95,
+   "value": 0.1805
+  },
+  {
+   "start_time": 107.95,
+   "end_time": 114.3,
+   "value": 0.1805
+  },
+  {
+   "start_time": 114.3,
+   "end_time": 120.65,
+   "value": 0.1805
+  },
+  {
+   "start_time": 120.65,
+   "end_time": 127.0,
+   "value": 0.1805
+  },
+  {
+   "start_time": 127.0,
+   "end_time": 133.35,
+   "value": 0.1805
+  },
+  {
+   "start_time": 133.35,
+   "end_time": 139.7,
+   "value": 0.1805
+  },
+  {
+   "start_time": 139.7,
+   "end_time": 146.05,
+   "value": 0.1805
+  },
+  {
+   "start_time": 146.05,
+   "end_time": 152.4,
+   "value": 0.1805
+  },
+  {
+   "start_time": 152.4,
+   "end_time": 158.75,
+   "value": 0.1805
+  },
+  {
+   "start_time": 158.75,
+   "end_time": 165.1,
+   "value": 0.1805
+  },
+  {
+   "start_time": 165.1,
+   "end_time": 171.45,
+   "value": 0.1805
+  },
+  {
+   "start_time": 171.45,
+   "end_time": 177.8,
+   "value": 0.1805
+  },
+  {
+   "start_time": 177.8,
+   "end_time": 184.15,
+   "value": 0.1805
+  },
+  {
+   "start_time": 184.15,
+   "end_time": 190.5,
+   "value": 0.1805
+  },
+  {
+   "start_time": 190.5,
+   "end_time": 196.85,
+   "value": 0.1805
+  },
+  {
+   "start_time": 196.85,
+   "end_time": 203.2,
+   "value": 0.1805
+  },
+  {
+   "start_time": 203.2,
+   "end_time": 209.55,
+   "value": 0.1805
+  },
+  {
+   "start_time": 209.55,
+   "end_time": 215.9,
+   "value": 0.1805
+  },
+  {
+   "start_time": 215.9,
+   "end_time": 222.25,
+   "value": 0.1805
+  },
+  {
+   "start_time": 222.25,
+   "end_time": 228.6,
+   "value": 0.1805
+  },
+  {
+   "start_time": 228.6,
+   "end_time": 234.95,
+   "value": 0.1805
+  },
+  {
+   "start_time": 234.95,
+   "end_time": 241.3,
+   "value": 0.1805
+  },
+  {
+   "start_time": 241.3,
+   "end_time": 247.65,
+   "value": 0.1805
+  },
+  {
+   "start_time": 247.65,
+   "end_time": 254.0,
+   "value": 0.1805
+  },
+  {
+   "start_time": 254.0,
+   "end_time": 260.35,
+   "value": 0.1805
+  },
+  {
+   "start_time": 260.35,
+   "end_time": 266.7,
+   "value": 0.1805
+  },
+  {
+   "start_time": 266.7,
+   "end_time": 273.05,
+   "value": 0.1805
+  },
+  {
+   "start_time": 273.05,
+   "end_time": 279.4,
+   "value": 0.1805
+  },
+  {
+   "start_time": 279.4,
+   "end_time": 285.75,
+   "value": 0.1805
+  },
+  {
+   "start_time": 285.75,
+   "end_time": 292.1,
+   "value": 0.1805
+  },
+  {
+   "start_time": 292.1,
+   "end_time": 298.45,
+   "value": 0.282
+  },
+  {
+   "start_time": 298.45,
+   "end_time": 304.8,
+   "value": 0.5959
+  },
+  {
+   "start_time": 304.8,
+   "end_time": 311.15,
+   "value": 0.8347
+  },
+  {
+   "start_time": 311.15,
+   "end_time": 317.5,
+   "value": 0.7747
+  },
+  {
+   "start_time": 317.5,
+   "end_time": 323.85,
+   "value": 0.4765
+  },
+  {
+   "start_time": 323.85,
+   "end_time": 330.2,
+   "value": 0.1942
+  },
+  {
+   "start_time": 330.2,
+   "end_time": 336.55,
+   "value": 0.1805
+  },
+  {
+   "start_time": 336.55,
+   "end_time": 342.9,
+   "value": 0.1805
+  },
+  {
+   "start_time": 342.9,
+   "end_time": 349.25,
+   "value": 0.1805
+  },
+  {
+   "start_time": 349.25,
+   "end_time": 355.6,
+   "value": 0.1805
+  },
+  {
+   "start_time": 355.6,
+   "end_time": 361.95,
+   "value": 0.1805
+  },
+  {
+   "start_time": 361.95,
+   "end_time": 368.3,
+   "value": 0.1805
+  },
+  {
+   "start_time": 368.3,
+   "end_time": 374.65,
+   "value": 0.1805
+  },
+  {
+   "start_time": 374.65,
+   "end_time": 381.0,
+   "value": 0.1805
+  },
+  {
+   "start_time": 381.0,
+   "end_time": 387.35,
+   "value": 0.1805
+  },
+  {
+   "start_time": 387.35,
+   "end_time": 393.7,
+   "value": 0.1805
+  },
+  {
+   "start_time": 393.7,
+   "end_time": 400.05,
+   "value": 0.1805
+  },
+  {
+   "start_time": 400.05,
+   "end_time": 406.4,
+   "value": 0.1805
+  },
+  {
+   "start_time": 406.4,
+   "end_time": 412.75,
+   "value": 0.1805
+  },
+  {
+   "start_time": 412.75,
+   "end_time": 419.1,
+   "value": 0.1805
+  },
+  {
+   "start_time": 419.1,
+   "end_time": 425.45,
+   "value": 0.1805
+  },
+  {
+   "start_time": 425.45,
+   "end_time": 431.8,
+   "value": 0.1805
+  },
+  {
+   "start_time": 431.8,
+   "end_time": 438.15,
+   "value": 0.1805
+  },
+  {
+   "start_time": 438.15,
+   "end_time": 444.5,
+   "value": 0.1805
+  },
+  {
+   "start_time": 444.5,
+   "end_time": 450.85,
+   "value": 0.1805
+  },
+  {
+   "start_time": 450.85,
+   "end_time": 457.2,
+   "value": 0.1805
+  },
+  {
+   "start_time": 457.2,
+   "end_time": 463.55,
+   "value": 0.1805
+  },
+  {
+   "start_time": 463.55,
+   "end_time": 469.9,
+   "value": 0.1805
+  },
+  {
+   "start_time": 469.9,
+   "end_time": 476.25,
+   "value": 0.1805
+  },
+  {
+   "start_time": 476.25,
+   "end_time": 482.6,
+   "value": 0.1805
+  },
+  {
+   "start_time": 482.6,
+   "end_time": 488.95,
+   "value": 0.1805
+  },
+  {
+   "start_time": 488.95,
+   "end_time": 495.3,
+   "value": 0.1805
+  },
+  {
+   "start_time": 495.3,
+   "end_time": 501.65,
+   "value": 0.1805
+  },
+  {
+   "start_time": 501.65,
+   "end_time": 508.0,
+   "value": 0.1805
+  },
+  {
+   "start_time": 508.0,
+   "end_time": 514.35,
+   "value": 0.3222
+  },
+  {
+   "start_time": 514.35,
+   "end_time": 520.7,
+   "value": 0.6602
+  },
+  {
+   "start_time": 520.7,
+   "end_time": 527.05,
+   "value": 0.604
+  },
+  {
+   "start_time": 527.05,
+   "end_time": 533.4,
+   "value": 0.2468
+  },
+  {
+   "start_time": 533.4,
+   "end_time": 539.75,
+   "value": 0.1805
+  },
+  {
+   "start_time": 539.75,
+   "end_time": 546.1,
+   "value": 0.1805
+  },
+  {
+   "start_time": 546.1,
+   "end_time": 552.45,
+   "value": 0.1805
+  },
+  {
+   "start_time": 552.45,
+   "end_time": 558.8,
+   "value": 0.1805
+  },
+  {
+   "start_time": 558.8,
+   "end_time": 565.15,
+   "value": 0.1805
+  },
+  {
+   "start_time": 565.15,
+   "end_time": 571.5,
+   "value": 0.1805
+  },
+  {
+   "start_time": 571.5,
+   "end_time": 577.85,
+   "value": 0.1805
+  },
+  {
+   "start_time": 577.85,
+   "end_time": 584.2,
+   "value": 0.1805
+  },
+  {
+   "start_time": 584.2,
+   "end_time": 590.55,
+   "value": 0.1805
+  },
+  {
+   "start_time": 590.55,
+   "end_time": 596.9,
+   "value": 0.1805
+  },
+  {
+   "start_time": 596.9,
+   "end_time": 603.25,
+   "value": 0.1805
+  },
+  {
+   "start_time": 603.25,
+   "end_time": 609.6,
+   "value": 0.1805
+  },
+  {
+   "start_time": 609.6,
+   "end_time": 615.95,
+   "value": 0.1805
+  },
+  {
+   "start_time": 615.95,
+   "end_time": 622.3,
+   "value": 0.1805
+  },
+  {
+   "start_time": 622.3,
+   "end_time": 628.65,
+   "value": 0.1805
+  },
+  {
+   "start_time": 628.65,
+   "end_time": 635.0,
+   "value": 0.1805
+  }
+ ],
+ "description": "UHD High Frame rate version of the iconic short film by Blender, Big Buck Bunny. More info:  https://studio.blender.org/projects/big-buck-bunny/\n\nLearn more about this UHD high frame-rate version at: http://bbb3d.renderfarming.net",
+ "subtitles": {},
+ "automatic_captions": {},
  "formats": [
   {
    "format_id": "sb3",

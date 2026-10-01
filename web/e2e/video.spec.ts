@@ -14,8 +14,9 @@ const FRAME_LIST = "รายการภาพเฟรม"
 const FRAME_COUNT = 128
 // ลิงก์เว็บอื่นยังเป็นแถวสีแดง (ข้อความธรรมดาที่ไม่มีลิงก์ถูกข้ามเงียบ ๆ ตั้งแต่ D1)
 const NOT_YOUTUBE = "https://vimeo.com/123"
-const MENU_ITEMS = ["คัดลอกภาพ", "โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้"]
+const MENU_ITEMS = ["คัดลอกภาพ", "โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้", "เปิดในยูทูปตรงเวลานี้"]
 
+const frameSection = (page: Page) => page.getByRole("region", { name: "ภาพเฟรม" })
 const frameItems = (page: Page) => page.getByRole("list", { name: FRAME_LIST }).getByRole("listitem")
 const frameButton = (page: Page, time: string) => page.getByRole("button", { name: `ภาพเฟรมที่ ${time}` })
 
@@ -29,15 +30,24 @@ test.describe("W2 หัวคลิป", () => {
     await page.goto(`/v/${BBB}`)
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny 60fps 4K")
     await expect(page.getByText("ช่อง Blender")).toBeVisible()
-    await expect(page.getByText("ความยาว 10:35")).toBeVisible()
-    await expect(page.getByText("เผยแพร่ 10 พฤศจิกายน 2557")).toBeVisible()
+    // owner round 4: ความยาวและวันที่อยู่ในช่องตัวเลข (ป้ายเล็ก + ค่าใหญ่) ชื่อเต็มอยู่ใน aria-label และ title
+    const duration = page.getByRole("img", { name: "ความยาว 10:35" })
+    await expect(duration).toBeVisible()
+    await expect(duration).toHaveText("ความยาว10:35")
+    const published = page.getByRole("img", { name: "เผยแพร่ 10 พฤศจิกายน 2557" })
+    await expect(published).toBeVisible()
+    await expect(published).toHaveAttribute("title", "เผยแพร่ 10 พฤศจิกายน 2557")
     await expect(page.getByText(/\d+ ตอน/)).toHaveCount(0)
     await expect(page).toHaveTitle("Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film · YT Toolkit")
   })
 
-  test("คลิปที่มี chapter แสดงป้าย '3 ตอน' และโลโก้พากลับหน้าแรก", async ({ page }) => {
-    await page.goto(`/v/${ZOO}`)
-    await expect(page.getByText("3 ตอน")).toBeVisible()
+  test("คลิปที่มี chapter: จำนวนตอนอยู่ที่หัวข้อ 'Chapter (3 ตอน)' ในแท็บข้อมูลคลิป ไม่มีป้าย '3 ตอน' ซ้ำในแถวข้อมูล · โลโก้พากลับหน้าแรก", async ({
+    page,
+  }) => {
+    await page.goto(`/v/${ZOO}?tab=info`)
+    await expect(page.getByRole("heading", { level: 2, name: "Chapter (3 ตอน)" })).toBeVisible()
+    // owner round 2: ป้าย "{n} ตอน" ในแถวข้อมูลถูกเอาออก (ซ้ำกับหัวข้อกล่อง chapter)
+    await expect(page.getByText("3 ตอน", { exact: true })).toHaveCount(0)
     await expect(page.getByRole("banner").getByRole("link", { name: "YT Toolkit" })).toHaveAttribute("href", "/")
   })
 
@@ -170,8 +180,9 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(first).toHaveAttribute("loading", "lazy")
     await expect(first).toHaveAttribute("width", "320")
     await expect(first).toHaveAttribute("height", "180")
-    await expect(page.getByRole("button", { name: /ดูทั้งหมด/ })).toHaveCount(0)
-    await expect(page.getByRole("button", { name: "ย่อ" })).toHaveCount(0)
+    await expect(frameSection(page)).toBeVisible()
+    await expect(frameSection(page).getByRole("button", { name: /ดูทั้งหมด/ })).toHaveCount(0)
+    await expect(frameSection(page).getByRole("button", { name: "ย่อ" })).toHaveCount(0)
   })
 
   test("D7: ภาพสุดท้ายของคลิปยาว (00:10:3x) อยู่ในหน้าแล้วโดยไม่ต้องกดอะไร · ภาพที่อยู่ไกลจอใช้ content-visibility", async ({
@@ -200,7 +211,9 @@ test.describe("W2 ภาพเฟรม", () => {
   test("คีย์บอร์ด: Tab ถึงภาพเฟรมได้ เห็น timecode ตอนโฟกัส", async ({ page }) => {
     await openBbb(page)
     const first = frameButton(page, "00:00:00")
-    for (let i = 0; i < 10 && !(await first.evaluate((el) => el === document.activeElement)); i++) {
+    // หัวคลิปมีปุ่มที่โฟกัสได้ก่อนแถบแท็บ (ปก โน้ต เปิดในยูทูป ฯลฯ)
+    // เทสนี้ตรวจว่ากด Tab ไปถึงภาพเฟรมได้ ไม่ได้ล็อกจำนวนครั้ง จึงให้กดได้ถึง 40 ครั้ง
+    for (let i = 0; i < 40 && !(await first.evaluate((el) => el === document.activeElement)); i++) {
       await page.keyboard.press("Tab")
     }
     await expect(first).toBeFocused()
@@ -214,7 +227,7 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(chip("00:00:00")).toBeHidden()
   })
 
-  test("คีย์บอร์ด: Shift+F10 และปุ่ม Menu เปิดเมนู มีสี่รายการ · Esc ปิดแล้วโฟกัสกลับที่ภาพ", async ({ page }) => {
+  test("คีย์บอร์ด: Shift+F10 และปุ่ม Menu เปิดเมนู มีห้ารายการ · Esc ปิดแล้วโฟกัสกลับที่ภาพ", async ({ page }) => {
     await openBbb(page)
     const frame = frameButton(page, "00:00:09")
     await frame.focus()
@@ -275,6 +288,48 @@ test.describe("W2 ภาพเฟรม", () => {
     await page.keyboard.press("Enter")
     await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`https://youtu.be/${BBB}?t=9`)
+  })
+
+  /** จด window.open ทุกครั้ง (ไม่เปิดแท็บยูทูปจริงระหว่างทดสอบ) */
+  async function recordWindowOpen(page: Page) {
+    await page.addInitScript(() => {
+      const opened: { url: string; target: string; features: string }[] = []
+      Object.defineProperty(window, "__opened", { value: opened })
+      window.open = (url?: string | URL, target?: string, features?: string) => {
+        opened.push({ url: String(url), target: target ?? "", features: features ?? "" })
+        return null
+      }
+    })
+    return () => page.evaluate(() => (window as unknown as { __opened: { url: string; target: string; features: string }[] }).__opened)
+  }
+
+  test("คลิกขวาภาพที่สอง (tMs 4961) → 'เปิดในยูทูปตรงเวลานี้' เปิดหน้าคลิปที่ &t=4s ในแท็บใหม่ แบบ noopener", async ({ page }) => {
+    const opened = await recordWindowOpen(page)
+    await openBbb(page)
+    await frameItems(page).nth(1).click({ button: "right" })
+    await page.getByRole("menuitem", { name: "เปิดในยูทูปตรงเวลานี้" }).click()
+    await expect.poll(opened).toHaveLength(1)
+    const [call] = await opened()
+    expect(call.url).toBe(`https://www.youtube.com/watch?v=${BBB}&t=4s`)
+    expect(call.target).toBe("_blank")
+    expect(call.features).toContain("noopener")
+    await expect(page.getByRole("menu")).toHaveCount(0)
+  })
+
+  test("คีย์บอร์ด: Shift+F10 แล้วลูกศรลง 4 ครั้งถึง 'เปิดในยูทูปตรงเวลานี้' · Enter เปิดที่ &t=9s", async ({ page }) => {
+    const opened = await recordWindowOpen(page)
+    await openBbb(page)
+    await frameButton(page, "00:00:09").focus()
+    await page.keyboard.press("Shift+F10")
+    await expect(page.getByRole("menuitem", { name: "คัดลอกภาพ" })).toBeFocused()
+    for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown")
+    await expect(page.getByRole("menuitem", { name: "เปิดในยูทูปตรงเวลานี้" })).toBeFocused()
+    await page.keyboard.press("Enter")
+    await expect.poll(opened).toHaveLength(1)
+    const [call] = await opened()
+    expect(call.url).toBe(`https://www.youtube.com/watch?v=${BBB}&t=9s`)
+    expect(call.target).toBe("_blank")
+    expect(call.features).toContain("noopener")
   })
 
   test("คัดลอกลิงก์ไม่ได้ → toast error", async ({ page }) => {
@@ -461,7 +516,8 @@ test.describe("W2 จอแคบ", () => {
     expect(columns).toBe(3)
     await expect(frameItems(page).locator("visible=true")).toHaveCount(FRAME_COUNT)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    await expect(page.getByRole("button", { name: /ดูทั้งหมด/ })).toHaveCount(0)
+    await expect(frameSection(page)).toBeVisible()
+    await expect(frameSection(page).getByRole("button", { name: /ดูทั้งหมด/ })).toHaveCount(0)
   })
 })
 

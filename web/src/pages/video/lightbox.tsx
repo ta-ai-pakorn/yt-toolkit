@@ -1,5 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
-import { useState, type KeyboardEvent } from "react"
+import { useState, type KeyboardEvent, type ReactNode } from "react"
 
 import { fill, th } from "@/i18n/th"
 import { formatTimecode } from "@/lib/format"
@@ -9,6 +9,75 @@ import type { StoryboardFrame } from "@/lib/types"
 const MAX_UPSCALE = 2
 // ขนาดสำรองเผื่อเบราว์เซอร์บอกขนาดภาพไม่ได้
 const DEFAULT_SIZE = { width: 320, height: 180 }
+
+type LightboxProps = {
+  open: boolean
+  src: string
+  /** ชื่อกล่องสำหรับโปรแกรมอ่านหน้าจอ */
+  label: string
+  onClose: () => void
+  /** ปิดแล้วโฟกัสกลับที่ไหน */
+  finalFocus: () => HTMLElement | null
+  /** ภาพชุดเดียวกันขนาดเท่ากัน: ค่านี้เปลี่ยน (ชุดภาพใหม่) = วัดขนาดจริงใหม่ */
+  sizeKey: unknown
+  onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void
+  /** ของเพิ่มในกล่อง เช่นข้อความที่อ่านออกเสียงเมื่อเลื่อนภาพ */
+  children?: ReactNode
+}
+
+/**
+ * ภาพขนาดใหญ่บนพื้นหลังมืด: มีแต่ภาพ ไม่มีกรอบ ไม่มีปุ่ม ไม่มีคำบรรยาย
+ * ปิดด้วย Esc, คลิกพื้นหลัง หรือคลิกที่ภาพ · ใช้กับภาพเฟรม (FrameLightbox) และภาพปกที่หัวคลิป
+ */
+export function Lightbox({ open, src, label, onClose, finalFocus, sizeKey, onKeyDown, children }: LightboxProps) {
+  // ขนาดจริงของภาพ: ทุกภาพในชุดเดียวกันขนาดเท่ากัน จึงใช้ขนาดของภาพที่โหลดแล้วกับภาพถัดไปได้เลย
+  // ยังไม่รู้ขนาด (เปิดครั้งแรก) = ซ่อนภาพไว้จนโหลดเสร็จ ภาพเล็กจะได้ไม่แวบขึ้นมาใหญ่เกินก่อน
+  const [natural, setNatural] = useState<{ key: unknown; width: number; height: number } | null>(null)
+  const known = natural?.key === sizeKey ? natural : null
+  const size = known ?? DEFAULT_SIZE
+  // ใหญ่ที่สุดที่ยังอยู่ในกรอบ 90vw × 85vh และไม่เกิน 2 เท่าของขนาดจริง (คงสัดส่วนภาพ)
+  const width = `min(90vw, calc(85vh * ${size.width} / ${size.height}), ${size.width * MAX_UPSCALE}px)`
+
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Backdrop
+          data-slot="lightbox-backdrop"
+          className="fixed inset-0 z-50 bg-black/85 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+        />
+        <DialogPrimitive.Popup
+          data-slot="lightbox"
+          aria-label={label}
+          finalFocus={finalFocus}
+          onKeyDown={onKeyDown}
+          className="fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 outline-none duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+        >
+          <img
+            src={src}
+            alt=""
+            draggable={false}
+            referrerPolicy="no-referrer"
+            onClick={onClose}
+            onLoad={(event) => {
+              const loaded = {
+                width: event.currentTarget.naturalWidth || DEFAULT_SIZE.width,
+                height: event.currentTarget.naturalHeight || DEFAULT_SIZE.height,
+              }
+              if (known?.width !== loaded.width || known.height !== loaded.height) setNatural({ key: sizeKey, ...loaded })
+            }}
+            onError={() => {
+              // โหลดภาพไม่ได้: เลิกซ่อน ใช้ขนาดสำรอง ให้เห็นกรอบภาพ (ไม่ค้างเป็นพื้นมืดเปล่า ๆ) คลิกหรือ Esc ปิดได้ตามปกติ
+              if (!known) setNatural({ key: sizeKey, ...DEFAULT_SIZE })
+            }}
+            style={{ width, aspectRatio: `${size.width} / ${size.height}`, visibility: known ? undefined : "hidden" }}
+            className="block h-auto max-w-none cursor-zoom-out rounded-sm bg-muted select-none"
+          />
+          {children}
+        </DialogPrimitive.Popup>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  )
+}
 
 type Props = {
   frames: StoryboardFrame[]
@@ -20,8 +89,7 @@ type Props = {
 }
 
 /**
- * ภาพเฟรมขนาดใหญ่บนพื้นหลังมืด: มีแต่ภาพ ไม่มีกรอบ ไม่มีปุ่ม ไม่มีคำบรรยาย
- * ปิดด้วย Esc, คลิกพื้นหลัง หรือคลิกที่ภาพ · ←/→ = ภาพก่อนหน้า/ถัดไป (ไม่มีปุ่มบนจอ)
+ * ภาพเฟรมขนาดใหญ่ (Lightbox) · ←/→ = ภาพก่อนหน้า/ถัดไป (ไม่มีปุ่มบนจอ)
  * โปรแกรมอ่านหน้าจอได้ชื่อกล่อง "ภาพเฟรมที่ HH:MM:SS" และได้ยินเวลาใหม่ทุกครั้งที่เลื่อนภาพ
  */
 export function FrameLightbox({ frames, index, onIndexChange, returnFocus }: Props) {
@@ -30,16 +98,9 @@ export function FrameLightbox({ frames, index, onIndexChange, returnFocus }: Pro
   if (index !== null && index !== last) setLast(index)
   const position = index ?? last
   const frame = frames[Math.min(position, frames.length - 1)]
-  // ขนาดจริงของภาพเฟรม: ทุกภาพในชุดเดียวกันขนาดเท่ากัน จึงใช้ขนาดของภาพที่โหลดแล้วกับภาพถัดไปได้เลย
-  // ยังไม่รู้ขนาด (เปิดครั้งแรก) = ซ่อนภาพไว้จนโหลดเสร็จ ภาพเล็กจะได้ไม่แวบขึ้นมาใหญ่เกินก่อน
-  const [natural, setNatural] = useState<{ frames: StoryboardFrame[]; width: number; height: number } | null>(null)
 
   if (!frame) return null
   const time = formatTimecode(frame.tMs)
-  const known = natural?.frames === frames ? natural : null
-  const size = known ?? DEFAULT_SIZE
-  // ใหญ่ที่สุดที่ยังอยู่ในกรอบ 90vw × 85vh และไม่เกิน 2 เท่าของขนาดจริง (คงสัดส่วนภาพ)
-  const width = `min(90vw, calc(85vh * ${size.width} / ${size.height}), ${size.width * MAX_UPSCALE}px)`
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "ArrowRight" && position < frames.length - 1) {
@@ -52,43 +113,18 @@ export function FrameLightbox({ frames, index, onIndexChange, returnFocus }: Pro
   }
 
   return (
-    <DialogPrimitive.Root open={index !== null} onOpenChange={(open) => !open && onIndexChange(null)}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop
-          data-slot="lightbox-backdrop"
-          className="fixed inset-0 z-50 bg-black/85 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
-        />
-        <DialogPrimitive.Popup
-          data-slot="lightbox"
-          aria-label={fill(th.frames.frameAlt, { time })}
-          finalFocus={() => returnFocus(position)}
-          onKeyDown={onKeyDown}
-          className="fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 outline-none duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
-        >
-          <img
-            src={frame.url}
-            alt=""
-            draggable={false}
-            onClick={() => onIndexChange(null)}
-            onLoad={(event) => {
-              const loaded = {
-                width: event.currentTarget.naturalWidth || DEFAULT_SIZE.width,
-                height: event.currentTarget.naturalHeight || DEFAULT_SIZE.height,
-              }
-              if (known?.width !== loaded.width || known.height !== loaded.height) setNatural({ frames, ...loaded })
-            }}
-            onError={() => {
-              // โหลดภาพไม่ได้: เลิกซ่อน ใช้ขนาดสำรอง ให้เห็นกรอบภาพ (ไม่ค้างเป็นพื้นมืดเปล่า ๆ) คลิกหรือ Esc ปิดได้ตามปกติ
-              if (!known) setNatural({ frames, ...DEFAULT_SIZE })
-            }}
-            style={{ width, aspectRatio: `${size.width} / ${size.height}`, visibility: known ? undefined : "hidden" }}
-            className="block h-auto max-w-none cursor-zoom-out rounded-sm bg-muted select-none"
-          />
-          <span className="sr-only" aria-live="polite">
-            {time}
-          </span>
-        </DialogPrimitive.Popup>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+    <Lightbox
+      open={index !== null}
+      src={frame.url}
+      label={fill(th.frames.frameAlt, { time })}
+      onClose={() => onIndexChange(null)}
+      finalFocus={() => returnFocus(position)}
+      sizeKey={frames}
+      onKeyDown={onKeyDown}
+    >
+      <span className="sr-only" aria-live="polite">
+        {time}
+      </span>
+    </Lightbox>
   )
 }
