@@ -408,11 +408,15 @@ def test_embed_subs_missing_track_skips_with_note(env):
     assert output_path(result).is_file()
 
 
-def test_embed_subs_bad_options_skips_with_note(env):
-    result, _ = env.run("video", THAI, video_params(embedSubs="a.th-orig", subOptions={"maxChars": 1}))
+def test_embed_subs_bad_options_fail_the_job(env):
+    # API ตรวจ subOptions แล้ว ค่าเสียถึงตัวทำงาน = ข้อมูลงานเสีย ล้มด้วย E_UNKNOWN (core ไม่มี E_BAD_REQUEST)
+    with pytest.raises(YtError) as err:
+        env.run("video", THAI, video_params(embedSubs="a.th-orig", subOptions={"maxChars": 1}))
 
-    assert result.notes == ("EMBED_SUBS_SKIPPED",)
-    assert output_path(result).is_file()
+    assert err.value.code == "E_UNKNOWN"
+    assert "subOptions" in err.value.detail
+    assert env.downloader.choices == []
+    assert folders(env.out) == []
 
 
 @pytest.mark.parametrize("code", ["E_NETWORK", "E_BOT_CHECK"])
@@ -632,6 +636,15 @@ def test_subtitle_job_missing_track_is_no_subtitles(env):
     assert folders(env.out) == []
 
 
+def test_subtitle_job_bad_options_fail_the_job(env):
+    with pytest.raises(YtError) as err:
+        env.run("subtitle", THAI, {"trackId": "a.th-orig", "format": "srt", "options": {"maxChars": 1}})
+
+    assert err.value.code == "E_UNKNOWN"
+    assert "options" in err.value.detail
+    assert folders(env.out) == []
+
+
 class WarmingSubtitles:
     """SubtitleService ที่ตอบ E_SESSION_WARMING ในการ export ครั้งแรก"""
 
@@ -720,6 +733,79 @@ def test_contact_sheet_without_storyboard_fails(env):
 def test_build_handlers_keys(env):
     assert set(build_handlers(env.deps)) == {"video", "audio", "subtitle", "contact_sheet", "frames_zip"}
     assert isinstance(env.downloader, Downloader)
+
+
+# ---------- "ล่าสุด" และการยกเลิกช่วงท้าย ----------
+
+
+@pytest.mark.parametrize(
+    ("kind", "params"),
+    [
+        ("video", video_params()),
+        ("audio", audio_params("mp3")),
+        ("contact_sheet", {"source": "fast", "columns": 5}),
+        ("frames_zip", {"source": "fast"}),
+    ],
+)
+def test_jobs_do_not_mark_clip_opened(env, kind, params):
+    env.run(kind, BBB, params)
+
+    assert env.videos.recent(10) == ([], 0)
+    rows = env.db.execute("SELECT title FROM videos WHERE video_id = ?", (BBB,))
+    assert [row["title"] for row in rows] == [BBB_TITLE]
+
+
+def test_storyboard_refresh_does_not_mark_clip_opened(env):
+    class FlakyDownloader(StubDownloader):
+        failed = False
+
+        def fetch(self, url: str) -> bytes:
+            if url.startswith(FakeExtractor.STORYBOARD_PREFIX) and not self.failed:
+                self.failed = True
+                raise YtError("E_NETWORK", "ลิงก์หมดอายุ")
+            return super().fetch(url)
+
+    flaky = FlakyDownloader(env.fake)
+    result, _ = env.run("frames_zip", BBB, {"source": "fast"}, deps=replace(env.deps, downloader=flaky))
+
+    assert flaky.failed
+    assert output_path(result).is_file()
+    assert env.videos.recent(10) == ([], 0)
+
+
+@pytest.mark.parametrize(
+    ("kind", "params", "cancel_on"),
+    [
+        ("video", video_params(), "merging"),
+        ("video", video_params(), "writing"),
+        ("audio", audio_params("m4a"), "writing"),
+        ("audio", audio_params("mp3"), "converting"),
+        ("audio", audio_params("wav"), "writing"),
+        ("subtitle", {"trackId": "a.th-orig", "format": "srt", "options": MEDIUM}, "writing"),
+        ("contact_sheet", {"source": "fast", "columns": 5}, "converting"),
+        ("contact_sheet", {"source": "fast", "columns": 5}, "writing"),
+        ("frames_zip", {"source": "fast"}, "converting"),
+        ("frames_zip", {"source": "fast"}, "writing"),
+    ],
+)
+def test_late_cancel_leaves_no_output(env, kind, params, cancel_on):
+    video_id = THAI if kind == "subtitle" else BBB
+    with pytest.raises(JobCancelled):
+        env.run(kind, video_id, params, cancel_on=cancel_on)
+
+    assert folders(env.out) == []
+
+
+def test_cover_not_fetched_after_cancel(env, tmp_path):
+    from yttoolkit.core.handlers import _Clip, _cover
+
+    env.downloader.cover = jpeg_bytes()
+    ctx = RecordingContext(tmp_path, env.out)
+    ctx._cancelled = True
+    clip = _Clip(BBB, {"thumbnailUrl": "https://i.ytimg.com/x.jpg"}, BBB_TITLE, env.out)
+
+    assert _cover(env.deps, clip, ctx) is None
+    assert env.downloader.fetched == []
 
 
 # ---------- ffmpeg จริง ----------

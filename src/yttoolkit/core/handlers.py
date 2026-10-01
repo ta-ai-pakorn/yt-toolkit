@@ -28,13 +28,13 @@ from .download import DownloadChoice, Downloader, DownloadHooks, audio_choice, v
 from .frames import contact_sheet, frames_zip
 from .jobs import Handler, Job, JobContext, JobResult, OutputFile
 from .media import MediaMeta, MediaTools, SubtitleInput, iso639_2
-from .srt_builder import options_from_dict
+from .srt_builder import SubOptions, options_from_dict
 from .storyboard import FOLDER as STORYBOARD_FOLDER
 from .storyboard import get_storyboard
 from .yterrors import YtError
 
 if TYPE_CHECKING:
-    from .subtitles import SubtitleService
+    from .subtitles import SubtitleExport, SubtitleService
     from .videos import VideoService
 
 log = logging.getLogger("yttoolkit")
@@ -150,6 +150,8 @@ def _disk_checked(choice: DownloadChoice, paths: Iterable[Path], disk_free: Call
     """ไม่เริ่มโหลดถ้าที่ว่างน้อยกว่า 2 เท่าของขนาดคาดการณ์ (ไม่รู้ขนาด หรืออ่านที่ว่างไม่ได้ = ไม่ตรวจ)
 
     ตรวจทั้งโฟลเดอร์ผลลัพธ์และโฟลเดอร์ทำงาน (อาจอยู่คนละไดรฟ์ ไฟล์โหลดลงโฟลเดอร์ทำงานก่อน)
+    ตั้งใจใช้ 2 เท่ากับทั้งสองที่ (รวมโฟลเดอร์ผลลัพธ์ที่อยู่คนละไดรฟ์ซึ่งต้องการจริงแค่ 1 เท่า):
+    เผื่อไว้ก่อนดีกว่าให้งานล้มกลางทางหลังโหลดไปนานแล้ว (review T10 minor 1)
     """
     if not choice.expected_bytes:
         return choice
@@ -180,7 +182,7 @@ def _hooks(deps: HandlerDeps, ctx: JobContext, report: _Reporter) -> DownloadHoo
 def _cover(deps: HandlerDeps, clip: _Clip, ctx: JobContext) -> Path | None:
     """ภาพปกเป็น JPEG ใน workdir (ยูทูปส่ง webp ได้) โหลดหรืออ่านไม่ได้ = ไม่มีปก งานยังไปต่อ"""
     url = str(clip.info.get("thumbnailUrl") or "")
-    if not url:
+    if not url or ctx.cancelled():
         return None
     target = Path(ctx.workdir) / "cover.jpg"
     try:
@@ -194,7 +196,20 @@ def _cover(deps: HandlerDeps, clip: _Clip, ctx: JobContext) -> Path | None:
     return target
 
 
-def _export_subtitle(deps: HandlerDeps, ctx: JobContext, video_id: str, track_id: str, fmt: str, opts: Any):
+def _sub_options(raw: Any, key: str) -> SubOptions:
+    """ค่าซับของงาน (subOptions / options) API ตรวจมาแล้ว ผิดที่นี่ = ข้อมูลงานเสีย งานล้มด้วย E_UNKNOWN
+
+    core ไม่มีรหัส E_BAD_REQUEST (เป็นรหัสของชั้น API) จึงใช้ E_UNKNOWN ทั้งงานซับและการฝังซับ
+    """
+    try:
+        return options_from_dict(raw if isinstance(raw, Mapping) else {})
+    except ValueError as exc:
+        raise YtError("E_UNKNOWN", f"{key}: {exc}") from exc
+
+
+def _export_subtitle(
+    deps: HandlerDeps, ctx: JobContext, video_id: str, track_id: str, fmt: str, opts: SubOptions
+) -> SubtitleExport:
     """SubtitleService.export ถ้าเซสชันผู้ชมยังไม่พร้อม (E_SESSION_WARMING) รอตามที่บอกแล้วลองอีกครั้งเดียว"""
     try:
         return deps.subtitles.export(video_id, track_id, fmt, opts)
@@ -211,20 +226,18 @@ def _embedded_subtitle(
     """ซับ .srt สำหรับฝังใน mp4 ทำไม่ได้ = ข้ามพร้อมโน้ต EMBED_SUBS_SKIPPED
 
     E_NETWORK / E_BOT_CHECK โยนต่อ (คิวลองใหม่หรือพักคิว ไม่ใช่ปัญหาของซับ)
+    subOptions เสีย = งานล้มด้วย E_UNKNOWN เหมือนงานซับ (_sub_options)
     """
     track_id = params.get("embedSubs")
     if not track_id:
         return None, ()
+    opts = _sub_options(params.get("subOptions"), "subOptions")  # ค่าเสีย = งานล้ม (ไม่ใช่ข้ามซับ)
     try:
-        opts = options_from_dict(params.get("subOptions") or {})
         result = _export_subtitle(deps, ctx, clip.video_id, str(track_id), "srt", opts)
     except YtError as exc:
         if exc.code in _EMBED_RETRY_CODES:
             raise
         log.info("งาน %s ฝังซับไม่ได้ (%s)", ctx.job_id, exc.code)
-        return None, ("EMBED_SUBS_SKIPPED",)
-    except ValueError as exc:
-        log.info("งาน %s ฝังซับไม่ได้ (ค่าซับไม่ถูกต้อง: %s)", ctx.job_id, exc)
         return None, ("EMBED_SUBS_SKIPPED",)
     path = Path(ctx.workdir) / "subs.srt"
     path.write_bytes(result.data)
@@ -352,7 +365,7 @@ def _subtitle(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     if not track_id:
         # คลิปไม่มีซับ: งานจบแบบไม่มีไฟล์ (ไม่ใช่ error สีแดง PRD 7) ไม่สร้างโฟลเดอร์
         return JobResult(notes=("NO_SUBTITLES",), title=clip.title or None)
-    opts = options_from_dict(params.get("options") or {})
+    opts = _sub_options(params.get("options"), "options")
     try:
         result = _export_subtitle(deps, ctx, clip.video_id, str(track_id), fmt, opts)
     except YtError as exc:

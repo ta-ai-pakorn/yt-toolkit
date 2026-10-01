@@ -367,5 +367,6 @@ def get_storyboard(
     except YtError as exc:
         if exc.code != "E_NETWORK":
             raise
-    videos.get(video_id, refresh=True)
+    # peek: probe ใหม่เพื่อต่ออายุลิงก์ ไม่ใช่การเปิดคลิป (งาน contact sheet / zip ในคิวต้องไม่ขึ้น "ล่าสุด")
+    videos.get(video_id, refresh=True, peek=True)
     return build(video_id, videos.raw(video_id), cache_dir, fetch)
