@@ -51,6 +51,9 @@ The controller asks Pete the questions in `m4-questions.md` (scratchpad) before 
 
 ---
 
+
+> **Owner answers (2026-10-01):** Pete chose the recommended option for all eight questions Q1-Q8 (see the questions list). The plan stands as written.
+
 ## Waves
 
 | Wave | Lanes (one worktree each, file sets disjoint) | Depends on |
