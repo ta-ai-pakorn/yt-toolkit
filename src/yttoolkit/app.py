@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 
 from .api.errors import install_error_handlers
+from .api.events import build_events_router
+from .api.jobs import build_jobs_router
 from .api.routes import build_router
 from .api.security import LocalOnlyMiddleware
 from .api.settings import build_settings_router
@@ -78,6 +80,10 @@ def create_app(ctx: AppContext) -> FastAPI:
         app.include_router(build_subtitles_router(ctx), prefix="/api")
     if ctx.settings is not None:
         app.include_router(build_settings_router(ctx), prefix="/api")
+    if ctx.queue is not None:
+        app.include_router(build_jobs_router(ctx), prefix="/api")
+    if ctx.events is not None:
+        app.include_router(build_events_router(ctx), prefix="/api")
     mount_web(app, ctx.paths.web_dist, ctx.token)
     app.add_middleware(LocalOnlyMiddleware, port=ctx.port, token=ctx.token, extra_origins=ctx.extra_origins)
     return app
