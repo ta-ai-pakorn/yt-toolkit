@@ -28,6 +28,16 @@ export function warmingDeadline(error: unknown, errorUpdatedAt: number): number 
   return seconds === null ? null : errorUpdatedAt + seconds * 1000
 }
 
+/**
+ * ยังอยู่ระหว่างนับถอยหลังไหม (error เป็น E_SESSION_WARMING และยังไม่ถึง deadline)
+ * เลย deadline แล้ว = error ค้าง (เช่น react-query คืนสถานะเดิมหลังยกเลิกคำขอตอนครบเวลาเพราะผู้ใช้เปลี่ยนแทร็กหนี)
+ * ให้ถือเป็น error ธรรมดาที่ observer โหลดใหม่เองได้ (I-2)
+ */
+export function isWarmingPending(error: unknown, errorUpdatedAt: number, now: number = Date.now()): boolean {
+  const deadline = warmingDeadline(error, errorUpdatedAt)
+  return deadline !== null && now < deadline
+}
+
 /** วินาทีที่เหลือ (ปัดขึ้น ไม่ต่ำกว่า 0) */
 export function secondsLeft(deadline: number, now: number): number {
   return Math.max(0, Math.ceil((deadline - now) / 1000))
@@ -53,6 +63,10 @@ export function watchWarming(client: QueryClient): () => void {
     const deadline = warmingDeadline(error, errorUpdatedAt)
     if (deadline === null) return
     const id = setTimeout(() => {
+      // ตัวจับเวลานี้ทำงานแล้ว: ลบออกจาก map (map เก็บเฉพาะตัวที่ยังรออยู่) ถ้า error ก้อนเดิมกลับมาอีกโดยไม่มีคำตอบใหม่
+      // (react-query ยกเลิกคำขอตอนครบเวลาแล้วคืนสถานะเดิม เพราะผู้ใช้เปลี่ยนแทร็กหนี) schedule จะตั้งใหม่
+      // และเพราะเลย deadline แล้วจึงยิงทันที ไม่ค้างที่ "กำลังโหลด" (I-2)
+      if (timers.get(query.queryHash)?.id === id) timers.delete(query.queryHash)
       // ยังเป็น error ก้อนเดิม (ไม่มีใครโหลดใหม่ไปก่อน) ถึงจะโหลด และไม่ยกเลิกคำขอที่กำลังวิ่งอยู่
       if (query.state.error === error) {
         // เรียก fetch ของ query ตรง ๆ: refetchQueries ข้าม query ที่มีแต่ observer แบบปิด (ปุ่มโน้ตที่หัวคลิป)

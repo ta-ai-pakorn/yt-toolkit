@@ -70,7 +70,8 @@ describe("watchWarming: โหลดใหม่ให้เองเมื่�
   })
 
   function stubResponses(...bodies: { status: number; body: unknown }[]) {
-    const fetch = vi.fn(async () => {
+    const fetch = vi.fn(async (url: string) => {
+      void url
       const next = bodies.length > 1 ? bodies.shift()! : bodies[0]
       return new Response(JSON.stringify(next.body), { status: next.status })
     })
@@ -161,6 +162,120 @@ describe("watchWarming: โหลดใหม่ให้เองเมื่�
     expect(fetch).toHaveBeenCalledTimes(2)
     expect(isWarming(observer.getCurrentResult().error)).toBe(true)
     unsubscribe()
+  })
+
+  /**
+   * I-2: คำขอตอนครบเวลาใช้เวลานาน (backend รอ 20 วินาทีเมื่อเจอ 429) ผู้ใช้เปลี่ยนแทร็กหนีระหว่างนั้น
+   * observer สุดท้ายของ t.en หลุด queryFn ใช้ signal จึงถูก cancel({revert:true}) สถานะกลับเป็น error ก้อนเดิม (idle)
+   * คำขอ t.en ตัวที่ 2 ค้างไว้ `slowMs` และ abort ได้ คำขอ t.en ตัวต่อ ๆ ไปตอบทันที
+   */
+  function stubSlowAtZero(slowMs: number) {
+    const urls: string[] = []
+    const aborted: number[] = []
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      urls.push(url)
+      const n = urls.length
+      const enCalls = urls.filter((u) => u.includes("/t.en/")).length
+      if (enCalls === 1 && url.includes("/t.en/")) {
+        return Promise.resolve(new Response(JSON.stringify(warming(1).body), { status: 503 }))
+      }
+      if (enCalls === 2 && url.includes("/t.en/")) {
+        return new Promise<Response>((resolve, reject) => {
+          const id = setTimeout(() => resolve(new Response(JSON.stringify(tokens.body), { status: 200 })), slowMs)
+          init?.signal?.addEventListener("abort", () => {
+            clearTimeout(id)
+            aborted.push(n)
+            reject(new DOMException("aborted", "AbortError"))
+          })
+        })
+      }
+      return Promise.resolve(new Response(JSON.stringify(tokens.body), { status: 200 }))
+    })
+    vi.stubGlobal("fetch", fetch)
+    return { fetch, urls, aborted, enCalls: () => urls.filter((u) => u.includes("/t.en/")).length }
+  }
+
+  async function switchAwayDuringRefetchAtZero(client: QueryClient) {
+    const { observer, unsubscribe } = await firstFetch(client)
+    expect(isWarming(observer.getCurrentResult().error)).toBe(true)
+    await vi.advanceTimersByTimeAsync(1_100) // ครบเวลา: watchWarming (หรือเทสเอง) ยิงคำขอที่ช้า
+    expect(observer.getCurrentResult().fetchStatus).toBe("fetching")
+    observer.setOptions(tokensQuery(VIDEO, "a.th-orig")) // เปลี่ยนแทร็กหนีระหว่างโหลด
+    await vi.advanceTimersByTimeAsync(0)
+    return { observer, unsubscribe }
+  }
+
+  it("เปลี่ยนแทร็กหนีระหว่างโหลดตอนครบเวลา (cancel/revert): watchWarming ตั้งใหม่แล้วโหลดเอง ไม่ค้าง (I-2)", async () => {
+    const stub = stubSlowAtZero(3_000)
+    const client = new QueryClient()
+    const stop = watchWarming(client)
+    const { observer, unsubscribe } = await switchAwayDuringRefetchAtZero(client)
+    expect(stub.aborted).toHaveLength(1) // คำขอตอนครบเวลาถูกยกเลิกจริง
+    await vi.advanceTimersByTimeAsync(100)
+    // error ก้อนเดิมกลับมา (revert) แต่ตัวจับเวลาเดิมทำงานไปแล้ว: ตั้งใหม่ เลย deadline แล้วจึงยิงทันที
+    const key = tokensQuery(VIDEO, "t.en").queryKey
+    await vi.waitFor(() => expect(client.getQueryState(key)?.status).toBe("success"))
+    expect(stub.enCalls()).toBe(3)
+    // กลับมาที่ t.en: เห็นซับเลย ไม่ยิงเพิ่ม
+    observer.setOptions(tokensQuery(VIDEO, "t.en"))
+    expect(observer.getCurrentResult().isSuccess).toBe(true)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(stub.enCalls()).toBe(3)
+    unsubscribe()
+    stop()
+  })
+
+  it("error ค้างที่เลย deadline แล้ว (หลัง revert) ถือเป็น error ธรรมดา: กลับมาที่แทร็กเดิมหรือ mount ใหม่ observer โหลดเอง (I-2)", async () => {
+    const stub = stubSlowAtZero(3_000)
+    const client = new QueryClient()
+    // ไม่มี watchWarming: จำลองตัวจับเวลาเองครั้งเดียวที่ 0 เพื่อพิสูจน์ว่า observer ไม่พึ่งตัวจับเวลา
+    const key = tokensQuery(VIDEO, "t.en").queryKey
+    const atZero = setTimeout(() => {
+      client.getQueryCache().find({ queryKey: key })?.fetch(undefined, { cancelRefetch: false }).catch(() => undefined)
+    }, 1_000)
+    const { observer, unsubscribe } = await switchAwayDuringRefetchAtZero(client)
+    clearTimeout(atZero)
+    expect(stub.aborted).toHaveLength(1)
+    const reverted = client.getQueryState(key)
+    expect(isWarming(reverted?.error)).toBe(true) // revert คืน error ก้อนเดิม
+    expect(reverted?.fetchStatus).toBe("idle")
+    expect(stub.enCalls()).toBe(2)
+    // เปลี่ยนแทร็กกลับมา (observer เดิมเปลี่ยน key): ยิงใหม่ ไม่ค้าง "กำลังโหลด"
+    observer.setOptions(tokensQuery(VIDEO, "t.en"))
+    await vi.waitFor(() => expect(observer.getCurrentResult().isSuccess).toBe(true))
+    expect(stub.enCalls()).toBe(3)
+    unsubscribe()
+
+    // mount ใหม่ (สลับแท็บ) กับ error ค้างที่เลย deadline ก็ยิงเหมือนกัน
+    const client2 = new QueryClient()
+    const stub2 = stubSlowAtZero(3_000)
+    const first = await firstFetch(client2)
+    first.unsubscribe()
+    await vi.advanceTimersByTimeAsync(1_100) // เลย deadline โดยไม่มีใครโหลด
+    const again = new QueryObserver(client2, tokensQuery(VIDEO, "t.en"))
+    const unsubscribeAgain = again.subscribe(() => undefined)
+    expect(again.getCurrentResult().fetchStatus).toBe("fetching")
+    expect(stub2.enCalls()).toBe(2)
+    unsubscribeAgain()
+  })
+
+  it("ก่อน deadline ตั้งใหม่แล้วไม่ยิงเร็ว ถึง deadline ยิงครั้งเดียวแม้ observer กับตัวจับเวลาพร้อมกัน", async () => {
+    const fetch = stubResponses(warming(2), tokens)
+    const client = new QueryClient()
+    const stop = watchWarming(client)
+    const { observer, unsubscribe } = await firstFetch(client)
+    await vi.advanceTimersByTimeAsync(1_000)
+    observer.setOptions(tokensQuery(VIDEO, "a.th-orig"))
+    observer.setOptions(tokensQuery(VIDEO, "t.en"))
+    await vi.advanceTimersByTimeAsync(500)
+    expect(fetch.mock.calls.filter(([url]) => String(url).includes("/t.en/"))).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(600)
+    observer.setOptions(tokensQuery(VIDEO, "a.th-orig"))
+    observer.setOptions(tokensQuery(VIDEO, "t.en"))
+    await vi.waitFor(() => expect(observer.getCurrentResult().isSuccess).toBe(true))
+    expect(fetch.mock.calls.filter(([url]) => String(url).includes("/t.en/"))).toHaveLength(2)
+    unsubscribe()
+    stop()
   })
 
   it("สลับแท็บกลับมา (mount ใหม่) ระหว่างนับไม่ยิงซ้ำ", async () => {
