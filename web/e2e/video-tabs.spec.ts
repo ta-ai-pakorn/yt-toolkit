@@ -436,7 +436,9 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(page.getByRole("button", { name: "คัดลอกคำอธิบาย" })).toBeVisible()
   })
 
-  test("จอกว้าง: คำอธิบายอยู่เหนือ chapter ในคอลัมน์ซ้าย คอมเมนต์ปักหมุดอยู่คอลัมน์ขวา · ปกยังเป็น 16:9", async ({ page }) => {
+  test("จอกว้าง: คำอธิบายอยู่คอลัมน์ซ้าย chapter อยู่บนสุดของคอลัมน์ขวาเหนือคอมเมนต์ปักหมุด (owner round 6) · ปกยังเป็น 16:9", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.route(`**/api/videos/${ZOO}/pinned-comment`, (route) => route.fulfill({ json: { comment: null } }))
     await gotoInfo(page, ZOO)
@@ -444,9 +446,9 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     const chapters = await chapterRegion(page).boundingBox()
     const pinned = await page.getByRole("region", { name: "คอมเมนต์ปักหมุด" }).boundingBox()
     expect(description && chapters && pinned).toBeTruthy()
-    expect(Math.abs((description?.x ?? 0) - (chapters?.x ?? 1))).toBeLessThan(2)
-    expect(chapters?.y ?? 0).toBeGreaterThan((description?.y ?? 0) + (description?.height ?? 0) - 1)
-    expect(pinned?.x ?? 0).toBeGreaterThan((description?.x ?? 0) + (description?.width ?? 0))
+    expect(chapters?.x ?? 0).toBeGreaterThan((description?.x ?? 0) + (description?.width ?? 0))
+    expect(Math.abs((chapters?.x ?? 0) - (pinned?.x ?? 1))).toBeLessThan(2)
+    expect(pinned?.y ?? 0).toBeGreaterThan((chapters?.y ?? 0) + (chapters?.height ?? 0) - 1)
     // M3.5: ปกเป็นช่องตัวเล่น (ปุ่ม "เล่นคลิป")
     const cover = await page.getByRole("button", { name: "เล่นคลิป" }).boundingBox()
     expect((cover?.width ?? 0) / (cover?.height ?? 1)).toBeCloseTo(16 / 9, 1)
