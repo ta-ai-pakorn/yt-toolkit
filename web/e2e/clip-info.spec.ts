@@ -561,63 +561,43 @@ test.describe("แท็บข้อมูลคลิป: ช่วงที่
     const times = await frameTimes(page)
     await expect(frameList(page).getByRole("listitem")).toHaveCount(times.length)
     const marked = await frameList(page)
-      .getByRole("button")
+      .getByRole("button", { name: /^ภาพเฟรมที่/ })
       .evaluateAll((buttons) => buttons.map((button) => button.querySelector("[data-replayed]") !== null))
     const expected = times.map(inSegments)
     expect(expected.filter(Boolean).length).toBeGreaterThan(0)
     expect(marked).toEqual(expected)
     // ชื่อปุ่มของภาพในช่วง: "ภาพเฟรมที่ 00:00:24 ดูซ้ำบ่อย"
     const first = times.findIndex(inSegments)
-    const button = frameList(page).getByRole("button").nth(first)
+    const button = frameList(page).getByRole("button", { name: /^ภาพเฟรมที่/ }).nth(first)
     await expect(button).toHaveAccessibleName(/^ภาพเฟรมที่ \d{2}:\d{2}:\d{2}\s+ดูซ้ำบ่อย$/)
     await expect(button.locator("[data-replayed] svg")).toBeVisible()
     // บรรทัดเวลาของช่วงย้ายไปแท็บข้อมูลคลิปแล้ว ส่วนภาพเฟรมไม่มีบรรทัดนี้
-    await expect(page.getByRole("region", { name: "ภาพเฟรม" }).getByRole("button", { name: /^ไปภาพเฟรมช่วง / })).toHaveCount(0)
+    await expect(page.getByRole("region", { name: "ภาพเฟรม" }).getByRole("button", { name: /^เล่นจาก \d/ })).toHaveCount(0)
   })
 
-  test("ส่วน 'ช่วงที่คนดูซ้ำบ่อย' มีปุ่มเวลา 00:00:20, 00:01:00 · กดแล้วไปแท็บภาพเฟรม ภาพแรกในช่วงถูกไฮไลต์ เห็นในจอ และได้โฟกัส", async ({
+  test("ส่วน 'ช่วงที่คนดูซ้ำบ่อย' มีปุ่มเวลา 00:00:20, 00:01:00 · กดแล้วเล่นคลิป (M3.5): อยู่แท็บเดิม URL ไม่เปลี่ยน ไม่ขอ storyboard", async ({
     page,
   }) => {
-    await withVideo(page, THAI, { mostReplayed: SEGMENTS })
-    await gotoInfo(page, THAI)
-    const times = replayedRegion(page).getByRole("button", { name: /^ไปภาพเฟรมช่วง / })
-    await expect(times).toHaveText(["00:00:20", "00:01:00"])
-    await times.nth(1).click()
-    // review M-2: ภาพแรกที่อยู่ในช่วง 60-66 วินาที (ภาพห่างกัน 4895 ms → 63635 ms = 00:01:03) ไม่ใช่ภาพที่ใกล้ 60 วินาที
-    // ที่สุด (58740 ms อยู่นอกช่วงและไม่มีป้าย)
-    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=63635$`))
-    await expect(tab(page, "ภาพเฟรม")).toHaveAttribute("aria-selected", "true")
-    const highlighted = frameList(page).locator("[data-highlighted]")
-    await expect(highlighted).toHaveCount(1)
-    await expect(highlighted).toBeFocused()
-    await expect(highlighted).toBeInViewport()
-    await expect(highlighted.locator("img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:01:03")
-    await expect(highlighted.locator("[data-replayed]")).toHaveCount(1)
-
-    // กลับไปแท็บข้อมูลคลิป (ล้างเวลา) แล้วกดเวลาเดิมซ้ำ ก็กลับมาที่ภาพเดิม
-    await tab(page, INFO_TAB).click()
-    await replayedRegion(page).getByRole("button", { name: "ไปภาพเฟรมช่วง 00:01:00" }).click()
-    await expect(highlighted).toBeFocused()
-    await expect(highlighted).toBeInViewport()
-  })
-
-  test("เปิด ?tab=info ตรง ๆ ไม่ขอ storyboard จนกว่าจะกดเวลาของช่วงที่คนดูซ้ำ (review M-2)", async ({ page }) => {
     await withVideo(page, THAI, { mostReplayed: SEGMENTS })
     const storyboardCalls: string[] = []
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === `/api/videos/${THAI}/storyboard`) storyboardCalls.push(request.url())
     })
     await gotoInfo(page, THAI)
-    const times = replayedRegion(page).getByRole("button", { name: /^ไปภาพเฟรมช่วง / })
+    const times = replayedRegion(page).getByRole("button", { name: /^เล่นจาก \d/ })
     await expect(times).toHaveText(["00:00:20", "00:01:00"])
-    await page.waitForTimeout(500)
-    expect(storyboardCalls).toHaveLength(0)
+    await expect(times.nth(1)).toHaveAccessibleName("เล่นจาก 00:01:00")
     await times.nth(1).click()
-    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=63635$`))
-    expect(storyboardCalls.length).toBeGreaterThan(0)
+    // ไม่พาไปแท็บภาพเฟรมแล้ว (ตัวเล่นที่หัวคลิปเล่นจากเวลานั้นแทน ดู player-sync.spec.ts)
+    await page.waitForTimeout(300)
+    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?tab=info$`))
+    await expect(tab(page, INFO_TAB)).toHaveAttribute("aria-selected", "true")
+    await expect(times.nth(1)).not.toHaveAttribute("aria-busy", "true")
+    await expect(times.nth(1)).toBeFocused()
+    expect(storyboardCalls).toHaveLength(0)
   })
 
-  test("ช่วงสั้นที่ไม่มีภาพอยู่ข้างใน: ภาพที่ใกล้กลางช่วงที่สุดได้ป้าย และปุ่มเวลาพาไปภาพนั้น (review M-2)", async ({ page }) => {
+  test("ช่วงสั้นที่ไม่มีภาพอยู่ข้างใน: ภาพที่ใกล้กลางช่วงที่สุดได้ป้าย · ปุ่มเวลาเป็นเวลาเริ่มของช่วง (review M-2)", async ({ page }) => {
     // 61-62 วินาที: ไม่มีภาพในช่วง กลางช่วง 61.5 วินาที ใกล้ภาพ 63635 ms (00:01:03) ที่สุด
     await withVideo(page, THAI, { mostReplayed: [{ startMs: 61_000, endMs: 62_000 }] })
     await page.goto(`/v/${THAI}`)
@@ -625,10 +605,7 @@ test.describe("แท็บข้อมูลคลิป: ช่วงที่
     await expect(marked).toHaveCount(1)
     await expect(marked.locator("img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:01:03")
     await tab(page, INFO_TAB).click()
-    await page.getByRole("button", { name: /^ไปภาพเฟรมช่วง 00:01:01/ }).click()
-    const highlighted = frameList(page).locator("[data-highlighted]")
-    await expect(highlighted).toBeFocused()
-    await expect(highlighted.locator("[data-replayed]")).toHaveCount(1)
+    await expect(replayedRegion(page).getByRole("button", { name: /^เล่นจาก \d/ })).toHaveText(["00:01:01"])
   })
 
   test("'คัดลอกช่วงที่คนดูซ้ำบ่อย' ได้ช่วงละบรรทัด HH:MM:SS - HH:MM:SS", async ({ page, context }) => {
@@ -661,12 +638,14 @@ test.describe("แท็บข้อมูลคลิป: ช่วงที่
   test("แท็บทรานสคริปต์: บรรทัดที่คาบเกี่ยวกับช่วงมีป้ายเดียวกัน บรรทัดอื่นไม่มี", async ({ page }) => {
     await withVideo(page, THAI, { mostReplayed: SEGMENTS })
     await page.goto(`/v/${THAI}?tab=transcript`)
-    const lines = page.getByRole("list", { name: LINES }).getByRole("button")
+    // M3.5: แต่ละบรรทัดมีปุ่มเวลา (เล่นจากตรงนี้) + ปุ่มข้อความ (มีป้าย) อ่านเวลาและป้ายจากทั้งแถว
+    const items = page.getByRole("list", { name: LINES }).getByRole("listitem")
+    const lines = items.locator("button:not([aria-label])")
     await expect(lines.first()).toBeVisible()
-    const rows = await lines.evaluateAll((buttons) =>
-      buttons.map((button) => {
-        const [h, m, s] = (button.querySelector(".font-mono")?.textContent ?? "").split(":").map(Number)
-        return { startS: (h * 60 + m) * 60 + s, marked: button.querySelector("[data-replayed]") !== null }
+    const rows = await items.evaluateAll((elements) =>
+      elements.map((item) => {
+        const [h, m, s] = (item.querySelector(".font-mono")?.textContent ?? "").split(":").map(Number)
+        return { startS: (h * 60 + m) * 60 + s, marked: item.querySelector("[data-replayed]") !== null }
       }),
     )
     const marked = rows.filter((row) => row.marked)
