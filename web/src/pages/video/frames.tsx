@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Captions, Copy, Download, ExternalLink, Flame, ImageIcon, ImageOff, Link2 } from "lucide-react"
+import { Captions, Copy, Download, ExternalLink, Flame, ImageIcon, ImageOff, Link2, Play } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { toast } from "sonner"
 
@@ -24,6 +24,8 @@ import { nearestFrameIndex, revealAndFocus } from "./frame-target"
 import { FrameLightbox } from "./lightbox"
 import { LoadError } from "./load-error"
 import { replayedFrameIndexes } from "./most-replayed"
+import { nowPlayingFrame } from "./playback-sync"
+import { playerActions, usePlayerValue } from "./player/player-store"
 import { ReplayedMark } from "./replayed-mark"
 import { storyboardQuery } from "./queries"
 import { subtitlesQuery } from "./subs-queries"
@@ -127,8 +129,24 @@ const HIGHLIGHT =
 const REPLAYED_FRAME =
   "pointer-events-none absolute inset-0 rounded-md shadow-[inset_0_0_0_2px_var(--primary),inset_0_0_0_3px_rgb(0_0_0/0.45)]"
 
+// ภาพที่ใกล้ตำแหน่งที่กำลังเล่นที่สุด (M3.5): กรอบสีฟ้า --info (โทเคนของธีม) 2px มีขอบสีพื้น 2px ด้านในคั่นจากภาพ ห่างขอบภาพเข้ามา 3-7px
+// สีฟ้าต่างจากทุกอย่างที่เป็นอำพัน: ป้าย/กรอบ "ดูซ้ำบ่อย" (--primary, ขอบภาพ 0-3px) วงโฟกัส (--ring นอกภาพ) และกรอบ ?at= (--accent-text นอกภาพ เว้นช่อง)
+// จึงเห็นซ้อนกันได้ทั้งสี่แบบ · มีป้ายคำว่า "กำลังเล่น" มุมขวาล่าง ไม่พึ่งกรอบอย่างเดียว
+const NOW_PLAYING_FRAME =
+  "pointer-events-none absolute inset-[5px] rounded-[4px] border-2 border-background ring-2 ring-info"
+// ป้าย "▶ กำลังเล่น": พื้น --info ตัวอักษรสีพื้นของธีม (สว่าง: ขาวนวลบนฟ้าเข้ม 5.2:1 · มืด: ดำบนฟ้าอ่อน 7.8:1) ขอบสีพื้นบาง ๆ แยกจากภาพ
+const NOW_PLAYING_LABEL =
+  "pointer-events-none absolute right-1 bottom-1 flex items-center gap-0.5 rounded-sm bg-info px-1 text-[11px] font-medium text-background shadow-sm ring-1 ring-background"
+
+// ปุ่ม ▶ มุมซ้ายบนของภาพ: เห็นเมื่อชี้เมาส์ที่ภาพหรือโฟกัสอยู่ในภาพ (ไม่อยู่ในลำดับ Tab) · จอสัมผัส (ไม่มีการชี้) เห็นตลอดและใหญ่ขึ้นให้นิ้วกดได้
+const PLAY_CORNER =
+  "absolute top-[7px] left-[7px] flex size-7 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm opacity-0 outline-none transition-opacity hover:bg-background focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 pointer-coarse:size-9 pointer-coarse:opacity-100 motion-reduce:transition-none"
+
 type FrameTileProps = {
   frame: StoryboardFrame
+  /** ภาพทั้งหมดของคลิป (ชุดเดียวกันทุกภาพ) และตำแหน่งของภาพนี้ในชุด: ใช้ถามว่าภาพนี้คือภาพที่กำลังเล่นไหม */
+  frames: readonly StoryboardFrame[]
+  frameIndex: number
   videoId: string
   highlighted: boolean
   /** ภาพอยู่ในช่วงที่คนดูซ้ำมากที่สุด (มีป้ายที่มุมขวาบน) */
@@ -139,8 +157,11 @@ type FrameTileProps = {
   buttonRef: (element: HTMLButtonElement | null) => void
 }
 
-function FrameTile({ frame, videoId, highlighted, replayed, onOpen, onViewSubs, buttonRef }: FrameTileProps) {
+function FrameTile({ frame, frames, frameIndex, videoId, highlighted, replayed, onOpen, onViewSubs, buttonRef }: FrameTileProps) {
   const time = formatTimecode(frame.tMs)
+  // ภาพเป็นร้อยภาพ: แต่ละภาพอ่านแค่ true/false ของตัวเอง เวลาเดินแล้วเรนเดอร์ใหม่เฉพาะภาพเดิมกับภาพใหม่ที่กำลังเล่น
+  const nowPlaying = usePlayerValue((state) => nowPlayingFrame(frames, state) === frameIndex)
+  const playHere = () => playerActions.playFrom(frame.tMs)
   const [menuOpen, setMenuOpen] = useState(false)
   const keyboardOpenRef = useRef(false)
   const firstItemRef = useRef<HTMLDivElement>(null)
@@ -182,6 +203,7 @@ function FrameTile({ frame, videoId, highlighted, replayed, onOpen, onViewSubs, 
           type="button"
           aria-haspopup="dialog"
           data-highlighted={highlighted ? "" : undefined}
+          data-now-playing={nowPlaying ? "" : undefined}
           aria-current={highlighted ? "true" : undefined}
           onClick={onOpen}
           onKeyDown={onKeyDown}
@@ -203,7 +225,25 @@ function FrameTile({ frame, videoId, highlighted, replayed, onOpen, onViewSubs, 
             </span>
             {replayed && <span aria-hidden data-replayed-frame="" className={REPLAYED_FRAME} />}
             {replayed && <ReplayedMark variant="badge" className="pointer-events-none absolute top-1 right-1" />}
+            {nowPlaying && <span aria-hidden className={NOW_PLAYING_FRAME} />}
+            {nowPlaying && (
+              <span data-slot="now-playing-label" className={NOW_PLAYING_LABEL}>
+                <Play aria-hidden className="size-2.5 fill-current" />
+                {t.nowPlaying}
+              </span>
+            )}
           </AspectRatio>
+        </button>
+        {/* เล่นคลิปจากเวลาของภาพนี้ (คลิกตัวภาพยังเปิดภาพใหญ่เหมือนเดิม)
+            ไม่อยู่ในลำดับ Tab (ภาพละ 1 จุดหยุด ไม่ใช่ 2): ผู้ใช้คีย์บอร์ดใช้เมนู "เล่นจากตรงนี้" (Shift+F10) แทน */}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={fill(t.playFromAt, { time })}
+          onClick={playHere}
+          className={PLAY_CORNER}
+        >
+          <Play aria-hidden className="size-3.5 fill-current" />
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent>
@@ -226,6 +266,10 @@ function FrameTile({ frame, videoId, highlighted, replayed, onOpen, onViewSubs, 
         <ContextMenuItem onClick={() => openInYoutube(youtubeWatchUrl(videoId, frame.tMs))}>
           <ExternalLink aria-hidden />
           {t.openYoutubeAt}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={playHere}>
+          <Play aria-hidden />
+          {t.playFrom}
         </ContextMenuItem>
         {onViewSubs && (
           <ContextMenuItem onClick={onViewSubs}>
@@ -310,6 +354,8 @@ function FrameGrid({ frames, videoId, at, marked, filtered, onUnfilter, onViewSu
           <FrameTile
             key={frame.index}
             frame={frame}
+            frames={frames}
+            frameIndex={shown[position]}
             videoId={videoId}
             highlighted={position === highlighted}
             replayed={markedSet.has(shown[position])}

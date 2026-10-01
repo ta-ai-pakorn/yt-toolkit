@@ -2,6 +2,8 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page, type Route } from "@playwright/test"
 
+import { installFakeYT } from "./fake-yt"
+
 // owner round 2-4 (หน้าเว็บ): ช่องตัวเลข · แท็บข้อมูลคลิป (คำอธิบาย chapter ช่วงที่คนดูซ้ำ คอมเมนต์ปักหมุด แท็ก)
 // · บันทึกเป็นโน้ต · เปิดในยูทูป · ภาพปกขนาดใหญ่ · หัวคลิปแบบกระชับ (สูงคงที่)
 // ข้อมูลใหม่ของ backend (stats, tags, categories, mostReplayed, /pinned-comment, /note) จำลองด้วย page.route
@@ -21,7 +23,7 @@ const FRAME_LIST = "รายการภาพเฟรม"
 const LINES = "บรรทัดในทรานสคริปต์"
 const INFO_TAB = "ข้อมูลคลิป"
 const REPLAYED_TITLE = "ช่วงที่คนดูซ้ำบ่อย"
-const COVER = "ดูภาพปกขนาดใหญ่"
+const COVER = "ดูภาพปก"
 
 /**
  * แก้ข้อมูลคลิปที่ backend ส่งมา: ลบคีย์ใหม่ทั้งหมดก่อน (ผลไม่ขึ้นกับว่า backend มีข้อมูลเหล่านี้แล้วหรือยัง) แล้วใส่ patch
@@ -392,14 +394,14 @@ test.describe("บันทึกเป็นโน้ต (.md)", () => {
     return requests
   }
 
-  test("ปุ่มรองในหัวคลิป (ไม่ใช่ปุ่มหลักสีเหลือง) · ชี้แล้วมีคำอธิบายว่าใช้กับ Obsidian หรือแอปจดโน้ต", async ({ page }) => {
+  test("ปุ่มรองในหัวคลิป (ไม่ใช่ปุ่มหลักสีเหลือง) · ชี้แล้วมีคำอธิบายว่าใช้กับ Obsidian หรือแอพจดโน้ต", async ({ page }) => {
     await page.goto(`/v/${THAI}`)
     const button = page.getByRole("button", { name: NOTE_BUTTON })
     await expect(button).toBeVisible()
     await expect(button).toHaveClass(/bg-secondary/)
     await expect(button).not.toHaveClass(/bg-primary/)
     await button.hover()
-    await expect(page.getByText(/Obsidian หรือแอปจดโน้ตอื่น/)).toBeVisible()
+    await expect(page.getByText(/Obsidian หรือแอพจดโน้ตอื่น/)).toBeVisible()
     // หน้า W2 ยังไม่มีปุ่มหลักสีเหลือง
     await expect(page.locator('[data-slot="button"].bg-primary')).toHaveCount(0)
   })
@@ -489,55 +491,43 @@ test.describe("เปิดในยูทูป และภาพปก", () =
     await expect(link).toHaveClass(/bg-secondary/)
   })
 
-  test("ปกไม่ใช่ลิงก์ไปยูทูป: กดแล้วเปิดภาพปกขนาดใหญ่ (กล่องเดียวกับภาพเฟรม) · Esc ปิดแล้วโฟกัสกลับที่ปก", async ({ page }) => {
+  // M3.5: ปกกลายเป็นช่องตัวเล่น (กดแล้วเล่นคลิป ดู player.spec.ts) ภาพปกขนาดใหญ่ย้ายมาเป็นปุ่ม "ดูภาพปก" ในแถวปุ่ม
+  test("ปุ่ม 'ดูภาพปก' เปิดภาพปกขนาดใหญ่ (กล่องเดียวกับภาพเฟรม) · Esc ปิดแล้วโฟกัสกลับที่ปุ่ม · ปกไม่ใช่ลิงก์ไปยูทูป", async ({ page }) => {
+    await installFakeYT(page)
     const info = await (await page.request.get(`/api/videos/${ZOO}`)).json() as { thumbnailUrl: string }
     expect(info.thumbnailUrl).not.toBe("")
     await page.goto(`/v/${ZOO}`)
-    const cover = page.getByRole("button", { name: COVER })
-    await expect(cover).toHaveAttribute("aria-haspopup", "dialog")
-    // ลิงก์ไปยูทูปในหน้ามีแค่ปุ่ม "เปิดในยูทูป" ปกไม่ได้อยู่ในลิงก์
+    const button = page.getByRole("button", { name: COVER, exact: true })
+    await expect(button).toHaveAttribute("aria-haspopup", "dialog")
+    // ลิงก์ไปยูทูปในหน้ามีแค่ปุ่ม "เปิดในยูทูป" ปก (ปุ่ม "เล่นคลิป") ไม่ได้อยู่ในลิงก์
     await expect(page.locator("a[href^='https://www.youtube.com/watch']")).toHaveCount(1)
-    await expect(cover.locator("xpath=ancestor::a")).toHaveCount(0)
-    await expect(cover).toHaveCSS("cursor", "zoom-in")
+    await expect(page.getByRole("button", { name: "เล่นคลิป" }).locator("xpath=ancestor::a")).toHaveCount(0)
 
-    await cover.click()
+    await button.click()
     const dialog = page.getByRole("dialog", { name: "ภาพปกของคลิป" })
     await expect(dialog).toBeVisible()
     await expect(dialog.locator("img")).toHaveAttribute("src", info.thumbnailUrl)
     await page.keyboard.press("Escape")
     await expect(dialog).toHaveCount(0)
-    await expect(cover).toBeFocused()
+    await expect(button).toBeFocused()
   })
 
   for (const key of ["Enter", "Space"]) {
-    test(`คีย์บอร์ด: ${key} ที่ปกเปิดภาพใหญ่ · เห็นไอคอนขยายตอนโฟกัส · คลิกที่ภาพปิดได้`, async ({ page }) => {
+    test(`คีย์บอร์ด: ${key} ที่ปุ่ม 'ดูภาพปก' เปิดภาพใหญ่ · คลิกที่ภาพปิดได้`, async ({ page }) => {
+      await installFakeYT(page)
       await page.goto(`/v/${ZOO}`)
-      const cover = page.getByRole("button", { name: COVER })
-      const zoom = cover.locator('[data-slot="cover-zoom"]')
-      await expect(zoom).toHaveCSS("opacity", "0")
-      await cover.focus()
-      await page.keyboard.press("Tab")
-      await page.keyboard.press("Shift+Tab")
-      await expect(cover).toBeFocused()
-      await expect(zoom).toHaveCSS("opacity", "1")
+      const button = page.getByRole("button", { name: COVER, exact: true })
+      await button.focus()
+      await expect(button).toBeFocused()
       await page.keyboard.press(key)
       const dialog = page.getByRole("dialog", { name: "ภาพปกของคลิป" })
       await expect(dialog).toBeVisible()
       await expect(dialog.locator("img")).toBeVisible()
       await dialog.locator("img").click()
       await expect(dialog).toHaveCount(0)
-      await expect(cover).toBeFocused()
+      await expect(button).toBeFocused()
     })
   }
-
-  test("ชี้เมาส์ที่ปกเห็นไอคอนขยาย", async ({ page }) => {
-    await page.goto(`/v/${ZOO}`)
-    const cover = page.getByRole("button", { name: COVER })
-    const zoom = cover.locator('[data-slot="cover-zoom"]')
-    await expect(zoom).toHaveCSS("opacity", "0")
-    await cover.hover()
-    await expect(zoom).toHaveCSS("opacity", "1")
-  })
 })
 
 test.describe("แท็บข้อมูลคลิป: ช่วงที่คนดูซ้ำบ่อย", () => {
@@ -561,63 +551,43 @@ test.describe("แท็บข้อมูลคลิป: ช่วงที่
     const times = await frameTimes(page)
     await expect(frameList(page).getByRole("listitem")).toHaveCount(times.length)
     const marked = await frameList(page)
-      .getByRole("button")
+      .getByRole("button", { name: /^ภาพเฟรมที่/ })
       .evaluateAll((buttons) => buttons.map((button) => button.querySelector("[data-replayed]") !== null))
     const expected = times.map(inSegments)
     expect(expected.filter(Boolean).length).toBeGreaterThan(0)
     expect(marked).toEqual(expected)
     // ชื่อปุ่มของภาพในช่วง: "ภาพเฟรมที่ 00:00:24 ดูซ้ำบ่อย"
     const first = times.findIndex(inSegments)
-    const button = frameList(page).getByRole("button").nth(first)
+    const button = frameList(page).getByRole("button", { name: /^ภาพเฟรมที่/ }).nth(first)
     await expect(button).toHaveAccessibleName(/^ภาพเฟรมที่ \d{2}:\d{2}:\d{2}\s+ดูซ้ำบ่อย$/)
     await expect(button.locator("[data-replayed] svg")).toBeVisible()
     // บรรทัดเวลาของช่วงย้ายไปแท็บข้อมูลคลิปแล้ว ส่วนภาพเฟรมไม่มีบรรทัดนี้
-    await expect(page.getByRole("region", { name: "ภาพเฟรม" }).getByRole("button", { name: /^ไปภาพเฟรมช่วง / })).toHaveCount(0)
+    await expect(page.getByRole("region", { name: "ภาพเฟรม" }).getByRole("button", { name: /^เล่นจาก \d/ })).toHaveCount(0)
   })
 
-  test("ส่วน 'ช่วงที่คนดูซ้ำบ่อย' มีปุ่มเวลา 00:00:20, 00:01:00 · กดแล้วไปแท็บภาพเฟรม ภาพแรกในช่วงถูกไฮไลต์ เห็นในจอ และได้โฟกัส", async ({
+  test("ส่วน 'ช่วงที่คนดูซ้ำบ่อย' มีปุ่มเวลา 00:00:20, 00:01:00 · กดแล้วเล่นคลิป (M3.5): อยู่แท็บเดิม URL ไม่เปลี่ยน ไม่ขอ storyboard", async ({
     page,
   }) => {
-    await withVideo(page, THAI, { mostReplayed: SEGMENTS })
-    await gotoInfo(page, THAI)
-    const times = replayedRegion(page).getByRole("button", { name: /^ไปภาพเฟรมช่วง / })
-    await expect(times).toHaveText(["00:00:20", "00:01:00"])
-    await times.nth(1).click()
-    // review M-2: ภาพแรกที่อยู่ในช่วง 60-66 วินาที (ภาพห่างกัน 4895 ms → 63635 ms = 00:01:03) ไม่ใช่ภาพที่ใกล้ 60 วินาที
-    // ที่สุด (58740 ms อยู่นอกช่วงและไม่มีป้าย)
-    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=63635$`))
-    await expect(tab(page, "ภาพเฟรม")).toHaveAttribute("aria-selected", "true")
-    const highlighted = frameList(page).locator("[data-highlighted]")
-    await expect(highlighted).toHaveCount(1)
-    await expect(highlighted).toBeFocused()
-    await expect(highlighted).toBeInViewport()
-    await expect(highlighted.locator("img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:01:03")
-    await expect(highlighted.locator("[data-replayed]")).toHaveCount(1)
-
-    // กลับไปแท็บข้อมูลคลิป (ล้างเวลา) แล้วกดเวลาเดิมซ้ำ ก็กลับมาที่ภาพเดิม
-    await tab(page, INFO_TAB).click()
-    await replayedRegion(page).getByRole("button", { name: "ไปภาพเฟรมช่วง 00:01:00" }).click()
-    await expect(highlighted).toBeFocused()
-    await expect(highlighted).toBeInViewport()
-  })
-
-  test("เปิด ?tab=info ตรง ๆ ไม่ขอ storyboard จนกว่าจะกดเวลาของช่วงที่คนดูซ้ำ (review M-2)", async ({ page }) => {
     await withVideo(page, THAI, { mostReplayed: SEGMENTS })
     const storyboardCalls: string[] = []
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === `/api/videos/${THAI}/storyboard`) storyboardCalls.push(request.url())
     })
     await gotoInfo(page, THAI)
-    const times = replayedRegion(page).getByRole("button", { name: /^ไปภาพเฟรมช่วง / })
+    const times = replayedRegion(page).getByRole("button", { name: /^เล่นจาก \d/ })
     await expect(times).toHaveText(["00:00:20", "00:01:00"])
-    await page.waitForTimeout(500)
-    expect(storyboardCalls).toHaveLength(0)
+    await expect(times.nth(1)).toHaveAccessibleName("เล่นจาก 00:01:00")
     await times.nth(1).click()
-    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=63635$`))
-    expect(storyboardCalls.length).toBeGreaterThan(0)
+    // ไม่พาไปแท็บภาพเฟรมแล้ว (ตัวเล่นที่หัวคลิปเล่นจากเวลานั้นแทน ดู player-sync.spec.ts)
+    await page.waitForTimeout(300)
+    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?tab=info$`))
+    await expect(tab(page, INFO_TAB)).toHaveAttribute("aria-selected", "true")
+    await expect(times.nth(1)).not.toHaveAttribute("aria-busy", "true")
+    await expect(times.nth(1)).toBeFocused()
+    expect(storyboardCalls).toHaveLength(0)
   })
 
-  test("ช่วงสั้นที่ไม่มีภาพอยู่ข้างใน: ภาพที่ใกล้กลางช่วงที่สุดได้ป้าย และปุ่มเวลาพาไปภาพนั้น (review M-2)", async ({ page }) => {
+  test("ช่วงสั้นที่ไม่มีภาพอยู่ข้างใน: ภาพที่ใกล้กลางช่วงที่สุดได้ป้าย · ปุ่มเวลาเป็นเวลาเริ่มของช่วง (review M-2)", async ({ page }) => {
     // 61-62 วินาที: ไม่มีภาพในช่วง กลางช่วง 61.5 วินาที ใกล้ภาพ 63635 ms (00:01:03) ที่สุด
     await withVideo(page, THAI, { mostReplayed: [{ startMs: 61_000, endMs: 62_000 }] })
     await page.goto(`/v/${THAI}`)
@@ -625,10 +595,7 @@ test.describe("แท็บข้อมูลคลิป: ช่วงที่
     await expect(marked).toHaveCount(1)
     await expect(marked.locator("img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:01:03")
     await tab(page, INFO_TAB).click()
-    await page.getByRole("button", { name: /^ไปภาพเฟรมช่วง 00:01:01/ }).click()
-    const highlighted = frameList(page).locator("[data-highlighted]")
-    await expect(highlighted).toBeFocused()
-    await expect(highlighted.locator("[data-replayed]")).toHaveCount(1)
+    await expect(replayedRegion(page).getByRole("button", { name: /^เล่นจาก \d/ })).toHaveText(["00:01:01"])
   })
 
   test("'คัดลอกช่วงที่คนดูซ้ำบ่อย' ได้ช่วงละบรรทัด HH:MM:SS - HH:MM:SS", async ({ page, context }) => {
@@ -661,12 +628,14 @@ test.describe("แท็บข้อมูลคลิป: ช่วงที่
   test("แท็บทรานสคริปต์: บรรทัดที่คาบเกี่ยวกับช่วงมีป้ายเดียวกัน บรรทัดอื่นไม่มี", async ({ page }) => {
     await withVideo(page, THAI, { mostReplayed: SEGMENTS })
     await page.goto(`/v/${THAI}?tab=transcript`)
-    const lines = page.getByRole("list", { name: LINES }).getByRole("button")
+    // M3.5: แต่ละบรรทัดมีปุ่มเวลา (เล่นจากตรงนี้) + ปุ่มข้อความ (มีป้าย) อ่านเวลาและป้ายจากทั้งแถว
+    const items = page.getByRole("list", { name: LINES }).getByRole("listitem")
+    const lines = items.locator("button:not([aria-label])")
     await expect(lines.first()).toBeVisible()
-    const rows = await lines.evaluateAll((buttons) =>
-      buttons.map((button) => {
-        const [h, m, s] = (button.querySelector(".font-mono")?.textContent ?? "").split(":").map(Number)
-        return { startS: (h * 60 + m) * 60 + s, marked: button.querySelector("[data-replayed]") !== null }
+    const rows = await items.evaluateAll((elements) =>
+      elements.map((item) => {
+        const [h, m, s] = (item.querySelector(".font-mono")?.textContent ?? "").split(":").map(Number)
+        return { startS: (h * 60 + m) * 60 + s, marked: item.querySelector("[data-replayed]") !== null }
       }),
     )
     const marked = rows.filter((row) => row.marked)
@@ -788,32 +757,57 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     })
   }
 
-  for (const width of [1280, 360]) {
-    test(`จอ ${width} px: Skeleton หัวคลิปสูงใกล้เคียงของจริง แถบแท็บขยับไม่เกิน 40 px ตอนโหลดเสร็จ`, async ({ page }) => {
+  // หัวคลิปก่อนเล่นสูงไม่ขึ้นกับ mostReplayed (M3.5 integration): ปุ่มช่วงไฮไลต์อยู่ในแถวปุ่ม ไม่มีแถวที่จองไว้ใต้ตัวเล่น
+  const WITHOUT_REPLAYED = { ...FULL, mostReplayed: undefined }
+  const CASES = [
+    ["มีช่วงดูซ้ำบ่อย", FULL],
+    ["ไม่มีช่วงดูซ้ำบ่อย", WITHOUT_REPLAYED],
+  ] as const
+  // จอ 360 px แถวปุ่มตัดขึ้นบรรทัดใหม่ได้ (ปุ่ม "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" ลงบรรทัดสอง) แต่ยังอยู่ในระยะ 40 px จาก Skeleton (เทสต์ถัดไป)
+  for (const width of [1280]) {
+    test(`จอ ${width} px: หัวคลิปก่อนเล่นสูงเท่ากันทั้งคลิปที่มีและไม่มีช่วงดูซ้ำบ่อย`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 })
-      await withVideo(page, BBB, FULL)
-      let release = () => {}
-      const gate = new Promise<void>((resolve) => (release = resolve))
-      // ลงทะเบียนทีหลัง = ทำงานก่อน: หน่วงคำขอข้อมูลคลิปแล้วส่งต่อให้ตัวแก้ข้อมูลด้านบน
-      await page.route(
-        (url) => url.pathname === `/api/videos/${BBB}`,
-        async (route) => {
-          await gate
-          await route.fallback()
-        },
-      )
-      await page.goto(`/v/${BBB}`)
-      await expect(page.getByRole("status").filter({ hasText: "กำลังโหลด" }).first()).toBeAttached()
-      const skeletonTop = await tabTop(page)
-      expect(skeletonTop).toBeGreaterThan(0)
-      release()
-      await expect(tile(page, "ยอดวิว 123,456 ครั้ง")).toBeVisible()
-      const loadedTop = await tabTop(page)
-      expect(Math.abs(loadedTop - skeletonTop)).toBeLessThanOrEqual(40)
+      const tops: number[] = []
+      for (const [, patch] of CASES) {
+        await page.unrouteAll({ behavior: "wait" })
+        await withVideo(page, BBB, patch)
+        await page.goto(`/v/${BBB}`)
+        await expect(tile(page, "ยอดวิว 123,456 ครั้ง")).toBeVisible()
+        await expect(page.getByRole("button", { name: "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" })).toHaveCount(patch.mostReplayed ? 1 : 0)
+        tops.push(await tabTop(page))
+      }
+      expect(tops[0]).toBe(tops[1])
     })
   }
 
-  test("จอกว้าง 1280 px แท็บข้อมูลคลิป: ซ้าย คำอธิบาย → Chapter · ขวา ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก (owner round 5)", async ({
+  for (const [label, patch] of CASES) {
+    for (const width of [1280, 360]) {
+      test(`จอ ${width} px (${label}): Skeleton หัวคลิปสูงใกล้เคียงของจริง แถบแท็บขยับไม่เกิน 40 px ตอนโหลดเสร็จ`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 800 })
+        await withVideo(page, BBB, patch)
+        let release = () => {}
+        const gate = new Promise<void>((resolve) => (release = resolve))
+        // ลงทะเบียนทีหลัง = ทำงานก่อน: หน่วงคำขอข้อมูลคลิปแล้วส่งต่อให้ตัวแก้ข้อมูลด้านบน
+        await page.route(
+          (url) => url.pathname === `/api/videos/${BBB}`,
+          async (route) => {
+            await gate
+            await route.fallback()
+          },
+        )
+        await page.goto(`/v/${BBB}`)
+        await expect(page.getByRole("status").filter({ hasText: "กำลังโหลด" }).first()).toBeAttached()
+        const skeletonTop = await tabTop(page)
+        expect(skeletonTop).toBeGreaterThan(0)
+        release()
+        await expect(tile(page, "ยอดวิว 123,456 ครั้ง")).toBeVisible()
+        const loadedTop = await tabTop(page)
+        expect(Math.abs(loadedTop - skeletonTop)).toBeLessThanOrEqual(40)
+      })
+    }
+  }
+
+  test("จอกว้าง 1280 px แท็บข้อมูลคลิป: ซ้าย คำอธิบาย · ขวา Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก (owner round 6)", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -828,16 +822,14 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     )
     const x = (box: typeof description) => box?.x ?? -1
     const y = (box: typeof description) => box?.y ?? -1
-    expect(Math.abs(x(chapters) - x(description))).toBeLessThan(2)
-    expect(y(description)).toBeLessThan(y(chapters))
-    // คอลัมน์ขวา: ช่วงดูซ้ำอยู่บนสุด เหนือคอมเมนต์ปักหมุด แล้วแท็ก
-    expect(Math.abs(x(replayed) - x(pinned))).toBeLessThan(2)
-    expect(Math.abs(x(tags) - x(pinned))).toBeLessThan(2)
+    // คอลัมน์ขวา: Chapter บนสุด แล้วช่วงดูซ้ำ คอมเมนต์ปักหมุด แท็ก
+    for (const box of [replayed, pinned, tags]) expect(Math.abs(x(box) - x(chapters))).toBeLessThan(2)
+    expect(y(chapters)).toBeLessThan(y(replayed))
     expect(y(replayed)).toBeLessThan(y(pinned))
     expect(y(pinned)).toBeLessThan(y(tags))
-    expect(x(replayed)).toBeGreaterThan(x(description) + (description?.width ?? 0))
+    expect(x(chapters)).toBeGreaterThan(x(description) + (description?.width ?? 0))
     // คอลัมน์ขวาเริ่มบรรทัดเดียวกับคอลัมน์ซ้าย
-    expect(Math.abs(y(replayed) - y(description))).toBeLessThan(2)
+    expect(Math.abs(y(chapters) - y(description))).toBeLessThan(2)
     // ลำดับใน DOM (= ลำดับ Tab) ตรงกับลำดับที่อ่าน: คอลัมน์ซ้ายก่อน แล้วคอลัมน์ขวา
     expect(await infoSectionOrder(page)).toEqual(INFO_ORDER)
   })

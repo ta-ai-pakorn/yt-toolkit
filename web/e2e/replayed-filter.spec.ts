@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page } from "@playwright/test"
 
 // owner round 5: ภาพเฟรมในช่วงที่คนดูซ้ำบ่อยเด่นขึ้น (กรอบอำพัน + ป้าย "ดูซ้ำบ่อย") · ตัวกรอง "ดูซ้ำบ่อย (n ภาพ)" (?replayed=1)
-// · ปุ่มเวลาของช่วงดูซ้ำไม่พาไปแท็บภาพเฟรมถ้าผู้ใช้เปลี่ยนแท็บไปก่อนข้อมูลมาถึง
+// · ปุ่มเวลาของช่วงดูซ้ำเล่นคลิปที่หัวคลิป (M3.5) ไม่รอ storyboard และไม่พาไปแท็บภาพเฟรมแล้ว
 // mostReplayed จำลองด้วย page.route ข้อมูลส่วนอื่นมาจาก backend โหมด fake
 
 // คลิปภาษาไทยที่มีภาพเฟรม (ห่างกัน 4895 ms)
@@ -31,6 +31,8 @@ async function withVideo(page: Page, videoId: string, patch: Record<string, unkn
 }
 
 const frameList = (page: Page) => page.getByRole("list", { name: "รายการภาพเฟรม" })
+// ปุ่มของตัวภาพ (เปิดภาพใหญ่) ไม่รวมปุ่ม ▶ "เล่นจากตรงนี้" ที่มุมภาพ (M3.5)
+const frameButtons = (page: Page) => frameList(page).getByRole("button", { name: /^ภาพเฟรมที่/ })
 const filterButton = (page: Page) => page.getByRole("button", { name: /^ดูซ้ำบ่อย \(\d+ ภาพ\)$/ })
 const lightbox = (page: Page) => page.getByRole("dialog")
 const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: true })
@@ -48,7 +50,7 @@ test.describe("แท็บภาพเฟรม: ภาพในช่วงท
     const total = await frameCount(page)
     await expect(frameList(page).getByRole("listitem")).toHaveCount(total)
 
-    const marked = frameList(page).getByRole("button").filter({ has: page.locator("[data-replayed]") })
+    const marked = frameButtons(page).filter({ has: page.locator("[data-replayed]") })
     await expect(marked).toHaveCount(3)
     expect(await marked.locator("img").evaluateAll((imgs) => imgs.map((img) => img.getAttribute("alt")))).toEqual(IN_SEGMENTS)
     for (let i = 0; i < 3; i += 1) {
@@ -65,7 +67,7 @@ test.describe("แท็บภาพเฟรม: ภาพในช่วงท
     // กรอบอำพันอยู่ด้านในภาพ (inset) ไม่ใช่เส้นนอกแบบภาพที่ไฮไลต์ (?at=)
     await expect(marked.first().locator("[data-replayed-frame]")).toHaveCSS("box-shadow", /inset/)
 
-    const others = frameList(page).getByRole("button").filter({ hasNot: page.locator("[data-replayed]") })
+    const others = frameButtons(page).filter({ hasNot: page.locator("[data-replayed]") })
     await expect(others).toHaveCount(total - 3)
     await expect(frameList(page).locator("[data-replayed-frame]")).toHaveCount(3)
     await expect(others.first()).toHaveAccessibleName(/^ภาพเฟรมที่ \d{2}:\d{2}:\d{2}$/)
@@ -112,7 +114,7 @@ test.describe("แท็บภาพเฟรม: ตัวกรอง 'ดู�
     await page.keyboard.press("Space")
     await expect(filterButton(page)).toHaveAttribute("aria-pressed", "true")
     // ภาพที่สองของชุดที่กรองแล้ว = 00:00:29
-    const second = frameList(page).getByRole("button").nth(1)
+    const second = frameButtons(page).nth(1)
     await second.focus()
     await page.keyboard.press("Shift+F10")
     await expect(page.getByRole("menuitem", { name: "คัดลอกภาพ" })).toBeFocused()
@@ -124,7 +126,7 @@ test.describe("แท็บภาพเฟรม: ตัวกรอง 'ดู�
     await withVideo(page, THAI, { mostReplayed: SEGMENTS })
     await page.goto(`/v/${THAI}?replayed=1`)
     await expect(frameList(page).getByRole("listitem")).toHaveCount(3)
-    await frameList(page).getByRole("button").first().click()
+    await frameButtons(page).first().click()
     await expect(lightbox(page)).toHaveAttribute("aria-label", "ภาพเฟรมที่ 00:00:24")
     await page.keyboard.press("ArrowRight")
     await expect(lightbox(page)).toHaveAttribute("aria-label", "ภาพเฟรมที่ 00:00:29")
@@ -173,12 +175,11 @@ test.describe("แท็บภาพเฟรม: ตัวกรอง 'ดู�
     await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=9790$`))
   })
 
-  test("ไปภาพของ chapter (?at= นอกช่วง) แล้วกดเปิดตัวกรอง: เปิดติด (ล้างเวลา) เห็นเฉพาะภาพที่มีป้าย (fix round 1)", async ({ page }) => {
-    // chapter เริ่ม 10 วินาที (?at=10000) → ภาพที่ใกล้ที่สุด 9790 ms (00:00:09) อยู่นอกช่วงดูซ้ำ
-    await withVideo(page, THAI, { mostReplayed: SEGMENTS, chapters: [{ startS: 10, endS: 50, title: "ตอนแรก" }] })
-    await page.goto(`/v/${THAI}?tab=info`)
-    await page.getByRole("button", { name: "ไปภาพเฟรมช่วง 00:00:10" }).click()
-    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=10000$`))
+  test("ภาพของเวลาใน URL (?at= นอกช่วง) แล้วกดเปิดตัวกรอง: เปิดติด (ล้างเวลา) เห็นเฉพาะภาพที่มีป้าย (fix round 1)", async ({ page }) => {
+    // ?at=10000 → ภาพที่ใกล้ที่สุด 9790 ms (00:00:09) อยู่นอกช่วงดูซ้ำ
+    // (M3.5: ปุ่มเวลาของ chapter เล่นคลิปแทนการพามาที่นี่ จึงเปิดด้วยเวลาใน URL ตรง ๆ)
+    await withVideo(page, THAI, { mostReplayed: SEGMENTS })
+    await page.goto(`/v/${THAI}?at=10000`)
     await expect(frameList(page).locator("[data-highlighted] img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:00:09")
 
     await filterButton(page).click()
@@ -191,12 +192,14 @@ test.describe("แท็บภาพเฟรม: ตัวกรอง 'ดู�
     await expect(filterButton(page)).toHaveAttribute("aria-pressed", "true")
     await expect(frameList(page).locator("[data-replayed]")).toHaveCount(3)
 
-    // กรองอยู่แล้วไป chapter อีกครั้ง (เวลาใหม่ชี้ภาพที่ถูกกรองออก): ตัวกรองปิดให้เห็นภาพนั้น
-    await tab(page, "ข้อมูลคลิป").click()
-    await page.getByRole("button", { name: "ไปภาพเฟรมช่วง 00:00:10" }).click()
-    await expect(frameList(page).locator("[data-highlighted] img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:00:09")
+    // กรองอยู่แล้วมาจากบรรทัดทรานสคริปต์ต้นคลิป (เวลาใหม่ชี้ภาพที่ถูกกรองออก): ตัวกรองปิดให้เห็นภาพนั้น
+    await tab(page, "ทรานสคริปต์").click()
+    const firstLine = page.getByRole("list", { name: "บรรทัดในทรานสคริปต์" }).getByRole("listitem").first()
+    await firstLine.locator("button:not([aria-label])").click()
+    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=\\d+$`))
+    await expect(frameList(page).locator("[data-highlighted]")).toHaveCount(1)
+    await expect(frameList(page).locator("[data-highlighted] [data-replayed]")).toHaveCount(0)
     await expect(filterButton(page)).toHaveAttribute("aria-pressed", "false")
-    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=10000$`))
   })
 
   test("จอ 360 px: ปุ่มตัวกรองและปุ่มโหลดทั้งสองสูงอย่างน้อย 44 px และหน้าไม่ล้นจอ (fix round 1)", async ({ page }) => {
@@ -227,43 +230,23 @@ test.describe("แท็บภาพเฟรม: ตัวกรอง 'ดู�
   }
 })
 
-test.describe("แท็บข้อมูลคลิป: ปุ่มเวลาของช่วงดูซ้ำระหว่างรอข้อมูล", () => {
-  test("กดเวลาแล้วเปลี่ยนแท็บก่อน storyboard มาถึง: อยู่แท็บใหม่ ไม่ถูกพาไปแท็บภาพเฟรม · ระหว่างรอปุ่มขึ้น aria-busy", async ({
-    page,
-  }) => {
+test.describe("แท็บข้อมูลคลิป: ปุ่มเวลาของช่วงดูซ้ำ (M3.5)", () => {
+  test("กดเวลาแล้วอยู่แท็บเดิม ไม่ขอ storyboard ไม่มีสถานะรอ · เปลี่ยนแท็บต่อก็ไม่ถูกพาไปแท็บภาพเฟรมทีหลัง", async ({ page }) => {
     await withVideo(page, THAI, { mostReplayed: SEGMENTS })
-    let release: () => void = () => {}
-    const gate = new Promise<void>((resolve) => (release = resolve))
-    let delayed = false
-    await page.route(
-      (url) => url.pathname === `/api/videos/${THAI}/storyboard`,
-      async (route) => {
-        if (!delayed) {
-          delayed = true
-          await gate
-        }
-        await route.continue()
-      },
-    )
+    const storyboardCalls: string[] = []
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === `/api/videos/${THAI}/storyboard`) storyboardCalls.push(request.url())
+    })
     await page.goto(`/v/${THAI}?tab=info`)
-    const time = page.getByRole("button", { name: "ไปภาพเฟรมช่วง 00:01:00" })
+    const time = page.getByRole("button", { name: "เล่นจาก 00:01:00" })
     await time.click()
-    await expect(time).toHaveAttribute("aria-busy", "true")
+    await expect(time).not.toHaveAttribute("aria-busy", "true")
     await expect(tab(page, "ข้อมูลคลิป")).toHaveAttribute("aria-selected", "true")
 
     await tab(page, "ซับ").click()
-    await expect(tab(page, "ซับ")).toHaveAttribute("aria-selected", "true")
-    const response = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/videos/${THAI}/storyboard`)
-    release()
-    await response
     await page.waitForTimeout(500)
     await expect(tab(page, "ซับ")).toHaveAttribute("aria-selected", "true")
     await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?tab=subs$`))
-
-    // กลับมาแท็บข้อมูลคลิป ปุ่มไม่ค้างสถานะรอ และกดแล้วไปภาพเฟรมได้ตามปกติ (storyboard อยู่ใน cache แล้ว)
-    await tab(page, "ข้อมูลคลิป").click()
-    await expect(time).not.toHaveAttribute("aria-busy", "true")
-    await time.click()
-    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=63635$`))
+    expect(storyboardCalls).toHaveLength(0)
   })
 })

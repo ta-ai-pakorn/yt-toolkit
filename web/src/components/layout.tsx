@@ -50,7 +50,8 @@ export function Layout() {
       <main className="mx-auto max-w-[960px] px-4 pb-16">
         <Outlet />
       </main>
-      <Toaster position="bottom-right" />
+      {/* ระยะจากขอบล่างมาจากตัวแปร CSS (index.css): ตัวเล่นลอยอยู่ = toast ขึ้นเหนือตัวเล่น · M4 ตั้ง --dock-bottom-offset ให้แถบคิว */}
+      <Toaster position="bottom-right" offset={{ bottom: "var(--toast-bottom-offset)" }} mobileOffset={{ bottom: "var(--toast-mobile-bottom-offset)" }} />
       {/* ย้อนกลับ (ปุ่ม back / "รายการที่วาง") = กลับไปตำแหน่งเลื่อนเดิม · เปิดหน้าใหม่ = เริ่มบนสุด */}
       <ScrollRestoration />
     </div>

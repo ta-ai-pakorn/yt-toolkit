@@ -929,6 +929,12 @@ test.describe("ปรับจากการเดินตามเส้น�
     await expect(page.getByRole("button", { name: "บันทึกเป็นโน้ต (.md)", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(page.getByRole("link", { name: /^เปิดในยูทูป/ })).toBeFocused()
+    // M3.5: ปุ่ม "ดูภาพปก" ต่อท้ายแถวปุ่ม
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "ดูภาพปก", exact: true })).toBeFocused()
+    // M3.5 integration: คลิปที่มีช่วงดูซ้ำบ่อย มีปุ่ม "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" ท้ายแถวปุ่ม (ย้ายมาจากใต้ตัวเล่น)
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(page.getByRole("tab", { name: "ภาพเฟรม", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")

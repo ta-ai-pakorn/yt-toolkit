@@ -17,8 +17,8 @@ const LINES = "บรรทัดในทรานสคริปต์"
 const SEARCH = "ค้นหาคำในทรานสคริปต์"
 const NO_SUBS = "คลิปนี้ไม่มีซับ"
 const PICK_HINT = "คลิปนี้ไม่มีซับจากเจ้าของคลิปหรือซับภาษาต้นฉบับ เลือกแทร็กที่ต้องการจากรายการ"
-// เมนูของภาพเฟรมที่ไม่ขึ้นกับซับ: 4 รายการของ M2 + "เปิดในยูทูปตรงเวลานี้" (owner round 4)
-const M2_MENU = ["คัดลอกภาพ", "โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้", "เปิดในยูทูปตรงเวลานี้"]
+// เมนูของภาพเฟรมที่ไม่ขึ้นกับซับ: 4 รายการของ M2 + "เปิดในยูทูปตรงเวลานี้" (owner round 4) + "เล่นจากตรงนี้" (M3.5)
+const M2_MENU = ["คัดลอกภาพ", "โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้", "เปิดในยูทูปตรงเวลานี้", "เล่นจากตรงนี้"]
 const MENU_WITH_SUBS = [...M2_MENU, "ดูซับช่วงนี้"]
 // ภาพเฟรมของคลิปนี้ห่างกัน 4895 ms: ภาพที่ใกล้ 10 วินาทีที่สุดคือ 9790 ms (00:00:09)
 const FRAME_NEAR_10S = "00:00:09"
@@ -86,6 +86,8 @@ const searchBox = (page: Page) => page.getByRole("textbox", { name: SEARCH })
 const lineItems = (page: Page) => page.getByRole("list", { name: LINES }).getByRole("listitem")
 const frameList = (page: Page) => page.getByRole("list", { name: FRAME_LIST })
 const frameButton = (page: Page, time: string) => page.getByRole("button", { name: `ภาพเฟรมที่ ${time}` })
+// ปุ่มข้อความของบรรทัด (ไปภาพเฟรม) ไม่รวมปุ่มเวลา "เล่นจากตรงนี้ …" หน้าบรรทัด (M3.5)
+const lineText = (item: ReturnType<typeof lineItems>) => item.locator("button:not([aria-label])")
 const currentLine = (page: Page) => page.getByRole("list", { name: LINES }).locator('[aria-current="true"]')
 
 const toMs = (timecode: string) => {
@@ -134,8 +136,8 @@ test.describe("M3 ทรานสคริปต์: ค้นหา (FR-SUB-8)"
     await mockThai(page)
     await page.goto(`/v/${THAI}?tab=transcript`)
     await expect(page.getByText("จากแทร็ก ไทย (อัตโนมัติ)", { exact: false })).toBeVisible()
-    const total = await lineItems(page).count()
-    expect(total).toBeGreaterThan(3)
+    // ป้ายแทร็กขึ้นก่อนรายการบรรทัดวาดเสร็จได้ (เครื่องช้า): รอให้มีบรรทัดก่อนนับ ไม่นับทันที
+    await expect.poll(() => lineItems(page).count()).toBeGreaterThan(3)
 
     await searchBox(page).fill("กรุงเทพ")
     await expect(page.getByText(/^พบ \d+ บรรทัด$/)).toBeVisible()
@@ -179,9 +181,9 @@ test.describe("M3 ทรานสคริปต์ → ภาพเฟรม", 
     await searchBox(page).fill("กรุงเทพ")
     // คำค้นใช้ useDeferredValue: รอให้รายการกรองเสร็จ (บรรทัดแรกมีคำที่ไฮไลต์) ก่อนอ่านเวลา
     await expect(lineItems(page).first().locator("mark").first()).toBeVisible()
-    const first = lineItems(page).first().getByRole("button")
+    const first = lineItems(page).first()
     const time = (await first.locator(".font-mono").textContent()) ?? ""
-    await first.click()
+    await lineText(first).click()
 
     // แท็บภาพเฟรมเป็นค่าเริ่มต้น จึงไม่ขึ้น tab= ใน URL เหลือแค่ at
     await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=\\d+$`))
@@ -198,7 +200,7 @@ test.describe("M3 ทรานสคริปต์ → ภาพเฟรม", 
     await mockThai(page)
     await page.goto(`/v/${THAI}?tab=transcript`)
     await expect(lineItems(page).first()).toBeVisible()
-    await lineItems(page).last().getByRole("button").click()
+    await lineText(lineItems(page).last()).click()
     await expect(page).toHaveURL(/\?at=\d+$/)
     await expectHighlightedFrameNear(page, atFromUrl(page))
   })
@@ -276,7 +278,7 @@ test.describe("M3 ภาพเฟรม → ทรานสคริปต์ (Q
     await page.keyboard.press("Shift+F10")
     await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(MENU_WITH_SUBS)
     await expect(page.getByRole("menuitem", { name: "คัดลอกภาพ" })).toBeFocused()
-    for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowDown")
+    for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowDown")
     await expect(page.getByRole("menuitem", { name: "ดูซับช่วงนี้" })).toBeFocused()
     await page.keyboard.press("Enter")
 

@@ -1,12 +1,17 @@
-import { useEffect, useRef } from "react"
+import { Play } from "lucide-react"
+import { memo, useCallback, useEffect, useRef, useState } from "react"
 
+import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { th } from "@/i18n/th"
+import { fill, th } from "@/i18n/th"
 import { formatTimecode } from "@/lib/format"
 import type { Cue } from "@/lib/types"
 
-import { centerInScrollArea, revealAndFocus } from "../frame-target"
+import { centerInScrollArea, cueIndexAt, revealAndFocus } from "../frame-target"
+import { hasPlayhead, nowPlayingLine } from "../playback-sync"
+import { getPlayerState, playerActions, usePlayerValue } from "../player/player-store"
 import { ReplayedMark } from "../replayed-mark"
+import { centerWithinList, isUserScroll, type FollowInput } from "./follow"
 import { lineRanges, type PreparedLine } from "./search"
 
 const t = th.transcript
@@ -16,12 +21,18 @@ const AREA = "rounded-md border [&>[data-slot=scroll-area-viewport]]:max-h-[360p
 
 // คลิปยาวมีเป็นพันบรรทัด: บรรทัดที่อยู่นอกกรอบไม่ต้องวาดจนกว่าจะเลื่อนถึง (content-visibility)
 // content-visibility ตัดทุกอย่างที่ล้นกรอบ li จึงเว้น padding 3px ให้วงโฟกัสของปุ่มไม่ถูกตัด
-const ITEM = "p-[3px] [contain-intrinsic-size:auto_36px] [content-visibility:auto]"
+// บรรทัดที่กำลังเล่น (M3.5) = แถบพื้นอำพันจางเต็มแถว (แบบคาราโอเกะ) ครอบทั้งปุ่มเวลาและข้อความ
+const ITEM =
+  "flex items-stretch gap-1 rounded-md p-[3px] [contain-intrinsic-size:auto_36px] [content-visibility:auto] data-playing:bg-primary/20"
 
-// บรรทัดของเวลาที่มาจาก "ดูซับช่วงนี้" = แถบซ้ายสีอำพันเข้ม (--accent-text ผ่าน 3:1 ทั้งสองธีม) + พื้นจาง
-// ต่างจากวงโฟกัส (วงรอบทั้งปุ่ม) จึงเห็นทั้งสองอย่างพร้อมกันได้โดยไม่สับสน
+// ปุ่มเวลาหน้าบรรทัด (M3.5): กดแล้วเล่นคลิปจากบรรทัดนั้น · ไอคอน ▶ เล็ก ๆ บอกว่ากดแล้วเล่น
+const TIME =
+  "inline-flex shrink-0 items-baseline gap-1 rounded-sm px-1.5 py-1.5 font-mono text-xs text-muted-foreground tabular-nums outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 in-data-playing:text-foreground"
+
+// บรรทัดของเวลาที่มาจาก "ดูซับช่วงนี้" (?at=) = แถบซ้ายสีอำพันเข้ม (--accent-text ผ่าน 3:1 ทั้งสองธีม) + พื้นจาง
+// ต่างจากวงโฟกัส (วงรอบทั้งปุ่ม) และแถบพื้นของบรรทัดที่กำลังเล่น จึงเห็นทั้งหมดพร้อมกันได้โดยไม่สับสน
 const LINE =
-  "flex w-full items-baseline gap-3 rounded-sm border-l-2 border-transparent px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=true]:border-accent-text aria-[current=true]:bg-muted"
+  "flex min-w-0 flex-1 items-baseline gap-2 rounded-sm border-l-2 border-transparent px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 data-highlighted:border-accent-text data-highlighted:bg-muted"
 
 /** ข้อความของบรรทัด โดยครอบคำที่ตรงคำค้นด้วย <mark> (คำนวณเฉพาะบรรทัดที่แสดง) */
 function Highlighted({ line, needle }: { line: PreparedLine; needle: string }) {
@@ -43,6 +54,62 @@ function Highlighted({ line, needle }: { line: PreparedLine; needle: string }) {
   return <>{parts}</>
 }
 
+type LineProps = {
+  index: number
+  cue: Cue
+  line: PreparedLine
+  needle: string
+  /** บรรทัดของเวลาใน URL (?at=) */
+  highlighted: boolean
+  /** บรรทัดที่กำลังเล่น */
+  playing: boolean
+  /** บรรทัดนี้ได้ aria-current: บรรทัดที่กำลังเล่นเมื่อตัวเล่นมีตำแหน่ง ไม่งั้นบรรทัดของ ?at= */
+  current: boolean
+  replayed: boolean
+  onPick: (cue: Cue) => void
+  onPlay: (cue: Cue) => void
+  setButton: (index: number, element: HTMLButtonElement | null) => void
+}
+
+/** บรรทัดเดียว: ปุ่มเวลา (เล่นจากตรงนี้) + ปุ่มข้อความ (ไปภาพเฟรมของช่วงนั้น) · memo: เวลาเดินแล้วเรนเดอร์ใหม่เฉพาะบรรทัดที่สถานะเปลี่ยน */
+const Line = memo(function Line({
+  index,
+  cue,
+  line,
+  needle,
+  highlighted,
+  playing,
+  current,
+  replayed,
+  onPick,
+  onPlay,
+  setButton,
+}: LineProps) {
+  const time = formatTimecode(cue.startMs)
+  const ref = useCallback((element: HTMLButtonElement | null) => setButton(index, element), [index, setButton])
+  return (
+    <li className={ITEM} data-playing={playing ? "" : undefined}>
+      <button type="button" aria-label={fill(t.playFromAt, { time })} onClick={() => onPlay(cue)} className={TIME}>
+        <Play aria-hidden className="size-2.5 shrink-0 self-center fill-current" />
+        {time}
+      </button>
+      <button
+        ref={ref}
+        type="button"
+        data-highlighted={highlighted ? "" : undefined}
+        aria-current={current ? "true" : undefined}
+        onClick={() => onPick(cue)}
+        className={LINE}
+      >
+        {replayed && <ReplayedMark className="inline-flex shrink-0 self-center" />}
+        <span className="min-w-0">
+          <Highlighted line={line} needle={needle} />
+        </span>
+      </button>
+    </li>
+  )
+})
+
 type Props = {
   cues: Cue[]
   /** ข้อความที่เตรียมไว้ค้นหา ตำแหน่งเดียวกับ cues */
@@ -61,8 +128,11 @@ type Props = {
 }
 
 /**
- * รายการบรรทัดทรานสคริปต์: แต่ละบรรทัดเป็นปุ่มเดียว เวลา HH:MM:SS + ข้อความ กดแล้วไปภาพเฟรมของช่วงนั้น
+ * รายการบรรทัดทรานสคริปต์: แต่ละบรรทัดมีปุ่มเวลา (เล่นคลิปจากบรรทัดนั้น) + ปุ่มข้อความ (ไปภาพเฟรมของช่วงนั้น)
  * ต้องเรนเดอร์ไว้ตลอด (ผลค้นหาว่างก็คืน null) เพราะจำไว้ว่าเลื่อนไปหาบรรทัดของ at แล้วหรือยัง
+ *
+ * ระหว่างเล่น (M3.5): บรรทัดที่กำลังเล่นมีแถบพื้นและได้ aria-current · กรอบรายการเลื่อนตามให้บรรทัดนั้นอยู่กลางกรอบ
+ * ผู้ใช้เลื่อนรายการเอง = หยุดเลื่อนตาม และขึ้นปุ่ม "กลับไปบรรทัดที่กำลังเล่น" · กดเวลาของบรรทัดไหนก็กลับมาเลื่อนตาม
  */
 export function LineList({ cues, lines, visible, needle, current, replayed, revealKey, onPick }: Props) {
   const buttons = useRef(new Map<number, HTMLButtonElement>())
@@ -70,6 +140,27 @@ export function LineList({ cues, lines, visible, needle, current, replayed, reve
   // บรรทัดที่ไฮไลต์ถูกซ่อนด้วยคำค้นหลังเลื่อนไปหาแล้ว: กลับมาเห็นเมื่อไร เลื่อนกรอบไปหาอีกครั้ง
   const wasHidden = useRef(false)
   const shown = current >= 0 && visible.includes(current)
+  // บรรทัดที่กำลังเล่น (ตำแหน่งใน cues) เปลี่ยนเฉพาะตอนเล่นข้ามบรรทัด ไม่ใช่ทุกครั้งที่เวลาเดิน
+  const playing = usePlayerValue((state) => nowPlayingLine(cues, state))
+  const active = usePlayerValue(hasPlayhead)
+  const [following, setFollowing] = useState(true)
+  // ตัวเล่นปิด/เล่นจบ (ไม่มีตำแหน่งแล้ว) = ล้างการหยุดเลื่อนตาม เล่นรอบใหม่ก็เลื่อนตามตั้งแต่ต้น
+  const [wasActive, setWasActive] = useState(active)
+  if (wasActive !== active) {
+    setWasActive(active)
+    if (!active) setFollowing(true)
+  }
+  const playingShown = playing >= 0 && visible.includes(playing)
+
+  const setButton = useCallback((index: number, element: HTMLButtonElement | null) => {
+    if (element) buttons.current.set(index, element)
+    else buttons.current.delete(index)
+  }, [])
+
+  const onPlay = useCallback((cue: Cue) => {
+    setFollowing(true)
+    playerActions.playFrom(cue.startMs)
+  }, [])
 
   useEffect(() => {
     if (revealKey === null) {
@@ -103,38 +194,88 @@ export function LineList({ cues, lines, visible, needle, current, replayed, reve
     }
   }, [revealKey, current, shown])
 
+  // เลื่อนกรอบรายการตามบรรทัดที่กำลังเล่น ให้อยู่กลางกรอบ (เลื่อนเฉพาะในกรอบ ไม่ดึงหน้า) · รอหนึ่งเฟรมให้บรรทัดวาดเสร็จก่อน
+  useEffect(() => {
+    if (!following || !playingShown) return
+    const frame = requestAnimationFrame(() => {
+      const button = buttons.current.get(playing)
+      if (button) centerWithinList(button)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [following, playing, playingShown])
+
+  // ผู้ใช้เลื่อนรายการเอง (ดูจากเจตนา ไม่ใช่เหตุการณ์ scroll ซึ่งรวมการเลื่อนที่แอปสั่งเอง) = หยุดเลื่อนตาม
+  function onIntent(input: FollowInput) {
+    if (following && isUserScroll(input)) setFollowing(false)
+  }
+
+  // กลับไปเลื่อนตาม: ปุ่มนี้จะหายไป จึงโฟกัสบรรทัดที่กำลังเล่นตอนกด (โฟกัสไม่วิ่งตามบรรทัดต่อ ๆ ไป) · ก่อนบรรทัดแรก = บรรทัดที่ใกล้ที่สุด
+  function resume() {
+    setFollowing(true)
+    const target = playing >= 0 ? playing : cueIndexAt(cues, getPlayerState().currentMs)
+    const button = buttons.current.get(target)
+    if (button) {
+      button.focus({ preventScroll: true })
+      centerWithinList(button)
+    }
+  }
+
   // ค้นไม่เจอ: ไม่วาดรายการ แต่ตัวนี้ยังอยู่ (สถานะการเลื่อนไปหาบรรทัดข้างบนไม่หาย)
   if (visible.length === 0) return null
 
+  // aria-current: บรรทัดที่กำลังเล่นเมื่อตัวเล่นมีตำแหน่ง (เล่น/หยุดชั่วคราว) ไม่งั้นบรรทัดของเวลาใน URL
+  const currentIndex = active ? playing : current
+
   return (
-    <ScrollArea className={AREA}>
-      <ul aria-label={t.linesLabel} className="flex flex-col p-1">
-        {visible.map((index) => {
-          const cue = cues[index]
-          return (
-            <li key={`${cue.startMs}-${index}`} className={ITEM}>
-              <button
-                ref={(element) => {
-                  if (element) buttons.current.set(index, element)
-                  else buttons.current.delete(index)
-                }}
-                type="button"
-                aria-current={index === current ? "true" : undefined}
-                onClick={() => onPick(cue)}
-                className={LINE}
-              >
-                <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
-                  {formatTimecode(cue.startMs)}
-                </span>
-                {replayed?.[index] && <ReplayedMark className="inline-flex shrink-0 self-center" />}
-                <span className="min-w-0">
-                  <Highlighted line={lines[index]} needle={needle} />
-                </span>
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-    </ScrollArea>
+    <div className="relative">
+      <ScrollArea
+        className={AREA}
+        onWheel={(event) => onIntent({ type: "wheel", ctrlKey: event.ctrlKey })}
+        onTouchMove={() => onIntent({ type: "touchmove" })}
+        onKeyDown={(event) =>
+          onIntent({
+            type: "keydown",
+            key: event.key,
+            target: (event.target as HTMLElement).tagName,
+            altKey: event.altKey,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey,
+          })
+        }
+        onPointerDown={(event) => {
+          if ((event.target as Element).closest('[data-slot="scroll-area-scrollbar"]')) onIntent({ type: "scrollbar" })
+        }}
+      >
+        <ul aria-label={t.linesLabel} className="flex flex-col p-1">
+          {visible.map((index) => (
+            <Line
+              key={`${cues[index].startMs}-${index}`}
+              index={index}
+              cue={cues[index]}
+              line={lines[index]}
+              needle={needle}
+              highlighted={index === current}
+              playing={index === playing}
+              current={index === currentIndex}
+              replayed={replayed?.[index] ?? false}
+              onPick={onPick}
+              onPlay={onPlay}
+              setButton={setButton}
+            />
+          ))}
+        </ul>
+      </ScrollArea>
+      {active && !following && (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={resume}
+          className="absolute bottom-2 left-1/2 -translate-x-1/2 shadow-md max-sm:h-11"
+        >
+          <Play aria-hidden className="fill-current" />
+          {t.backToPlaying}
+        </Button>
+      )}
+    </div>
   )
 }

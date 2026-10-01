@@ -318,7 +318,7 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await page.setViewportSize({ width: 360, height: 800 })
     await gotoInfo(page, ZOO)
     await expect(page.getByRole("button", { name: "คัดลอก chapter" })).toBeVisible()
-    for (const name of ["คัดลอก chapter", "คัดลอกคำอธิบาย", "ไปภาพเฟรมช่วง 00:00:05"]) {
+    for (const name of ["คัดลอก chapter", "คัดลอกคำอธิบาย", "เล่นจาก 00:00:05"]) {
       const box = await page.getByRole("button", { name, exact: true }).boundingBox()
       expect(box?.height ?? 0, name).toBeGreaterThanOrEqual(44)
     }
@@ -335,15 +335,16 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(chapterRegion(page).locator("[aria-expanded]")).toHaveCount(0)
   })
 
-  test("กดเวลาของ chapter → ไปแท็บภาพเฟรมที่เวลานั้น (?at=)", async ({ page }) => {
+  test("กดเวลาของ chapter → เล่นคลิปจากเวลานั้น (M3.5): อยู่แท็บข้อมูลคลิป URL ไม่เปลี่ยน", async ({ page }) => {
     await withVideo(page, BBB, { chapters: [{ startS: 0, endS: 9, title: "เปิดเรื่อง" }, { startS: 9, endS: 60, title: "ตอนสอง" }] })
     await gotoInfo(page, BBB)
-    await chapterRegion(page).getByRole("button", { name: "ไปภาพเฟรมช่วง 00:00:09" }).click()
-    await expect(page).toHaveURL(new RegExp(`/v/${BBB}\\?at=9000$`))
-    await expect(tab(page, "ภาพเฟรม")).toHaveAttribute("aria-selected", "true")
-    const highlighted = page.getByRole("list", { name: FRAME_LIST }).locator("[data-highlighted]")
-    await expect(highlighted).toHaveCount(1)
-    await expect(highlighted).toBeFocused()
+    const time = chapterRegion(page).getByRole("button", { name: "เล่นจาก 00:00:09" })
+    await expect(time).toHaveText("00:00:09")
+    await time.click()
+    await page.waitForTimeout(300)
+    await expect(page).toHaveURL(new RegExp(`/v/${BBB}\\?tab=info$`))
+    await expect(tab(page, "ข้อมูลคลิป")).toHaveAttribute("aria-selected", "true")
+    await expect(time).toBeFocused()
   })
 
   test("AC-PROBE-03: 'คัดลอก chapter' ได้บรรทัด HH:MM:SS ชื่อตอน ครบ 3 ตอน และขึ้น toast", async ({ page, context }) => {
@@ -435,7 +436,9 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(page.getByRole("button", { name: "คัดลอกคำอธิบาย" })).toBeVisible()
   })
 
-  test("จอกว้าง: คำอธิบายอยู่เหนือ chapter ในคอลัมน์ซ้าย คอมเมนต์ปักหมุดอยู่คอลัมน์ขวา · ปกยังเป็น 16:9", async ({ page }) => {
+  test("จอกว้าง: คำอธิบายอยู่คอลัมน์ซ้าย chapter อยู่บนสุดของคอลัมน์ขวาเหนือคอมเมนต์ปักหมุด (owner round 6) · ปกยังเป็น 16:9", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.route(`**/api/videos/${ZOO}/pinned-comment`, (route) => route.fulfill({ json: { comment: null } }))
     await gotoInfo(page, ZOO)
@@ -443,10 +446,11 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     const chapters = await chapterRegion(page).boundingBox()
     const pinned = await page.getByRole("region", { name: "คอมเมนต์ปักหมุด" }).boundingBox()
     expect(description && chapters && pinned).toBeTruthy()
-    expect(Math.abs((description?.x ?? 0) - (chapters?.x ?? 1))).toBeLessThan(2)
-    expect(chapters?.y ?? 0).toBeGreaterThan((description?.y ?? 0) + (description?.height ?? 0) - 1)
-    expect(pinned?.x ?? 0).toBeGreaterThan((description?.x ?? 0) + (description?.width ?? 0))
-    const cover = await page.getByRole("button", { name: "ดูภาพปกขนาดใหญ่" }).boundingBox()
+    expect(chapters?.x ?? 0).toBeGreaterThan((description?.x ?? 0) + (description?.width ?? 0))
+    expect(Math.abs((chapters?.x ?? 0) - (pinned?.x ?? 1))).toBeLessThan(2)
+    expect(pinned?.y ?? 0).toBeGreaterThan((chapters?.y ?? 0) + (chapters?.height ?? 0) - 1)
+    // M3.5: ปกเป็นช่องตัวเล่น (ปุ่ม "เล่นคลิป")
+    const cover = await page.getByRole("button", { name: "เล่นคลิป" }).boundingBox()
     expect((cover?.width ?? 0) / (cover?.height ?? 1)).toBeCloseTo(16 / 9, 1)
   })
 
@@ -473,7 +477,7 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(page.getByText("คัดลอกไม่สำเร็จ ลองอีกครั้ง")).toBeVisible()
   })
 
-  test("คีย์บอร์ด: หัวคลิป ชื่อคลิป → โน้ต → เปิดในยูทูป → แท็บภาพเฟรม (ไม่มีจุด Tab ของคำอธิบาย/chapter แล้ว)", async ({ page }) => {
+  test("คีย์บอร์ด: หัวคลิป ชื่อคลิป → โน้ต → เปิดในยูทูป → ดูภาพปก → เล่นเฉพาะช่วงที่ดูซ้ำบ่อย → แท็บภาพเฟรม (ไม่มีจุด Tab ของคำอธิบาย/chapter แล้ว)", async ({ page }) => {
     await page.goto(`/v/${ZOO}`)
     const heading = page.getByRole("heading", { level: 1 })
     await expect(heading).toContainText("Me at the zoo")
@@ -482,6 +486,12 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(page.getByRole("button", { name: "บันทึกเป็นโน้ต (.md)", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(page.getByRole("link", { name: /^เปิดในยูทูป/ })).toBeFocused()
+    // M3.5: ปุ่ม "ดูภาพปก" ต่อท้ายแถวปุ่ม
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "ดูภาพปก", exact: true })).toBeFocused()
+    // M3.5 integration: คลิปที่มีช่วงดูซ้ำบ่อย มีปุ่ม "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" ท้ายแถวปุ่ม (ย้ายมาจากใต้ตัวเล่น)
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(tab(page, "ภาพเฟรม")).toBeFocused()
   })
@@ -495,7 +505,7 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await gotoInfo(page, ZOO)
     await expect(page.getByText("ไม่มีคอมเมนต์ปักหมุด")).toBeVisible()
     await tab(page, "ข้อมูลคลิป").focus()
-    for (const name of ["คัดลอกคำอธิบาย", "คัดลอก chapter", "ไปภาพเฟรมช่วง 00:00:00", "ไปภาพเฟรมช่วง 00:00:05", "ไปภาพเฟรมช่วง 00:00:17"]) {
+    for (const name of ["คัดลอกคำอธิบาย", "คัดลอก chapter", "เล่นจาก 00:00:00", "เล่นจาก 00:00:05", "เล่นจาก 00:00:17"]) {
       await page.keyboard.press("Tab")
       await expect(page.getByRole("button", { name, exact: true })).toBeFocused()
     }
