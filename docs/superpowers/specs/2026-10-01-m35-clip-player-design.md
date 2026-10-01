@@ -112,5 +112,5 @@ Watch the clip inside W2 using YouTube's official embedded player. Frames, trans
 
 ## Out of scope / later
 
-- **M4:** "ตั้งจุดเริ่ม/ตั้งจุดจบ" on the player, to send a range to the download form.
+- **M5 (with range download):** "ตั้งจุดเริ่ม/ตั้งจุดจบ" on the player, to send a range to the download form.
 - Autoplay on page load, remembering the last position, and custom player controls. We use YouTube's own controls.
