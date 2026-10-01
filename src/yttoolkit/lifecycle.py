@@ -22,6 +22,7 @@ from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
 from .core import thai_fallback, tools
 from .core.db import Database, purge_stale_cache
 from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, visitor_session
+from .core.settings import SettingsStore
 from .core.subtitles import SubtitleService
 from .core.videos import VideoService
 from .platform import LockFileError, Platform, current
@@ -143,10 +144,11 @@ def configure_thai(paths: Paths) -> None:
 
 
 def open_services(
-    paths: Paths, fake: bool = False
-) -> tuple[Database, VideoService, Extractor, SubtitleService]:
-    """เปิดฐานข้อมูล (สร้างตารางถ้ายังไม่มี) ล้าง cache เก่า เลือก extractor และสร้างบริการซับ
+    paths: Paths, plat: Platform, fake: bool = False
+) -> tuple[Database, VideoService, Extractor, SubtitleService, SettingsStore]:
+    """เปิดฐานข้อมูล (สร้างตารางถ้ายังไม่มี) ล้าง cache เก่า เลือก extractor และสร้างบริการซับกับที่เก็บตั้งค่า
 
+    โฟลเดอร์ปลายทางเริ่มต้น: <Downloads>/YT-Toolkit (โหมดข้อมูลปลอม = <data_root>/output ไม่ไปเขียนใน Downloads ของเครื่อง)
     fake=True = ใช้ข้อมูลทดสอบใน tests/fixtures แทนยูทูปจริง (serve ส่งมาเมื่อ YT_TOOLKIT_FAKE=1 ใช้กับ E2E)
     ล้าง cache ไม่สำเร็จแค่บันทึก log แล้วเปิดโปรแกรมต่อ ส่วนฐานข้อมูลเปิดไม่ได้จะโยนต่อ
     """
@@ -168,7 +170,13 @@ def open_services(
     purge_cache_once(db, paths.cache)
     configure_thai(paths)
     videos = VideoService(db, extractor)
-    return db, videos, extractor, SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
+    subtitles = SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
+    default_output = paths.data_root / "output" if fake else default_output_dir(plat)
+    return db, videos, extractor, subtitles, SettingsStore(db, default_output)
+
+
+def _fake_open_folder(path: Path) -> None:
+    log.info("โหมดข้อมูลปลอม: ไม่เปิดโฟลเดอร์")
 
 
 def purge_cache_once(db: Database, cache_root: Path) -> None:
@@ -208,7 +216,7 @@ def run_app(
     fake: bool = False,
 ) -> int:
     try:
-        db, videos, extractor, subtitles = open_services(paths, fake=fake)
+        db, videos, extractor, subtitles, settings = open_services(paths, plat, fake=fake)
     except Exception:
         log.exception("เปิดฐานข้อมูลไม่สำเร็จ (%s)", paths.db)
         return 1
@@ -225,6 +233,7 @@ def run_app(
             videos=videos,
             extractor=extractor,
             subtitles=subtitles,
+            settings=settings,
             fake=fake,
         )
     finally:
@@ -256,6 +265,7 @@ def _run_server(
     videos: VideoService,
     extractor: Extractor,
     subtitles: SubtitleService | None = None,
+    settings: SettingsStore | None = None,
     fake: bool = False,
 ) -> int:
     token = runstate.new_token()
@@ -274,7 +284,7 @@ def _run_server(
         token=token,
         version=__version__,
         commit=git_commit(paths.code_root, plat),
-        output_dir=default_output_dir(plat),
+        output_dir=settings.output_dir() if settings is not None else default_output_dir(plat),
         request_shutdown=request_shutdown,
         extra_origins=tuple(extra_origins),
         db=db,
@@ -283,7 +293,12 @@ def _run_server(
         cache_root=paths.cache,
         fake=fake,
         subtitles=subtitles,
+        settings=settings,
     )
+    if fake:
+        # โหมดข้อมูลปลอมไม่เปิดหน้าต่างจริง (E2E รันบนเครื่องพนักงานได้โดยไม่มีหน้าต่างโผล่)
+        ctx.open_folder = _fake_open_folder
+        ctx.reveal = _fake_open_folder
     server = Server(ctx)
     server.start()
     if not server.wait_until_ready():
@@ -305,8 +320,9 @@ def _run_server(
         webbrowser.open(url)
 
     def open_output() -> None:
-        ctx.output_dir.mkdir(parents=True, exist_ok=True)
-        plat.open_folder(ctx.output_dir)
+        folder = ctx.settings.output_dir() if ctx.settings is not None else ctx.output_dir
+        folder.mkdir(parents=True, exist_ok=True)
+        (ctx.open_folder or plat.open_folder)(folder)
 
     def quit_from_tray() -> None:
         if ctx.pending_jobs() > 0:

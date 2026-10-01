@@ -420,10 +420,10 @@ def clean_thai_env(monkeypatch):
     return monkeypatch
 
 
-def test_open_services_builds_subtitle_service_and_thai_dir(paths, clean_thai_env):
+def test_open_services_builds_subtitle_service_and_thai_dir(paths, fake_platform, clean_thai_env):
     import os
 
-    db, videos, extractor, subtitles = lifecycle.open_services(paths, fake=True)
+    db, videos, extractor, subtitles, _ = lifecycle.open_services(paths, fake_platform, fake=True)
     try:
         assert isinstance(subtitles, SubtitleService)
         assert subtitles.tracks(THAI)["defaultTrackId"] == TRACK
@@ -626,11 +626,11 @@ def test_warming_export_and_note_use_the_same_gate(make):
     assert info.value.code == "E_SESSION_WARMING"
 
 
-def test_open_services_real_mode_shares_one_session(paths, clean_thai_env, monkeypatch):
+def test_open_services_real_mode_shares_one_session(paths, fake_platform, clean_thai_env, monkeypatch):
     from yttoolkit.core.extractor import YtDlpExtractor
     from yttoolkit.core.visitor_session import VisitorSession
 
-    db, videos, extractor, subtitles = lifecycle.open_services(paths, fake=False)
+    db, videos, extractor, subtitles, _ = lifecycle.open_services(paths, fake_platform, fake=False)
     try:
         assert isinstance(extractor, YtDlpExtractor)
         assert isinstance(extractor.session, VisitorSession)
@@ -642,8 +642,8 @@ def test_open_services_real_mode_shares_one_session(paths, clean_thai_env, monke
         db.close()
 
 
-def test_open_services_fake_mode_has_no_session(paths, clean_thai_env):
-    db, _, extractor, subtitles = lifecycle.open_services(paths, fake=True)
+def test_open_services_fake_mode_has_no_session(paths, fake_platform, clean_thai_env):
+    db, _, extractor, subtitles, _ = lifecycle.open_services(paths, fake_platform, fake=True)
     try:
         assert subtitles._session is None
         assert not hasattr(extractor, "session")

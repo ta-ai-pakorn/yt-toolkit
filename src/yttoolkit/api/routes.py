@@ -28,7 +28,8 @@ def build_router(ctx: AppContext) -> APIRouter:
     def _health() -> dict:
         if ctx.health is not None:
             return ctx.health()
-        return tools.collect_health(ctx.paths, ctx.plat, ctx.output_dir)
+        output_dir = ctx.settings.output_dir() if ctx.settings is not None else ctx.output_dir
+        return tools.collect_health(ctx.paths, ctx.plat, output_dir)
 
     @router.get("/ping")
     def ping() -> dict:
