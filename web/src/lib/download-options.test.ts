@@ -14,6 +14,7 @@ import {
   wavBytes,
   wavMegabytes,
 } from "./download-options"
+import { audioLanguageName } from "./languages"
 import { PRESETS } from "./sub-options"
 import type { AudioFormat, Settings, VideoFormat, VideoInfo } from "./types"
 
@@ -126,12 +127,8 @@ function clip(over: Partial<VideoInfo> = {}): VideoInfo {
   }
 }
 
-// ชื่อภาษาแบบ "อังกฤษ (สหรัฐอเมริกา)" (languageDisplay standard) ตามที่หน้าเว็บแสดงในช่องภาษาเสียง
-const names = new Intl.DisplayNames("th", {
-  type: "language",
-  languageDisplay: "standard",
-})
-const languageName = (tag: string) => names.of(tag) ?? tag
+// ชื่อภาษาแบบ "อังกฤษ (สหรัฐอเมริกา)" (Intl.DisplayNames แบบ standard) ตามที่หน้าเว็บแสดงในช่องภาษาเสียง
+const languageName = audioLanguageName
 const labels = { original: "ต้นฉบับ ({lang})", originalUnknown: "ต้นฉบับ" }
 
 describe("codecLabel", () => {
@@ -231,6 +228,48 @@ describe("audioLanguageOptions", () => {
         { value: "th", label: "ไทย" },
       ]
     )
+  })
+
+  it("ไม่ส่ง languageName = audioLanguageName · ต้นฉบับมีภูมิภาคใช้แค่ภาษาหลัก วงเล็บไม่ซ้อน", () => {
+    const audio: AudioFormat[] = [
+      {
+        formatId: "140-0",
+        language: "en-US",
+        isOriginal: true,
+        acodec: "mp4a.40.2",
+      },
+      {
+        formatId: "140-1",
+        language: "th",
+        isOriginal: false,
+        acodec: "mp4a.40.2",
+      },
+      {
+        formatId: "140-2",
+        language: "pt-BR",
+        isOriginal: false,
+        acodec: "mp4a.40.2",
+      },
+    ]
+    expect(audioLanguageOptions(clip({ audio }), undefined, labels)).toEqual([
+      { value: "original", label: "ต้นฉบับ (อังกฤษ)" },
+      { value: "th", label: "ไทย" },
+      { value: "pt-BR", label: audioLanguageName("pt-BR") },
+    ])
+    expect(audioLanguageName("pt-BR")).toMatch(/^โปรตุเกส \(.+\)$/)
+  })
+
+  it("รหัสต้นฉบับรูปแบบผิดไม่ทำให้พัง", () => {
+    const audio: AudioFormat[] = [
+      { formatId: "1", language: "x", isOriginal: true, acodec: "mp4a.40.2" },
+      { formatId: "2", language: "th", isOriginal: false, acodec: "mp4a.40.2" },
+    ]
+    expect(
+      audioLanguageOptions(clip({ audio }), undefined, labels)?.[0]
+    ).toEqual({
+      value: "original",
+      label: "ต้นฉบับ (x)",
+    })
   })
 })
 
