@@ -7,6 +7,7 @@ import { AudioPanel } from "./download/audio-panel"
 import { audioPanelHasControls, useDownloadChoices, videoPanelHasControls } from "./download/use-download-state"
 import { VideoPanel } from "./download/video-panel"
 import { FramesSection } from "./frames"
+import { infoSections } from "./info-sections"
 import { useWarmingRefetch } from "./session-warming"
 import { SubsPanel } from "./subs-panel"
 import { TranscriptPanel } from "./transcript-panel"
@@ -32,9 +33,9 @@ const LIST =
 // แผงของแท็บรับโฟกัสได้ (Base UI ตั้ง tabIndex 0) จึงต้องมีวงโฟกัสให้เห็น แบบเดียวกับ breadcrumb
 const PANEL = "rounded-md pt-2 focus-visible:ring-3 focus-visible:ring-ring/50"
 
-/** แท็บข้อมูลคลิปมีปุ่มที่โฟกัสได้แน่นอนเมื่อข้อมูลคลิปมาแล้ว: ส่วนเครดิตมีปุ่ม "คัดลอกเครดิต" เสมอ (M4 T16) */
+/** แท็บข้อมูลคลิปมีปุ่มที่โฟกัสได้แน่นอนเมื่อมีส่วนเครดิต (ปุ่ม "คัดลอกเครดิต", M4 T16): ใช้เงื่อนไขเดียวกับ infoSections */
 function panelHasButtons(video: VideoInfo | undefined): boolean {
-  return video !== undefined
+  return video !== undefined && infoSections(video).credit
 }
 
 type Props = {
