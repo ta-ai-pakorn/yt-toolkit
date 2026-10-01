@@ -81,7 +81,7 @@ class PinnedCommentService:
 
         error ของข้อมูลคลิป (คลิปไม่มี, ส่วนตัว ฯลฯ) และของการดึง (E_BOT_CHECK, E_NETWORK ฯลฯ) โยนต่อ
         """
-        info = self._videos.get(video_id)  # ตรวจ id และว่าคลิปมีจริงด้วย
+        info = self._videos.get(video_id, peek=True)  # ตรวจ id และว่าคลิปมีจริงด้วย
         stats = info.get("stats") or {}
         if stats.get("comments") == 0:
             return None

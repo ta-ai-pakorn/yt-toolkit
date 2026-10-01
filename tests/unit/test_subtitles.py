@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from yttoolkit import lifecycle
-from yttoolkit.core.db import Database
+from yttoolkit.core.db import PEEK_SENTINEL, Database
 from yttoolkit.core.extractor import FakeExtractor
 from yttoolkit.core.srt_builder import PRESETS, SubOptions
 from yttoolkit.core.subparse import PARSER_VERSION
@@ -58,7 +58,14 @@ def make(tmp_path):
         db.migrate()
         made.append(db)
         fake = FakeExtractor(FIXTURES)
-        videos = VideoService(db, fake, now=lambda: datetime(2026, 9, 30, 12, tzinfo=UTC))
+        # นาฬิกาเดินทุกครั้งที่ถูกอ่าน: ทุกครั้งที่มีการ stamp เวลาจึงต่างกัน เทสเรื่อง opened_at ถึงจับได้
+        ticks = [0]
+
+        def clock() -> datetime:
+            ticks[0] += 1
+            return datetime(2026, 9, 30, 12, tzinfo=UTC) + timedelta(seconds=ticks[0])
+
+        videos = VideoService(db, fake, now=clock)
         fetch = Fetcher(fake, fail, times)
         # รอก่อนลองซับแปลซ้ำ (20 วินาที) บันทึกไว้แทนการหลับจริง
         fetch.sleeps = []
@@ -660,9 +667,65 @@ def test_tracks_tokens_and_note_do_not_stamp_opened_at_either(make):
     assert videos.recent(10, scope="opened") == ([], 0)
 
 
-def test_export_reprobe_keeps_existing_opened_at(make):
+def _opened_at(db, video_id: str) -> str:
+    return db.execute("SELECT opened_at FROM videos WHERE video_id = ?", (video_id,))[0]["opened_at"]
+
+
+def _drop_captions(db, video_id: str) -> None:
+    """ทำให้แถวเหมือนของ M2 (ไม่มี captions) เพื่อบังคับให้ _trimmed probe ใหม่"""
+    row = db.execute("SELECT probe_json FROM videos WHERE video_id = ?", (video_id,))[0]
+    data = json.loads(row["probe_json"])
+    data.pop("captions")
+    db.execute("UPDATE videos SET probe_json = ? WHERE video_id = ?", (json.dumps(data), video_id))
+
+
+def _check_reprobe_leaves_opened_at(videos, db, probes_before_call, run, opened: bool) -> None:
+    """opened=False: คลิปไม่เคยเปิด ต้องยังเป็น PEEK_SENTINEL / opened=True: opened_at เดิมต้องไม่ขยับ"""
+    before = _opened_at(db, THAI)
+    assert before != PEEK_SENTINEL if opened else before == PEEK_SENTINEL
+    run()
+    assert probes_before_call() == 1  # re-probe เกิดขึ้นจริง (ไม่งั้นเทสนี้ไม่ได้ทดสอบอะไร)
+    assert _opened_at(db, THAI) == before
+    assert (videos.recent(10, scope="opened")[1]) == (1 if opened else 0)
+
+
+@pytest.mark.parametrize("opened", [False, True])
+def test_reprobe_for_missing_captions_does_not_stamp_opened_at(make, opened):
+    service, fake, _, db, videos = make()
+    videos.get(THAI, peek=not opened)
+    _drop_captions(db, THAI)
+    start = probes(fake)
+    _check_reprobe_leaves_opened_at(videos, db, lambda: probes(fake) - start, lambda: service.tracks(THAI), opened)
+
+
+@pytest.mark.parametrize("opened", [False, True])
+def test_reprobe_for_expired_link_does_not_stamp_opened_at(make, opened):
+    service, fake, fetch, db, videos = make(fail="E_NETWORK", times=1)
+    videos.get(THAI, peek=not opened)
+    service.tracks(THAI)
+    start = probes(fake)
+    _check_reprobe_leaves_opened_at(videos, db, lambda: probes(fake) - start, lambda: service.tokens(THAI, TRACK), opened)
+    assert len(fetch.urls) == 2
+
+
+@pytest.mark.parametrize("opened", [False, True])
+def test_reprobe_to_mint_a_session_does_not_stamp_opened_at(make, opened):
+    service, fake, fetch, db, videos = make(session=Session(None, 75))
+    videos.get(THAI, peek=not opened)
+    service.tracks(THAI)
+    start = probes(fake)
+
+    def run() -> None:
+        with pytest.raises(YtError) as info:
+            service.tokens(THAI, "t.en")
+        assert info.value.code == "E_SESSION_WARMING"
+
+    _check_reprobe_leaves_opened_at(videos, db, lambda: probes(fake) - start, run, opened)
+
+
+def test_first_probe_through_raw_is_a_peek(make):
+    # คลิปที่ยังไม่มีในเครื่อง: tracks() probe ครั้งแรกผ่าน raw() แถวที่ได้ต้องเป็น PEEK_SENTINEL
     service, _, _, db, videos = make()
-    videos.get(THAI)
-    before = db.execute("SELECT opened_at FROM videos WHERE video_id = ?", (THAI,))[0]["opened_at"]
-    service.export(THAI, TRACK, "srt", PRESETS["medium"])
-    assert db.execute("SELECT opened_at FROM videos WHERE video_id = ?", (THAI,))[0]["opened_at"] == before
+    service.tracks(THAI)
+    assert _opened_at(db, THAI) == PEEK_SENTINEL
+    assert videos.recent(10, scope="opened") == ([], 0)
