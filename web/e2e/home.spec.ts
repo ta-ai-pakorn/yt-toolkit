@@ -932,6 +932,7 @@ test.describe("ปรับจากการเดินตามเส้น�
     await page.keyboard.press("Tab")
     await expect(page.getByRole("tab", { name: "ภาพเฟรม", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
-    await expect(page.getByRole("button", { name: "โหลดภาพรวมเฟรม" })).toBeFocused()
+    // owner round 5: BBB มีช่วงดูซ้ำบ่อย ปุ่มตัวกรองจึงเป็นปุ่มแรกของส่วนภาพเฟรม
+    await expect(page.getByRole("button", { name: /^ดูซ้ำบ่อย \(\d+ ภาพ\)$/ })).toBeFocused()
   })
 })

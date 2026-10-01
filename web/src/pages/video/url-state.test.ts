@@ -10,11 +10,12 @@ describe("readVideoParams", () => {
       tab: "subs",
       trackId: "a.th-orig",
       at: 90500,
+      replayed: false,
     })
   })
 
   it("ไม่มีพารามิเตอร์ = แท็บภาพเฟรม ไม่มีแทร็ก ไม่มีเวลา", () => {
-    expect(readVideoParams(params(""))).toEqual({ tab: "frames", trackId: null, at: null })
+    expect(readVideoParams(params(""))).toEqual({ tab: "frames", trackId: null, at: null, replayed: false })
   })
 
   it("แท็บที่ไม่รู้จักอ่านเป็นภาพเฟรม", () => {
@@ -36,6 +37,25 @@ describe("readVideoParams", () => {
     expect(readVideoParams(params("track=o.")).trackId).toBeNull()
     expect(readVideoParams(params("track=o.th/../x")).trackId).toBeNull()
     expect(readVideoParams(params("track=t.fr")).trackId).toBe("t.fr")
+  })
+})
+
+describe("ตัวกรองดูซ้ำบ่อย (?replayed=1)", () => {
+  it("อ่านเป็น true เฉพาะค่า 1", () => {
+    expect(readVideoParams(params("replayed=1")).replayed).toBe(true)
+    for (const bad of ["0", "true", "", "yes", "01"]) {
+      expect(readVideoParams(params(`replayed=${bad}`)).replayed).toBe(false)
+    }
+  })
+
+  it("เปิด/ปิดด้วย patch โดยเก็บค่าอื่นไว้ · ปิด = ลบคีย์ออก", () => {
+    expect(patchSearch(params("track=o.th"), { replayed: true })).toBe("?track=o.th&replayed=1")
+    expect(patchSearch(params("track=o.th&replayed=1"), { replayed: false })).toBe("?track=o.th")
+    expect(patchSearch(params("replayed=1"), { tab: "subs", at: 5 })).toBe("?tab=subs&at=5&replayed=1")
+  })
+
+  it("ค่าที่ผิดรูปใน URL เดิมถูกล้างเมื่อ patch", () => {
+    expect(patchSearch(params("replayed=yes"), { tab: "info" })).toBe("?tab=info")
   })
 })
 

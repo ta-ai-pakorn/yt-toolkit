@@ -283,6 +283,9 @@ test.describe("W2 แถบแท็บ คีย์บอร์ด", () => {
     await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
     await tab(page, "ภาพเฟรม").focus()
     await page.keyboard.press("Tab")
+    // owner round 5: คลิปที่มีช่วงดูซ้ำบ่อย ปุ่มตัวกรอง "ดูซ้ำบ่อย (n ภาพ)" อยู่ก่อนปุ่มโหลด (ซ้ายมือ ลำดับเดียวกับที่ตาเห็น)
+    await expect(page.getByRole("button", { name: /^ดูซ้ำบ่อย \(\d+ ภาพ\)$/ })).toBeFocused()
+    await page.keyboard.press("Tab")
     await expect(page.getByRole("button", { name: "โหลดภาพรวมเฟรม" })).toBeFocused()
   })
 

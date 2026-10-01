@@ -1,12 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { cn } from "cn"
 import { Copy, Flame, ThumbsUp } from "lucide-react"
-import { useId, type ReactNode } from "react"
+import { useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { fill, th } from "@/i18n/th"
 import { formatChapters } from "@/lib/chapters"
 import { formatCompact, formatCount, formatTags, formatTimecode } from "@/lib/format"
@@ -77,17 +78,22 @@ function InfoSection({
   )
 }
 
-/** ปุ่มเวลา (HH:MM:SS) ที่พาไปแท็บภาพเฟรมตรงภาพของเวลานั้น (?at=) ชื่อปุ่ม "ไปภาพเฟรมช่วง HH:MM:SS" */
-function TimeButton({ ms, onPick }: { ms: number; onPick: () => void }) {
+/**
+ * ปุ่มเวลา (HH:MM:SS) ที่พาไปแท็บภาพเฟรมตรงภาพของเวลานั้น (?at=) ชื่อปุ่ม "ไปภาพเฟรมช่วง HH:MM:SS"
+ * busy = กำลังรอข้อมูลก่อนไป (aria-busy + วงหมุนเล็ก + จางลง) ปุ่มยังกดได้และโฟกัสไม่หลุด
+ */
+function TimeButton({ ms, onPick, busy = false }: { ms: number; onPick: () => void; busy?: boolean }) {
   const time = formatTimecode(ms)
   return (
     <Button
       variant="outline"
       size="xs"
-      className="font-mono text-foreground tabular-nums max-sm:h-11 max-sm:px-3"
+      className="font-mono text-foreground tabular-nums aria-busy:opacity-70 max-sm:h-11 max-sm:px-3"
       aria-label={fill(t.info.goToTime, { time })}
+      aria-busy={busy || undefined}
       onClick={onPick}
     >
+      {busy && <Spinner aria-hidden role={undefined} aria-label={undefined} className="size-3" />}
       {time}
     </Button>
   )
@@ -133,6 +139,8 @@ const formatSegments = (segments: readonly ReplaySegment[]) =>
  * กดแล้วไปแท็บภาพเฟรม ไฮไลต์ภาพแรกในช่วงนั้น (ไม่มีภาพในช่วง = ภาพที่ใกล้กลางช่วงที่สุด ซึ่งก็มีป้าย)
  * ไม่ขอ storyboard เองตอนเปิดแท็บ: ตอนกดปุ่มเวลาจึงใช้ของใน cache หรือขอตอนนั้น (ensureQueryData) แล้วค่อยไป
  * ขอไม่สำเร็จ = ใช้เวลาเริ่มของช่วงแทน
+ * ระหว่างรอ ปุ่มที่กดขึ้นสถานะกำลังโหลด · ข้อมูลมาถึงตอนส่วนนี้ถูกปิดไปแล้ว (เปลี่ยนแท็บ) หรือกดปุ่มเวลาอื่นต่อ
+ * = ไม่พาไปไหน (คำขอที่ล้าสมัย ไม่ดึงผู้ใช้ออกจากแท็บที่เลือกเอง)
  */
 function ReplayedSection({
   videoId,
@@ -144,7 +152,21 @@ function ReplayedSection({
   onPick: (ms: number) => void
 }) {
   const queryClient = useQueryClient()
-  async function pick(segment: ReplaySegment) {
+  // ช่วงที่กำลังรอข้อมูล (ตำแหน่งใน segments) · null = ไม่มี
+  const [pending, setPending] = useState<number | null>(null)
+  // ส่วนนี้ยังอยู่บนจอไหม + คำขอล่าสุด (กดซ้ำ/กดปุ่มอื่น = คำขอก่อนหน้าล้าสมัย)
+  const mounted = useRef(false)
+  const latest = useRef(0)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
+  async function pick(segment: ReplaySegment, index: number) {
+    const request = ++latest.current
+    setPending(index)
     let target = segment.startMs
     try {
       const { frames } = await queryClient.ensureQueryData(storyboardQuery(videoId, true))
@@ -153,6 +175,8 @@ function ReplayedSection({
     } catch {
       // ไม่มี storyboard: ใช้เวลาเริ่มของช่วง
     }
+    if (!mounted.current || request !== latest.current) return
+    setPending(null)
     onPick(target)
   }
   return (
@@ -164,10 +188,7 @@ function ReplayedSection({
       <ul className="flex flex-wrap gap-2">
         {segments.map((segment, index) => (
           <li key={`${segment.startMs}-${index}`}>
-            <TimeButton
-              ms={segment.startMs}
-              onPick={() => void pick(segment)}
-            />
+            <TimeButton ms={segment.startMs} busy={pending === index} onPick={() => void pick(segment, index)} />
           </li>
         ))}
       </ul>
@@ -268,8 +289,9 @@ function PinnedSection({ videoId }: { videoId: string }) {
 
 /**
  * แท็บ "ข้อมูลคลิป" (?tab=info): ทุกส่วนแสดงเต็ม ไม่มีพับ/กาง (เปิดแท็บ = เปิดดู) แต่ละส่วนมีหัวข้อและปุ่มคัดลอกของตัวเอง
- * จอกว้าง (lg ขึ้นไป) 2 คอลัมน์: ซ้าย คำอธิบาย → Chapter → ช่วงที่คนดูซ้ำบ่อย · ขวา คอมเมนต์ปักหมุด → แท็ก
- * จอแคบกว่านั้น คอลัมน์เดียวตามลำดับเดียวกัน (คอลัมน์ซ้ายก่อน) · ไม่มีข้อมูลเลย = ข้อความจางบรรทัดเดียว
+ * จอกว้าง (lg ขึ้นไป) 2 คอลัมน์: ซ้าย คำอธิบาย → Chapter · ขวา ช่วงที่คนดูซ้ำบ่อย → คอมเมนต์ปักหมุด → แท็ก (owner round 5)
+ * จอแคบกว่านั้น คอลัมน์เดียว: คำอธิบาย → Chapter → ช่วงที่คนดูซ้ำบ่อย → คอมเมนต์ปักหมุด → แท็ก
+ * ลำดับใน DOM = ลำดับที่อ่านทั้งสองขนาดจอ (คอลัมน์ซ้ายก่อน) ลำดับ Tab จึงตามที่ตาเห็น · ไม่มีข้อมูลเลย = ข้อความจางบรรทัดเดียว
  */
 export function ClipInfoPanel({ video }: { video: VideoInfo | undefined }) {
   const { update } = useVideoParams()
@@ -288,10 +310,10 @@ export function ClipInfoPanel({ video }: { video: VideoInfo | undefined }) {
   const left: ReactNode[] = []
   if (has.description) left.push(<DescriptionSection key="description" description={video.description ?? ""} />)
   if (has.chapters) left.push(<ChapterSection key="chapters" chapters={video.chapters} onPick={toFrames} />)
-  if (has.replayed && video.mostReplayed) {
-    left.push(<ReplayedSection key="replayed" videoId={video.videoId} segments={video.mostReplayed} onPick={toFrames} />)
-  }
   const right: ReactNode[] = []
+  if (has.replayed && video.mostReplayed) {
+    right.push(<ReplayedSection key="replayed" videoId={video.videoId} segments={video.mostReplayed} onPick={toFrames} />)
+  }
   if (has.pinned) right.push(<PinnedSection key="pinned" videoId={video.videoId} />)
   if (has.tags) right.push(<TagsSection key="tags" tags={cleanTags(video.tags)} />)
 
