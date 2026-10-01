@@ -54,6 +54,8 @@ def test_cases_file_shape() -> None:
         "two-lines-merge-refused-per-line", "word-preset-english", "word-preset-thai",
         "word-preset-punctuation", "word-preset-leading-punctuation-and-gap",
         "tokens-mode-punctuation-two-lines", "short-preset-punctuation-unchanged",
+        "word-preset-openers", "word-preset-straight-quotes", "word-preset-trailing-opener",
+        "tokens-mode-opener-keeps-its-word",
     ):
         assert required in names
     raw = (FIXTURES / "subs" / "builder-cases.json").read_bytes()

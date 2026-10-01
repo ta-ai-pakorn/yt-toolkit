@@ -356,7 +356,13 @@ LIMITS = { maxChars: [10, 60], lines: [1, 2], minMs: [300, 3000] /*step 100*/,
 - **Tokens mode without `tokensPerCue`:** `buildCues` raises `ValueError` (Python) or throws (TS). This is the only validation it does.
 
 - **`isPunctOnly(tok)`** (owner round 3, controller ruling 2026-10-01): the token's text trimmed of U+0020 is non-empty and **every** code point is in a Unicode `P*` or `S*` category. Python: `unicodedata.category(ch)[0] in "PS"`; TS: `/^[\p{P}\p{S}]+$/u` on `tidy(t)`. Examples: `"."`, `","`, `" ?"`, `"..."`, `"♪"`, `"--"`, `"("`, emoji count; `"a."`, `"1"`, `". ."` (inner space), `"ฯ"` (Lo) do not.
-- **`words(range)`** = the number of tokens in the range that are **not** `isPunctOnly`. Only used in tokens mode; in chars mode every token is a word and nothing below changes.
+- **`kind(tok)`** (tokens mode only; fix round 1, controller ruling 2026-10-01), computed right to left: `word` (not `isPunctOnly`), `forward` or `back`.
+  - A punctuation token is `forward` when there is a next token, the next token starts less than 1000 ms after it, the next token's kind is not `back`, **and** either:
+    - every code point is an **opener** `( [ { « “ ‘ ¿ ¡` or a full-width `（ ［ ｛`; or
+    - every code point is a **straight quote** `" '` (or full-width `＂ ＇`) and it reads as an opener: there is space before it (its text starts with U+0020, the previous token's text ends with U+0020, the previous token is all openers, it is the first token, or it starts ≥ 1000 ms after the previous token) **and** it is glued to the next token (its text does not end with U+0020 and the next token's text does not start with U+0020).
+  - Every other punctuation token is `back`.
+  - **Choice of the spacing rule over quote parity:** YouTube json3 tokens keep their leading space (`" movie"`, `" \""`, `"Dang"`), so spacing tells openers from closers directly. Parity would drift after one unbalanced quote. Known limit: two quotes glued together (`directly.""Do`) read as two closers, so the second quote stays with `directly.`.
+- **`words(range)`** = the number of tokens in the range whose kind is not `forward`/`back`. Only used in tokens mode; in chars mode every token is a word and nothing below changes.
 
 **1. Greedy grouping** (tokens mode still applies **all** close rules, the char/line rule included, to word tokens)
 ```
@@ -364,9 +370,15 @@ cues = []; cur = []
 for tok in tokens:
     if cur:
         gap = tok.s - cur[-1].e >= 1000
-        if mode == "tokens" and (isPunctOnly(tok) or words(cur) == 0):
+        if kind(tok) == "back" or (mode == "tokens" and words(cur) == 0) or kind(prev token) == "forward":
             close = gap        # punctuation attaches to the cue being built; a cue that so far holds only
-                               # leading punctuation takes the next word in (first-token case)
+                               # leading punctuation takes the next word in; a word never leaves its opener
+        elif kind(tok) == "forward":
+            j = first token after tok whose kind is not "forward"   # the word the opener(s) attach to
+            close = not fits(cur + tokens[tok..j], maxChars)
+                 or gap
+                 or tokens[j].e - cur[0].s > maxMs
+                 or words(cur) >= tokensPerCue
         else:
             close = not fits(cur + [tok], maxChars)
                  or gap
@@ -377,9 +389,9 @@ for tok in tokens:
 if cur: cues.append(Cue(cur))
 # Cue(cur): startMs = cur[0].s, endMs = cur[-1].e
 ```
-- **Punctuation-only tokens in tokens mode (owner round 3):** they never count toward `tokensPerCue` and attach to the previous word's cue, bypassing the line-length, `maxMs` and count rules (like a single over-long token, a word plus its attached punctuation may exceed `maxChars`). A leading one attaches to the next word's cue. The **only** exception is silence: a gap of ≥ 1000 ms still starts a new cue, so a punctuation-only cue can exist only with ≥ 1 s of silence on both sides. Reason: in ทีละคำ on English ASR, 13% of cues were a lone "." or ",".
+- **Punctuation-only tokens in tokens mode (owner round 3; openers: fix round 1):** they never count toward `tokensPerCue`. `forward` openers move with the word after them (the opener decides with that word, so `(`/`“`/an opening `"` starts the word's cue); `back` tokens attach to the previous word's cue, bypassing the line-length, `maxMs` and count rules (like a single over-long token, a word plus its attached punctuation may exceed `maxChars`). A leading one attaches to the next word's cue. The **only** exception is silence: a gap of ≥ 1000 ms still starts a new cue, so a punctuation-only cue can exist only with ≥ 1 s of silence on both sides. Reason: in ทีละคำ on English ASR, 13% of cues were a lone "." or ",".
 - Step 4 consequence: a 2-line cue may now have **no** valid split (an over-long word plus attached punctuation); it then stays on one line.
-- Shared cases: `word-preset-punctuation`, `word-preset-leading-punctuation-and-gap`, `tokens-mode-punctuation-two-lines`, `short-preset-punctuation-unchanged` (chars mode keeps the lone "." cue). Goldens: only `en-asr.word.srt` changed; all other presets and `th-asr.custom-tokens.srt` are byte-identical.
+- Shared cases: `word-preset-punctuation`, `word-preset-leading-punctuation-and-gap`, `tokens-mode-punctuation-two-lines`, `short-preset-punctuation-unchanged` (chars mode keeps the lone "." cue), and (fix round 1) `word-preset-openers`, `word-preset-straight-quotes`, `word-preset-trailing-opener` (an opener at the end of the track, or before ≥ 1 s of silence, attaches backward), `tokens-mode-opener-keeps-its-word`. Goldens: only `en-asr.word.srt` changed (e.g. `movie "` / `Dang` became `movie` / `"Dang`); all other presets and `th-asr.custom-tokens.srt` are byte-identical.
 
 **2. Minimum duration** (index loop, re-check the same index after a merge)
 ```

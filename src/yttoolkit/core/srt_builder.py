@@ -105,6 +105,53 @@ def is_punct_only(token: Token) -> bool:
     return bool(text) and all(unicodedata.category(ch)[0] in "PS" for ch in text)
 
 
+# เครื่องหมายเปิดที่เกาะหน้าคำถัดไปเสมอ (fix round 1): ( [ { « “ ‘ ¿ ¡ และ ( [ { แบบเต็มความกว้าง
+OPENERS = frozenset("([{\u00ab\u201c\u2018\u00bf\u00a1\uff08\uff3b\uff5b")
+# อัญประกาศตรงที่เป็นได้ทั้งเปิดและปิด (" ' และแบบเต็มความกว้าง) ตัดสินจากช่องว่างรอบตัว (_kinds)
+STRAIGHT_QUOTES = frozenset("\"'\uff02\uff07")
+_WORD, _BACK, _FORWARD = 0, 1, 2
+
+
+def _only(token: Token, chars: frozenset[str]) -> bool:
+    text = token.t.strip(" ")
+    return bool(text) and all(ch in chars for ch in text)
+
+
+def _kinds(tokens: Sequence[Token]) -> list[int]:
+    """โหมดนับคำ: คำ (_WORD) / เครื่องหมายที่เกาะคำก่อนหน้า (_BACK) / เครื่องหมายเปิดที่เกาะคำถัดไป (_FORWARD)
+
+    เครื่องหมายเปิดเกาะไปข้างหน้าได้เมื่อถัดไปมี token ที่ห่างไม่ถึง 1 วินาที และเป็นคำหรือเครื่องหมายเปิดอีกตัว
+    (ไม่งั้นเกาะคำก่อนหน้าเหมือนเครื่องหมายอื่น เช่นวงเล็บเปิดตัวสุดท้ายของแทร็ก)
+    อัญประกาศตรงนับเป็นเครื่องหมายเปิดเมื่อ (1) ข้างหน้ามีช่องว่าง: ตัวมันขึ้นต้นด้วย U+0020, token ก่อนหน้าจบด้วย U+0020,
+    token ก่อนหน้าเป็นเครื่องหมายเปิด, เป็น token แรก หรือเงียบ >= 1 วินาทีก่อนหน้า และ (2) token ถัดไปติดกันไม่มีช่องว่าง
+    (ตัวมันไม่จบด้วย U+0020 และ token ถัดไปไม่ขึ้นต้นด้วย U+0020) ใช้ได้เพราะ token ของยูทูปเก็บช่องว่างนำหน้าคำไว้
+    """
+    n = len(tokens)
+    kinds = [_WORD] * n
+    for i in range(n - 1, -1, -1):
+        tok = tokens[i]
+        if not is_punct_only(tok):
+            continue
+        kinds[i] = _BACK
+        if i + 1 >= n or kinds[i + 1] == _BACK or tokens[i + 1].s - tok.e >= GAP_SPLIT_MS:
+            continue
+        if _only(tok, OPENERS):
+            kinds[i] = _FORWARD
+        elif _only(tok, STRAIGHT_QUOTES):
+            prev = tokens[i - 1] if i > 0 else None
+            spaced_before = (
+                prev is None
+                or tok.s - prev.e >= GAP_SPLIT_MS
+                or tok.t.startswith(" ")
+                or prev.t.endswith(" ")
+                or _only(prev, OPENERS)
+            )
+            glued_after = not tok.t.endswith(" ") and not tokens[i + 1].t.startswith(" ")
+            if spaced_before and glued_after:
+                kinds[i] = _FORWARD
+    return kinds
+
+
 def _collapse(text: str) -> str:
     # ใช้กับชื่อคลิปและชื่อ chapter เท่านั้น
     return _WS_EDGE.sub("", _WS_RUN.sub(" ", text))
@@ -235,13 +282,22 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
         raise ValueError("tokens mode needs tokens_per_cue")
     per_cue = opts.tokens_per_cue or 0
 
-    # โหมดนับคำ (owner round 3): token ที่เป็นเครื่องหมายล้วนไม่นับเป็นคำ และเกาะซับของคำก่อนหน้าเสมอ
-    # (ไม่ใช้กฎความยาวบรรทัด/เวลานานสุด/จำนวนคำ) ตัวแรกสุดเกาะซับถัดไป จึงไม่มีซับที่มีแค่ "." หรือ "," อีก
-    # ยกเว้นเงียบ >= 1 วินาที ซึ่งยังขึ้นซับใหม่เหมือนเดิม
-    punct = [tokens_mode and is_punct_only(tok) for tok in tokens]
+    # โหมดนับคำ (owner round 3 + fix round 1): token ที่เป็นเครื่องหมายล้วนไม่นับเป็นคำ
+    # - เครื่องหมายทั่วไปเกาะซับของคำก่อนหน้า (ไม่ใช้กฎความยาวบรรทัด/เวลานานสุด/จำนวนคำ) ตัวแรกสุดเกาะซับถัดไป
+    # - เครื่องหมายเปิด ( “ และอัญประกาศตรงที่ทำหน้าที่เปิด เกาะหน้าคำถัดไป (_kinds)
+    # จึงไม่มีซับที่มีแค่เครื่องหมาย ยกเว้นเงียบ >= 1 วินาที ซึ่งยังขึ้นซับใหม่เหมือนเดิม
+    kinds = _kinds(tokens) if tokens_mode else [_WORD] * len(tokens)
+    punct = [kind != _WORD for kind in kinds]
 
     def words(start: int, end: int) -> int:
         return sum(1 for k in range(start, end) if not punct[k])
+
+    def chain_end(start: int) -> int:
+        """token แรกหลังเครื่องหมายเปิดที่ต่อกันตั้งแต่ start (คือคำที่เครื่องหมายเปิดเหล่านี้เกาะ)"""
+        k = start
+        while kinds[k] == _FORWARD:
+            k += 1
+        return k
 
     # 1. จับกลุ่มแบบ greedy (cur = token ช่วง [cur_from, i))
     drafts: list[_Draft] = []
@@ -250,9 +306,19 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
     for i, tok in enumerate(tokens):
         if cur:
             gap = tok.s - cur[-1].e >= GAP_SPLIT_MS
-            if punct[i] or (tokens_mode and words(cur_from, i) == 0):
-                # เครื่องหมายเกาะซับที่กำลังสร้าง / ซับที่มีแต่เครื่องหมายนำหน้า ให้คำนี้เข้ามาอยู่ด้วย
+            if kinds[i] == _BACK or (tokens_mode and words(cur_from, i) == 0) or kinds[i - 1] == _FORWARD:
+                # เครื่องหมายเกาะซับที่กำลังสร้าง / ซับที่มีแต่เครื่องหมายนำหน้า / คำที่มีเครื่องหมายเปิดนำหน้า
+                # ให้ token นี้อยู่ซับเดียวกัน
                 close = gap
+            elif kinds[i] == _FORWARD:
+                # เครื่องหมายเปิดตัดสินพร้อมคำที่มันเกาะ: ถ้าคำนั้นต้องขึ้นซับใหม่ เครื่องหมายก็ขึ้นไปด้วย
+                j = chain_end(i)
+                close = (
+                    not _fits([*cur, *tokens[i : j + 1]], opts, opts.max_chars)
+                    or gap
+                    or tokens[j].e - cur[0].s > opts.max_ms
+                    or words(cur_from, i) >= per_cue
+                )
             else:
                 close = (
                     not _fits([*cur, tok], opts, opts.max_chars)

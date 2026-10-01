@@ -54,6 +54,50 @@ export function isPunctOnly(tok: SubToken): boolean {
   return PUNCT_ONLY.test(tidy(tok.t))
 }
 
+/** เครื่องหมายเปิดที่เกาะหน้าคำถัดไปเสมอ (fix round 1): ( [ { « “ ‘ ¿ ¡ และ ( [ { แบบเต็มความกว้าง */
+const OPENERS = new Set("([{\u00ab\u201c\u2018\u00bf\u00a1\uff08\uff3b\uff5b")
+/** อัญประกาศตรงที่เป็นได้ทั้งเปิดและปิด (" ' และแบบเต็มความกว้าง) ตัดสินจากช่องว่างรอบตัว (tokenKinds) */
+const STRAIGHT_QUOTES = new Set("\"'\uff02\uff07")
+const WORD = 0
+const BACK = 1
+const FORWARD = 2
+
+function only(tok: SubToken, chars: Set<string>): boolean {
+  const text = tidy(tok.t)
+  if (text === "") return false
+  for (const ch of text) if (!chars.has(ch)) return false
+  return true
+}
+
+/**
+ * โหมดนับคำ: คำ (WORD) / เครื่องหมายที่เกาะคำก่อนหน้า (BACK) / เครื่องหมายเปิดที่เกาะคำถัดไป (FORWARD)
+ * กฎเดียวกับ `_kinds` ฝั่ง Python ทุกข้อ (ดู docstring ที่นั่น)
+ */
+function tokenKinds(tokens: readonly SubToken[]): number[] {
+  const n = tokens.length
+  const kinds = new Array<number>(n).fill(WORD)
+  for (let i = n - 1; i >= 0; i--) {
+    const tok = tokens[i]
+    if (!isPunctOnly(tok)) continue
+    kinds[i] = BACK
+    if (i + 1 >= n || kinds[i + 1] === BACK || tokens[i + 1].s - tok.e >= GAP_SPLIT_MS) continue
+    if (only(tok, OPENERS)) {
+      kinds[i] = FORWARD
+    } else if (only(tok, STRAIGHT_QUOTES)) {
+      const prev = i > 0 ? tokens[i - 1] : null
+      const spacedBefore =
+        prev === null ||
+        tok.s - prev.e >= GAP_SPLIT_MS ||
+        tok.t.startsWith(" ") ||
+        prev.t.endsWith(" ") ||
+        only(prev, OPENERS)
+      const gluedAfter = !tok.t.endsWith(" ") && !tokens[i + 1].t.startsWith(" ")
+      if (spacedBefore && gluedAfter) kinds[i] = FORWARD
+    }
+  }
+  return kinds
+}
+
 /** ใช้กับชื่อคลิปและชื่อ chapter เท่านั้น: ช่องว่างทุกแบบของ JS (\s) ยุบเหลือช่องเดียว แล้วตัดหัวท้าย */
 function collapse(text: string): string {
   return text.replace(/\s+/g, " ").trim()
@@ -160,10 +204,17 @@ export function buildCues(tokens: readonly SubToken[], o: SubOptions): Cue[] {
   const m = measure(tokens)
   const draft = (from: number, to: number): Draft => ({ from, to, startMs: tokens[from].s, endMs: tokens[to - 1].e })
 
-  // โหมดนับคำ (owner round 3): token ที่เป็นเครื่องหมายล้วนไม่นับเป็นคำ และเกาะซับของคำก่อนหน้าเสมอ
-  // (ไม่ใช้กฎความยาวบรรทัด/เวลานานสุด/จำนวนคำ) ตัวแรกสุดเกาะซับถัดไป จึงไม่มีซับที่มีแค่ "." หรือ "," อีก
+  // โหมดนับคำ (owner round 3 + fix round 1): token ที่เป็นเครื่องหมายล้วนไม่นับเป็นคำ
+  // เครื่องหมายทั่วไปเกาะซับของคำก่อนหน้า ตัวแรกสุดเกาะซับถัดไป · เครื่องหมายเปิดเกาะหน้าคำถัดไป (tokenKinds)
   // ยกเว้นเงียบ >= 1 วินาที ซึ่งยังขึ้นซับใหม่เหมือนเดิม · wordsBefore[k] = จำนวนคำ (ไม่นับเครื่องหมาย) ใน token [0, k)
-  const punct = tokens.map((tok) => tokensMode && isPunctOnly(tok))
+  const kinds = tokensMode ? tokenKinds(tokens) : new Array<number>(tokens.length).fill(WORD)
+  const punct = kinds.map((kind) => kind !== WORD)
+  // คำที่เครื่องหมายเปิดซึ่งต่อกันตั้งแต่ start เกาะอยู่ (token แรกที่ไม่ใช่เครื่องหมายเปิด)
+  const chainEnd = (start: number) => {
+    let k = start
+    while (kinds[k] === FORWARD) k++
+    return k
+  }
   const wordsBefore = [0]
   for (const p of punct) wordsBefore.push(wordsBefore[wordsBefore.length - 1] + (p ? 0 : 1))
   const words = (from: number, to: number) => wordsBefore[to] - wordsBefore[from]
@@ -174,14 +225,25 @@ export function buildCues(tokens: readonly SubToken[], o: SubOptions): Cue[] {
   for (let i = 1; i < tokens.length; i++) {
     const tok = tokens[i]
     const gap = tok.s - tokens[i - 1].e >= GAP_SPLIT_MS
-    // เครื่องหมายเกาะซับที่กำลังสร้าง / ซับที่มีแต่เครื่องหมายนำหน้า ให้คำนี้เข้ามาอยู่ด้วย
-    const close =
-      punct[i] || (tokensMode && words(curFrom, i) === 0)
-        ? gap
-        : !fits(m, curFrom, i + 1, o, o.maxChars) ||
-          gap ||
-          tok.e - tokens[curFrom].s > o.maxMs ||
-          (tokensMode && words(curFrom, i) >= perCue)
+    let close: boolean
+    if (kinds[i] === BACK || (tokensMode && words(curFrom, i) === 0) || kinds[i - 1] === FORWARD) {
+      // เครื่องหมายเกาะซับที่กำลังสร้าง / ซับที่มีแต่เครื่องหมายนำหน้า / คำที่มีเครื่องหมายเปิดนำหน้า อยู่ซับเดียวกัน
+      close = gap
+    } else if (kinds[i] === FORWARD) {
+      // เครื่องหมายเปิดตัดสินพร้อมคำที่มันเกาะ: ถ้าคำนั้นต้องขึ้นซับใหม่ เครื่องหมายก็ขึ้นไปด้วย
+      const j = chainEnd(i)
+      close =
+        !fits(m, curFrom, j + 1, o, o.maxChars) ||
+        gap ||
+        tokens[j].e - tokens[curFrom].s > o.maxMs ||
+        words(curFrom, i) >= perCue
+    } else {
+      close =
+        !fits(m, curFrom, i + 1, o, o.maxChars) ||
+        gap ||
+        tok.e - tokens[curFrom].s > o.maxMs ||
+        (tokensMode && words(curFrom, i) >= perCue)
+    }
     if (close) {
       drafts.push(draft(curFrom, i))
       curFrom = i

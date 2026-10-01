@@ -529,6 +529,88 @@
       ],
       "srt": "1\r\n00:00:00,000 --> 00:00:00,500\r\nabcdefghijklmno\r\n\r\n2\r\n00:00:00,500 --> 00:00:01,300\r\n.\r\n",
       "txt": "abcdefghijklmno.\r\n"
+    },
+    {
+      "name": "word-preset-openers",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "He", "s": 0, "e": 300},
+        {"t": " said", "s": 300, "e": 600},
+        {"t": " (", "s": 600, "e": 650},
+        {"t": "yes", "s": 650, "e": 1000},
+        {"t": ")", "s": 1000, "e": 1050},
+        {"t": " «", "s": 1050, "e": 1100},
+        {"t": "ok", "s": 1100, "e": 1400},
+        {"t": "»", "s": 1400, "e": 1500}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 300, "lines": ["He"]},
+        {"startMs": 300, "endMs": 600, "lines": ["said"]},
+        {"startMs": 600, "endMs": 1050, "lines": ["(yes)"]},
+        {"startMs": 1050, "endMs": 1850, "lines": ["«ok»"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,300\r\nHe\r\n\r\n2\r\n00:00:00,300 --> 00:00:00,600\r\nsaid\r\n\r\n3\r\n00:00:00,600 --> 00:00:01,050\r\n(yes)\r\n\r\n4\r\n00:00:01,050 --> 00:00:01,850\r\n«ok»\r\n",
+      "txt": "He said (yes) «ok»\r\n"
+    },
+    {
+      "name": "word-preset-straight-quotes",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "She", "s": 0, "e": 300},
+        {"t": " said", "s": 300, "e": 600},
+        {"t": ",", "s": 600, "e": 650},
+        {"t": " \"", "s": 650, "e": 700},
+        {"t": "Hi", "s": 700, "e": 1000},
+        {"t": ".", "s": 1000, "e": 1050},
+        {"t": "\"", "s": 1050, "e": 1100},
+        {"t": " Then", "s": 1100, "e": 1400},
+        {"t": " \"", "s": 1400, "e": 1450},
+        {"t": " go", "s": 1450, "e": 1800}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 300, "lines": ["She"]},
+        {"startMs": 300, "endMs": 650, "lines": ["said,"]},
+        {"startMs": 650, "endMs": 1100, "lines": ["\"Hi.\""]},
+        {"startMs": 1100, "endMs": 1450, "lines": ["Then \""]},
+        {"startMs": 1450, "endMs": 2250, "lines": ["go"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,300\r\nShe\r\n\r\n2\r\n00:00:00,300 --> 00:00:00,650\r\nsaid,\r\n\r\n3\r\n00:00:00,650 --> 00:00:01,100\r\n\"Hi.\"\r\n\r\n4\r\n00:00:01,100 --> 00:00:01,450\r\nThen \"\r\n\r\n5\r\n00:00:01,450 --> 00:00:02,250\r\ngo\r\n",
+      "txt": "She said, \"Hi.\" Then \" go\r\n"
+    },
+    {
+      "name": "word-preset-trailing-opener",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "A", "s": 0, "e": 400},
+        {"t": " [", "s": 400, "e": 450},
+        {"t": "B", "s": 1500, "e": 1900},
+        {"t": " (", "s": 1900, "e": 2000}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 800, "lines": ["A ["]},
+        {"startMs": 1500, "endMs": 2300, "lines": ["B ("]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,800\r\nA [\r\n\r\n2\r\n00:00:01,500 --> 00:00:02,300\r\nB (\r\n",
+      "txt": "A [B (\r\n"
+    },
+    {
+      "name": "tokens-mode-opener-keeps-its-word",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 300, "maxMs": 5000, "mode": "tokens", "tokensPerCue": 3},
+      "tokens": [
+        {"t": "a", "s": 0, "e": 100},
+        {"t": " b", "s": 100, "e": 200},
+        {"t": " (", "s": 200, "e": 250},
+        {"t": "c", "s": 250, "e": 300},
+        {"t": " d", "s": 300, "e": 400},
+        {"t": ")", "s": 400, "e": 450},
+        {"t": " e", "s": 450, "e": 500}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 300, "lines": ["a b (c"]},
+        {"startMs": 300, "endMs": 600, "lines": ["d) e"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,300\r\na b (c\r\n\r\n2\r\n00:00:00,300 --> 00:00:00,600\r\nd) e\r\n",
+      "txt": "a b (c d) e\r\n"
     }
   ]
 }
