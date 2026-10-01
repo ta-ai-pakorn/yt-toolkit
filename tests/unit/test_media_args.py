@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from yttoolkit.core.media import (
     m4a_args,
     mp3_args,
     mp4_args,
+    run_ffmpeg,
     wav_args,
 )
 from yttoolkit.core.yterrors import YtError
@@ -203,3 +205,55 @@ def test_ffmpeg_tools_missing(tmp_path: Path) -> None:
         with pytest.raises(YtError) as info:
             call()
         assert info.value.code == "E_FFMPEG_MISSING"
+
+
+def _stub(code: str) -> list[str]:
+    return [sys.executable, "-c", code]
+
+
+def test_run_ffmpeg_disk_full_maps_to_e_disk_full() -> None:
+    args = _stub("import sys; sys.stderr.write('x: No space left on device'); sys.exit(1)")
+    with pytest.raises(YtError) as info:
+        run_ffmpeg(args, duration_s=None, cancel=_never, on_progress=_ignore)
+    assert info.value.code == "E_DISK_FULL"
+
+
+def test_run_ffmpeg_other_failure_maps_to_e_unknown() -> None:
+    args = _stub("import sys; sys.stderr.write('boom'); sys.exit(3)")
+    with pytest.raises(YtError) as info:
+        run_ffmpeg(args, duration_s=None, cancel=_never, on_progress=_ignore)
+    assert info.value.code == "E_UNKNOWN"
+    assert "ffmpeg exit 3" in info.value.detail
+    assert "boom" in info.value.detail
+
+
+def test_run_ffmpeg_reports_progress_from_out_time_lines() -> None:
+    code = "print('out_time_us=500000'); print('out_time_ms=1500000'); print('out_time_us=9000000'); print('progress=end')"
+    seen: list[float | None] = []
+    run_ffmpeg(_stub(code), duration_s=2.0, cancel=_never, on_progress=seen.append)
+    assert seen == [0.25, 0.75, 1.0]
+
+
+def test_run_ffmpeg_progress_is_none_without_duration() -> None:
+    seen: list[float | None] = []
+    run_ffmpeg(_stub("print('out_time_us=500000')"), duration_s=None, cancel=_never, on_progress=seen.append)
+    assert seen == [None]
+
+
+def test_run_ffmpeg_survives_a_failing_progress_callback() -> None:
+    # ถ้าตัวอ่าน stdout ตาย pipe จะเต็มแล้วโปรเซสค้าง: สคริปต์นี้พิมพ์เยอะพอจะอุดท่อ
+    code = "for i in range(20000): print('out_time_us=%d' % i)"
+    calls: list[float | None] = []
+
+    def broken(value: float | None) -> None:
+        calls.append(value)
+        raise RuntimeError("callback พัง")
+
+    run_ffmpeg(_stub(code), duration_s=1.0, cancel=_never, on_progress=broken)
+    assert len(calls) == 20000
+
+
+def test_run_ffmpeg_missing_executable_is_ffmpeg_missing(tmp_path: Path) -> None:
+    with pytest.raises(YtError) as info:
+        run_ffmpeg([str(tmp_path / "nope.exe")], duration_s=None, cancel=_never, on_progress=_ignore)
+    assert info.value.code == "E_FFMPEG_MISSING"

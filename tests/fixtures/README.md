@@ -143,7 +143,7 @@ ffmpeg -hide_banner -y -f lavfi -i testsrc=size=160x90 -frames:v 1 cover.jpg
 
 เทส real-ffmpeg ใช้ `requires_ffmpeg` (`tests/helpers_ffmpeg.py`) จะถูกข้ามเมื่อเครื่องไม่มี ffmpeg
 
-หมายเหตุ `license`: ไฟล์ `probe/88o5Sk8_m1Y.json` ไม่มีฟิลด์ `license` (ตัวตัด probe ไม่เก็บ) แต่คลิปนี้เผยแพร่แบบ CC BY ตามหัวข้อ "ลิขสิทธิ์" ด้านล่าง เทสที่ต้องการข้อความเครดิตของคลิปนี้ต้องอ้างจากสถานะนั้น ไม่ใช่จากฟิลด์ในไฟล์
+หมายเหตุ `license`: `probe/88o5Sk8_m1Y.json` มีฟิลด์ระดับบน `"license": "Creative Commons Attribution license (reuse allowed)"` ซึ่งใส่เข้าไปด้วยมือ (ตัวตัด probe `core/videos.trim_probe` ไม่เก็บฟิลด์นี้ และไฟล์ probe อื่นไม่มี) เพื่อให้เทสเครดิตของคลิป CC BY อ่านค่าจากไฟล์ได้ (`tests/unit/test_video_meta.py`) คลิปนี้เผยแพร่แบบ CC BY ตามหัวข้อ "ลิขสิทธิ์" ด้านล่าง
 
 ## ลิขสิทธิ์
 Big Buck Bunny © Blender Foundation | www.bigbuckbunny.org
