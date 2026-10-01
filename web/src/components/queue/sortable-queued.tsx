@@ -18,7 +18,7 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { GripVertical } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { fill, th } from "@/i18n/th"
 import type { Job } from "@/lib/types"
@@ -26,7 +26,7 @@ import { cn } from "cn"
 
 import { QueuedRow } from "./job-row"
 import { jobTitle } from "./job-text"
-import { endQueueDrag, startQueueDrag, useReorder } from "./use-queue"
+import { endQueueDrag, resetQueueDrag, startQueueDrag, useReorder } from "./use-queue"
 
 function SortableRow({ job }: { job: Job }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
@@ -62,6 +62,8 @@ function SortableRow({ job }: { job: Job }) {
  */
 export function SortableQueued({ jobs }: { jobs: Job[] }) {
   const reorder = useReorder()
+  // ถูกถอดออกกลางการลาก (งานสุดท้ายในคิวเริ่มทำ, ชีตปิด) dnd-kit ไม่เรียก onDragEnd/onDragCancel ให้
+  useEffect(() => resetQueueDrag, [])
   // ข้อความประกาศต้องอยู่ในชีต: ชีตเป็น modal ส่วนนอกชีตถูกซ่อนจากโปรแกรมอ่านหน้าจอ
   const [announcer, setAnnouncer] = useState<HTMLDivElement | null>(null)
   const sensors = useSensors(

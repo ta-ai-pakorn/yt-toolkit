@@ -4,7 +4,16 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), dismiss: v
 
 import type { Job } from "@/lib/types"
 
-import { applyActionResult, applyReorder, jobToast, queueSheet, rollbackReorder } from "./use-queue"
+import {
+  applyActionResult,
+  applyReorder,
+  jobToast,
+  queueDrag,
+  queueSheet,
+  resetQueueDrag,
+  rollbackReorder,
+  startQueueDrag,
+} from "./use-queue"
 
 function job(id: string, over: Partial<Job> = {}): Job {
   return {
@@ -137,5 +146,19 @@ describe("queueSheet", () => {
     queueSheet.open()
     expect(listener).toHaveBeenCalledTimes(2)
     queueSheet.close()
+  })
+})
+
+describe("queueDrag", () => {
+  it("ล้างได้ทันที และปิดชีตแล้วไม่ค้างว่ากำลังลาก", () => {
+    startQueueDrag()
+    expect(queueDrag.active).toBe(true)
+    resetQueueDrag()
+    expect(queueDrag.active).toBe(false)
+
+    queueSheet.open()
+    startQueueDrag()
+    queueSheet.close()
+    expect(queueDrag.active).toBe(false)
   })
 })

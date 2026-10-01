@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright"
-import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test"
+import { expect, test, type APIRequestContext, type Locator, type Page, type Request, type Response } from "@playwright/test"
 
 import type { Job, NewJob } from "../src/lib/types"
 
@@ -40,14 +40,45 @@ async function order34(request: APIRequestContext): Promise<string[]> {
 }
 
 /**
- * เปิดหน้าแล้วรอจน SSE ต่อติดและรายการงานแรกโหลดเสร็จ ก่อนส่งงานเข้าคิว
- * (ไม่งั้นเหตุการณ์ของงานใหม่อาจมาถึงก่อนหน้าเว็บพร้อมฟัง)
+ * เปิดหน้าแล้วรอจน SSE ต่อติด และรายการงานที่โหลดใหม่ตอน SSE ต่อติดครั้งแรก (events.ts) เสร็จแล้ว ก่อนส่งงานเข้าคิว
+ * ไม่งั้นคำตอบของการโหลดใหม่นั้น (คำนวณก่อนส่งงาน) อาจทับงานที่เพิ่งเข้าคิวในแคช
+ * นับเฉพาะ GET /api/jobs ที่ส่งหลังได้คำตอบ /api/events และรอจนไม่มีคำขอรายการงานค้างอยู่
  */
 async function gotoReady(page: Page, path = "/") {
-  const events = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/events")
-  const jobs = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/jobs" && r.request().method() === "GET")
-  await page.goto(path)
-  await Promise.all([events, jobs])
+  const isJobsGet = (request: Request) =>
+    new URL(request.url()).pathname === "/api/jobs" && request.method() === "GET"
+  let eventsOpen = false
+  let inFlight = 0
+  let finishedAfterOpen = 0
+  const after = new Set<Request>()
+  const onResponse = (response: Response) => {
+    if (new URL(response.url()).pathname === "/api/events") eventsOpen = true
+  }
+  const onRequest = (request: Request) => {
+    if (!isJobsGet(request)) return
+    inFlight += 1
+    if (eventsOpen) after.add(request)
+  }
+  const onDone = (request: Request) => {
+    if (!isJobsGet(request)) return
+    inFlight -= 1
+    if (after.has(request)) finishedAfterOpen += 1
+  }
+  page.on("response", onResponse)
+  page.on("request", onRequest)
+  page.on("requestfinished", onDone)
+  page.on("requestfailed", onDone)
+  try {
+    await page.goto(path)
+    await expect.poll(() => eventsOpen && finishedAfterOpen > 0 && inFlight === 0).toBe(true)
+    // ให้ react-query ใส่คำตอบลงแคชก่อน (หลังโหลดเนื้อหาครบแล้วยังมีขั้นอ่าน JSON)
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))))
+  } finally {
+    page.off("response", onResponse)
+    page.off("request", onRequest)
+    page.off("requestfinished", onDone)
+    page.off("requestfailed", onDone)
+  }
 }
 
 async function getConcurrency(page: Page): Promise<number> {

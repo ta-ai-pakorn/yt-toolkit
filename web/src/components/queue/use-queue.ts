@@ -90,7 +90,10 @@ function createSheetStore() {
     get: () => state,
     /** เปิดชีต · focusId = เลื่อนไปที่แถวของงานนั้น */
     open: (focusId: string | null = null) => set({ open: true, focusId }),
-    close: () => set({ open: false, focusId: null }),
+    close: () => {
+      resetQueueDrag()
+      set({ open: false, focusId: null })
+    },
     subscribe(listener: () => void) {
       listeners.add(listener)
       return () => void listeners.delete(listener)
@@ -111,9 +114,12 @@ export function startQueueDrag(): void {
 }
 
 export function endQueueDrag(): void {
-  window.setTimeout(() => {
-    queueDrag.active = false
-  }, 0)
+  window.setTimeout(resetQueueDrag, 0)
+}
+
+/** ล้างทันที: รายการที่ลากอยู่หายไปกลางคัน (งานเริ่มทำ, กดนอกชีต) หรือชีตปิด จะได้ไม่ค้างว่ายังลากอยู่ */
+export function resetQueueDrag(): void {
+  queueDrag.active = false
 }
 
 export function useQueueSheet(): SheetState {
