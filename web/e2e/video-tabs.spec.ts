@@ -3,7 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 import AxeBuilder from "@axe-core/playwright"
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Locator, type Page } from "@playwright/test"
 
 const BBB = "aqz-KE-bpKQ"
 const BBB_URL = `https://www.youtube.com/watch?v=${BBB}`
@@ -61,6 +61,24 @@ async function recordClipboardWrites(page: Page) {
       },
     })
   })
+}
+
+const descriptionRegion = (page: Page) => page.getByRole("region", { name: "คำอธิบาย" })
+const chapterRegion = (page: Page) => page.getByRole("region", { name: /^Chapter \(/ })
+const chapterRows = (page: Page) => chapterRegion(page).getByRole("listitem")
+
+/** ข้อความถูกตัด (สูงเกินกล่องที่เห็น) อยู่หรือไม่ */
+const isCut = (locator: Locator) => locator.evaluate((el) => el.scrollHeight > el.clientHeight + 1)
+
+/** แก้ข้อมูลคลิปที่ backend ส่งมาบางช่อง (เช่น chapter หลายตอน คำอธิบายว่าง) ส่วนอื่นมาจากชุดทดสอบตามปกติ */
+async function withVideo(page: Page, videoId: string, patch: Record<string, unknown>) {
+  await page.route(
+    (url) => url.pathname === `/api/videos/${videoId}`,
+    async (route) => {
+      const response = await route.fetch()
+      route.fulfill({ response, json: { ...((await response.json()) as object), ...patch } })
+    },
+  )
 }
 
 const lastWrite = (page: Page) =>
@@ -218,13 +236,26 @@ test.describe("W2 แถบแท็บ คีย์บอร์ด", () => {
   })
 })
 
-test.describe("W2 ปุ่มคัดลอกที่หัวคลิป", () => {
-  test("จอแคบ 360 px: ปุ่มคัดลอกสูงอย่างน้อย 44 px", async ({ page }) => {
+test.describe("W2 คำอธิบายและ chapter ที่หัวคลิป", () => {
+  test("จอแคบ 360 px: ปุ่มคัดลอกและปุ่มดูทั้งหมดสูงอย่างน้อย 44 px · หน้าไม่ล้นแนวนอน", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 800 })
     await page.goto(`/v/${ZOO}`)
     await expect(page.getByRole("button", { name: "คัดลอก chapter" })).toBeVisible()
-    const box = await page.getByRole("button", { name: "คัดลอก chapter" }).boundingBox()
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44)
+    for (const name of ["คัดลอก chapter", "คัดลอกคำอธิบาย", "ดูทั้งหมด"]) {
+      const box = await page.getByRole("button", { name, exact: true }).boundingBox()
+      expect(box?.height ?? 0, name).toBeGreaterThanOrEqual(44)
+    }
+    // ลิงก์ยาวในคำอธิบายตัดขึ้นบรรทัดใหม่ได้ ไม่ดันหน้าให้กว้างเกินจอ
+    await page.getByRole("button", { name: "ดูทั้งหมด" }).click()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
+  })
+
+  test("เห็นรายการ chapter ก่อนคัดลอก: หัวข้อ 'Chapter (3 ตอน)' และบรรทัด HH:MM:SS ชื่อตอน", async ({ page }) => {
+    await page.goto(`/v/${ZOO}`)
+    await expect(page.getByRole("heading", { level: 2, name: "Chapter (3 ตอน)" })).toBeVisible()
+    await expect(chapterRows(page)).toHaveText(["00:00:00Intro", "00:00:05The cool thing", "00:00:17End"])
+    // 3 ตอนแสดงครบแล้ว ไม่มีปุ่มดูทั้งหมดของ chapter
+    await expect(chapterRegion(page).getByRole("button", { name: "ดูทั้งหมด" })).toHaveCount(0)
   })
 
   test("AC-PROBE-03: 'คัดลอก chapter' ได้บรรทัด HH:MM:SS ชื่อตอน ครบ 3 ตอน และขึ้น toast", async ({ page, context }) => {
@@ -233,8 +264,10 @@ test.describe("W2 ปุ่มคัดลอกที่หัวคลิป",
     expect(chapters).toHaveLength(3)
     await recordClipboardWrites(page)
     await page.goto(`/v/${ZOO}`)
-    const group = page.getByRole("group", { name: "คัดลอกข้อมูลคลิป" })
-    await group.getByRole("button", { name: "คัดลอก chapter" }).click()
+    // ปุ่มที่ตาเห็นเขียนว่า "คัดลอก" ชื่อสำหรับโปรแกรมอ่านหน้าจอบอกว่าคัดลอกอะไร
+    const button = page.getByRole("button", { name: "คัดลอก chapter" })
+    await expect(button).toHaveText("คัดลอก")
+    await button.click()
     await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
     const text = (await lastWrite(page)) ?? ""
     const lines = text.split("\n")
@@ -253,10 +286,102 @@ test.describe("W2 ปุ่มคัดลอกที่หัวคลิป",
     expect(await readClipboardLf(page)).toBe(expected)
   })
 
-  test("คลิปไม่มี chapter ไม่มีปุ่ม 'คัดลอก chapter'", async ({ page }) => {
+  test("chapter เกิน 5 ตอน: แสดง 5 ตอนแรก กด 'ดูทั้งหมด' เห็นครบ กด 'ย่อ' กลับเหลือ 5 · คัดลอกได้ครบทุกตอนเสมอ", async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"])
+    await recordClipboardWrites(page)
+    // ส่งคืนลำดับสลับกันโดยตั้งใจ: หน้าเว็บต้องเรียงตามเวลาเอง
+    const titles = ["ตอนที่ 1", "ตอนที่ 2", "ตอนที่ 3", "ตอนที่ 4", "ตอนที่ 5", "ตอนที่ 6", "ตอนที่ 7", "ตอนที่ 8"]
+    const chapters = titles.map((title, i) => ({ startS: i * 60, endS: i * 60 + 60, title })).reverse()
+    await withVideo(page, ZOO, { chapters })
+    await page.goto(`/v/${ZOO}`)
+    await expect(page.getByRole("heading", { level: 2, name: "Chapter (8 ตอน)" })).toBeVisible()
+    await expect(chapterRows(page)).toHaveCount(5)
+    await expect(chapterRows(page).first()).toHaveText("00:00:00ตอนที่ 1")
+    const more = chapterRegion(page).getByRole("button", { name: "ดูทั้งหมด" })
+    await expect(more).toHaveAttribute("aria-expanded", "false")
+    await more.click()
+    const less = chapterRegion(page).getByRole("button", { name: "ย่อ" })
+    await expect(less).toHaveAttribute("aria-expanded", "true")
+    await expect(less).toBeFocused()
+    await expect(chapterRows(page)).toHaveCount(8)
+    await expect(chapterRows(page).last()).toHaveText("00:07:00ตอนที่ 8")
+    await less.click()
+    await expect(chapterRows(page)).toHaveCount(5)
+    await expect(chapterRegion(page).getByRole("button", { name: "ดูทั้งหมด" })).toBeFocused()
+
+    await page.getByRole("button", { name: "คัดลอก chapter" }).click()
+    await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
+    expect(((await lastWrite(page)) ?? "").split("\n")).toEqual(titles.map((t, i) => `00:0${i}:00 ${t}`))
+  })
+
+  test("คลิปไม่มี chapter ไม่มีกล่อง chapter และไม่มีปุ่ม 'คัดลอก chapter'", async ({ page }) => {
     await page.goto(`/v/${BBB}`)
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    await expect(page.getByRole("heading", { level: 2, name: "คำอธิบาย" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: /^Chapter/ })).toHaveCount(0)
     await expect(page.getByRole("button", { name: "คัดลอก chapter" })).toHaveCount(0)
+  })
+
+  test("คลิปไม่มีทั้งคำอธิบายและ chapter (หรือคำอธิบายมีแต่ช่องว่าง) ไม่มีทั้งสองกล่อง", async ({ page }) => {
+    await withVideo(page, BBB, { description: "  \n ", chapters: [] })
+    await page.goto(`/v/${BBB}`)
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    await expect(tab(page, "ภาพเฟรม")).toBeVisible()
+    await expect(page.getByRole("heading", { level: 2, name: "คำอธิบาย" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /^คัดลอก/ })).toHaveCount(0)
+  })
+
+  test("คำอธิบาย: แสดง 3 บรรทัดแรก กด 'ดูทั้งหมด' เห็นครบ กด 'ย่อ' กลับเป็น 3 บรรทัด · ลิงก์เป็นข้อความธรรมดา", async ({
+    page,
+  }) => {
+    const { description } = probeFixture(BBB)
+    await page.goto(`/v/${BBB}`)
+    const region = descriptionRegion(page)
+    const text = region.getByText(/^UHD High Frame rate/)
+    await expect(text).toBeVisible()
+    // ข้อความครบทุกตัว (ขึ้นบรรทัดตามต้นฉบับ) แต่ตัดที่ 3 บรรทัด
+    expect(await text.evaluate((el) => el.textContent)).toBe(description)
+    await expect(text).toHaveCSS("white-space", "pre-line")
+    await expect(text).toHaveCSS("-webkit-line-clamp", "3")
+    expect(await isCut(text)).toBe(true)
+    await expect(region.getByRole("link")).toHaveCount(0)
+
+    const more = region.getByRole("button", { name: "ดูทั้งหมด" })
+    await expect(more).toHaveAttribute("aria-expanded", "false")
+    await expect(more).toHaveAttribute("aria-controls", (await text.getAttribute("id")) ?? "")
+    await more.click()
+    const less = region.getByRole("button", { name: "ย่อ" })
+    await expect(less).toHaveAttribute("aria-expanded", "true")
+    await expect(text).toHaveCSS("-webkit-line-clamp", "none")
+    expect(await isCut(text)).toBe(false)
+    await less.click()
+    await expect(region.getByRole("button", { name: "ดูทั้งหมด" })).toHaveAttribute("aria-expanded", "false")
+    expect(await isCut(text)).toBe(true)
+  })
+
+  test("คำอธิบายสั้น (ไม่เกิน 3 บรรทัด) ไม่มีปุ่ม 'ดูทั้งหมด'", async ({ page }) => {
+    await withVideo(page, BBB, { description: "คำอธิบายสั้น ๆ บรรทัดเดียว" })
+    await page.goto(`/v/${BBB}`)
+    await expect(descriptionRegion(page).getByText("คำอธิบายสั้น ๆ บรรทัดเดียว")).toBeVisible()
+    await expect(page.getByRole("button", { name: "ดูทั้งหมด" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "คัดลอกคำอธิบาย" })).toBeVisible()
+  })
+
+  test("จอกว้างที่มีทั้งสองกล่อง: วางคู่กัน 2 คอลัมน์ ปกยังเป็น 16:9 แม้กางคำอธิบาย", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.goto(`/v/${ZOO}`)
+    const description = await descriptionRegion(page).boundingBox()
+    const chapters = await chapterRegion(page).boundingBox()
+    expect(description && chapters).toBeTruthy()
+    expect(Math.abs((description?.y ?? 0) - (chapters?.y ?? 1))).toBeLessThan(2)
+    expect(chapters?.x ?? 0).toBeGreaterThan((description?.x ?? 0) + (description?.width ?? 0))
+    await descriptionRegion(page).getByRole("button", { name: "ดูทั้งหมด" }).click()
+    // ปก = กล่องข้างคอลัมน์ข้อมูล (ไม่ใช้ <img> เพราะภาพจริงอาจโหลดไม่ได้ในเครื่องทดสอบ)
+    const cover = await page.getByRole("heading", { level: 1 }).locator("xpath=../preceding-sibling::div[1]").boundingBox()
+    expect((cover?.width ?? 0) / (cover?.height ?? 1)).toBeCloseTo(16 / 9, 1)
   })
 
   test("AC-PROBE-04: 'คัดลอกคำอธิบาย' ได้คำอธิบายตรงทุกตัวอักษรตามชุดทดสอบ", async ({ page, context }) => {
@@ -265,10 +390,9 @@ test.describe("W2 ปุ่มคัดลอกที่หัวคลิป",
     expect(typeof description).toBe("string")
     await recordClipboardWrites(page)
     await page.goto(`/v/${BBB}`)
-    await page
-      .getByRole("group", { name: "คัดลอกข้อมูลคลิป" })
-      .getByRole("button", { name: "คัดลอกคำอธิบาย" })
-      .click()
+    const button = descriptionRegion(page).getByRole("button", { name: "คัดลอกคำอธิบาย" })
+    await expect(button).toHaveText("คัดลอก")
+    await button.click()
     await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
     expect(await lastWrite(page)).toBe(description)
     expect(await readClipboardLf(page)).toBe(toLf(String(description)))
@@ -282,6 +406,34 @@ test.describe("W2 ปุ่มคัดลอกที่หัวคลิป",
     await page.getByRole("button", { name: "คัดลอก chapter" }).click()
     await expect(page.getByText("คัดลอกไม่สำเร็จ ลองอีกครั้ง")).toBeVisible()
   })
+
+  test("คีย์บอร์ด: จากชื่อคลิป Tab ไป คัดลอกคำอธิบาย → ดูทั้งหมด → คัดลอก chapter → แท็บภาพเฟรม", async ({ page }) => {
+    await page.goto(`/v/${ZOO}`)
+    const heading = page.getByRole("heading", { level: 1 })
+    await expect(heading).toContainText("Me at the zoo")
+    await expect(page.getByRole("button", { name: "ดูทั้งหมด" })).toBeVisible()
+    await heading.focus()
+    for (const name of ["คัดลอกคำอธิบาย", "ดูทั้งหมด", "คัดลอก chapter"]) {
+      await page.keyboard.press("Tab")
+      await expect(page.getByRole("button", { name, exact: true })).toBeFocused()
+    }
+    await page.keyboard.press("Tab")
+    await expect(tab(page, "ภาพเฟรม")).toBeFocused()
+  })
+
+  for (const scheme of ["dark", "light"] as const) {
+    test(`หัวคลิปที่กางคำอธิบายและ chapter แล้วไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
+      const titles = ["หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก"]
+      await withVideo(page, ZOO, { chapters: titles.map((title, i) => ({ startS: i * 3, endS: i * 3 + 3, title })) })
+      await page.emulateMedia({ colorScheme: scheme })
+      await page.goto(`/v/${ZOO}`)
+      await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
+      await descriptionRegion(page).getByRole("button", { name: "ดูทั้งหมด" }).click()
+      await chapterRegion(page).getByRole("button", { name: "ดูทั้งหมด" }).click()
+      await expect(chapterRows(page)).toHaveCount(6)
+      expect(await seriousViolations(page)).toEqual([])
+    })
+  }
 })
 
 test.describe("W2 ป้ายแทร็กซับ", () => {
