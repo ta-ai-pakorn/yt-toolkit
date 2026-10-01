@@ -20,7 +20,7 @@
 
 ---
 
-## Owner decisions (PENDING, see the questions file)
+## Owner decisions (ANSWERED 2026-10-01: all eight recommended)
 
 The controller asks Pete the questions in `m4-questions.md` (scratchpad) before Wave 1 and records the answers here. **This plan is written for the recommended answer of every question.** Where another answer changes a task, the task says so in a "Q<n> ≠ recommended" note.
 
