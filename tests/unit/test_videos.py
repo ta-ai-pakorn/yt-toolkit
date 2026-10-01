@@ -779,8 +779,8 @@ def test_trim_drops_urls_and_unused_fields_but_keeps_storyboard(db: Database) ->
 
 def test_trim_probe_adds_probe_version_description_and_captions() -> None:
     data = trim_probe(load("88o5Sk8_m1Y"))
-    assert PROBE_VERSION == 5  # M4: เก็บ license และ asr/audio_channels ของเสียงเพิ่ม
-    assert data["probeVersion"] == 5
+    assert PROBE_VERSION == 6  # M4 gate 2: เก็บความกว้างของ format วิดีโอ (คลิปแนวตั้ง)
+    assert data["probeVersion"] == PROBE_VERSION
     assert data["description"] == load("88o5Sk8_m1Y")["description"]
     assert set(data["captions"]) == {"owner", "original", "translated", "translateFrom"}
     assert [o["key"] for o in data["captions"]["original"]] == ["th-orig"]
@@ -874,7 +874,7 @@ def test_round_three_row_without_license_is_reprobed(
     assert svc.get("88o5Sk8_m1Y")["license"] == "Creative Commons Attribution license (reuse allowed)"
     assert ext.count["probe"] == 2
     stored = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
-    assert stored["probeVersion"] == 5 and "license" in stored
+    assert stored["probeVersion"] == PROBE_VERSION and "license" in stored
 
 
 def test_trim_keeps_license_and_audio_sample_rate_and_channels() -> None:

@@ -217,7 +217,7 @@ def video_choice(info: dict, params: Mapping[str, Any]) -> DownloadChoice:
         pool = videos
         tail = "/b"
     else:
-        # เพดานนับที่ด้านสั้น: Shorts 1080x1920 ได้ 1080p ไม่ถูกตัดลงเหลือ 608x1080
+        # เพดานนับที่ด้านสั้น: Shorts 1080x1920 ได้ 1080p ไม่ถูกตัดลงเหลือ 480x854 (format แนวตั้งตัวใหญ่สุดที่สูงไม่เกิน 1080)
         short_side = "width" if _is_portrait(videos) else "height"
         video = f"bv*[vcodec^=avc1][{short_side}<={height_cap}]"
         pool = [

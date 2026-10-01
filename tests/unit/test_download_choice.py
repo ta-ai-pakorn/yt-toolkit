@@ -299,6 +299,7 @@ def test_yt_dlp_selects_the_short_side_cap(info: dict, picked: str) -> None:
     spec = video_choice(info, {**AUTO, "noAudio": True}).format_spec
     formats = [f for f in info["formats"] if f["vcodec"] != "none"]
     with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
+        # _select_formats เป็น API ภายในของ yt-dlp (ไม่มีทางสาธารณะให้รันตัวเลือก format โดยไม่ต่อเน็ต) อัปเดต yt-dlp แล้วพัง = แก้ที่นี่
         selected = ydl._select_formats(formats, ydl.build_format_selector(spec))
     assert [f["format_id"] for f in selected] == [picked]
 
