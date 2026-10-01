@@ -63,12 +63,12 @@ Amended in the integration round: the start button lives in the header action ro
 - **Frames tab:**
   - The frame nearest to `currentMs` (the existing `nearestFrameIndex`) gets a "now playing" outline. It must look different from the focus ring, from the `?at=` highlight and from the amber most-replayed ring.
   - There is no auto-scroll of the grid.
-  - Each frame gets a small ▶ button in a corner, shown on hover and on focus within. Its name is "เล่นจากตรงนี้ {timecode}". It plays from that frame's time.
+  - Each frame gets a small ▶ button in a corner, shown on hover and on focus within. Its name is "เล่นจากตรงนี้ {timecode}". It plays from that frame's time. (Integration ruling: it is not in the Tab order, `tabindex="-1"`; keyboard users use the context-menu item below via Shift+F10.)
   - Clicking the image itself still opens the lightbox.
   - The context menu gets the item "เล่นจากตรงนี้".
 - **Transcript tab:**
-  - The line whose time range contains `currentMs` is highlighted (a karaoke-style band) and gets `aria-current="true"`.
-  - Auto-follow: the highlighted line is scrolled into view (block "nearest").
+  - The last line whose start is at or before `currentMs` is highlighted (a karaoke-style band) and gets `aria-current="true"`. It stays lit through silent gaps and clears after the final line ends. (Integration ruling.)
+  - Auto-follow: the list scrolls (the list only, never the page) so the highlighted line sits in the vertical centre of the list, clamped at the start and end. (Owner ruling in the final review; it was block "nearest".)
   - If the user scrolls the list themselves (wheel, touch or keyboard), auto-follow pauses and a button "กลับไปบรรทัดที่กำลังเล่น" appears. Pressing it resumes auto-follow.
   - Clicking a line's time plays from that line.
 - **Info tab:** the chapter and most-replayed time buttons now play the player from that time, instead of jumping to the frames tab. The stale-jump guard is no longer needed for these buttons.
@@ -80,7 +80,9 @@ Amended in the integration round: the start button lives in the header action ro
   - 101 / 150 (embedding disabled): in the slot, show "เจ้าของคลิปไม่อนุญาตให้เล่นนอกยูทูป" plus the "เปิดในยูทูป" link (with `&t=` at the requested time).
   - 2 / 5 / 100 / 153 / other: show "เล่นคลิปนี้ในแอพไม่ได้" plus the "เปิดในยูทูป" link.
 - If the API script fails to load (offline): show "ต้องต่ออินเทอร์เน็ตก่อนถึงจะเล่นคลิปได้" plus a "ลองอีกครั้ง" button.
-- After an error, "play from here" actions elsewhere do nothing except focus the error message in the slot.
+- After an embed_blocked or unplayable error, "play from here" actions elsewhere do nothing except focus the error message in the slot.
+- Offline is different: any play request (the slot's "ลองอีกครั้ง" or a "play from here" elsewhere) retries loading the script, then plays from the requested time if it loads. If iframe_api loaded but www-widgetapi.js did not, the app clears the stale `window.YT` first so the retry really reloads.
+- When an error message first appears, it takes focus only if focus is on body or inside the player slot or dock. It never steals focus from another control.
 
 ## 6. Accessibility and copy
 

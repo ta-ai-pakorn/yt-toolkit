@@ -136,8 +136,9 @@ test.describe("M3 ทรานสคริปต์: ค้นหา (FR-SUB-8)"
     await mockThai(page)
     await page.goto(`/v/${THAI}?tab=transcript`)
     await expect(page.getByText("จากแทร็ก ไทย (อัตโนมัติ)", { exact: false })).toBeVisible()
+    // ป้ายแทร็กขึ้นก่อนรายการบรรทัดวาดเสร็จได้ (เครื่องช้า): รอให้มีบรรทัดก่อนนับ ไม่นับทันที
+    await expect.poll(() => lineItems(page).count()).toBeGreaterThan(3)
     const total = await lineItems(page).count()
-    expect(total).toBeGreaterThan(3)
 
     await searchBox(page).fill("กรุงเทพ")
     await expect(page.getByText(/^พบ \d+ บรรทัด$/)).toBeVisible()

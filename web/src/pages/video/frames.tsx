@@ -129,11 +129,14 @@ const HIGHLIGHT =
 const REPLAYED_FRAME =
   "pointer-events-none absolute inset-0 rounded-md shadow-[inset_0_0_0_2px_var(--primary),inset_0_0_0_3px_rgb(0_0_0/0.45)]"
 
-// ภาพที่ใกล้ตำแหน่งที่กำลังเล่นที่สุด (M3.5): กรอบสองชั้นสีขาวดำ (สีพื้น 2px ด้านใน + สีตัวอักษร 2px ด้านนอก) ห่างขอบภาพเข้ามา 3-7px
-// เห็นได้ทั้งบนภาพสว่างและมืด ไม่ใช่สีอำพัน · ต่างจากวงโฟกัส (นอกภาพ) กรอบ ?at= (นอกภาพ เว้นช่อง) และกรอบดูซ้ำบ่อย (ขอบภาพ 0-3px)
+// ภาพที่ใกล้ตำแหน่งที่กำลังเล่นที่สุด (M3.5): กรอบสีฟ้า --info (โทเคนของธีม) 2px มีขอบสีพื้น 2px ด้านในคั่นจากภาพ ห่างขอบภาพเข้ามา 3-7px
+// สีฟ้าต่างจากทุกอย่างที่เป็นอำพัน: ป้าย/กรอบ "ดูซ้ำบ่อย" (--primary, ขอบภาพ 0-3px) วงโฟกัส (--ring นอกภาพ) และกรอบ ?at= (--accent-text นอกภาพ เว้นช่อง)
 // จึงเห็นซ้อนกันได้ทั้งสี่แบบ · มีป้ายคำว่า "กำลังเล่น" มุมขวาล่าง ไม่พึ่งกรอบอย่างเดียว
 const NOW_PLAYING_FRAME =
-  "pointer-events-none absolute inset-[5px] rounded-[4px] border-2 border-background ring-2 ring-foreground"
+  "pointer-events-none absolute inset-[5px] rounded-[4px] border-2 border-background ring-2 ring-info"
+// ป้าย "▶ กำลังเล่น": พื้น --info ตัวอักษรสีพื้นของธีม (สว่าง: ขาวนวลบนฟ้าเข้ม 5.2:1 · มืด: ดำบนฟ้าอ่อน 7.8:1) ขอบสีพื้นบาง ๆ แยกจากภาพ
+const NOW_PLAYING_LABEL =
+  "pointer-events-none absolute right-1 bottom-1 flex items-center gap-0.5 rounded-sm bg-info px-1 text-[11px] font-medium text-background shadow-sm ring-1 ring-background"
 
 // ปุ่ม ▶ มุมซ้ายบนของภาพ: เห็นเมื่อชี้เมาส์ที่ภาพหรือโฟกัสอยู่ในภาพ (ไม่อยู่ในลำดับ Tab) · จอสัมผัส (ไม่มีการชี้) เห็นตลอดและใหญ่ขึ้นให้นิ้วกดได้
 const PLAY_CORNER =
@@ -224,7 +227,7 @@ function FrameTile({ frame, frames, frameIndex, videoId, highlighted, replayed, 
             {replayed && <ReplayedMark variant="badge" className="pointer-events-none absolute top-1 right-1" />}
             {nowPlaying && <span aria-hidden className={NOW_PLAYING_FRAME} />}
             {nowPlaying && (
-              <span className="pointer-events-none absolute right-1 bottom-1 flex items-center gap-0.5 rounded-sm bg-foreground px-1 text-[11px] text-background">
+              <span data-slot="now-playing-label" className={NOW_PLAYING_LABEL}>
                 <Play aria-hidden className="size-2.5 fill-current" />
                 {t.nowPlaying}
               </span>

@@ -87,4 +87,43 @@ describe("loadYouTubeApi", () => {
     vi.advanceTimersByTime(API_TIMEOUT_MS)
     await expect(promise).rejects.toThrow("timeout")
   })
+
+  it("โหลด iframe_api ได้แต่ www-widgetapi.js ไม่มา (YT = { loading: 1 } ค้าง) → ล้าง YT และสคริปต์ widgetapi · ลองใหม่โหลดได้จริง", async () => {
+    const e = env()
+    const widget = { removed: false, remove: () => (widget.removed = true) }
+    const other = { removed: false, remove: () => (other.removed = true) }
+    const selectors: string[] = []
+    const doc = {
+      ...e.doc,
+      querySelectorAll: (selector: string) => {
+        selectors.push(selector)
+        return selector.includes("www-widgetapi") ? [widget] : [other]
+      },
+    }
+    const first = loadYouTubeApi(e.win, doc)
+    // iframe_api ทำงานแล้ว: ตั้ง YT.loading แล้วใส่สคริปต์ widgetapi ซึ่งโหลดไม่สำเร็จ ไม่มีใครเรียก onYouTubeIframeAPIReady
+    ;(e.win as { YT?: unknown }).YT = { loading: 1, loaded: 0 }
+    vi.advanceTimersByTime(API_TIMEOUT_MS)
+    await expect(first).rejects.toThrow("timeout")
+    expect(e.win.YT).toBeUndefined()
+    expect(widget.removed).toBe(true)
+    expect(other.removed).toBe(false)
+    expect(selectors.every((selector) => selector.includes("www-widgetapi"))).toBe(true)
+
+    // ลองอีกครั้ง: ใส่ iframe_api ใหม่ (ซึ่งจะเห็นว่าไม่มี YT แล้วโหลด widgetapi ใหม่) และเล่นได้
+    const second = loadYouTubeApi(e.win, doc)
+    expect(e.scripts).toHaveLength(2)
+    e.ready()
+    await expect(second).resolves.toBe(e.win.YT)
+  })
+
+  it("YT ที่โหลดครบแล้ว (loaded = 1) ไม่ถูกล้างแม้ผิดพลาด", async () => {
+    const e = env()
+    const promise = loadYouTubeApi(e.win, e.doc)
+    const loaded = { loaded: 1 }
+    ;(e.win as { YT?: unknown }).YT = loaded
+    vi.advanceTimersByTime(API_TIMEOUT_MS)
+    await expect(promise).rejects.toThrow("timeout")
+    expect(e.win.YT).toBe(loaded)
+  })
 })

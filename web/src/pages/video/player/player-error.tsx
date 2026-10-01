@@ -9,6 +9,13 @@ import { playerActions, usePlayerValue, type PlayerError } from "./player-store"
 
 const t = th.player
 
+/** โฟกัสหลุด (body) หรืออยู่ในช่องตัวเล่น/ตัวเล่นลอย */
+function focusIsOnPlayer(): boolean {
+  const active = document.activeElement
+  if (active === null || active === document.body) return true
+  return active.closest('[data-slot="player-slot"], [data-slot="player-frame"]') !== null
+}
+
 const MESSAGE: Record<PlayerError, string> = {
   embed_blocked: t.embedBlocked,
   unplayable: t.unplayable,
@@ -25,10 +32,15 @@ export function PlayerErrorView({ videoId, error }: { videoId: string; error: Pl
   const atMs = usePlayerValue((s) => s.errorAtMs)
   const nudge = usePlayerValue((s) => s.errorNudge)
   const ref = useRef<HTMLDivElement>(null)
+  // ค่า nudge ตอนข้อความนี้ขึ้นมา: เท่าเดิม = ขึ้นครั้งแรก · เปลี่ยน = มีคนกด "เล่นจากตรงนี้" ที่อื่นระหว่างผิดพลาด
+  const mountNudge = useRef(nudge)
 
   useEffect(() => {
     const box = ref.current
     if (!box) return
+    // ขึ้นครั้งแรก: แย่งโฟกัสเฉพาะตอนโฟกัสหลุด (body) หรืออยู่ที่ตัวเล่นเอง (ช่องในหัวคลิป / ตัวเล่นลอย)
+    // ผู้ใช้กำลังทำอย่างอื่นอยู่ (เช่นพิมพ์ค้นทรานสคริปต์) = ไม่ดึงโฟกัสและไม่เลื่อนหน้า (role="alert" ประกาศให้แล้ว)
+    if (nudge === mountNudge.current && !focusIsOnPlayer()) return
     box.focus({ preventScroll: true })
     box.scrollIntoView({ block: "nearest" })
   }, [nudge])

@@ -11,7 +11,7 @@ import { centerInScrollArea, cueIndexAt, revealAndFocus } from "../frame-target"
 import { hasPlayhead, nowPlayingLine } from "../playback-sync"
 import { getPlayerState, playerActions, usePlayerValue } from "../player/player-store"
 import { ReplayedMark } from "../replayed-mark"
-import { isUserScroll, scrollIntoViewWithinList, type FollowInput } from "./follow"
+import { centerWithinList, isUserScroll, type FollowInput } from "./follow"
 import { lineRanges, type PreparedLine } from "./search"
 
 const t = th.transcript
@@ -131,7 +131,7 @@ type Props = {
  * รายการบรรทัดทรานสคริปต์: แต่ละบรรทัดมีปุ่มเวลา (เล่นคลิปจากบรรทัดนั้น) + ปุ่มข้อความ (ไปภาพเฟรมของช่วงนั้น)
  * ต้องเรนเดอร์ไว้ตลอด (ผลค้นหาว่างก็คืน null) เพราะจำไว้ว่าเลื่อนไปหาบรรทัดของ at แล้วหรือยัง
  *
- * ระหว่างเล่น (M3.5): บรรทัดที่กำลังเล่นมีแถบพื้นและได้ aria-current · กรอบรายการเลื่อนตามให้เห็นบรรทัดนั้น (nearest)
+ * ระหว่างเล่น (M3.5): บรรทัดที่กำลังเล่นมีแถบพื้นและได้ aria-current · กรอบรายการเลื่อนตามให้บรรทัดนั้นอยู่กลางกรอบ
  * ผู้ใช้เลื่อนรายการเอง = หยุดเลื่อนตาม และขึ้นปุ่ม "กลับไปบรรทัดที่กำลังเล่น" · กดเวลาของบรรทัดไหนก็กลับมาเลื่อนตาม
  */
 export function LineList({ cues, lines, visible, needle, current, replayed, revealKey, onPick }: Props) {
@@ -194,12 +194,12 @@ export function LineList({ cues, lines, visible, needle, current, replayed, reve
     }
   }, [revealKey, current, shown])
 
-  // เลื่อนกรอบรายการตามบรรทัดที่กำลังเล่น (เลื่อนเฉพาะในกรอบ ไม่ดึงหน้า) · รอหนึ่งเฟรมให้บรรทัดวาดเสร็จก่อน
+  // เลื่อนกรอบรายการตามบรรทัดที่กำลังเล่น ให้อยู่กลางกรอบ (เลื่อนเฉพาะในกรอบ ไม่ดึงหน้า) · รอหนึ่งเฟรมให้บรรทัดวาดเสร็จก่อน
   useEffect(() => {
     if (!following || !playingShown) return
     const frame = requestAnimationFrame(() => {
       const button = buttons.current.get(playing)
-      if (button) scrollIntoViewWithinList(button)
+      if (button) centerWithinList(button)
     })
     return () => cancelAnimationFrame(frame)
   }, [following, playing, playingShown])
@@ -216,7 +216,7 @@ export function LineList({ cues, lines, visible, needle, current, replayed, reve
     const button = buttons.current.get(target)
     if (button) {
       button.focus({ preventScroll: true })
-      scrollIntoViewWithinList(button)
+      centerWithinList(button)
     }
   }
 

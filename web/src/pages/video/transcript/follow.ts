@@ -40,28 +40,34 @@ export function isUserScroll(input: FollowInput): boolean {
 }
 
 /**
- * scrollTop ใหม่ของกรอบเลื่อน ให้บรรทัด (box) อยู่ในกรอบ (frame) แบบ block "nearest":
- * อยู่ในกรอบแล้ว = ไม่เลื่อน · ล้นบน = ชิดขอบบน · ล้นล่าง = ชิดขอบล่าง (สูงกว่ากรอบ = ชิดขอบบน)
- * ใช้แทน element.scrollIntoView เพราะตัวนั้นเลื่อนทั้งหน้าด้วย ถ้ารายการอยู่นอกจอ (ผู้ใช้ดูตัวเล่นอยู่) หน้าจะถูกดึงไปเอง
+ * scrollTop ใหม่ของกรอบเลื่อน ให้กึ่งกลางบรรทัด (box) อยู่กึ่งกลางกรอบ (frame) · ตำแหน่งเป็นพิกัดจอ (getBoundingClientRect)
+ * ต้นรายการ/ท้ายรายการเลื่อนได้แค่ถึงขอบ (0 ถึง maxScrollTop) บรรทัดแรก ๆ จึงอยู่บน บรรทัดท้าย ๆ อยู่ล่าง ตามธรรมชาติ
+ * (owner: บรรทัดที่กำลังเล่นต้องไม่ไปกองที่ขอบล่างของรายการ อ่านบรรทัดถัดไปล่วงหน้าได้)
  */
-export function nearestScrollTop(
+export function centeredScrollTop(
   scrollTop: number,
   frame: { top: number; bottom: number },
   box: { top: number; bottom: number },
+  maxScrollTop: number,
 ): number {
-  if (box.top < frame.top) return scrollTop - (frame.top - box.top)
-  if (box.bottom > frame.bottom) {
-    const down = box.bottom - frame.bottom
-    const roomAbove = box.top - frame.top
-    return scrollTop + Math.min(down, roomAbove)
-  }
-  return scrollTop
+  const offset = (box.top + box.bottom) / 2 - (frame.top + frame.bottom) / 2
+  return Math.round(Math.min(Math.max(0, scrollTop + offset), Math.max(0, maxScrollTop)))
 }
 
-/** เลื่อนกรอบรายการ (ScrollArea) ให้เห็น element แบบ nearest โดยไม่เลื่อนหน้า · ไม่อยู่ในกรอบเลื่อน = ไม่ทำอะไร */
-export function scrollIntoViewWithinList(element: HTMLElement): void {
+/**
+ * เลื่อนกรอบรายการ (ScrollArea) ให้บรรทัดอยู่กลางกรอบ โดยไม่เลื่อนหน้า · ไม่อยู่ในกรอบเลื่อน = ไม่ทำอะไร
+ * คำนวณ scrollTop เองแทน element.scrollIntoView เพราะตัวนั้นเลื่อนทั้งหน้าด้วย ถ้ารายการอยู่นอกจอ (ผู้ใช้ดูตัวเล่นอยู่) หน้าจะถูกดึงไปเอง
+ */
+export function centerWithinList(element: HTMLElement): void {
   const viewport = element.closest<HTMLElement>('[data-slot="scroll-area-viewport"]')
   if (!viewport) return
-  const next = nearestScrollTop(viewport.scrollTop, viewport.getBoundingClientRect(), element.getBoundingClientRect())
+  // ทั้งแถว (ปุ่มเวลา + ข้อความ) ไม่ใช่แค่ปุ่มข้อความ
+  const line = element.closest("li") ?? element
+  const next = centeredScrollTop(
+    viewport.scrollTop,
+    viewport.getBoundingClientRect(),
+    line.getBoundingClientRect(),
+    viewport.scrollHeight - viewport.clientHeight,
+  )
   if (next !== viewport.scrollTop) viewport.scrollTop = next
 }

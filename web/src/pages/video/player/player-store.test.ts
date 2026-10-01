@@ -143,12 +143,13 @@ describe("ผิดพลาด", () => {
 })
 
 describe("ปิด / เปลี่ยนคลิป", () => {
-  it("close = stop adapter กลับเป็น idle started=false", () => {
+  it("close = stop adapter กลับเป็น idle started=false ตำแหน่งกลับเป็น 0", () => {
     playerActions.playFrom()
     const { calls } = readyAdapter()
+    playerAdapterHooks.onTime(42_000)
     playerActions.close()
     expect(calls.at(-1)).toEqual(["stop"])
-    expect(getPlayerState()).toMatchObject({ status: "idle", started: false })
+    expect(getPlayerState()).toMatchObject({ status: "idle", started: false, currentMs: 0 })
     // ไม่มี adapter แล้ว: ขอเล่นใหม่ = โหลดใหม่
     playerActions.playFrom(1000)
     expect(getPlayerState().status).toBe("loading")

@@ -136,7 +136,12 @@ test.describe("ช่องตัวเล่นที่หัวคลิป",
     // เว้นที่ท้ายหน้า เนื้อหาล่างสุดไม่ถูกบัง
     const padding = await page.evaluate(() => parseFloat(getComputedStyle(document.body).paddingBottom))
     expect(padding).toBeGreaterThanOrEqual(box?.height ?? 0)
-    await expect(page.getByRole("button", { name: "กำลังเล่นที่มุมจอ" })).toBeAttached()
+    // ชื่อปุ่มขึ้นต้นด้วยคำกริยา (สิ่งที่กดแล้วเกิด) ข้อความที่เห็นเป็นคำอธิบาย
+    const placeholderButton = page.locator('[data-slot="player-docked-placeholder"]')
+    await expect(placeholderButton).toHaveAccessibleName("กลับไปที่หัวคลิป")
+    await expect(placeholderButton).toBeAttached()
+    await expect(placeholderButton).toHaveAccessibleDescription("กำลังเล่นที่มุมจอ")
+    await expect(placeholderButton).toContainText("กำลังเล่นที่มุมจอ")
     // ไม่มีแถบไทม์ไลน์ตอนลอย
     await expect(timeline(page)).toHaveCount(0)
 
@@ -151,7 +156,7 @@ test.describe("ช่องตัวเล่นที่หัวคลิป",
     const slotBox = (await slot(page).boundingBox())!
     await page.evaluate((y) => window.scrollTo(0, y), slotBox.y + slotBox.height * 0.75)
     await expect(dock(page)).toBeVisible()
-    const placeholder = page.getByRole("button", { name: "กำลังเล่นที่มุมจอ" })
+    const placeholder = page.locator('[data-slot="player-docked-placeholder"]')
     await expect(placeholder).toBeInViewport()
     await placeholder.click({ position: { x: slotBox.width / 2, y: slotBox.height * 0.9 } })
     await expect(dock(page)).toHaveCount(0)
@@ -565,6 +570,215 @@ test.describe("จอแคบ: ลำดับ DOM ตรงกับที่�
     expect(Math.abs(bar.x - box.x)).toBeLessThan(2)
     expect(bar.y).toBeGreaterThan(box.y + box.height - 1)
     expect(bar.y - (box.y + box.height)).toBeLessThan(24)
+  })
+})
+
+test.describe("แถบไทม์ไลน์: แตะกับปัดบนจอสัมผัส", () => {
+  test.use({ hasTouch: true })
+
+  test("จอ 360 px: ปัดขึ้นลงที่เริ่มบนแถบ = เลื่อนหน้า ไม่กระโดด · แตะ = กระโดด", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 })
+    await installFakeYT(page, { durationS: 372 })
+    await open(page, { mostReplayed: REPLAYED, chapters: CHAPTERS })
+    await play(page)
+    const bar = timeline(page)
+    await expect(bar).toBeVisible()
+    await expect(bar).toHaveCSS("touch-action", "pan-y")
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight))
+      .toBeGreaterThan(600)
+    const before = (await fakeYTLog(page)).seeks.length
+    const box = (await bar.boundingBox())!
+    // ปัดนิ้วขึ้น (เลื่อนหน้าลง) โดยเริ่มที่กลางแถบ ผ่าน input pipeline จริงของเบราว์เซอร์ (touch-action มีผล)
+    const cdp = await page.context().newCDPSession(page)
+    const x = Math.round(box.x + box.width / 2)
+    const y = Math.round(box.y + box.height / 2)
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] })
+    for (let step = 1; step <= 10; step++) {
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y - step * 30 }] })
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(100)
+    expect((await fakeYTLog(page)).seeks.length).toBe(before)
+
+    // กลับขึ้นบน แล้วแตะกลางแถบ = กระโดดไปกลางคลิป (186 วินาที)
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await expect(bar).toBeVisible()
+    const again = (await bar.boundingBox())!
+    await page.touchscreen.tap(again.x + again.width / 2, again.y + again.height / 2)
+    await expect.poll(async () => (await fakeYTLog(page)).seeks.length).toBeGreaterThan(before)
+    const seek = (await fakeYTLog(page)).seeks.at(-1) ?? 0
+    expect(Math.abs(seek - 186)).toBeLessThanOrEqual(3)
+  })
+})
+
+test.describe("แถบไทม์ไลน์กับโปรแกรมอ่านหน้าจอ", () => {
+  test("โฟกัสอยู่ที่แถบ: aria-valuetext หยุดนิ่งระหว่างเล่น (หัวอ่านที่ตาเห็นยังเดิน) · อัปเดตเมื่อหยุดคลิป และเมื่อโฟกัสใหม่", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installFakeYT(page, { rate: 20, durationS: 372 })
+    await open(page)
+    await play(page)
+    const bar = timeline(page)
+    await expect(bar).toBeVisible()
+    await bar.focus()
+    const first = (await bar.getAttribute("aria-valuetext")) ?? ""
+    const playhead = bar.locator('[data-slot="timeline-playhead"]')
+    const left = await playhead.evaluate((el) => (el as HTMLElement).style.left)
+    await page.waitForTimeout(800)
+    expect(await bar.getAttribute("aria-valuetext")).toBe(first)
+    expect(await playhead.evaluate((el) => (el as HTMLElement).style.left)).not.toBe(left)
+
+    // หยุดคลิป (ปุ่มของยูทูป) = อัปเดตเป็นเวลาที่หยุด
+    await page.evaluate(() => {
+      ;(window as unknown as { __fakeYT: { players: { pauseVideo(): void }[] } }).__fakeYT.players[0].pauseVideo()
+    })
+    await expect(bar).not.toHaveAttribute("aria-valuetext", first)
+    const paused = (await bar.getAttribute("aria-valuetext")) ?? ""
+
+    // เล่นต่อ: นิ่งที่ค่าเดิมจนกว่าจะโฟกัสใหม่
+    await page.evaluate(() => {
+      ;(window as unknown as { __fakeYT: { players: { playVideo(): void }[] } }).__fakeYT.players[0].playVideo()
+    })
+    await page.waitForTimeout(600)
+    expect(await bar.getAttribute("aria-valuetext")).toBe(paused)
+    await heading(page).focus()
+    await bar.focus()
+    await expect(bar).not.toHaveAttribute("aria-valuetext", paused)
+  })
+})
+
+test.describe("โฟกัสไม่หลุดเมื่อปุ่มของตัวเล่นหายไปเอง", () => {
+  test("โฟกัสที่แถบไทม์ไลน์แล้วเลื่อนจอจนตัวเล่นลอย → 'กลับไปที่หัวคลิป' บนตัวเล่นลอย · เลื่อนกลับ → แถบไทม์ไลน์", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installFakeYT(page)
+    await open(page)
+    await play(page)
+    await timeline(page).focus()
+    await scrollAway(page)
+    await expect(dock(page)).toBeVisible()
+    await expect(dock(page).getByRole("button", { name: "กลับไปที่หัวคลิป" })).toBeFocused()
+    const scrolled = await page.evaluate(() => window.scrollY)
+    expect(scrolled).toBeGreaterThan(600)
+
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await expect(dock(page)).toHaveCount(0)
+    await expect(timeline(page)).toBeFocused()
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  })
+
+  test("โฟกัสที่ปุ่มหยุดช่วงไฮไลต์บนตัวเล่นลอยแล้วเลื่อนกลับขึ้น → แถบไทม์ไลน์", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installFakeYT(page, { rate: 1 })
+    await open(page, { mostReplayed: REPLAYED })
+    await reelButton(page).click()
+    await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 2/)
+    await scrollAway(page)
+    await expect(dock(page)).toBeVisible()
+    await dock(page).getByRole("button", { name: REEL_STOP }).focus()
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await expect(dock(page)).toHaveCount(0)
+    await expect(timeline(page)).toBeFocused()
+  })
+})
+
+test.describe("ข้อความผิดพลาดกับโฟกัส", () => {
+  test("ผิดพลาดครั้งแรกตอนผู้ใช้กด ▶ ของภาพเฟรม: ไม่แย่งโฟกัสจากภาพเฟรม · กดเล่นจากภาพอีกครั้ง = โฟกัสข้อความผิดพลาด", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installFakeYT(page, { errorCode: 150 })
+    await open(page)
+    const tile = frameList(page).getByRole("listitem").nth(2)
+    await tile.hover()
+    const corner = tile.getByRole("button", { name: /^เล่นจากตรงนี้ / })
+    await corner.click()
+    const alert = slot(page).getByRole("alert")
+    await expect(alert).toBeVisible()
+    await page.waitForTimeout(200)
+    await expect(corner).toBeFocused()
+
+    await corner.click()
+    await expect(alert).toBeFocused()
+  })
+})
+
+test.describe("ตัวเล่นยูทูปแบบที่เจอจริง (fake-yt)", () => {
+  test("เวลาเก่าค้างหลัง seek นาน 1.5 วินาที (เน็ตช้า): หัวอ่านไม่เด้งกลับตำแหน่งเก่า แล้วเดินต่อจากจุดใหม่", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installFakeYT(page, { rate: 1, durationS: 372, staleAfterSeekMs: 1500 })
+    await open(page)
+    await play(page)
+    const bar = timeline(page)
+    await expect(bar).toBeVisible()
+    const box = (await bar.boundingBox())!
+    // จด left ของหัวอ่านทุก 50 ms ช่วง 2.5 วินาที ระหว่างนั้นคลิกกลางแถบ (186 วินาที = 50%)
+    const samples = page.evaluate(
+      () =>
+        new Promise<number[]>((resolve) => {
+          const out: number[] = []
+          const read = () => {
+            const el = document.querySelector<HTMLElement>('[data-slot="timeline-playhead"]')
+            if (el) out.push(parseFloat(el.style.left))
+          }
+          const id = setInterval(read, 50)
+          setTimeout(() => {
+            clearInterval(id)
+            resolve(out)
+          }, 2500)
+        }),
+    )
+    await page.waitForTimeout(100)
+    await bar.click({ position: { x: box.width / 2, y: box.height / 2 } })
+    const values = await samples
+    const jumped = values.findIndex((value) => value >= 49)
+    expect(jumped).toBeGreaterThanOrEqual(0)
+    expect(Math.min(...values.slice(jumped))).toBeGreaterThanOrEqual(49)
+    // พ้นช่วงค้างแล้วเดินต่อจากจุดใหม่ (ไม่ติดค้างที่จุดที่ seek)
+    await expect
+      .poll(() => bar.locator('[data-slot="timeline-playhead"]').evaluate((el) => parseFloat((el as HTMLElement).style.left)))
+      .toBeGreaterThan(50.2)
+  })
+
+  test("เบราว์เซอร์ไม่ให้เล่นเอง: พร้อมแล้วหยุดอยู่ที่เวลาที่ขอ ไม่มี error ไม่ค้างกำลังโหลด · กดเล่นในตัวเล่นยูทูปแล้วเดินต่อ", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installFakeYT(page, { rate: 1, durationS: 372, autoplayBlocked: true })
+    await open(page)
+    const tile = frameList(page).getByRole("listitem").nth(2)
+    await tile.hover()
+    await tile.getByRole("button", { name: "เล่นจากตรงนี้ 00:00:09", exact: true }).click()
+    await expect.poll(async () => (await fakeYTLog(page)).calls).toContain("play-blocked")
+    await expect(iframe(page)).toHaveCount(1)
+    await expect(slot(page).getByRole("alert")).toHaveCount(0)
+    await expect(page.getByLabel("กำลังโหลดตัวเล่น")).toHaveCount(0)
+    // หยุดอยู่ที่เวลาที่ขอ: ภาพเฟรมนั้นมีกรอบ "กำลังเล่น" แถบไทม์ไลน์อยู่ที่เวลานั้น และไม่เดิน
+    await expect(frameList(page).locator("[data-now-playing] img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:00:09")
+    await expect(timeline(page)).toHaveAttribute("aria-valuetext", "00:00:09")
+    await page.waitForTimeout(1200)
+    await expect(timeline(page)).toHaveAttribute("aria-valuetext", "00:00:09")
+
+    // ผู้ใช้กดปุ่มเล่นของยูทูปเอง
+    await page.evaluate(() => {
+      ;(window as unknown as { __fakeYT: { players: { playVideo(): void }[] } }).__fakeYT.players[0].playVideo()
+    })
+    await expect(timeline(page)).not.toHaveAttribute("aria-valuetext", "00:00:09", { timeout: 5000 })
+  })
+
+  test("เล่นถึงท้ายคลิประหว่างเล่นช่วงไฮไลต์ (ENDED): ช่วงไฮไลต์จบ กรอบภาพเฟรมและบรรทัดที่กำลังเล่นหายไป ไม่มี error", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    // คลิปยาว 30 วินาที (ตัวเล่นปลอม) ช่วงไฮไลต์ 20-40 วินาที: ถึงท้ายคลิปก่อนท้ายช่วง
+    await installFakeYT(page, { rate: 5, durationS: 30 })
+    await open(page, { mostReplayed: [{ startMs: 20_000, endMs: 40_000 }] })
+    await reelButton(page).click()
+    await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 1/)
+    await expect(frameList(page).locator("[data-now-playing]")).toHaveCount(1)
+    await expect.poll(async () => (await fakeYTLog(page)).states, { timeout: 10_000 }).toContain(0)
+    await expect(reelStatus(page)).toHaveCount(0)
+    await expect(frameList(page).locator("[data-now-playing]")).toHaveCount(0)
+    await expect(slot(page).getByRole("alert")).toHaveCount(0)
+    await expect(iframe(page)).toHaveCount(1)
+    await page.getByRole("tab", { name: "ทรานสคริปต์", exact: true }).click()
+    const lines = page.getByRole("list", { name: "บรรทัดในทรานสคริปต์" })
+    await expect(lines.getByRole("listitem").first()).toBeVisible()
+    await expect(lines.locator("[data-playing]")).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "กลับไปบรรทัดที่กำลังเล่น" })).toHaveCount(0)
   })
 })
 

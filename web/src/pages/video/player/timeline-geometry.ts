@@ -36,6 +36,14 @@ export function rangeBox(
   return { left: `${start.toFixed(3)}%`, width: `${Math.min(width, 100 - start).toFixed(3)}%` }
 }
 
+/** ขยับเกินนี้ (px) ระหว่างกดกับปล่อย = ลาก/ปัดจอ ไม่ใช่การแตะเพื่อกระโดด */
+export const TAP_SLOP_PX = 6
+
+/** กดแล้วปล่อยแทบที่เดิม = แตะ/คลิก (กระโดดไปเวลานั้น) · ปัดขึ้นลงเพื่อเลื่อนหน้า = ไม่ใช่ */
+export function isTap(start: { x: number; y: number }, end: { x: number; y: number }, slop = TAP_SLOP_PX): boolean {
+  return Math.hypot(end.x - start.x, end.y - start.y) < slop
+}
+
 /** ปุ่มคีย์บอร์ดของแถบ (slider) → เวลาใหม่ · ปุ่มอื่น = null */
 export function keyTarget(key: string, currentMs: number, durationMs: number): number | null {
   switch (key) {
