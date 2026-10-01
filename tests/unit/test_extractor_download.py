@@ -537,11 +537,62 @@ def test_real_other_download_errors_are_not_retried(
 
 def test_real_cancel_from_the_progress_hook_is_job_cancelled(dl: type[DownloadYDL], workdir: Path) -> None:
     dl.hook_events = [_d("downloading", "avc1", 10, total_bytes=100)]
-    rec = Recorder(cancel_at=1)
+    rec = Recorder(cancel_at=3)  # ครั้งที่ 1-2 = ก่อนดึงข้อมูล / หลัง choose ครั้งที่ 3 = ใน progress hook
     with pytest.raises(JobCancelled):
         YtDlpExtractor().download(BBB, _video(), workdir, rec.hooks)
-    assert len(dl.extracted) == 1
+    assert len(dl.extracted) == 1 and len(dl.processed) == 1
     assert _media_files(workdir) == []
+
+
+def test_real_cancel_before_extracting_skips_yt_dlp(dl: type[DownloadYDL], workdir: Path) -> None:
+    choose = CountingChoose()
+    with pytest.raises(JobCancelled):
+        YtDlpExtractor().download(BBB, choose, workdir, Recorder(cancel_at=1).hooks)
+    assert dl.instances == [] and choose.infos == []
+
+
+def test_real_cancel_after_choose_does_not_start_the_download(dl: type[DownloadYDL], workdir: Path) -> None:
+    choose = CountingChoose()
+    with pytest.raises(JobCancelled):
+        YtDlpExtractor().download(BBB, choose, workdir, Recorder(cancel_at=2).hooks)
+    assert len(dl.extracted) == 1 and len(choose.infos) == 1
+    assert len(dl.instances) == 1 and dl.processed == []
+
+
+def test_real_cancel_during_a_refused_retry_does_not_re_extract(dl: type[DownloadYDL], workdir: Path) -> None:
+    dl.process_errors = [DownloadError(REFUSED)]
+    rec = Recorder(cancel_at=3)  # 1 = ก่อนดึงข้อมูล 2 = หลัง choose 3 = ต้นรอบลองซ้ำของ Q2
+    with pytest.raises(JobCancelled):
+        YtDlpExtractor().download(BBB, _video(), workdir, rec.hooks)
+    assert len(dl.extracted) == 1 and len(dl.processed) == 1
+    assert _media_files(workdir) == []
+
+
+def test_download_logger_hides_workdir_and_home(
+    workdir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    logger = extractor_mod._download_opts(_choice(), workdir, Recorder().hooks)["logger"]
+    assert isinstance(logger, extractor_mod._PathHidingLogger)
+    home = Path.home()
+    other = home / "Videos" / "clip.mp4"
+    with caplog.at_level("DEBUG", logger="yttoolkit"):
+        logger.warning(f"Unable to delete file {workdir / 'media.f137.mp4'}")
+        logger.error(f"ERROR: unable to open {str(workdir).upper()}{'/'}media.mp4.part")
+        logger.debug(f"[download] Destination: {workdir.as_posix()}/media.f140.m4a")
+        logger.info(f"wrote {other}")
+    text = caplog.text
+    assert "<workdir>" in text and "media.f137.mp4" in text
+    assert str(workdir).lower() not in text.lower()
+    assert workdir.as_posix().lower() not in text.lower()
+    assert str(home).lower() not in text.lower()
+    assert f"~{other.as_posix()[len(home.as_posix()):]}" in text.replace("\\", "/")
+
+
+def test_download_youtubedl_gets_the_path_hiding_logger(dl: type[DownloadYDL], workdir: Path) -> None:
+    YtDlpExtractor().download(BBB, _video(), workdir, Recorder().hooks)
+    first, second = dl.instances
+    assert type(first.params["logger"]) is extractor_mod._YtDlpLogger
+    assert isinstance(second.params["logger"], extractor_mod._PathHidingLogger)
 
 
 def test_real_download_reports_progress_through_hooks(dl: type[DownloadYDL], workdir: Path) -> None:

@@ -273,6 +273,40 @@ class _YtDlpLogger:
         log.debug("yt-dlp: %s", msg)
 
 
+class _PathHidingLogger(_YtDlpLogger):
+    """logger ของตัวโหลด: ข้อความของ yt-dlp มี path เต็มได้ (เช่น "Unable to delete file C:\\Users\\<ชื่อ>\\...")
+
+    แทน workdir ด้วย <workdir> และโฟลเดอร์ home ของผู้ใช้ด้วย ~ ก่อนลง log (ชื่อผู้ใช้ Windows ห้ามลง log)
+    เทียบแบบไม่สนตัวพิมพ์ และทั้งแบบ \\ กับ / (path อันยาวแทนก่อน)
+    """
+
+    def __init__(self, workdir: Path) -> None:
+        pairs: dict[str, str] = {}
+        for path, label in ((workdir, "<workdir>"), (workdir.resolve(), "<workdir>"), (Path.home(), "~")):
+            text = str(path)
+            if len(text) > 1:
+                for variant in (text, text.replace("\\", "/"), text.replace("/", "\\")):
+                    pairs.setdefault(variant.lower(), label)
+        ordered = sorted(pairs, key=len, reverse=True)
+        self._labels = pairs
+        self._pattern = re.compile("|".join(re.escape(p) for p in ordered), re.IGNORECASE)
+
+    def _hide(self, msg: str) -> str:
+        return self._pattern.sub(lambda m: self._labels[m.group(0).lower()], str(msg))
+
+    def debug(self, msg: str) -> None:
+        super().debug(self._hide(msg))
+
+    def info(self, msg: str) -> None:
+        super().info(self._hide(msg))
+
+    def warning(self, msg: str) -> None:
+        super().warning(self._hide(msg))
+
+    def error(self, msg: str) -> None:
+        super().error(self._hide(msg))
+
+
 # ---------- งานโหลดไฟล์ (C8) ----------
 
 # ไฟล์ที่ตัวโหลดเขียนใน workdir ขึ้นต้นด้วย "media." ทั้งหมด (ไฟล์สุดท้าย ไฟล์ format ย่อย .part .ytdl)
@@ -363,7 +397,7 @@ def _download_opts(choice: DownloadChoice, workdir: Path, hooks: DownloadHooks) 
         "paths": {"home": str(workdir), "temp": str(workdir)},
         "progress_hooks": [_progress_hook(hooks)],
         "postprocessor_hooks": [_pp_hook(hooks)],
-        "logger": _YtDlpLogger(),
+        "logger": _PathHidingLogger(workdir),
     }
     if choice.merge_mp4:
         opts["merge_output_format"] = "mp4"
@@ -425,7 +459,8 @@ class YtDlpExtractor:
         """YoutubeDL หนึ่งตัว with_session = ใช้เซสชันผู้ชม (ผ่าน cookiefile) แล้วบันทึกคืนตอนปิด"""
         import yt_dlp
 
-        params = {**opts, "logger": _YtDlpLogger()}
+        # opts ที่มี logger ของตัวเอง (ตัวโหลดใช้ตัวที่ซ่อน path) ใช้ตัวนั้น ไม่งั้นใช้ตัวปกติ
+        params = {"logger": _YtDlpLogger(), **opts}
         session = self.session if with_session else None
         if session is not None:
             params["cookiefile"] = str(session.path)
@@ -571,8 +606,13 @@ class YtDlpExtractor:
         url = f"https://www.youtube.com/watch?v={video_id}"
         attempt = 1
         while True:
+            # ยกเลิกแล้วไม่ต้องรอดึงข้อมูลใหม่ (รอบแรกหรือรอบลองซ้ำของ Q2) หรือรอเริ่มโหลด
+            if hooks.is_cancelled():
+                raise JobCancelled()
             source, info = self._extract_for_download(url)
             choice = choose(info)
+            if hooks.is_cancelled():
+                raise JobCancelled()
             try:
                 path = self._download_media(source, choice, workdir, hooks)
             except YtError as exc:
