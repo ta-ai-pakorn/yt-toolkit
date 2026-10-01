@@ -50,3 +50,14 @@ export function replayedFrames(frames: readonly StoryboardFrame[], segments: rea
   }
   return marked
 }
+
+/**
+ * ตัวกรอง "ดูซ้ำบ่อย" ของแท็บภาพเฟรม: ตำแหน่ง (ใน frames) ของภาพที่มีป้าย เรียงตามลำดับเดิม
+ * ใช้ชุดเดียวกับป้าย ภาพที่เห็นตอนเปิดตัวกรองจึงเป็นภาพที่มีป้ายทุกภาพ · ความยาวของผล = ตัวเลขบนปุ่ม
+ */
+export function replayedFrameIndexes(
+  frames: readonly StoryboardFrame[],
+  segments: readonly ReplaySegment[] | undefined,
+): number[] {
+  return [...replayedFrames(frames, segments)].sort((a, b) => a - b)
+}

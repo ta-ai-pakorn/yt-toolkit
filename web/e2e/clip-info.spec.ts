@@ -81,6 +81,19 @@ const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: t
 const tile = (page: Page, name: string | RegExp) => page.getByRole("list", { name: "ตัวเลขของคลิป" }).getByRole("img", { name })
 const gotoInfo = (page: Page, videoId: string) => page.goto(`/v/${videoId}?tab=info`)
 
+/** ลำดับที่อ่าน (และลำดับ Tab) ของแท็บข้อมูลคลิปที่มีครบทุกส่วน ทั้งจอกว้างและจอแคบ (owner round 5) */
+const INFO_ORDER = ["คำอธิบาย", /^Chapter \(/, REPLAYED_TITLE, PINNED_TITLE, /^แท็ก \(/].map(String)
+
+/** หัวข้อของส่วนในแท็บข้อมูลคลิปตามลำดับใน DOM (ส่วนที่เป็น pattern แปลงเป็นสตริงของ pattern ให้เทียบกับ INFO_ORDER ได้) */
+async function infoSectionOrder(page: Page): Promise<string[]> {
+  const titles = await page.getByRole("tabpanel").locator("section h2").allTextContents()
+  return titles.map((title) => {
+    if (/^Chapter \(/.test(title)) return String(/^Chapter \(/)
+    if (/^แท็ก \(/.test(title)) return String(/^แท็ก \(/)
+    return title
+  })
+}
+
 const STATS = { views: 123_456, likes: 4567, comments: 89, channelFollowers: 2_000_000 }
 
 test.describe("ช่องตัวเลขที่หัวคลิป", () => {
@@ -716,7 +729,10 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
         async (region) => (await region.boundingBox())?.y ?? -1,
       ),
     )
+    // จอ 360 px คอลัมน์เดียว: คำอธิบาย → Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก ทั้งตำแหน่งบนจอและลำดับใน DOM
     expect([...order].sort((a, b) => a - b)).toEqual(order)
+    expect(new Set(order).size).toBe(order.length)
+    expect(await infoSectionOrder(page)).toEqual(INFO_ORDER)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
   })
 
@@ -797,7 +813,9 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     })
   }
 
-  test("จอกว้าง แท็บข้อมูลคลิป: ซ้าย คำอธิบาย → Chapter → ช่วงดูซ้ำ · ขวา คอมเมนต์ปักหมุด → แท็ก", async ({ page }) => {
+  test("จอกว้าง 1280 px แท็บข้อมูลคลิป: ซ้าย คำอธิบาย → Chapter · ขวา ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก (owner round 5)", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await withVideo(page, ZOO, FULL)
     await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: { text: "ปักหมุด", byUploader: false } } }))
@@ -811,14 +829,17 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     const x = (box: typeof description) => box?.x ?? -1
     const y = (box: typeof description) => box?.y ?? -1
     expect(Math.abs(x(chapters) - x(description))).toBeLessThan(2)
-    expect(Math.abs(x(replayed) - x(description))).toBeLessThan(2)
     expect(y(description)).toBeLessThan(y(chapters))
-    expect(y(chapters)).toBeLessThan(y(replayed))
+    // คอลัมน์ขวา: ช่วงดูซ้ำอยู่บนสุด เหนือคอมเมนต์ปักหมุด แล้วแท็ก
+    expect(Math.abs(x(replayed) - x(pinned))).toBeLessThan(2)
     expect(Math.abs(x(tags) - x(pinned))).toBeLessThan(2)
+    expect(y(replayed)).toBeLessThan(y(pinned))
     expect(y(pinned)).toBeLessThan(y(tags))
-    expect(x(pinned)).toBeGreaterThan(x(description) + (description?.width ?? 0))
+    expect(x(replayed)).toBeGreaterThan(x(description) + (description?.width ?? 0))
     // คอลัมน์ขวาเริ่มบรรทัดเดียวกับคอลัมน์ซ้าย
-    expect(Math.abs(y(pinned) - y(description))).toBeLessThan(2)
+    expect(Math.abs(y(replayed) - y(description))).toBeLessThan(2)
+    // ลำดับใน DOM (= ลำดับ Tab) ตรงกับลำดับที่อ่าน: คอลัมน์ซ้ายก่อน แล้วคอลัมน์ขวา
+    expect(await infoSectionOrder(page)).toEqual(INFO_ORDER)
   })
 
   for (const scheme of ["dark", "light"] as const) {

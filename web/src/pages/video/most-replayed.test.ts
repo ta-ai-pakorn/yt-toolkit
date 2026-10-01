@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { cueInReplayed, inReplayed, replayedFrames, segmentFrameIndex } from "./most-replayed"
+import { cueInReplayed, inReplayed, replayedFrameIndexes, replayedFrames, segmentFrameIndex } from "./most-replayed"
 
 const SEGMENTS = [
   { startMs: 80_000, endMs: 95_000 },
@@ -70,5 +70,36 @@ describe("ภาพเฟรมของช่วงดูซ้ำบ่อย 
       expect(replayedFrames(frames, segments).has(segmentFrameIndex(frames, segment))).toBe(true)
     }
     expect(replayedFrames(frames, undefined).size).toBe(0)
+  })
+})
+
+describe("ตัวกรองดูซ้ำบ่อยของแท็บภาพเฟรม", () => {
+  // ภาพทุก 10 วินาที: 0, 10, 20, ... 100 วินาที
+  const frames = Array.from({ length: 11 }, (_, index) => ({ index, tMs: index * 10_000, url: `f${index}` }))
+
+  it("ได้ตำแหน่งภาพที่อยู่ในช่วง เรียงตามเวลา · นับต้นช่วง ไม่นับปลายช่วง · ช่วงซ้อนกันไม่นับซ้ำ", () => {
+    const segments = [
+      { startMs: 60_000, endMs: 80_000 },
+      { startMs: 20_000, endMs: 40_000 },
+      { startMs: 30_000, endMs: 41_000 },
+    ]
+    const indexes = replayedFrameIndexes(frames, segments)
+    expect(indexes).toEqual([2, 3, 4, 6, 7])
+    // จำนวนบนปุ่ม "ดูซ้ำบ่อย (n ภาพ)"
+    expect(indexes).toHaveLength(5)
+    // เวลาของภาพที่กรองแล้วยังเป็นเวลาเดิมของภาพนั้น
+    expect(indexes.map((index) => frames[index].tMs)).toEqual([20_000, 30_000, 40_000, 60_000, 70_000])
+  })
+
+  it("ช่วงสั้นที่ไม่มีภาพข้างในได้ภาพแทน 1 ภาพ (ภาพเดียวกับที่มีป้าย)", () => {
+    const segments = [{ startMs: 12_000, endMs: 19_000 }]
+    expect(replayedFrameIndexes(frames, segments)).toEqual([2])
+    expect(replayedFrameIndexes(frames, segments)).toEqual([...replayedFrames(frames, segments)])
+  })
+
+  it("ไม่มีข้อมูลช่วง ช่วงว่าง หรือไม่มีภาพ = 0 ภาพ (ไม่มีปุ่มกรอง)", () => {
+    expect(replayedFrameIndexes(frames, undefined)).toEqual([])
+    expect(replayedFrameIndexes(frames, [])).toEqual([])
+    expect(replayedFrameIndexes([], [{ startMs: 0, endMs: 10_000 }])).toEqual([])
   })
 })
