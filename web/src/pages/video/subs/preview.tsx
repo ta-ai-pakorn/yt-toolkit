@@ -5,13 +5,14 @@ import { useEffect, useId, useRef, useState, type RefObject } from "react"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { fill, th } from "@/i18n/th"
-import { ApiError } from "@/lib/api"
 import { cueStats } from "@/lib/srt-builder"
 import type { SubOptions, SubTokens } from "@/lib/types"
 
+import { hasCode } from "../errors"
 import { LoadError } from "../load-error"
 import { useCues } from "../use-cues"
 import { previewTime } from "./track-groups"
+import { TranslationBlocked } from "./translation-blocked"
 
 const t = th.subs
 
@@ -115,12 +116,18 @@ type Props = {
   /** ผลของ tokensQuery สำหรับแทร็กที่ใช้อยู่ */
   query: UseQueryResult<SubTokens>
   options: SubOptions
+  /** ปุ่ม "ใช้ซับภาษาต้นฉบับ" เมื่อยูทูปไม่ให้โหลดซับแปล null = คลิปไม่มีแทร็กเริ่มต้น (ไม่มีปุ่ม) */
+  onUseOriginal: ((button: HTMLButtonElement) => void) | null
 }
 
-/** ตัวอย่างซับครบ 4 สถานะ: กำลังโหลด = Skeleton 5 แถว · แทร็กไม่มีข้อความ = Empty · ผิดพลาด = Alert + ลองใหม่ */
-export function SubsPreview({ query, options }: Props) {
+/**
+ * ตัวอย่างซับครบ 4 สถานะ: กำลังโหลด = Skeleton 5 แถว · แทร็กไม่มีข้อความ = Empty
+ * ยูทูปไม่ให้โหลดซับแปล = คำแนะนำ + ปุ่มใช้ซับภาษาต้นฉบับ · ผิดพลาดอื่น = Alert + ลองใหม่ (ถ้าลองแล้วช่วย)
+ */
+export function SubsPreview({ query, options, onUseOriginal }: Props) {
   if (query.isError) {
-    if (query.error instanceof ApiError && query.error.code === "E_NO_SUBTITLES") return <NoTokens />
+    if (hasCode(query.error, "E_NO_SUBTITLES")) return <NoTokens />
+    if (hasCode(query.error, "E_TRANSLATION_BLOCKED")) return <TranslationBlocked onUseOriginal={onUseOriginal} />
     return <LoadError title={t.loadError} error={query.error} onRetry={() => void query.refetch()} />
   }
   if (!query.isSuccess) return <PreviewSkeleton />

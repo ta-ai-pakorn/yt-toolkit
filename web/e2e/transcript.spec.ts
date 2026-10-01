@@ -319,6 +319,40 @@ test.describe("M3 ทรานสคริปต์: คลิปที่ไม
   })
 })
 
+test.describe("M3 ทรานสคริปต์: แทร็กที่อ่านไม่ได้", () => {
+  test("แทร็กที่อ่านแล้วไม่มีข้อความ (E_NO_SUBTITLES) → 'คลิปนี้ไม่มีซับ' แบบเดียวกับแท็บซับ ไม่มีกล่อง error และปุ่มลองใหม่", async ({
+    page,
+  }) => {
+    await page.route(`**/api/videos/${THAI}/subtitles/*/tokens`, (route) =>
+      route.fulfill({ status: 404, json: { error: { code: "E_NO_SUBTITLES", message: NO_SUBS, detail: null } } }),
+    )
+    await page.goto(`/v/${THAI}?tab=transcript`)
+    await expect(page.getByText(NO_SUBS)).toBeVisible()
+    await expect(page.getByText("โหลดซับไม่สำเร็จ")).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "ลองใหม่" })).toHaveCount(0)
+  })
+
+  test("ซับแปลที่ยูทูปไม่ให้โหลด → ข้อความตรง ๆ + 'ใช้ซับภาษาต้นฉบับ' → ทรานสคริปต์ภาษาไทยในแท็บเดิม", async ({ page }) => {
+    const blocked = "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน"
+    await page.route(`**/api/videos/${THAI}/subtitles/t.en/tokens`, (route) =>
+      route.fulfill({ status: 503, json: { error: { code: "E_TRANSLATION_BLOCKED", message: blocked, detail: null } } }),
+    )
+    await page.goto(`/v/${THAI}?tab=transcript&track=t.en`)
+    await expect(page.getByText(blocked)).toBeVisible()
+    await expect(page.getByRole("button", { name: "ลองใหม่" })).toHaveCount(0)
+    await page.getByRole("button", { name: "ใช้ซับภาษาต้นฉบับ" }).click()
+    await expect(page).toHaveURL(/[?&]track=a\.th-orig(&|$)/)
+    await expect(tab(page, "ทรานสคริปต์")).toHaveAttribute("aria-selected", "true")
+    await expect(lineItems(page).first()).toContainText("สวัสดี")
+    await expect(page.getByText(blocked)).toHaveCount(0)
+    // ปุ่มหายไปแล้ว: โฟกัสอยู่ที่แผงของแท็บทรานสคริปต์ (ไม่หลุดไป body) Tab ถัดไปถึงช่องค้นหา
+    await expect(page.getByRole("tabpanel", { name: "ทรานสคริปต์" })).toBeFocused()
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false)
+    await page.keyboard.press("Tab")
+    await expect(searchBox(page)).toBeFocused()
+  })
+})
+
 test.describe("M3 ทรานสคริปต์ การเข้าถึง (axe)", () => {
   for (const scheme of ["dark", "light"] as const) {
     test(`แท็บทรานสคริปต์ระหว่างค้นหาไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {

@@ -153,6 +153,8 @@ export const th = {
     copyFailed: "คัดลอกไม่สำเร็จ ลองอีกครั้ง",
     preparing: "กำลังเตรียมไฟล์…",
     downloadFailed: "โหลดซับไม่สำเร็จ ลองอีกครั้ง",
+    translationBlocked: "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน",
+    useOriginal: "ใช้ซับภาษาต้นฉบับ",
   },
   transcript: {
     title: "ทรานสคริปต์",

@@ -54,6 +54,8 @@ STATUS_BY_CODE: dict[str, int] = {
     "E_AGE_RESTRICTED": 409,
     "E_GEO_BLOCKED": 409,
     "E_BOT_CHECK": 429,
+    # ซับแปลถูกยูทูปปิดชั่วคราว (ต้นทางตอบ 429) ใช้ 503 ให้ต่างจาก E_BOT_CHECK ที่หมายถึงพักทั้งคิว
+    "E_TRANSLATION_BLOCKED": 503,
     "E_NETWORK": 502,
 }
 

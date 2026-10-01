@@ -1,9 +1,12 @@
 import { ApiError } from "@/lib/api"
 
-// error เหล่านี้ลองใหม่ทันทีก็ไม่ช่วย จึงซ่อนปุ่ม "ลองใหม่": เกิดจากตัวคลิปเอง (ผลเหมือนเดิมทุกครั้ง)
+// error เหล่านี้ลองใหม่ทันทีก็ไม่ช่วย จึงซ่อนปุ่ม "ลองใหม่" และไม่ยิงซ้ำเมื่อสลับแท็บ: เกิดจากตัวคลิปเอง (ผลเหมือนเดิมทุกครั้ง)
 // หรือ E_BOT_CHECK ที่ยูทูปให้รอสักพัก (M2 ยังไม่มีคิวพักให้ กดซ้ำรัว ๆ มีแต่ทำให้ถูกบล็อกนานขึ้น)
+// E_TRANSLATION_BLOCKED = ยูทูปไม่ให้โหลดซับแปลอัตโนมัติ ยิงซ้ำก็ได้ 429 เหมือนเดิม (ให้เลือกซับภาษาต้นฉบับแทน)
 const FINAL_CODES = new Set([
   "E_BOT_CHECK",
+  "E_TRANSLATION_BLOCKED",
+  "E_NO_SUBTITLES",
   "E_LIVE_NOT_READY",
   "E_VIDEO_PRIVATE",
   "E_VIDEO_UNAVAILABLE",
@@ -15,6 +18,11 @@ const FINAL_CODES = new Set([
 /** เน็ตหลุด (E_NETWORK, E_OFFLINE) และรหัสที่ไม่รู้จักลองใหม่ได้ · error ที่เป็นเรื่องของคลิปเอง และ E_BOT_CHECK ลองใหม่ไม่ช่วย */
 export function canRetry(error: unknown): boolean {
   return !(error instanceof ApiError && FINAL_CODES.has(error.code))
+}
+
+/** error จาก backend ที่มีรหัสนี้หรือไม่ (error อื่นที่ไม่ใช่ ApiError = ไม่ใช่) */
+export function hasCode(error: unknown, code: string): boolean {
+  return error instanceof ApiError && error.code === code
 }
 
 /** ข้อความไทยจาก envelope ของ backend · error ที่ไม่ใช่ ApiError ใช้ข้อความกลางของแอพ */

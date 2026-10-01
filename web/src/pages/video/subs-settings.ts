@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useSyncExternalStore } from "react"
 
 import { clampOptions, DEFAULT_PRESET, PRESETS } from "@/lib/sub-options"
 import type { SubOptions, SubPreset } from "@/lib/types"
@@ -66,23 +66,65 @@ export function saveSubSettings(storage: Pick<Storage, "setItem"> | null, value:
   }
 }
 
-/** ตัวเลือกความยาวซับที่จำไว้ในเบราว์เซอร์: choosePreset = เลือกสำเร็จรูป, setCustom = ค่าที่ปรับเอง */
+export type SubSettingsStore = {
+  get: () => SubSettings
+  subscribe: (listener: () => void) => () => void
+  choosePreset: (preset: SubPreset) => void
+  setCustom: (options: SubOptions) => void
+  /** อ่านค่าจาก storage ใหม่ (อีกแท็บของเบราว์เซอร์เปลี่ยนค่า) storage ใช้ไม่ได้ = คงค่าในหน่วยความจำไว้ */
+  reload: () => void
+}
+
+/**
+ * ที่เก็บค่าความยาวซับก้อนเดียวของทั้งหน้า: แท็บซับและทรานสคริปต์อ่านก้อนเดียวกันเสมอ (Q4 เห็นอะไรในทรานสคริปต์
+ * ได้แบบนั้นในไฟล์ .srt) แม้เบราว์เซอร์บล็อก storage ค่าที่ปรับไว้ก็อยู่ในหน่วยความจำ ไม่หายตอนสลับแท็บ
+ * อ่าน storage ครั้งแรกเมื่อมีคนขอค่า · ค่าใหม่ = ก้อนใหม่ (ก้อนเดิมไม่ถูกแก้ ซับจึงสร้างใหม่เฉพาะเมื่อค่าเปลี่ยนจริง)
+ */
+export function createSubSettingsStore(getStorage: () => Storage | null): SubSettingsStore {
+  let current: SubSettings | null = null
+  const listeners = new Set<() => void>()
+
+  const get = () => (current ??= loadSubSettings(getStorage()))
+  const notify = () => listeners.forEach((listener) => listener())
+  const apply = (next: SubSettings) => {
+    current = next
+    saveSubSettings(getStorage(), next)
+    notify()
+  }
+
+  return {
+    get,
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    },
+    choosePreset: (preset) => apply({ preset, options: PRESETS[preset] }),
+    setCustom: (options) => apply({ preset: "custom", options: clampOptions(options) }),
+    reload() {
+      const storage = getStorage()
+      if (!storage) return
+      current = loadSubSettings(storage)
+      notify()
+    },
+  }
+}
+
+const store = createSubSettingsStore(safeLocalStorage)
+
+// อีกแท็บของเบราว์เซอร์เปลี่ยนค่า: แท็บนี้ตามด้วย (เดิมอ่านใหม่ทุกครั้งที่เปิดแท็บซับหรือทรานสคริปต์)
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key === SUB_SETTINGS_KEY || event.key === null) store.reload()
+  })
+}
+
+/** ตัวเลือกความยาวซับที่จำไว้ในเบราว์เซอร์ (ก้อนเดียวกันทั้งหน้า): choosePreset = เลือกสำเร็จรูป, setCustom = ค่าที่ปรับเอง */
 export function useSubSettings() {
-  const [settings, setSettings] = useState<SubSettings>(() => loadSubSettings(safeLocalStorage()))
-
-  const apply = useCallback((next: SubSettings) => {
-    setSettings(next)
-    saveSubSettings(safeLocalStorage(), next)
-  }, [])
-
-  const choosePreset = useCallback(
-    (preset: SubPreset) => apply({ preset, options: PRESETS[preset] }),
-    [apply],
-  )
-  const setCustom = useCallback(
-    (options: SubOptions) => apply({ preset: "custom", options: clampOptions(options) }),
-    [apply],
-  )
-
-  return { preset: settings.preset, options: settings.options, choosePreset, setCustom }
+  const settings = useSyncExternalStore(store.subscribe, store.get, store.get)
+  return {
+    preset: settings.preset,
+    options: settings.options,
+    choosePreset: store.choosePreset,
+    setCustom: store.setCustom,
+  }
 }

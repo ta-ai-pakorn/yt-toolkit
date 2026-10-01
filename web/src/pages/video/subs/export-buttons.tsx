@@ -53,21 +53,21 @@ type Props = {
   options: SubOptions
   /** คำของแทร็กนี้ (ยังโหลดไม่เสร็จ = ปุ่มคัดลอกกดไม่ได้) */
   tokens: readonly SubToken[] | undefined
-  /** แทร็กนี้อ่านแล้วไม่มีข้อความ (E_NO_SUBTITLES): โหลดไปก็ได้ error จึงกดไม่ได้ทุกปุ่ม */
-  noText: boolean
+  /** โหลดคำของแทร็กนี้ไม่สำเร็จ (error ใดก็ได้ เช่น ไม่มีข้อความ หรือยูทูปไม่ให้โหลดซับแปล): โหลดไฟล์ไปก็ได้ error เดิม จึงกดไม่ได้ทุกปุ่ม */
+  failed: boolean
 }
 
 /**
  * ปุ่มโหลดไฟล์ซับ .srt / .txt / .md (ปุ่มรอง เบราว์เซอร์โหลดลงเครื่องทันที) และปุ่ม "คัดลอกข้อความ"
- * ยังไม่มีแทร็ก หรือแทร็กไม่มีข้อความ = กดไม่ได้ทุกปุ่ม · ระหว่างเตรียมไฟล์ปุ่มที่กดมีวงหมุน และทุกปุ่มโหลดกดซ้ำไม่ได้ (แต่ยังโฟกัสได้ ลำดับ Tab ไม่กระโดด)
+ * ยังไม่มีแทร็ก หรือโหลดคำของแทร็กไม่สำเร็จ = กดไม่ได้ทุกปุ่ม · ระหว่างเตรียมไฟล์ปุ่มที่กดมีวงหมุน และทุกปุ่มโหลดกดซ้ำไม่ได้ (แต่ยังโฟกัสได้ ลำดับ Tab ไม่กระโดด)
  */
-export function ExportButtons({ videoId, track, options, tokens, noText }: Props) {
+export function ExportButtons({ videoId, track, options, tokens, failed }: Props) {
   const [busy, setBusy] = useState<SubExportFormat | null>(null)
 
-  const unavailable = !track || noText
+  const unavailable = !track || failed
 
   async function download(format: SubExportFormat) {
-    if (!track || noText || busy !== null) return
+    if (!track || failed || busy !== null) return
     setBusy(format)
     try {
       await downloadWithToast(exportPath(videoId, track.id, format, options), `subtitles.${track.lang}.${format}`)

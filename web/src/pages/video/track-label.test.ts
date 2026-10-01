@@ -35,9 +35,17 @@ describe("trackInEffect", () => {
     expect(trackInEffect(data, null)?.id).toBe("a.th-orig")
   })
 
-  it("ไม่มีแทร็กที่ใช้อยู่ หรือรหัสใน URL ไม่อยู่ในรายการ = null", () => {
+  it("รหัสใน URL ไม่อยู่ในรายการของคลิปนี้ (ลิงก์เก่า พิมพ์ผิด) = ใช้แทร็กเริ่มต้น", () => {
+    expect(trackInEffect(data, "o.xx")?.id).toBe("a.th-orig")
+    expect(trackInEffect(data, "t.nope")?.id).toBe("a.th-orig")
+    expect(trackInEffect(data, "")?.id).toBe("a.th-orig")
+  })
+
+  it("ไม่มีแทร็กที่ใช้อยู่ และไม่มีแทร็กเริ่มต้น = null", () => {
     expect(trackInEffect({ tracks: data.tracks }, null)).toBeNull()
-    expect(trackInEffect(data, "o.xx")).toBeNull()
+    expect(trackInEffect({ tracks: data.tracks }, "o.xx")).toBeNull()
     expect(trackInEffect({ tracks: [] }, null)).toBeNull()
+    // แทร็กเริ่มต้นที่ไม่อยู่ในรายการก็ไม่นับ
+    expect(trackInEffect({ tracks: data.tracks, defaultTrackId: "a.xx-orig" }, "o.xx")).toBeNull()
   })
 })

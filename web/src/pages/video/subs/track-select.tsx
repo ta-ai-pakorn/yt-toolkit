@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from "react"
+import { useId, useMemo, useRef, useState, type Ref } from "react"
 
 import {
   Select,
@@ -29,13 +29,15 @@ type Props = {
   /** ภาษาต้นฉบับของคลิป (รหัสหลัก) แทร็กภาษานี้ขึ้นก่อนในแต่ละกลุ่ม */
   originalLang: string | null
   onChoose: (trackId: string) => void
+  /** ปุ่มเปิดรายการ (ให้ผู้เรียกย้ายโฟกัสมาที่นี่ได้ เช่น หลังกด "ใช้ซับภาษาต้นฉบับ") */
+  triggerRef?: Ref<HTMLButtonElement>
 }
 
 /**
  * ตัวเลือกแทร็กซับ: กลุ่มซับจากเจ้าของคลิป · ซับอัตโนมัติภาษาต้นฉบับ และแถวสุดท้าย "เลือกซับแปลอัตโนมัติ…"
  * ยังไม่มีแทร็ก = ช่องว่างพร้อมคำแนะนำใต้ช่อง · ซับแปลที่เลือกไว้แสดงในช่องเป็น "… (แปลอัตโนมัติ)"
  */
-export function TrackSelect({ data, track, originalLang, onChoose }: Props) {
+export function TrackSelect({ data, track, originalLang, onChoose, triggerRef }: Props) {
   const labelId = useId()
   const hintId = useId()
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -73,6 +75,7 @@ export function TrackSelect({ data, track, originalLang, onChoose }: Props) {
         onOpenChangeComplete={onOpenChangeComplete}
       >
         <SelectTrigger
+          ref={triggerRef}
           aria-labelledby={labelId}
           aria-describedby={track ? undefined : hintId}
           className="w-full min-w-0 sm:w-80 max-sm:h-11!"

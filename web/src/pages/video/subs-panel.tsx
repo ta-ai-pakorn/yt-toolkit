@@ -1,10 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId } from "react"
+import { useId, useRef } from "react"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { th } from "@/i18n/th"
-import { ApiError } from "@/lib/api"
 import type { SubtitleTracks, VideoInfo } from "@/lib/types"
 
 import { videoQuery } from "./queries"
@@ -27,10 +26,19 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
   const track = trackInEffect(data, trackId)
   const settings = useSubSettings()
   const tokens = useQuery(tokensQuery(videoId, track?.id))
-  const noText = tokens.error instanceof ApiError && tokens.error.code === "E_NO_SUBTITLES"
   // อ่านข้อมูลคลิปจาก cache เท่านั้น (หน้า W2 โหลดไว้แล้ว) ไม่สร้างคำขอใหม่ ซึ่งจะนับว่าเปิดคลิปซ้ำ
   const video = useQueryClient().getQueryData<VideoInfo>(videoQuery(videoId).queryKey)
   const originalLang = originalLanguage(data.tracks, video?.audio)
+  const defaultTrackId = data.defaultTrackId
+  // ยูทูปไม่ให้โหลดซับแปล: กลับไปแทร็กเริ่มต้นของคลิป (เปลี่ยนแค่แทร็กใน patch เดียว)
+  // โฟกัสไปที่ช่องเลือกแทร็กก่อน (ปุ่มที่กดจะหายไป) ช่องนี้อยู่ต่อและบอกแทร็กใหม่ให้โปรแกรมอ่านหน้าจอ
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const backToOriginal = defaultTrackId
+    ? () => {
+        triggerRef.current?.focus()
+        update({ trackId: defaultTrackId })
+      }
+    : null
 
   return (
     <section aria-labelledby={titleId}>
@@ -49,12 +57,13 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
             originalLang={originalLang}
             // เปลี่ยนแค่แทร็ก (ส่งคีย์เดียว คีย์อื่นใน URL คงเดิม)
             onChoose={(id) => update({ trackId: id })}
+            triggerRef={triggerRef}
           />
           <PresetControls options={settings.options} onPreset={settings.choosePreset} onCustom={settings.setCustom} />
           {track && (
             <>
               <Separator />
-              <SubsPreview query={tokens} options={settings.options} />
+              <SubsPreview query={tokens} options={settings.options} onUseOriginal={backToOriginal} />
             </>
           )}
           <ExportButtons
@@ -62,7 +71,7 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
             track={track}
             options={settings.options}
             tokens={tokens.data?.tokens}
-            noText={noText}
+            failed={tokens.isError}
           />
         </CardContent>
       </Card>
