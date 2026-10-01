@@ -170,6 +170,29 @@ def test_missing_format_id_with_max_quality_falls_back_to_max(fake: FakeExtracto
     assert c.format_spec == "bv*+140/b" and c.notes == ("QUALITY_FALLBACK",)
 
 
+@pytest.mark.parametrize("fid", ["140", "sb0"])
+def test_format_id_must_name_a_video_format(fake: FakeExtractor, fid: str) -> None:
+    # review M-4: เสียงล้วน (140) หรือ storyboard (sb0) ไม่ใช่ format วิดีโอ = เหมือนไม่มีแล้ว
+    c = video_choice(fake.probe(BBB), {**AUTO, "formatId": fid})
+    assert c.format_spec == "bv*[vcodec^=avc1][height<=1080]+140/b[ext=mp4]"
+    assert c.notes == ("QUALITY_FALLBACK",)
+
+
+def test_storyboard_with_a_vcodec_is_still_not_a_video(fake: FakeExtractor) -> None:
+    info = copy.deepcopy(fake.probe(BBB))
+    for fmt in info["formats"]:
+        if fmt["format_id"] == "sb0":
+            fmt["vcodec"], fmt["height"] = "mjpeg", 4000
+    c = video_choice(info, {**AUTO, "formatId": "sb0", "maxQuality": True})
+    assert c.format_spec == "bv*+140/b" and c.notes == ("QUALITY_FALLBACK",)
+    assert c.expected_bytes == 1362269481 + 10271496  # storyboard never counts as the best video
+
+
+def test_muxed_format_id_is_accepted(fake: FakeExtractor) -> None:
+    c = video_choice(fake.probe(BBB), {**AUTO, "formatId": "18"})
+    assert c.format_spec == "18+140" and c.notes == ()
+
+
 def test_notes_keep_the_order_quality_then_audio(fake: FakeExtractor) -> None:
     c = video_choice(fake.probe(DUB), {**AUTO, "formatId": "nope", "audioLanguage": "ja"})
     assert c.notes == ("QUALITY_FALLBACK", "AUDIO_LANG_FALLBACK")
