@@ -70,6 +70,21 @@ async function inListView(locator: ReturnType<Page["locator"]>): Promise<boolean
   })
 }
 
+/**
+ * กึ่งกลางของบรรทัด (ทั้งแถว li) ห่างจากกึ่งกลางกรอบรายการกี่ px และแถวสูงเท่าไร
+ * owner: บรรทัดที่กำลังเล่นอยู่กลางกรอบ ไม่ไปกองที่ขอบล่าง (ยกเว้นต้น/ท้ายรายการที่เลื่อนได้ไม่ถึง)
+ */
+async function offsetFromListCenter(locator: ReturnType<Page["locator"]>): Promise<{ offset: number; height: number }> {
+  return locator.evaluate((element) => {
+    const viewport = element.closest('[data-slot="scroll-area-viewport"]')
+    const line = element.closest("li") ?? element
+    if (!viewport) return { offset: Number.POSITIVE_INFINITY, height: 0 }
+    const box = line.getBoundingClientRect()
+    const frame = viewport.getBoundingClientRect()
+    return { offset: Math.abs(box.top + box.height / 2 - (frame.top + frame.height / 2)), height: box.height }
+  })
+}
+
 // จอสูงพอให้หัวคลิปและรายการทรานสคริปต์อยู่ในจอพร้อมกัน: หน้าไม่ต้องเลื่อน ตรวจได้ว่าการเลื่อนตามไม่ดึงทั้งหน้า
 const TALL = { width: 1280, height: 1600 }
 
@@ -267,6 +282,14 @@ test.describe("M3.5 ทรานสคริปต์ตามการเล่
       .toBeGreaterThan(20)
     await expect.poll(() => inListView(playingLine(page))).toBe(true)
     await expect(backToPlaying(page)).toHaveCount(0)
+    // กลางรายการ: บรรทัดที่กำลังเล่นอยู่กลางกรอบ (ห่างจากกึ่งกลางไม่เกินราวหนึ่งบรรทัด) หยุดคลิปไว้ก่อนวัด
+    await pauseFake(page)
+    await expect
+      .poll(async () => {
+        const { offset, height } = await offsetFromListCenter(playingLine(page))
+        return offset <= height + 2
+      })
+      .toBe(true)
     // การเลื่อนตามเลื่อนเฉพาะกรอบรายการ ไม่ดึงทั้งหน้า
     expect(await page.evaluate(() => window.scrollY)).toBeLessThan(5)
   })
@@ -304,6 +327,9 @@ test.describe("M3.5 ทรานสคริปต์ตามการเล่
     await expect.poll(() => inListView(playingLine(page))).toBe(true)
     await expect(playingLine(page)).toBeFocused()
     await expect(playingLine(page)).toHaveText(playingText ?? "")
+    // กลับมาเลื่อนตาม = บรรทัดนั้นอยู่กลางกรอบ (อยู่กลางรายการแล้ว ไม่ติดขอบ)
+    const { offset, height } = await offsetFromListCenter(playingLine(page))
+    expect(offset).toBeLessThanOrEqual(height + 2)
   })
 
   test("กด 'กลับไปบรรทัดที่กำลังเล่น' ระหว่างเล่นอยู่: โฟกัสบรรทัดที่เล่นตอนกด แล้วเลื่อนตามต่อโดยโฟกัสไม่ตาม", async ({ page }) => {

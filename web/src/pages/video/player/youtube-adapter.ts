@@ -5,9 +5,21 @@ import type { YTNamespace, YTPlayer } from "./youtube-api"
 export const PLAYER_HOST = "https://www.youtube-nocookie.com"
 /** อ่านเวลาปัจจุบันทุกเท่านี้ระหว่างเล่น */
 export const POLL_MS = 250
-/** หลัง seek ช่วงสั้น ๆ เวลาที่อ่านได้อาจยังเป็นตำแหน่งเก่า: ข้ามค่าที่ห่างจากจุดที่ seek เกินนี้ */
-const SEEK_SETTLE_MS = 1000
+/**
+ * หลัง seek เวลาที่อ่านได้อาจยังเป็นตำแหน่งเก่าอยู่พักหนึ่ง (นานเท่าไรขึ้นกับเน็ตและการบัฟเฟอร์ ไม่ใช่เวลาตายตัว)
+ * จึงข้ามค่าที่ไม่ใกล้ตำแหน่งที่ควรเป็น จนกว่าจะอ่านได้ค่าที่ใกล้ (แล้วเลิกกัน) หรือตัวเล่นเข้าสถานะ PLAYING ครั้งถัดไป
+ * "ตำแหน่งที่ควรเป็น" = จุดที่ seek + เวลาที่เล่นไปแล้วหลัง seek (ถ้าเล่นอยู่) จึงไม่ติดกันถาวรแม้อ่านห่างกันนาน
+ * (แท็บที่อยู่เบื้องหลังถูกเบราว์เซอร์ชะลอ timer หรือเล่นเร็วกว่าปกติ)
+ */
 const SEEK_TOLERANCE_MS = 2000
+/** เผื่อความเร็วที่ไม่แน่นอน: ยอมให้เวลาเดินหน้าได้ถึง 1.5 เท่าของ rate ที่ตัวเล่นบอก */
+const SEEK_RATE_SLACK = 1.5
+
+/** ค่าที่อ่านได้หลัง seek ไป target เมื่อ elapsedMs ที่แล้ว (เล่นด้วยความเร็ว rate) ใช่ตำแหน่งใหม่แล้วหรือยัง (ไม่ใช่ค่าเก่าที่ค้าง) */
+export function seekLanded(ms: number, target: number, elapsedMs: number, rate: number): boolean {
+  const ahead = Math.max(0, elapsedMs) * Math.max(1, rate) * SEEK_RATE_SLACK
+  return ms >= target - SEEK_TOLERANCE_MS && ms <= target + SEEK_TOLERANCE_MS + ahead
+}
 
 // ค่าของ YT.PlayerState (ไม่อ้าง window.YT.PlayerState ตรง ๆ: ทดสอบได้โดยไม่ต้องมีของจริง)
 const YT_ENDED = 0
@@ -70,7 +82,10 @@ export function createYouTubeAdapter(YT: YTNamespace, iframe: HTMLIFrameElement,
   let ready = false
   let stopped = false
   let poll: unknown = null
+  /** จุดที่ seek ไปล่าสุดและเมื่อไร ที่ยังไม่ได้ยืนยันจากตัวเล่น (null = ไม่มีค่าค้างให้กันแล้ว) */
   let lastSeek: { ms: number; at: number } | null = null
+  /** สถานะล่าสุดจาก onStateChange (ใช้ดูว่า PLAYING ครั้งนี้เพิ่งเข้ามาหรือเล่นอยู่แล้ว) */
+  let ytState: number | null = null
   const hooks = playerAdapterHooks
 
   const readMs = (): number | null => {
@@ -79,11 +94,21 @@ export function createYouTubeAdapter(YT: YTNamespace, iframe: HTMLIFrameElement,
     return Number.isFinite(seconds) ? Math.max(0, Math.round(seconds * 1000)) : null
   }
 
+  const playbackRate = (): number => {
+    const rate = player?.getPlaybackRate?.()
+    return typeof rate === "number" && Number.isFinite(rate) && rate > 0 ? rate : 1
+  }
+
   const tick = () => {
     if (stopped) return
     const ms = readMs()
     if (ms === null) return
-    if (lastSeek && timers.now() - lastSeek.at < SEEK_SETTLE_MS && Math.abs(ms - lastSeek.ms) > SEEK_TOLERANCE_MS) return
+    if (lastSeek !== null) {
+      // ยังเป็นตำแหน่งเก่า: ข้าม (หัวอ่านไม่เด้งกลับ) · ใกล้ตำแหน่งที่ควรเป็นแล้ว = ตัวเล่นตามทัน เลิกกัน
+      const elapsed = ytState === YT_PLAYING ? timers.now() - lastSeek.at : 0
+      if (!seekLanded(ms, lastSeek.ms, elapsed, playbackRate())) return
+      lastSeek = null
+    }
     hooks.onTime(ms)
   }
 
@@ -129,6 +154,8 @@ export function createYouTubeAdapter(YT: YTNamespace, iframe: HTMLIFrameElement,
 
   hooks.attach(adapter)
   player = new YT.Player(iframe, {
+    // iframe มี src ของ youtube-nocookie อยู่แล้ว ใส่ host ซ้ำกันไว้เผื่อ API สร้าง/โหลด iframe ใหม่เอง
+    host: PLAYER_HOST,
     events: {
       onReady: () => {
         if (stopped) return
@@ -141,7 +168,11 @@ export function createYouTubeAdapter(YT: YTNamespace, iframe: HTMLIFrameElement,
       },
       onStateChange: (event) => {
         if (stopped) return
+        const previous = ytState
+        ytState = event.data
         if (event.data === YT_PLAYING) {
+          // เพิ่งเข้า PLAYING (หลังบัฟเฟอร์/หยุด) = ตัวเล่นอยู่ที่ตำแหน่งใหม่แล้ว เลิกกันค่าเก่าหลัง seek
+          if (previous !== YT_PLAYING) lastSeek = null
           hooks.onStatus("playing")
           startPolling()
         } else if (event.data === YT_PAUSED || event.data === YT_ENDED) {

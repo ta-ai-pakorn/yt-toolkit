@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { isUserScroll, nearestScrollTop } from "./follow"
+import { centeredScrollTop, isUserScroll } from "./follow"
 
 describe("isUserScroll: อะไรทำให้หยุดเลื่อนตามบรรทัดที่กำลังเล่น", () => {
   it("ล้อเมาส์ ลากนิ้ว และกดแถบเลื่อน = ผู้ใช้เลื่อนเอง", () => {
@@ -38,27 +38,28 @@ describe("isUserScroll: อะไรทำให้หยุดเลื่อ�
   })
 })
 
-describe("nearestScrollTop: เลื่อนกรอบให้เห็นบรรทัดแบบ block nearest", () => {
-  // กรอบรายการอยู่ที่ y 100-460 (สูง 360) เลื่อนไปแล้ว 1000
+describe("centeredScrollTop: เลื่อนกรอบให้บรรทัดที่กำลังเล่นอยู่กลางกรอบ", () => {
+  // กรอบรายการอยู่ที่ y 100-460 (สูง 360 กลาง = 280) เลื่อนไปแล้ว 1000 · เลื่อนได้สูงสุด 5000
   const FRAME = { top: 100, bottom: 460 }
+  const MAX = 5000
 
-  it("บรรทัดอยู่ในกรอบแล้ว = ไม่เลื่อน", () => {
-    expect(nearestScrollTop(1000, FRAME, { top: 100, bottom: 136 })).toBe(1000)
-    expect(nearestScrollTop(1000, FRAME, { top: 300, bottom: 336 })).toBe(1000)
-    expect(nearestScrollTop(1000, FRAME, { top: 424, bottom: 460 })).toBe(1000)
+  it("บรรทัดอยู่กลางกรอบแล้ว = ไม่เลื่อน", () => {
+    expect(centeredScrollTop(1000, FRAME, { top: 262, bottom: 298 }, MAX)).toBe(1000)
   })
 
-  it("ล้นขอบล่าง = เลื่อนลงพอให้ชิดขอบล่าง", () => {
-    expect(nearestScrollTop(1000, FRAME, { top: 440, bottom: 476 })).toBe(1016)
-    expect(nearestScrollTop(1000, FRAME, { top: 2000, bottom: 2036 })).toBe(1000 + 2036 - 460)
+  it("บรรทัดต่ำกว่ากลาง = เลื่อนลงจนอยู่กลาง (ไม่ไปกองที่ขอบล่าง)", () => {
+    expect(centeredScrollTop(1000, FRAME, { top: 424, bottom: 460 }, MAX)).toBe(1000 + 162)
+    expect(centeredScrollTop(1000, FRAME, { top: 2000, bottom: 2036 }, MAX)).toBe(1000 + 2018 - 280)
   })
 
-  it("ล้นขอบบน = เลื่อนขึ้นพอให้ชิดขอบบน", () => {
-    expect(nearestScrollTop(1000, FRAME, { top: 90, bottom: 126 })).toBe(990)
-    expect(nearestScrollTop(1000, FRAME, { top: -500, bottom: -464 })).toBe(400)
+  it("บรรทัดสูงกว่ากลาง = เลื่อนขึ้นจนอยู่กลาง", () => {
+    expect(centeredScrollTop(1000, FRAME, { top: 100, bottom: 136 }, MAX)).toBe(1000 - 162)
   })
 
-  it("บรรทัดสูงกว่ากรอบ = ชิดขอบบน (เห็นต้นบรรทัด)", () => {
-    expect(nearestScrollTop(1000, FRAME, { top: 200, bottom: 700 })).toBe(1100)
+  it("ต้นรายการและท้ายรายการ: เลื่อนได้แค่ถึงขอบ (บรรทัดแรก ๆ อยู่บน บรรทัดท้าย ๆ อยู่ล่าง)", () => {
+    expect(centeredScrollTop(50, FRAME, { top: 110, bottom: 146 }, MAX)).toBe(0)
+    expect(centeredScrollTop(4900, FRAME, { top: 430, bottom: 466 }, MAX)).toBe(MAX)
+    // รายการสั้นกว่ากรอบ (เลื่อนไม่ได้) = 0 เสมอ
+    expect(centeredScrollTop(0, FRAME, { top: 400, bottom: 436 }, 0)).toBe(0)
   })
 })

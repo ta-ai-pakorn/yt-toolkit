@@ -1,6 +1,6 @@
 import { cn } from "cn"
 import { ArrowUpToLine, Play, X } from "lucide-react"
-import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react"
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, type RefObject } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -8,6 +8,7 @@ import { fill, th } from "@/i18n/th"
 import type { VideoInfo } from "@/lib/types"
 import { Thumbnail } from "@/pages/home/thumbnail"
 
+import { FOCUS_SLOTS, firstSlot, useFocusRescue } from "./focus-rescue"
 import { PlayerErrorView } from "./player-error"
 import { playerActions, playerAdapterHooks, usePlayerValue, type PlayerStatus } from "./player-store"
 import { ReelStatus } from "./reel-button"
@@ -99,7 +100,6 @@ type FrameProps = {
 function PlayerFrame({ videoId, title, thumbnailUrl, docked, loading, boxRef, onClose }: FrameProps) {
   const host = useRef<HTMLDivElement>(null)
   const wrapper = useRef<HTMLDivElement>(null)
-  const backToTop = useRef<HTMLButtonElement>(null)
   usePlayerIframe(host, videoId, title)
   useDockSpace(docked, wrapper)
 
@@ -129,21 +129,74 @@ function PlayerFrame({ videoId, title, thumbnailUrl, docked, loading, boxRef, on
           </div>
         )}
       </div>
-      {docked && (
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 p-1.5 max-sm:flex-col max-sm:items-stretch max-sm:p-2">
-          <ReelStatus size="xs" className="gap-1 px-1" buttonClassName="max-sm:h-11" fallbackFocus={() => backToTop.current} />
-          <div className="ml-auto flex items-center gap-1 max-sm:ml-0 max-sm:justify-end">
-            <Button ref={backToTop} variant="ghost" size="sm" className="max-sm:h-11" onClick={() => scrollToHeader(boxRef.current)}>
-              <ArrowUpToLine aria-hidden />
-              {t.backToTop}
-            </Button>
-            <Button variant="ghost" size="icon-sm" aria-label={t.close} title={t.close} className="max-sm:size-11" onClick={onClose}>
-              <X aria-hidden />
-            </Button>
-          </div>
-        </div>
-      )}
+      {docked && <DockToolbar boxRef={boxRef} onClose={onClose} />}
     </div>
+  )
+}
+
+/**
+ * แถบเครื่องมือของตัวเล่นลอย: "ช่วง i จาก n" + หยุด (ตอนเล่นช่วงไฮไลต์) · "กลับไปที่หัวคลิป" · ✕ "ปิดตัวเล่น"
+ * หายไปเมื่อตัวเล่นกลับเข้าหัวคลิป (เลื่อนจอขึ้นเอง): โฟกัสที่อยู่บนปุ่มเหล่านี้ย้ายไปแถบไทม์ไลน์ (ไม่มี = "ดูภาพปก")
+ */
+function DockToolbar({ boxRef, onClose }: { boxRef: RefObject<HTMLDivElement | null>; onClose: () => void }) {
+  const toolbar = useRef<HTMLDivElement>(null)
+  const backToHeader = () => firstSlot(FOCUS_SLOTS.timeline, FOCUS_SLOTS.cover)
+  useFocusRescue(toolbar, backToHeader)
+  return (
+    <div ref={toolbar} className="flex min-w-0 flex-1 flex-wrap items-center gap-1 p-1.5 max-sm:flex-col max-sm:items-stretch max-sm:p-2">
+      <ReelStatus
+        size="xs"
+        className="gap-1 px-1"
+        buttonClassName="max-sm:h-11"
+        // กดหยุด = "กลับไปที่หัวคลิป" ข้าง ๆ · หายเพราะกลับเข้าหัวคลิป = แถบไทม์ไลน์
+        fallbackFocus={() => firstSlot(FOCUS_SLOTS.dockBack, FOCUS_SLOTS.timeline, FOCUS_SLOTS.cover)}
+      />
+      <div className="ml-auto flex items-center gap-1 max-sm:ml-0 max-sm:justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          data-slot="dock-back"
+          className="max-sm:h-11"
+          onClick={() => scrollToHeader(boxRef.current)}
+        >
+          <ArrowUpToLine aria-hidden />
+          {t.backToTop}
+        </Button>
+        <Button variant="ghost" size="icon-sm" aria-label={t.close} title={t.close} className="max-sm:size-11" onClick={onClose}>
+          <X aria-hidden />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * ช่องในหัวคลิประหว่างตัวเล่นลอย: ปกจาง ๆ + "กำลังเล่นที่มุมจอ" · กดแล้วเลื่อนกลับบนสุด ตัวเล่นกลับเข้าช่อง
+ * ชื่อปุ่มขึ้นต้นด้วยคำกริยา "กลับไปที่หัวคลิป" (สิ่งที่กดแล้วเกิด) ส่วนข้อความที่เห็นเป็นคำอธิบาย (aria-describedby)
+ */
+function DockedPlaceholder({ thumbnailUrl, boxRef }: { thumbnailUrl: string; boxRef: RefObject<HTMLDivElement | null> }) {
+  const button = useRef<HTMLButtonElement>(null)
+  const describedBy = useId()
+  // เลื่อนจอขึ้นเองจนตัวเล่นกลับเข้าช่อง ปุ่มนี้หาย: โฟกัสไปแถบไทม์ไลน์ใต้ตัวเล่น (ไม่มี = "ดูภาพปก")
+  useFocusRescue(button, () => firstSlot(FOCUS_SLOTS.timeline, FOCUS_SLOTS.cover))
+  return (
+    <button
+      ref={button}
+      type="button"
+      aria-label={t.backToTop}
+      aria-describedby={describedBy}
+      data-slot="player-docked-placeholder"
+      onClick={() => scrollToHeader(boxRef.current)}
+      className="absolute inset-0 block cursor-pointer overflow-hidden rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring"
+    >
+      <Thumbnail src={thumbnailUrl} className="size-full opacity-35" />
+      <span
+        id={describedBy}
+        className="absolute inset-0 flex items-center justify-center p-1 text-center text-sm font-medium text-foreground max-sm:text-xs"
+      >
+        {t.playingInCorner}
+      </span>
+    </button>
   )
 }
 
@@ -227,19 +280,7 @@ export function PlayerSlot({
           </span>
         </button>
       ) : null}
-      {docked && (
-        <button
-          type="button"
-          data-slot="player-docked-placeholder"
-          onClick={() => scrollToHeader(boxRef.current)}
-          className="absolute inset-0 block cursor-pointer overflow-hidden rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring"
-        >
-          <Thumbnail src={thumbnailUrl} className="size-full opacity-35" />
-          <span className="absolute inset-0 flex items-center justify-center p-1 text-center text-sm font-medium text-foreground max-sm:text-xs">
-            {t.playingInCorner}
-          </span>
-        </button>
-      )}
+      {docked && <DockedPlaceholder thumbnailUrl={thumbnailUrl} boxRef={boxRef} />}
       {active && (
         <PlayerFrame
           videoId={videoId}
@@ -265,20 +306,27 @@ export function PlayerControls({ video, inView, className }: { video: VideoInfo;
   const status = usePlayerValue((s) => s.status)
   const started = usePlayerValue((s) => s.started)
   const reel = usePlayerValue((s) => s.reel !== null)
-  const row = useRef<HTMLDivElement>(null)
   const active = storeVideoId === video.videoId && ACTIVE.has(status)
   const durationMs = Math.max(0, video.durationS) * 1000
   const timeline = durationMs > 0
   // ลอยอยู่ (เริ่มเล่นแล้วแต่ช่องพ้นจอ) = ไม่มีแถวนี้ · เงื่อนไขเดียวกับ docked ของ PlayerSlot
   if (!active || !started || !inView || !(timeline || reel)) return null
+  return <ControlsRow video={video} durationMs={timeline ? durationMs : 0} className={className} />
+}
+
+function ControlsRow({ video, durationMs, className }: { video: VideoInfo; durationMs: number; className?: string }) {
+  const row = useRef<HTMLDivElement>(null)
+  // แถวนี้หายเพราะตัวเล่นลอย (เลื่อนจอลงทั้งที่โฟกัสอยู่ที่แถบ): โฟกัสไป "กลับไปที่หัวคลิป" บนตัวเล่นลอย
+  useFocusRescue(row, () => firstSlot(FOCUS_SLOTS.dockBack, FOCUS_SLOTS.cover))
   return (
     <div ref={row} data-slot="player-controls" className={cn("flex flex-col gap-2", className)}>
-      {timeline && <Timeline durationMs={durationMs} chapters={video.chapters} replayed={video.mostReplayed} visible />}
+      {durationMs > 0 && <Timeline durationMs={durationMs} chapters={video.chapters} replayed={video.mostReplayed} visible />}
       <ReelStatus
         buttonClassName="max-sm:h-11"
-        // ปุ่มหยุดหายไป: โฟกัสแถบไทม์ไลน์ในแถวเดียวกัน (ไม่มีแถบ = ปุ่มช่วงไฮไลต์ในแถวปุ่ม)
+        // กดหยุด: แถบไทม์ไลน์ในแถวเดียวกัน (ไม่มีแถบ = ปุ่มช่วงไฮไลต์ในแถวปุ่ม) · หายเพราะตัวเล่นลอย: ปุ่มบนตัวเล่นลอย
         fallbackFocus={() =>
-          row.current?.querySelector<HTMLElement>('[role="slider"]') ?? document.querySelector<HTMLElement>('[data-slot="player-reel"]')
+          row.current?.querySelector<HTMLElement>('[role="slider"]') ??
+          firstSlot(FOCUS_SLOTS.dockBack, FOCUS_SLOTS.reel, FOCUS_SLOTS.cover)
         }
       />
     </div>

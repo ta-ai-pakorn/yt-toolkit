@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { fractionOf, keyTarget, msAtPoint, percentOf, rangeBox } from "./timeline-geometry"
+import { fractionOf, isTap, keyTarget, msAtPoint, percentOf, rangeBox } from "./timeline-geometry"
 
 describe("fractionOf / percentOf", () => {
   it("สัดส่วนของความยาวคลิป ไม่เกินขอบ 0-1", () => {
@@ -65,5 +65,15 @@ describe("keyTarget", () => {
   it("ปุ่มอื่น = null", () => {
     expect(keyTarget("Enter", 0, 60_000)).toBeNull()
     expect(keyTarget("a", 0, 60_000)).toBeNull()
+  })
+})
+
+describe("isTap", () => {
+  it("ขยับน้อยกว่า 6 px = แตะ · ปัดขึ้นลงหรือลากไกลกว่านั้น = ไม่ใช่", () => {
+    expect(isTap({ x: 10, y: 10 }, { x: 10, y: 10 })).toBe(true)
+    expect(isTap({ x: 10, y: 10 }, { x: 13, y: 14 })).toBe(true)
+    expect(isTap({ x: 10, y: 10 }, { x: 10, y: 16 })).toBe(false)
+    expect(isTap({ x: 10, y: 10 }, { x: 10, y: 200 })).toBe(false)
+    expect(isTap({ x: 10, y: 10 }, { x: 40, y: 10 })).toBe(false)
   })
 })

@@ -1,11 +1,12 @@
 import { cn } from "cn"
 import { Flame, Square } from "lucide-react"
-import { useLayoutEffect, useRef } from "react"
+import { useRef } from "react"
 
 import { Button } from "@/components/ui/button"
 import { th } from "@/i18n/th"
 import type { ReplaySegment } from "@/lib/types"
 
+import { useFocusRescue } from "./focus-rescue"
 import { playerActions } from "./player-store"
 import { stopReel, useReelStatus } from "./reel"
 
@@ -64,20 +65,8 @@ export function ReelStatus({ fallbackFocus, className, buttonClassName, size = "
 
 function StopButton({ size, className, fallbackFocus }: Pick<StatusProps, "fallbackFocus" | "className" | "size">) {
   const ref = useRef<HTMLButtonElement>(null)
-  const fallback = useRef(fallbackFocus)
-  useLayoutEffect(() => {
-    fallback.current = fallbackFocus
-  })
-  // หายไปตอนกดหยุดหรือเล่นจบช่วงสุดท้าย: ถ้าโฟกัสอยู่ที่ปุ่ม ย้ายไปที่ใกล้ ๆ หลังวาดเสร็จ
-  useLayoutEffect(() => {
-    const button = ref.current
-    return () => {
-      if (button === null || document.activeElement !== button) return
-      requestAnimationFrame(() => {
-        if (document.activeElement === null || document.activeElement === document.body) fallback.current()?.focus({ preventScroll: true })
-      })
-    }
-  }, [])
+  // หายไปตอนกดหยุด เล่นจบช่วงสุดท้าย หรือตัวเล่นย้ายที่: ถ้าโฟกัสอยู่ที่ปุ่ม ย้ายไปที่ใกล้ ๆ หลังวาดเสร็จ
+  useFocusRescue(ref, fallbackFocus)
   return (
     <Button ref={ref} variant={size === "xs" ? "ghost" : "secondary"} size={size} onClick={stopReel} className={className}>
       <Square aria-hidden />

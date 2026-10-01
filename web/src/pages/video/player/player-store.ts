@@ -126,7 +126,7 @@ export const playerActions = {
   close(): void {
     adapter?.stop()
     adapter = null
-    set({ status: "idle", started: false, reel: null, pendingSeekMs: null, error: null, errorAtMs: null })
+    set({ status: "idle", started: false, currentMs: 0, reel: null, pendingSeekMs: null, error: null, errorAtMs: null })
   },
   /** หลังโหลดสคริปต์ไม่ได้ (offline) ลองใหม่ */
   retry(): void {

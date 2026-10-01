@@ -394,14 +394,14 @@ test.describe("บันทึกเป็นโน้ต (.md)", () => {
     return requests
   }
 
-  test("ปุ่มรองในหัวคลิป (ไม่ใช่ปุ่มหลักสีเหลือง) · ชี้แล้วมีคำอธิบายว่าใช้กับ Obsidian หรือแอปจดโน้ต", async ({ page }) => {
+  test("ปุ่มรองในหัวคลิป (ไม่ใช่ปุ่มหลักสีเหลือง) · ชี้แล้วมีคำอธิบายว่าใช้กับ Obsidian หรือแอพจดโน้ต", async ({ page }) => {
     await page.goto(`/v/${THAI}`)
     const button = page.getByRole("button", { name: NOTE_BUTTON })
     await expect(button).toBeVisible()
     await expect(button).toHaveClass(/bg-secondary/)
     await expect(button).not.toHaveClass(/bg-primary/)
     await button.hover()
-    await expect(page.getByText(/Obsidian หรือแอปจดโน้ตอื่น/)).toBeVisible()
+    await expect(page.getByText(/Obsidian หรือแอพจดโน้ตอื่น/)).toBeVisible()
     // หน้า W2 ยังไม่มีปุ่มหลักสีเหลือง
     await expect(page.locator('[data-slot="button"].bg-primary')).toHaveCount(0)
   })
