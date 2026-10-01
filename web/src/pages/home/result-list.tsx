@@ -22,13 +22,8 @@ import { formatDuration } from "@/lib/format"
 import type { PlaylistEntry, ResolveItem } from "@/lib/types"
 import { cn } from "cn"
 
-import {
-  BotStopContext,
-  createBotStop,
-  useBotStop,
-  useBotStopped,
-  type BotStop,
-} from "./bot-stop"
+import { BotStopContext, useBotStop, useBotStopped } from "./bot-stop"
+import { botStopFor } from "./bot-stop-gate"
 import {
   AUTO_TITLE_ROWS,
   playlistQuery,
@@ -38,7 +33,7 @@ import {
 import { homeStore, playlistKey, useHomeState } from "./state"
 import { Thumbnail } from "./thumbnail"
 import { fromListState, fromPlaylistState } from "./use-analyze"
-import { batchPath } from "../batch/path"
+import { batchPath } from "@/pages/batch/path"
 
 const t = th.home.results
 
@@ -419,14 +414,6 @@ function Row({ item, listId, autoTitle, onWhole }: RowProps) {
   }
 }
 
-// เบรก E_BOT_CHECK ผูกกับรายการผลชุดหนึ่ง (listId) ไม่ใช่กับการแสดงผล: ไปหน้าคลิปแล้วกลับมา
-// รายการเดิมยังถูกเบรกอยู่ ไม่ยิงคำขอซ้ำ · วิเคราะห์ใหม่ = listId ใหม่ = เบรกใหม่
-let currentGate: { listId: string; gate: BotStop } | null = null
-function botStopFor(listId: string): BotStop {
-  if (currentGate?.listId !== listId) currentGate = { listId, gate: createBotStop() }
-  return currentGate.gate
-}
-
 const isClip = (item: ResolveItem) =>
   item.kind === "video" || item.kind === "ambiguous"
 
@@ -442,7 +429,8 @@ type ResultListProps = {
 
 export function ResultList({ items, listId, onWhole, onClear, skipped = false }: ResultListProps) {
   const botStop = botStopFor(listId)
-  const clipCount = items.filter(isClip).length
+  // คลิปไม่ซ้ำรหัส: ลิงก์คลิปเดียวกันที่เขียนต่างกัน (คลิปล้วน + คลิปในเพลย์ลิสต์) ไม่นับเป็นสองคลิป
+  const clipCount = new Set(items.filter(isClip).map((item) => item.videoId)).size
   // นับเฉพาะแถวที่เป็นคลิป: 10 แถวแรกของคลิปดึงชื่อเอง
   const autoTitle = items.map(
     (item, index) =>

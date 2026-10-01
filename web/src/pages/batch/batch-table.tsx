@@ -93,6 +93,7 @@ function Header({ rows, deselected, onToggleAll }: Omit<Props, "onToggle">) {
   return (
     <TableHeader>
       <TableRow className="hover:bg-transparent">
+        {/* ชื่อของช่องมาจาก label ที่ครอบ (Base UI ผูก aria-labelledby ให้เอง ห้ามใส่ aria-label ซ้ำไม่งั้นชื่อซ้อนสองรอบ) */}
         {/* ช่องเลือกทั้งหมดอยู่คอลัมน์แรก (ข้อความต่อท้ายกินสองคอลัมน์: ช่องติ๊ก + ปก) กดข้อความก็ติ๊กได้ */}
         <TableHead colSpan={2} className={HEAD}>
           <label className="flex min-h-8 w-fit items-center gap-3 text-foreground">
@@ -103,7 +104,6 @@ function Header({ rows, deselected, onToggleAll }: Omit<Props, "onToggle">) {
                 indeterminate={state === "some"}
                 disabled={selectable.length === 0}
                 onCheckedChange={(next) => onToggleAll(next)}
-                aria-label={t.selectAll}
                 className="data-indeterminate:border-primary data-indeterminate:bg-primary data-indeterminate:[&_svg]:invisible"
               />
               {state === "some" && (

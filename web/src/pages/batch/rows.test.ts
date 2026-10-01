@@ -70,11 +70,22 @@ describe("clipRows", () => {
     expect(hasPlaylists).toBe(false)
   })
 
-  it("ชื่อมาจาก cache (titleOf) · ไม่รู้ชื่อ = ไม่มี title", () => {
-    const { rows } = clipRows([video("aaaaaaaaaaa"), video("bbbbbbbbbbb")], (id) => (id === "aaaaaaaaaaa" ? "ชื่อคลิป" : undefined))
-    expect(rows[0]).toEqual({ videoId: "aaaaaaaaaaa", title: "ชื่อคลิป" })
+  it("ชื่อและความยาวมาจาก cache (infoOf) · ไม่รู้ = ไม่มีคีย์", () => {
+    const { rows } = clipRows([video("aaaaaaaaaaa"), video("bbbbbbbbbbb")], (id) =>
+      id === "aaaaaaaaaaa" ? { title: "ชื่อคลิป", durationS: 90 } : undefined
+    )
+    expect(rows[0]).toEqual({ videoId: "aaaaaaaaaaa", title: "ชื่อคลิป", durationS: 90 })
     expect(rows[1]).toEqual({ videoId: "bbbbbbbbbbb" })
     expect("title" in rows[1]).toBe(false)
+    expect("durationS" in rows[1]).toBe(false)
+  })
+
+  it("คลิปไม่เกิน 200 แถว (วาง 260 ลิงก์) · แถวลิงก์เสียยังแสดงครบ", () => {
+    const many = Array.from({ length: 260 }, (_, i) => video(`vid${String(i).padStart(8, "0")}`))
+    const { rows } = clipRows([...many, invalid], () => undefined)
+    expect(rows.filter((r) => !r.invalid)).toHaveLength(MAX_BATCH_ROWS)
+    expect(rows.filter((r) => r.invalid)).toHaveLength(1)
+    expect(rows[0].videoId).toBe("vid00000000")
   })
 })
 

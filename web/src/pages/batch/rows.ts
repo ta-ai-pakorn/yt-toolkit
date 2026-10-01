@@ -18,6 +18,9 @@ export const MAX_BATCH_ROWS = 200
 /** เลือกเกินกี่คลิปแล้วต้องถามยืนยันก่อนส่งเข้าคิว */
 export const CONFIRM_ABOVE = 20
 
+/** ข้อมูลคลิปที่รู้จาก cache ของ react-query */
+export type ClipInfo = { title?: string; durationS?: number }
+
 /**
  * แถวของตารางเลือกคลิป · แถวลิงก์ที่อ่านไม่ออก (`invalid`) ไม่มี videoId (ว่าง) และเลือกไม่ได้
  * ไม่รู้ชื่อ = ไม่มี title (หน้าเว็บแสดงรหัสคลิปแทน)
@@ -45,25 +48,29 @@ const isInvalid = (item: ResolveItem) => item.kind === "invalid" || (item.kind =
  * แถวคลิปจากรายการผลของ W1 (ไม่ได้เลือกเพลย์ลิสต์): คลิปกับลิงก์กำกวม ไม่ซ้ำรหัสตามลำดับที่เจอครั้งแรก
  * (กฎเดียวกับลำดับก่อนหน้า/ถัดไปของ W2) · ลิงก์อ่านไม่ออกเป็นแถวแดงที่เลือกไม่ได้ ตามตำแหน่งเดิม
  * · แถวเพลย์ลิสต์ไม่เข้าตาราง (`hasPlaylists` = ให้หน้าเว็บบอกว่าเลือกคลิปของมันได้จากปุ่มที่หน้าแรก)
- * `titleOf` = ชื่อจาก cache ของ react-query (ไม่รู้ = undefined) ไม่มีการขอข้อมูลใหม่
+ * `infoOf` = ชื่อและความยาวจาก cache ของ react-query (ไม่รู้ = undefined) ไม่มีการขอข้อมูลใหม่ · เกิน 200 คลิปตัดทิ้ง
  */
 export function clipRows(
   items: readonly ResolveItem[],
-  titleOf: (videoId: string) => string | undefined
+  infoOf: (videoId: string) => ClipInfo | undefined
 ): { rows: BatchRow[]; hasPlaylists: boolean } {
   const seen = new Set<string>()
   const rows: BatchRow[] = []
+  let clips = 0
   let hasPlaylists = false
   for (const item of items) {
     if (isInvalid(item)) {
       rows.push({ videoId: "", invalid: { input: item.input } })
     } else if (item.kind === "playlist") {
       hasPlaylists = true
-    } else if (isClip(item) && item.videoId && !seen.has(item.videoId)) {
+    } else if (isClip(item) && item.videoId && !seen.has(item.videoId) && clips < MAX_BATCH_ROWS) {
+      // ไม่เกิน 200 คลิป (FR-IN-3): งานวิดีโอ/เสียง + ซับ ต่อคลิปจึงไม่เกินขีด 500 งานต่อคำขอ
       seen.add(item.videoId)
+      clips += 1
       const row: BatchRow = { videoId: item.videoId }
-      const title = titleOf(item.videoId)
-      if (title) row.title = title
+      const info = infoOf(item.videoId)
+      if (info?.title) row.title = info.title
+      if (info?.durationS !== undefined) row.durationS = info.durationS
       rows.push(row)
     }
   }

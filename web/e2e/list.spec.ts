@@ -507,6 +507,8 @@ test.describe("W3 ทางเข้าหน้าเลือกคลิป (
     await expect(page).toHaveURL(/\/batch\?src=[^&]+$/)
     await expect(heading(page)).toHaveText("หลายลิงก์")
     await expect(crumbs(page)).toContainText("รายการที่วาง (3 ลิงก์)")
+    // แถวเพลย์ลิสต์ไม่เข้าตาราง: มีบรรทัดบอกทางไปเลือกที่หน้าแรก
+    await expect(page.getByText("เพลย์ลิสต์ในรายการนี้เลือกคลิปได้จากปุ่มในแถวของเพลย์ลิสต์ที่หน้าแรก")).toBeVisible()
   })
 
   test("แถวเพลย์ลิสต์มีปุ่มของตัวเอง → /batch?src=…&playlist=<id> แสดงชื่อเพลย์ลิสต์ · แถวคลิปไม่มีปุ่มนี้", async ({ page }) => {
@@ -518,6 +520,12 @@ test.describe("W3 ทางเข้าหน้าเลือกคลิป (
     await own.click()
     await expect(page).toHaveURL(new RegExp(`/batch\\?src=[^&]+&playlist=${PLAYLIST_ID}$`))
     await expect(heading(page)).toHaveText(PLAYLIST_TITLE)
+  })
+
+  test("ลิงก์คลิปเดียวกันสองแบบ (คลิปล้วน + คลิปในเพลย์ลิสต์) = คลิปเดียว → ไม่มีปุ่มที่หัวรายการ", async ({ page }) => {
+    await analyze(page, [`https://youtu.be/${BBB}`, `https://www.youtube.com/watch?v=${BBB}&list=${PLAYLIST_ID}`].join("\n"))
+    await expect(rows(page)).toHaveCount(2)
+    await expect(batchLink(page)).toHaveCount(0)
   })
 
   test("คลิปแถวเดียว (อีกแถวเป็นลิงก์เสีย) → ไม่มีปุ่มที่หัวรายการ · เพลย์ลิสต์อย่างเดียว = มีแค่ปุ่มของแถว", async ({

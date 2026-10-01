@@ -242,6 +242,15 @@ test("จอ 640 px (ซูม 200%): ไม่มีแถบเลื่อน
 })
 
 for (const scheme of ["dark", "light"] as const) {
+  test(`axe: หน้า W3 ตอนรายการหมดอายุไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await page.goto("/batch?src=deadbeefdeadbeef")
+    await expect(page.getByText("รายการนี้ไม่อยู่แล้ว วางลิงก์ใหม่ที่หน้าแรก")).toBeVisible()
+    await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
+    expect(await seriousViolations(page)).toEqual([])
+  })
+
+
   test(`axe: หน้า W3 (รายการหลายลิงก์ และกล่องยืนยัน) ไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme })
     await openBatchFromList(page)

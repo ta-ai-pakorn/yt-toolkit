@@ -46,11 +46,14 @@ import {
   type BatchChoice,
   type BatchRow,
   type BatchSource,
+  type ClipInfo,
 } from "./batch/rows"
+import { botStopFor } from "./home/bot-stop-gate"
 import { playlistQuery, videoTitleQuery } from "./home/queries"
 import { useHomeState } from "./home/state"
-import { useSubSettings } from "./video/subs-settings"
 import { LoadError } from "./video/load-error"
+import { videoQuery } from "./video/queries"
+import { useSubSettings } from "./video/subs-settings"
 
 const t = th.batch
 
@@ -94,21 +97,30 @@ function BatchCrumbs({ listCount }: { listCount?: number }) {
   )
 }
 
-/** ชื่อคลิปที่ W1 โหลดไว้แล้ว (cache ของ react-query) ไม่ส่งคำขอใหม่: ผู้สังเกตการณ์ปิดการดึง (enabled: false) แค่อ่านและตามการเปลี่ยนแปลง */
-function useCachedTitles(videoIds: string[]): ReadonlyMap<string, string> {
+/**
+ * ชื่อและความยาวของคลิปที่โหลดไว้แล้วใน cache ของ react-query (ไม่ส่งคำขอใหม่: ผู้สังเกตการณ์ปิดการดึง enabled: false แค่อ่านและตามการเปลี่ยนแปลง)
+ * ดูทั้งข้อมูลจากรายการผลของ W1 (peek) และข้อมูลของหน้า W2 ["video", id]
+ */
+function useCachedInfo(videoIds: string[]): ReadonlyMap<string, ClipInfo> {
   // combine ต้องคงตัวเดิมระหว่างการวาดซ้ำ ไม่งั้นได้ Map ใหม่ทุกรอบและตารางคำนวณแถวใหม่ทุกรอบ
   const combine = useCallback(
-    (results: { data?: { title?: string } }[]) => {
-      const titles = new Map<string, string>()
-      results.forEach((result, index) => {
-        if (result.data?.title) titles.set(videoIds[index], result.data.title)
+    (results: { data?: { title?: string; durationS?: number } }[]) => {
+      const infos = new Map<string, ClipInfo>()
+      videoIds.forEach((id, index) => {
+        const known = [results[index * 2]?.data, results[index * 2 + 1]?.data]
+        const title = known.find((data) => data?.title)?.title
+        const durationS = known.find((data) => data?.durationS !== undefined)?.durationS
+        if (title || durationS !== undefined) infos.set(id, { title, durationS })
       })
-      return titles
+      return infos
     },
     [videoIds]
   )
   return useQueries({
-    queries: videoIds.map((id) => ({ ...videoTitleQuery(id), enabled: false })),
+    queries: videoIds.flatMap((id) => [
+      { ...videoTitleQuery(id), enabled: false },
+      { ...videoQuery(id), enabled: false },
+    ]),
     combine,
   })
 }
@@ -138,8 +150,9 @@ function BatchBody({ source, results }: BodyProps) {
 
   // เลือกเฉพาะเพลย์ลิสต์/มิกซ์ = ข้อมูลเดียวกับที่ W1 โหลดไว้ (cache เดียวกัน ไม่ขอใหม่ถ้ายังสด)
   const playlistSource = source.playlist
+  // เบรก E_BOT_CHECK ของรายการผลนี้ (ตัวเดียวกับที่ W1 ใช้): ถูกเบรกอยู่ = ไม่ยิงคำขอเพลย์ลิสต์ใหม่
   const playlist = useQuery({
-    ...playlistQuery(playlistSource?.id ?? "", undefined, playlistSource?.v),
+    ...playlistQuery(playlistSource?.id ?? "", botStopFor(source.src), playlistSource?.v),
     enabled: playlistSource !== undefined,
   })
 
@@ -147,9 +160,9 @@ function BatchBody({ source, results }: BodyProps) {
     () => (playlistSource ? [] : clipRows(results, () => undefined).rows.flatMap((row) => (row.invalid ? [] : [row.videoId]))),
     [playlistSource, results]
   )
-  const titles = useCachedTitles(clipIds)
+  const infos = useCachedInfo(clipIds)
 
-  const fromList = useMemo(() => clipRows(results, (id) => titles.get(id)), [results, titles])
+  const fromList = useMemo(() => clipRows(results, (id) => infos.get(id)), [results, infos])
   const rows: BatchRow[] = useMemo(
     () => (playlistSource ? (playlist.data ? playlistRows(playlist.data.entries) : []) : fromList.rows),
     [playlistSource, playlist.data, fromList.rows]
@@ -192,8 +205,9 @@ function BatchBody({ source, results }: BodyProps) {
 
   const loadingPlaylist = playlistSource !== undefined && playlist.isPending
   const failure = playlistSource !== undefined && playlist.isError ? playlist : settings.isError ? settings : null
+  // ระหว่างโหลด/ผิดพลาดหัวเรื่องเป็นชื่อหน้า (ข้อความ "กำลังโหลด" อยู่ในกล่องสถานะอันเดียว ไม่ประกาศซ้ำ)
   const heading = playlistSource
-    ? (playlist.data ? playlist.data.title || th.home.results.playlistUntitled : loadingPlaylist ? t.loading : t.crumb)
+    ? (playlist.data ? playlist.data.title || th.home.results.playlistUntitled : t.crumb)
     : t.multiTitle
 
   return (
@@ -210,7 +224,12 @@ function BatchBody({ source, results }: BodyProps) {
       </div>
 
       {failure ? (
-        <LoadError title={t.loadError} error={failure.error} onRetry={() => void failure.refetch()} />
+        // ค่าตั้งโหลดไม่ได้ใช้ข้อความของค่าตั้ง (ไม่ใช่ความผิดพลาดของรายการคลิป)
+        <LoadError
+          title={failure === settings ? th.general.loadError : t.loadError}
+          error={failure.error}
+          onRetry={() => void failure.refetch()}
+        />
       ) : loadingPlaylist ? (
         <div aria-busy="true">
           <span className="sr-only" role="status">
@@ -241,14 +260,17 @@ function BatchBody({ source, results }: BodyProps) {
             </div>
           </div>
 
-          {fromList.hasPlaylists && !playlistSource && (
+          {fromList.hasPlaylists && !playlistSource && rows.length > 0 && (
             <p className="text-sm text-muted-foreground">{t.playlistsNote}</p>
           )}
 
           {rows.length === 0 ? (
             <Empty className="border py-12">
               <EmptyHeader>
-                <EmptyDescription>{th.home.results.playlistEmpty}</EmptyDescription>
+                {/* รายการหลายลิงก์ที่ไม่มีคลิปให้เลือก = มีแต่เพลย์ลิสต์ (บอกทางไปเลือกที่หน้าแรก) */}
+                <EmptyDescription>
+                  {playlistSource ? th.home.results.playlistEmpty : fromList.hasPlaylists ? t.playlistsNote : th.home.results.none}
+                </EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (
