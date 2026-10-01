@@ -78,16 +78,25 @@ export function presetOf(o: SubOptions): SubPreset | null {
   return null
 }
 
+/** คีย์ความยาวซับใน query ลำดับคงที่: maxChars, lines, minMs, maxMs, mode[, tokensPerCue] */
+function optionParams(o: SubOptions): string[] {
+  const query = [`maxChars=${o.maxChars}`, `lines=${o.lines}`, `minMs=${o.minMs}`, `maxMs=${o.maxMs}`, `mode=${o.mode}`]
+  if (o.mode === "tokens" && o.tokensPerCue !== undefined) query.push(`tokensPerCue=${o.tokensPerCue}`)
+  return query
+}
+
 /** path โหลดไฟล์ซับ ลำดับคีย์คงที่: format, maxChars, lines, minMs, maxMs, mode[, tokensPerCue] */
 export function exportPath(videoId: string, trackId: string, format: SubExportFormat, o: SubOptions): string {
-  const query = [
-    `format=${format}`,
-    `maxChars=${o.maxChars}`,
-    `lines=${o.lines}`,
-    `minMs=${o.minMs}`,
-    `maxMs=${o.maxMs}`,
-    `mode=${o.mode}`,
-  ]
-  if (o.mode === "tokens" && o.tokensPerCue !== undefined) query.push(`tokensPerCue=${o.tokensPerCue}`)
+  const query = [`format=${format}`, ...optionParams(o)]
   return `/api/videos/${encodeURIComponent(videoId)}/subtitles/${encodeURIComponent(trackId)}/export?${query.join("&")}`
+}
+
+/**
+ * path โหลดโน้ต .md ของคลิป (สัญญา C-A3): แทร็กที่ใช้อยู่ + ความยาวซับชุดเดียวกับไฟล์ซับ
+ * ไม่มีแทร็ก (ยังโหลดรายการแทร็กไม่เสร็จ หรือคลิปไม่มีซับ) = ไม่ส่ง trackId ให้ backend ใช้แทร็กเริ่มต้นเอง
+ * ลำดับคีย์คงที่: trackId, maxChars, lines, minMs, maxMs, mode[, tokensPerCue]
+ */
+export function notePath(videoId: string, trackId: string | null, o: SubOptions): string {
+  const query = [...(trackId ? [`trackId=${encodeURIComponent(trackId)}`] : []), ...optionParams(o)]
+  return `/api/videos/${encodeURIComponent(videoId)}/note?${query.join("&")}`
 }

@@ -49,3 +49,27 @@ export function youtubeLinkAt(videoId: string, ms: number): string {
   const seconds = Math.max(0, Math.floor((Number.isFinite(ms) ? ms : 0) / 1000))
   return `https://youtu.be/${videoId}?t=${seconds}`
 }
+
+// ตัวเลขแบบย่อของไทย ("1.2 แสน", "3.4 ล้าน"): compactDisplay long ได้หน่วยเป็นคำไทย (short ได้ "123K" แบบอังกฤษ)
+const compact = new Intl.NumberFormat("th", { notation: "compact", compactDisplay: "long" })
+const full = new Intl.NumberFormat("th")
+
+const count = (n: number) => (Number.isFinite(n) && n > 0 ? Math.floor(n) : 0)
+
+/** ตัวเลขย่อสำหรับแถวข้อมูลคลิป เช่น 123456 → "1.2 แสน" · ค่าที่ไม่ใช่ตัวเลขจริงหรือติดลบ = "0" */
+export function formatCompact(n: number): string {
+  return compact.format(count(n))
+}
+
+/** ตัวเลขเต็มมีจุลภาค เช่น 123456 → "123,456" (ใช้ในชื่อสำหรับโปรแกรมอ่านหน้าจอ) */
+export function formatCount(n: number): string {
+  return full.format(count(n))
+}
+
+/** แท็กของคลิปสำหรับคัดลอก: คั่นด้วย ", " ตามลำดับเดิม (ตัดช่องว่างหัวท้าย ข้ามแท็กว่าง) */
+export function formatTags(tags: readonly string[]): string {
+  return tags
+    .map((tag) => tag.trim())
+    .filter((tag) => tag !== "")
+    .join(", ")
+}

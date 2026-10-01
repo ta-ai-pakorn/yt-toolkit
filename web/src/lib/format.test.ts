@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest"
 
-import { formatDuration, formatPublished, formatTimecode, relativeTime, youtubeLinkAt } from "./format"
+import {
+  formatCompact,
+  formatCount,
+  formatDuration,
+  formatPublished,
+  formatTags,
+  formatTimecode,
+  relativeTime,
+  youtubeLinkAt,
+} from "./format"
 
 describe("formatDuration", () => {
   it("ต่ำกว่า 1 ชั่วโมงเป็น M:SS", () => {
@@ -103,5 +112,52 @@ describe("youtubeLinkAt", () => {
   it("ค่าที่ผิดปกติได้ t=0", () => {
     expect(youtubeLinkAt("abc", -5)).toBe("https://youtu.be/abc?t=0")
     expect(youtubeLinkAt("abc", Number.NaN)).toBe("https://youtu.be/abc?t=0")
+  })
+})
+
+describe("formatCompact", () => {
+  it("ย่อเป็นหน่วยไทย (พัน หมื่น แสน ล้าน) ทศนิยมไม่เกิน 1 ตำแหน่ง", () => {
+    expect(formatCompact(0)).toBe("0")
+    expect(formatCompact(7)).toBe("7")
+    expect(formatCompact(999)).toBe("999")
+    expect(formatCompact(1000)).toBe("1 พัน")
+    expect(formatCompact(1234)).toBe("1.2 พัน")
+    expect(formatCompact(12_345)).toBe("1.2 หมื่น")
+    expect(formatCompact(123_456)).toBe("1.2 แสน")
+    expect(formatCompact(1_234_567)).toBe("1.2 ล้าน")
+    expect(formatCompact(301_000_000)).toBe("301 ล้าน")
+    expect(formatCompact(1_234_567_890)).toBe("1.2 พันล้าน")
+  })
+
+  it("ค่าที่ผิดปกติได้ 0 และตัดเศษทิ้ง", () => {
+    expect(formatCompact(-5)).toBe("0")
+    expect(formatCompact(Number.NaN)).toBe("0")
+    expect(formatCompact(Number.POSITIVE_INFINITY)).toBe("0")
+    expect(formatCompact(999.9)).toBe("999")
+  })
+})
+
+describe("formatCount", () => {
+  it("ตัวเลขเต็มมีจุลภาค", () => {
+    expect(formatCount(0)).toBe("0")
+    expect(formatCount(999)).toBe("999")
+    expect(formatCount(123_456)).toBe("123,456")
+    expect(formatCount(1_234_567_890)).toBe("1,234,567,890")
+  })
+
+  it("ค่าที่ผิดปกติได้ 0", () => {
+    expect(formatCount(-1)).toBe("0")
+    expect(formatCount(Number.NaN)).toBe("0")
+  })
+})
+
+describe("formatTags", () => {
+  it("คั่นด้วย จุลภาค + เว้นวรรค ตามลำดับเดิม", () => {
+    expect(formatTags(["ยูทูป", "AI", "การตลาด"])).toBe("ยูทูป, AI, การตลาด")
+  })
+
+  it("ตัดช่องว่างหัวท้ายและข้ามแท็กว่าง · ไม่มีแท็ก = ข้อความว่าง", () => {
+    expect(formatTags(["  a ", "", "   ", "b"])).toBe("a, b")
+    expect(formatTags([])).toBe("")
   })
 })

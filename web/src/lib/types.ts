@@ -37,6 +37,12 @@ export type AudioFormat = {
 
 export type Chapter = { startS: number; endS: number; title: string }
 
+/** ตัวเลขของคลิปตอนดึงข้อมูล (ไม่มีคีย์ไหน = ยูทูปไม่บอก) */
+export type VideoStats = { views?: number; likes?: number; comments?: number; channelFollowers?: number }
+
+/** ช่วงที่คนดูซ้ำมากที่สุด (มิลลิวินาที) จาก heatmap ของยูทูป */
+export type ReplaySegment = { startMs: number; endMs: number }
+
 export type VideoInfo = {
   videoId: string
   title: string
@@ -51,7 +57,21 @@ export type VideoInfo = {
   isLive: boolean
   /** คำอธิบายคลิปตามที่ยูทูปให้มา (ข้อความดิบ) ไม่มีคีย์นี้เมื่อว่าง */
   description?: string
+  /** ยอดดู ถูกใจ คอมเมนต์ (สัญญา C-A1) ไม่มีคีย์นี้เมื่อไม่รู้ */
+  stats?: VideoStats
+  /** แท็กของคลิป (ไม่เกิน 50) */
+  tags?: string[]
+  /** หมวดหมู่ของยูทูป เช่น "Education" */
+  categories?: string[]
+  /** ช่วงที่คนดูซ้ำมากที่สุด ไม่เกิน 3 ช่วง เรียงตามเวลา · คลิปที่ไม่มี heatmap ไม่มีคีย์นี้ */
+  mostReplayed?: ReplaySegment[]
 }
+
+/** คอมเมนต์ปักหมุดที่เจ้าของช่องเขียนเอง (ไม่มีชื่อหรือรหัสผู้เขียน ตาม PDPA) */
+export type PinnedComment = { text: string; likes?: number; publishedText?: string }
+
+/** ผลของ GET /videos/{id}/pinned-comment · null = ไม่มีคอมเมนต์ปักหมุดจากเจ้าของช่อง */
+export type PinnedCommentResult = { comment: PinnedComment | null }
 
 export type ResolveKind = "video" | "playlist" | "ambiguous" | "invalid"
 
