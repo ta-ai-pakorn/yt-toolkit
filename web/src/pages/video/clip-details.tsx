@@ -12,7 +12,7 @@ import { formatChapters } from "@/lib/chapters"
 import { formatCompact, formatCount, formatTags, formatTimecode } from "@/lib/format"
 import type { Chapter, PinnedComment, ReplaySegment, VideoInfo } from "@/lib/types"
 
-import { cleanTags, infoSections } from "./info-sections"
+import { cleanTags, creditLine, infoSections } from "./info-sections"
 import { LoadError } from "./load-error"
 import { playerActions } from "./player/player-store"
 import { pinnedCommentQuery } from "./queries"
@@ -93,6 +93,30 @@ function TimeButton({ ms }: { ms: number }) {
       <Play aria-hidden className="fill-current" />
       {time}
     </Button>
+  )
+}
+
+/**
+ * เครดิต (FR-OUT-7, Q6): บรรทัดที่มาของคลิป + ปุ่ม "คัดลอกเครดิต" ได้ข้อความเดียวกับที่เห็น
+ * ปุ่มรองแบบ ghost (ไม่ใช่ปุ่มหลักสีเหลือง) ชื่อปุ่มเห็นเต็ม ๆ ไม่ย่อเป็น "คัดลอก"
+ */
+function CreditSection({ video, children }: { video: VideoInfo; children?: ReactNode }) {
+  const line = creditLine(video)
+  const headingId = useId()
+  return (
+    <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-h-7 flex-wrap items-center gap-x-2 gap-y-1">
+        <h2 id={headingId} className="text-base font-medium">
+          {t.info.creditTitle}
+        </h2>
+        <Button variant="ghost" size="sm" className={TOUCH} onClick={() => void copyText(line)}>
+          <Copy aria-hidden />
+          {t.info.copyCredit}
+        </Button>
+      </div>
+      <p className="text-sm leading-relaxed [overflow-wrap:anywhere] text-muted-foreground">{line}</p>
+      {children}
+    </section>
   )
 }
 
@@ -246,9 +270,9 @@ function PinnedSection({ videoId }: { videoId: string }) {
 
 /**
  * แท็บ "ข้อมูลคลิป" (?tab=info): ทุกส่วนแสดงเต็ม ไม่มีพับ/กาง (เปิดแท็บ = เปิดดู) แต่ละส่วนมีหัวข้อและปุ่มคัดลอกของตัวเอง
- * จอกว้าง (lg ขึ้นไป) 2 คอลัมน์: ซ้าย คำอธิบาย → Chapter · ขวา ช่วงที่คนดูซ้ำบ่อย → คอมเมนต์ปักหมุด → แท็ก (owner round 5)
- * จอแคบกว่านั้น คอลัมน์เดียว: คำอธิบาย → Chapter → ช่วงที่คนดูซ้ำบ่อย → คอมเมนต์ปักหมุด → แท็ก
- * ลำดับใน DOM = ลำดับที่อ่านทั้งสองขนาดจอ (คอลัมน์ซ้ายก่อน) ลำดับ Tab จึงตามที่ตาเห็น · ไม่มีข้อมูลเลย = ข้อความจางบรรทัดเดียว
+ * จอกว้าง (lg ขึ้นไป) 2 คอลัมน์: ซ้าย เครดิต → คำอธิบาย · ขวา Chapter → ช่วงที่คนดูซ้ำบ่อย → คอมเมนต์ปักหมุด → แท็ก (owner round 5-6, M4 Q6)
+ * จอแคบกว่านั้น คอลัมน์เดียว: เครดิต → คำอธิบาย → Chapter → ช่วงที่คนดูซ้ำบ่อย → คอมเมนต์ปักหมุด → แท็ก
+ * ลำดับใน DOM = ลำดับที่อ่านทั้งสองขนาดจอ (คอลัมน์ซ้ายก่อน) ลำดับ Tab จึงตามที่ตาเห็น · ไม่มีข้อมูลอื่นเลย = ข้อความจางบรรทัดเดียวใต้เครดิต
  */
 export function ClipInfoPanel({ video }: { video: VideoInfo | undefined }) {
   if (!video) {
@@ -262,7 +286,18 @@ export function ClipInfoPanel({ video }: { video: VideoInfo | undefined }) {
   }
   const has = infoSections(video)
 
+  const empty = !has.description && !has.chapters && !has.replayed && !has.pinned && !has.tags
+  const emptyNote = <p className="py-2 text-sm text-muted-foreground">{t.info.empty}</p>
+
+  // เครดิตอยู่บนสุดของคอลัมน์ซ้าย (เหนือคำอธิบาย) · ไม่มีส่วนอื่นเลย = "คลิปนี้ไม่มีข้อมูลเพิ่มเติม" อยู่ใต้เครดิต
   const left: ReactNode[] = []
+  if (has.credit) {
+    left.push(
+      <CreditSection key="credit" video={video}>
+        {empty && emptyNote}
+      </CreditSection>,
+    )
+  }
   if (has.description) left.push(<DescriptionSection key="description" description={video.description ?? ""} />)
   const right: ReactNode[] = []
   // owner round 6: Chapter อยู่คอลัมน์ขวา เหนือช่วงที่คนดูซ้ำบ่อย (คอลัมน์เดียว: คำอธิบาย, Chapter, ดูซ้ำบ่อย, ...)
@@ -274,7 +309,7 @@ export function ClipInfoPanel({ video }: { video: VideoInfo | undefined }) {
   if (has.tags) right.push(<TagsSection key="tags" tags={cleanTags(video.tags)} />)
 
   const columns = [left, right].filter((sections) => sections.length > 0)
-  if (columns.length === 0) return <p className="py-2 text-sm text-muted-foreground">{t.info.empty}</p>
+  if (columns.length === 0) return emptyNote
   return (
     <div className={cn("grid gap-x-8 gap-y-6", columns.length === 2 && "lg:grid-cols-2")}>
       {columns.map((sections, index) => (

@@ -2,6 +2,8 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page } from "@playwright/test"
 
+import { mockEnqueue } from "./queue-helpers"
+
 // owner round 5: ภาพเฟรมในช่วงที่คนดูซ้ำบ่อยเด่นขึ้น (กรอบอำพัน + ป้าย "ดูซ้ำบ่อย") · ตัวกรอง "ดูซ้ำบ่อย (n ภาพ)" (?replayed=1)
 // · ปุ่มเวลาของช่วงดูซ้ำเล่นคลิปที่หัวคลิป (M3.5) ไม่รอ storyboard และไม่พาไปแท็บภาพเฟรมแล้ว
 // mostReplayed จำลองด้วย page.route ข้อมูลส่วนอื่นมาจาก backend โหมด fake
@@ -143,17 +145,23 @@ test.describe("แท็บภาพเฟรม: ตัวกรอง 'ดู�
     await expect(frameList(page).getByRole("button", { name: /^ภาพเฟรมที่ 00:00:29/ })).toBeFocused()
   })
 
-  test("'โหลดทั้งหมด (.zip)' ไม่ขึ้นกับตัวกรอง: ชื่อปุ่มเดิม คำขอเดิม (ไม่มีพารามิเตอร์) ได้ไฟล์ .zip", async ({ page }) => {
+  test("'โหลดทั้งหมด (.zip)' ไม่ขึ้นกับตัวกรอง: ชื่อปุ่มเดิม ส่งงานเข้าคิว frames_zip โดยไม่มีพารามิเตอร์กรอง (M4)", async ({
+    page,
+  }) => {
+    const queue = await mockEnqueue(page)
     await withVideo(page, THAI, { mostReplayed: SEGMENTS })
     await page.goto(`/v/${THAI}?replayed=1`)
     await expect(filterButton(page)).toHaveAttribute("aria-pressed", "true")
     const zipButton = page.getByRole("button", { name: ZIP, exact: true })
     await expect(zipButton).toHaveText(ZIP)
-    const request = page.waitForRequest((r) => new URL(r.url()).pathname === `/api/videos/${THAI}/storyboard/frames.zip`)
-    const download = page.waitForEvent("download")
+    let downloads = 0
+    page.on("download", () => (downloads += 1))
     await zipButton.click()
-    expect(new URL((await request).url()).search).toBe("")
-    expect((await download).suggestedFilename()).toMatch(/\.zip$/)
+    await expect.poll(() => queue.bodies.length).toBe(1)
+    // ตัวกรองไม่มีผล: มีแค่ source (ไม่มีช่วงเวลา ไม่มีรายการภาพ) และไม่มีไฟล์โหลดผ่านเบราว์เซอร์
+    expect(queue.bodies[0]).toEqual([{ videoId: THAI, kind: "frames_zip", params: { source: "fast" } }])
+    await expect(page.getByText("เพิ่มเข้าคิวแล้ว").first()).toBeVisible()
+    expect(downloads).toBe(0)
   })
 
   test("?replayed=1 แต่คลิปไม่มีช่วงดูซ้ำ: ไม่สนใจ เห็นทุกภาพ และไม่มีปุ่มกรอง", async ({ page }) => {

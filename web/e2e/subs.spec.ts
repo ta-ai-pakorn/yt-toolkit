@@ -1,9 +1,8 @@
 /// <reference lib="dom" />
-import fs from "node:fs"
-import path from "node:path"
-
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page } from "@playwright/test"
+
+import { mockEnqueue } from "./queue-helpers"
 
 // คลิปภาษาไทย: ซับอัตโนมัติภาษาต้นฉบับ (th-orig) เป็นแทร็กเริ่มต้น + ซับแปลอัตโนมัติหลายภาษา
 const THAI = "88o5Sk8_m1Y"
@@ -22,8 +21,6 @@ const OPEN_TRANSLATED = "เลือกซับแปลอัตโนมั�
 const WARNING = "ซับกลุ่มนี้ยูทูปแปลด้วยเครื่อง คุณภาพต่ำและอาจผิดความหมาย ใช้เมื่อไม่มีซับภาษาที่ต้องการเท่านั้น"
 const PICK_HINT = "คลิปนี้ไม่มีซับจากเจ้าของคลิปหรือซับภาษาต้นฉบับ เลือกแทร็กที่ต้องการจากรายการ"
 const MAX_CHARS = "ตัวอักษรสูงสุดต่อบรรทัด"
-// ชื่อไฟล์ตาม Q2 = ก: <ชื่อคลิปที่ปลอดภัย>.<ภาษา>.<นามสกุล> (ตัด | ออกและยุบช่องว่าง) ตรงกับที่เทสต์ API ของ T11 ตรึงไว้
-const SRT_NAME = "Thai Listening Practice EP.1 Beginner.th.srt"
 
 const trackSelect = (page: Page) => page.getByRole("combobox", { name: "แทร็กซับ" })
 // ข้อความที่ช่องเลือกแสดง (ไอคอนลูกศรของช่องมีอักขระซ่อนอยู่ใน textContent จึงอ่านเฉพาะส่วนค่า)
@@ -80,9 +77,10 @@ test.describe("แท็บซับ", () => {
     expect(await firstCueLines(page).allTextContents()).toEqual(after)
   })
 
-  test("กด 'ทีละคำ' → ทุกซับในตัวอย่างมีคำเดียว จำนวนซับเท่ากับจำนวนคำ · ไฟล์ .srt ตรงกับ golden ทีละคำ", async ({
+  test("กด 'ทีละคำ' → ทุกซับในตัวอย่างมีคำเดียว จำนวนซับเท่ากับจำนวนคำ · ปุ่ม .srt ส่งงานเข้าคิวด้วยค่าของ ทีละคำ", async ({
     page,
   }) => {
+    const queue = await mockEnqueue(page)
     const tokensResponse = page.waitForResponse((r) => /\/subtitles\/[^/]+\/tokens$/.test(new URL(r.url()).pathname))
     await openSubs(page, THAI)
     const { tokens } = (await (await tokensResponse).json()) as { tokens: { t: string }[] }
@@ -100,16 +98,21 @@ test.describe("แท็บซับ", () => {
       await expect(cues(page).nth(i).locator('[data-slot="cue-line"]')).toHaveText([word])
     }
 
-    // ไฟล์ที่ backend สร้างด้วยค่าของ "ทีละคำ" ตรงกับ golden ที่ฝั่ง Python และ TS ตรวจไว้ทุกไบต์
-    const downloading = page.waitForEvent("download")
+    // M4: ปุ่มโหลดส่งงานเข้าคิว (ไม่โหลดผ่านเบราว์เซอร์) ค่าความยาวซับของ "ทีละคำ" ไปครบทุกช่อง
+    // (ไฟล์จริงตรงกับ golden ทุกไบต์ ตรวจที่ pytest ฝั่ง backend)
     await page.getByRole("group", { name: "โหลดซับ" }).getByRole("button", { name: "โหลด .srt" }).click()
-    const bytes = await (await downloading).createReadStream().then(async (stream) => {
-      const chunks: Buffer[] = []
-      for await (const chunk of stream) chunks.push(chunk as Buffer)
-      return Buffer.concat(chunks)
-    })
-    const golden = fs.readFileSync(path.join(import.meta.dirname, "../../tests/fixtures/subs/golden/th-asr.word.srt"))
-    expect(bytes.equals(golden)).toBe(true)
+    await expect.poll(() => queue.bodies.length).toBe(1)
+    expect(queue.bodies[0]).toEqual([
+      {
+        videoId: THAI,
+        kind: "subtitle",
+        params: {
+          trackId: "a.th-orig",
+          format: "srt",
+          options: { maxChars: 15, lines: 1, minMs: 800, maxMs: 3000, mode: "tokens", tokensPerCue: 1 },
+        },
+      },
+    ])
 
     await page.reload()
     await expect(cues(page)).toHaveCount(5)
@@ -176,27 +179,49 @@ test.describe("แท็บซับ", () => {
     await expect(trackValue(page)).toHaveText("ไทย (อัตโนมัติ)")
   })
 
-  test("'โหลด .srt' ได้ไฟล์ชื่อตามคลิป .th.srt ที่ขึ้นต้นด้วย 1\\r\\n00:00:00,120", async ({ page }) => {
+  test("'โหลด .srt/.txt/.md' ส่งงานเข้าคิว: payload ครบ (แทร็ก รูปแบบ ความยาวซับกลาง) + toast 'เพิ่มเข้าคิวแล้ว' · ไม่มีไฟล์โหลดผ่านเบราว์เซอร์", async ({
+    page,
+  }) => {
+    const queue = await mockEnqueue(page)
+    let downloads = 0
+    page.on("download", () => (downloads += 1))
     await openSubs(page, THAI)
-    const downloading = page.waitForEvent("download")
-    await page.getByRole("group", { name: "โหลดซับ" }).getByRole("button", { name: "โหลด .srt" }).click()
-    const download = await downloading
-    expect(download.suggestedFilename()).toBe(SRT_NAME)
-    const bytes = await download.createReadStream().then(async (stream) => {
-      const chunks: Buffer[] = []
-      for await (const chunk of stream) chunks.push(chunk as Buffer)
-      return Buffer.concat(chunks)
-    })
-    expect(bytes.toString("utf8").startsWith("1\r\n00:00:00,120 --> ")).toBe(true)
+    const group = page.getByRole("group", { name: "โหลดซับ" })
+    for (const [index, format] of ["srt", "txt", "md"].entries()) {
+      await group.getByRole("button", { name: `โหลด .${format}` }).click()
+      await expect.poll(() => queue.bodies.length).toBe(index + 1)
+      await expect(page.getByText("เพิ่มเข้าคิวแล้ว").first()).toBeVisible()
+      // กดซ้ำได้อีกครั้งเมื่อส่งเสร็จ (ปุ่มกลับมาใช้ได้)
+      await expect(group.getByRole("button", { name: `โหลด .${format}` })).toBeEnabled()
+    }
+    expect(queue.bodies.map((items) => items[0].params)).toEqual(
+      ["srt", "txt", "md"].map((format) => ({
+        trackId: "a.th-orig",
+        format,
+        options: { maxChars: 25, lines: 1, minMs: 1200, maxMs: 5000, mode: "chars" },
+      })),
+    )
+    for (const items of queue.bodies) {
+      expect(items).toHaveLength(1)
+      expect(items[0]).toMatchObject({ videoId: THAI, kind: "subtitle" })
+    }
+    expect(downloads).toBe(0)
   })
 
-  test("โหลดไม่สำเร็จ → toast ข้อความไทย ไม่ได้ไฟล์", async ({ page }) => {
-    await page.route((url) => url.pathname.endsWith("/export"), (route) => route.abort())
+  test("ส่งเข้าคิวไม่สำเร็จ → toast ข้อความไทยจาก backend · ปุ่มกลับมากดได้ ไม่มีไฟล์โหลด", async ({ page }) => {
+    await page.route("**/api/jobs", (route) =>
+      route.request().method() === "POST"
+        ? route.fulfill({
+            status: 500,
+            json: { error: { code: "E_INTERNAL", message: "ส่งเข้าคิวไม่ได้ในตอนนี้", detail: null } },
+          })
+        : route.fallback(),
+    )
     await openSubs(page, THAI)
     let downloads = 0
     page.on("download", () => (downloads += 1))
     await page.getByRole("button", { name: "โหลด .txt" }).click()
-    await expect(page.getByText(/เชื่อมต่อโปรแกรมไม่ได้/)).toBeVisible()
+    await expect(page.getByText("ส่งเข้าคิวไม่ได้ในตอนนี้")).toBeVisible()
     await expect(page.getByRole("button", { name: "โหลด .txt" })).toBeEnabled()
     expect(downloads).toBe(0)
   })

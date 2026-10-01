@@ -17,6 +17,7 @@ import { ApiError } from "@/lib/api"
 import { copyImage } from "@/lib/clipboard"
 import { downloadFile } from "@/lib/download"
 import { formatTimecode, youtubeLinkAt, youtubeWatchUrl } from "@/lib/format"
+import { useEnqueue } from "@/lib/jobs"
 import type { ReplaySegment, StoryboardFrame } from "@/lib/types"
 
 import { errorMessage } from "./errors"
@@ -437,13 +438,28 @@ function NoStoryboard() {
 
 type Bulk = "sheet" | "zip"
 
+/** ข้อความ toast ตอนส่งเข้าคิว: "failed" ของคิวคือ "เพิ่มเข้าคิวไม่สำเร็จ" (addFailed) */
+const ENQUEUE_MESSAGES = {
+  added: th.queue.added,
+  addedMany: th.queue.addedMany,
+  failed: th.queue.addFailed,
+  goHealth: th.queue.goHealth,
+}
+
+/** ปุ่มโหลดทั้งชุด: M4 ส่งงานเข้าคิว (ไฟล์ลงโฟลเดอร์ปลายทาง) ตัวกรองไม่มีผล ทุกภาพเสมอ */
 function BulkDownloads({ videoId }: { videoId: string }) {
   const [busy, setBusy] = useState<Bulk | null>(null)
+  const { enqueue } = useEnqueue(ENQUEUE_MESSAGES)
 
-  async function run(kind: Bulk, path: string, fallbackName: string) {
+  async function run(kind: Bulk) {
+    if (busy !== null) return
     setBusy(kind)
     try {
-      await downloadWithToast(`/api/videos/${videoId}/storyboard/${path}`, fallbackName)
+      await enqueue([
+        kind === "sheet"
+          ? { videoId, kind: "contact_sheet", params: { source: "fast", columns: 5 } }
+          : { videoId, kind: "frames_zip", params: { source: "fast" } },
+      ])
     } finally {
       setBusy(null)
     }
@@ -461,7 +477,7 @@ function BulkDownloads({ videoId }: { videoId: string }) {
               className={TOUCH}
               disabled={busy !== null}
               focusableWhenDisabled
-              onClick={() => void run("sheet", "contact-sheet.jpg", "contact-sheet.jpg")}
+              onClick={() => void run("sheet")}
             />
           }
         >
@@ -476,7 +492,7 @@ function BulkDownloads({ videoId }: { videoId: string }) {
         className={TOUCH}
         disabled={busy !== null}
         focusableWhenDisabled
-        onClick={() => void run("zip", "frames.zip", "frames.zip")}
+        onClick={() => void run("zip")}
       >
         {busy === "zip" && <Spinner aria-hidden />}
         {t.zip}
