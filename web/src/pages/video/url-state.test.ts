@@ -20,6 +20,8 @@ describe("readVideoParams", () => {
   it("แท็บที่ไม่รู้จักอ่านเป็นภาพเฟรม", () => {
     expect(readVideoParams(params("tab=weird")).tab).toBe("frames")
     expect(readVideoParams(params("tab=transcript")).tab).toBe("transcript")
+    expect(readVideoParams(params("tab=info")).tab).toBe("info")
+    expect(readVideoParams(params("tab=INFO")).tab).toBe("frames")
   })
 
   it("เวลาที่ติดลบ ไม่ใช่ตัวเลข หรือเป็นทศนิยมอ่านเป็น null", () => {
@@ -49,6 +51,11 @@ describe("patchSearch", () => {
 
   it("tab: frames ลบ tab ออก (ค่าเริ่มต้นไม่ขึ้นใน URL)", () => {
     expect(patchSearch(params("tab=subs&track=a.th-orig"), { tab: "frames" })).toBe("?track=a.th-orig")
+  })
+
+  it("tab: info ขึ้นใน URL เป็น ?tab=info และไปภาพเฟรมพร้อมเวลาได้ในก้าวเดียว", () => {
+    expect(patchSearch(params(""), { tab: "info" })).toBe("?tab=info")
+    expect(patchSearch(params("tab=info"), { tab: "frames", at: 5000 })).toBe("?at=5000")
   })
 
   it("trackId: null ลบแทร็กออก และไม่เหลืออะไรคืนสตริงว่าง", () => {

@@ -14,7 +14,7 @@ import { videoQuery } from "./video/queries"
 import { ClipSequence } from "./video/sequence"
 import { VideoTabs } from "./video/tabs"
 
-/** หน้า W2 (/v/:videoId): breadcrumb + หัวคลิป + แถบแท็บ (ภาพเฟรม · ซับ · ทรานสคริปต์) · ส่วนไหนข้อมูลมาก่อนแสดงก่อน */
+/** หน้า W2 (/v/:videoId): breadcrumb + หัวคลิป + แถบแท็บ (ภาพเฟรม · ซับ · ทรานสคริปต์ · ข้อมูลคลิป) · ส่วนไหนข้อมูลมาก่อนแสดงก่อน */
 export function VideoPage() {
   const { videoId = "" } = useParams()
   const location = useLocation()
@@ -64,7 +64,7 @@ export function VideoPage() {
       </div>
       <VideoHeader video={video} />
       {/* คลิปเปิดไม่ได้ (ส่วนตัว/ไลฟ์/ถูกลบ) ก็ไม่มีภาพเฟรมหรือซับให้ขอ ซ่อนแถบแท็บทั้งแถบ */}
-      {(hasData || !video.isError) && <VideoTabs videoId={videoId} enabled={hasData} mostReplayed={video.data?.mostReplayed} />}
+      {(hasData || !video.isError) && <VideoTabs videoId={videoId} enabled={hasData} video={video.data} />}
       {dialog}
     </div>
   )

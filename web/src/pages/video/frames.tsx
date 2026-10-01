@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Captions, Copy, Download, Flame, ImageIcon, ImageOff, Link2 } from "lucide-react"
+import { Captions, Copy, Download, ExternalLink, ImageIcon, ImageOff, Link2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { toast } from "sonner"
 
@@ -16,14 +16,14 @@ import { fill, th } from "@/i18n/th"
 import { ApiError } from "@/lib/api"
 import { copyImage } from "@/lib/clipboard"
 import { downloadFile } from "@/lib/download"
-import { formatTimecode, youtubeLinkAt } from "@/lib/format"
+import { formatTimecode, youtubeLinkAt, youtubeWatchUrl } from "@/lib/format"
 import type { ReplaySegment, StoryboardFrame } from "@/lib/types"
 
 import { errorMessage } from "./errors"
 import { nearestFrameIndex, revealAndFocus } from "./frame-target"
 import { FrameLightbox } from "./lightbox"
 import { LoadError } from "./load-error"
-import { replayedFrames, segmentFrameIndex } from "./most-replayed"
+import { replayedFrames } from "./most-replayed"
 import { ReplayedMark } from "./replayed-mark"
 import { storyboardQuery } from "./queries"
 import { subtitlesQuery } from "./subs-queries"
@@ -64,6 +64,11 @@ async function copyText(text: string): Promise<void> {
   } catch {
     toast.error(t.copyFailed)
   }
+}
+
+/** เปิดลิงก์ยูทูปในแท็บใหม่ แยกจากหน้านี้ (noopener, noreferrer) */
+function openInYoutube(url: string): void {
+  window.open(url, "_blank", "noopener,noreferrer")
 }
 
 /** url ของภาพเฟรมมี ?v=<token> อยู่แล้ว ต่อ download ด้วย & (ถ้าไม่มี query ค่อยใช้ ?) */
@@ -210,6 +215,10 @@ function FrameTile({ frame, videoId, highlighted, replayed, onOpen, onViewSubs, 
         <ContextMenuItem onClick={() => void copyText(youtubeLinkAt(videoId, frame.tMs))}>
           <Link2 aria-hidden />
           {t.copyLink}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => openInYoutube(youtubeWatchUrl(videoId, frame.tMs))}>
+          <ExternalLink aria-hidden />
+          {t.openYoutubeAt}
         </ContextMenuItem>
         {onViewSubs && (
           <ContextMenuItem onClick={onViewSubs}>
@@ -372,59 +381,16 @@ function BulkDownloads({ videoId }: { videoId: string }) {
   )
 }
 
-/**
- * บรรทัด "ช่วงที่คนดูซ้ำมากที่สุด: 00:01:20, 00:05:10" ใต้หัวข้อภาพเฟรม (ไอคอนเดียวกับป้ายบนภาพ จึงอธิบายป้ายไปในตัว)
- * กดเวลาแล้วไฮไลต์ภาพแรกในช่วงนั้น (ไม่มีภาพในช่วง = ภาพที่ใกล้กลางช่วงที่สุด ซึ่งก็มีป้าย) เลื่อนมาให้เห็นและโฟกัส
- * (กลไกเดียวกับ ?at= จากทรานสคริปต์) ตัวเลขบนปุ่มยังเป็นเวลาเริ่มของช่วง
- */
-function ReplayedTimes({
-  segments,
-  frames,
-  onPick,
-}: {
-  segments: ReplaySegment[]
-  frames: StoryboardFrame[]
-  onPick: (ms: number) => void
-}) {
-  return (
-    <p className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm text-muted-foreground">
-      <Flame aria-hidden className="size-4 shrink-0 text-accent-text" />
-      <span className="mr-1">{t.replayedTitle}</span>
-      {segments.map((segment, index) => {
-        const time = formatTimecode(segment.startMs)
-        return (
-          <span key={`${segment.startMs}-${index}`} className="inline-flex items-center">
-            <Button
-              variant="outline"
-              size="xs"
-              className="font-mono text-foreground tabular-nums max-sm:h-11 max-sm:px-3"
-              aria-label={fill(t.goToReplayed, { time })}
-              onClick={() => {
-                const index = segmentFrameIndex(frames, segment)
-                onPick(index >= 0 ? frames[index].tMs : segment.startMs)
-              }}
-            >
-              {time}
-            </Button>
-            {index < segments.length - 1 && <span aria-hidden>,</span>}
-          </span>
-        )
-      })}
-    </p>
-  )
-}
-
 type FramesSectionProps = {
   videoId: string
   enabled: boolean
-  /** ช่วงที่คนดูซ้ำมากที่สุดจากข้อมูลคลิป · ไม่มี = ไม่มีบรรทัดนี้และไม่มีป้ายบนภาพ */
+  /** ช่วงที่คนดูซ้ำมากที่สุดจากข้อมูลคลิป · ไม่มี = ไม่มีป้ายบนภาพ (ปุ่มเวลาของช่วงอยู่ในแท็บข้อมูลคลิป) */
   mostReplayed?: ReplaySegment[]
 }
 
 /** ส่วน "ภาพเฟรม" ของ W2 · เริ่มโหลด storyboard เมื่อ `enabled` (หลังข้อมูลคลิปมาแล้ว) */
 export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionProps) {
   const storyboard = useQuery(storyboardQuery(videoId, enabled))
-  const sectionRef = useRef<HTMLElement>(null)
   // รายการแทร็กซับ (cache เดียวกับป้ายแทร็กที่หัวคลิป) ใช้ตัดสินว่าเมนูภาพเฟรมมี "ดูซับช่วงนี้" ไหม
   const subtitles = useQuery(subtitlesQuery(videoId, enabled))
   const { trackId, at, update } = useVideoParams()
@@ -444,10 +410,9 @@ export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionP
   } else if (storyboard.isSuccess) {
     body = <FrameGrid frames={frames} videoId={videoId} at={at} segments={mostReplayed} onViewSubs={onViewSubs} />
   } else body = <FrameSkeleton />
-  const showReplayed = storyboard.isSuccess && frames.length > 0 && (mostReplayed?.length ?? 0) > 0
 
   return (
-    <section ref={sectionRef} aria-labelledby="frames-title">
+    <section aria-labelledby="frames-title">
       <Card>
         {/* จอแคบ: หัวข้อ แถวปุ่มโหลด และคำแนะนำ เรียงกันคนละบรรทัด หัวข้อจะได้ไม่ถูกบีบจนขึ้นบรรทัดใหม่ */}
         <CardHeader className="max-sm:grid-cols-1!">
@@ -468,20 +433,6 @@ export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionP
           )}
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          {showReplayed && mostReplayed && (
-            <ReplayedTimes
-              segments={mostReplayed}
-              frames={frames}
-              onPick={(ms) => {
-                // กดเวลาเดิมซ้ำ (at ไม่เปลี่ยน) ก็ยังพาไปที่ภาพที่ไฮไลต์อยู่
-                if (ms === at) {
-                  const current = sectionRef.current?.querySelector<HTMLElement>("button[data-highlighted]")
-                  current?.focus({ preventScroll: true })
-                  current?.scrollIntoView({ block: "center" })
-                } else update({ at: ms })
-              }}
-            />
-          )}
           {body}
         </CardContent>
       </Card>

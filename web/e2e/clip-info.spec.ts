@@ -2,7 +2,8 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page, type Route } from "@playwright/test"
 
-// owner round 2 (หน้าเว็บ): ข้อมูลคลิป · คอมเมนต์ปักหมุด · บันทึกเป็นโน้ต · ช่วงที่คนดูซ้ำ · หัวคลิปแบบกระชับ
+// owner round 2-4 (หน้าเว็บ): ช่องตัวเลข · แท็บข้อมูลคลิป (คำอธิบาย chapter ช่วงที่คนดูซ้ำ คอมเมนต์ปักหมุด แท็ก)
+// · บันทึกเป็นโน้ต · เปิดในยูทูป · ภาพปกขนาดใหญ่ · หัวคลิปแบบกระชับ (สูงคงที่)
 // ข้อมูลใหม่ของ backend (stats, tags, categories, mostReplayed, /pinned-comment, /note) จำลองด้วย page.route
 // ข้อมูลส่วนอื่นมาจาก backend โหมด fake ตามปกติ
 
@@ -12,12 +13,15 @@ const ZOO = "jNQXAC9IVRw"
 const THAI = "88o5Sk8_m1Y"
 
 const NEW_KEYS = ["stats", "tags", "categories", "mostReplayed"]
-const PINNED_TITLE = "คอมเมนต์ปักหมุดจากเจ้าของช่อง"
-const NO_PINNED = "ไม่มีคอมเมนต์ปักหมุดจากเจ้าของช่อง"
+const PINNED_TITLE = "คอมเมนต์ปักหมุด"
+const NO_PINNED = "ไม่มีคอมเมนต์ปักหมุด"
 const NOTE_BUTTON = "บันทึกเป็นโน้ต (.md)"
 const TAB_LIST = "เครื่องมือของคลิปนี้"
 const FRAME_LIST = "รายการภาพเฟรม"
 const LINES = "บรรทัดในทรานสคริปต์"
+const INFO_TAB = "ข้อมูลคลิป"
+const REPLAYED_TITLE = "ช่วงที่คนดูซ้ำบ่อย"
+const COVER = "ดูภาพปกขนาดใหญ่"
 
 /**
  * แก้ข้อมูลคลิปที่ backend ส่งมา: ลบคีย์ใหม่ทั้งหมดก่อน (ผลไม่ขึ้นกับว่า backend มีข้อมูลเหล่านี้แล้วหรือยัง) แล้วใส่ patch
@@ -67,28 +71,42 @@ const lastWrite = (page: Page) =>
   page.evaluate(() => (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites.at(-1))
 
 const heading = (page: Page) => page.getByRole("heading", { level: 1 })
-const toggle = (page: Page, name: string | RegExp) => page.getByRole("button", { name, exact: typeof name === "string" })
-const pinnedRegion = (page: Page) => page.getByRole("region", { name: PINNED_TITLE })
+const pinnedRegion = (page: Page) => page.getByRole("region", { name: PINNED_TITLE, exact: true })
 const tagsRegion = (page: Page) => page.getByRole("region", { name: /^แท็ก \(/ })
 const chapterRegion = (page: Page) => page.getByRole("region", { name: /^Chapter \(/ })
+const descriptionRegion = (page: Page) => page.getByRole("region", { name: "คำอธิบาย" })
+const replayedRegion = (page: Page) => page.getByRole("region", { name: REPLAYED_TITLE })
 const frameList = (page: Page) => page.getByRole("list", { name: FRAME_LIST })
 const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: true })
+const tile = (page: Page, name: string | RegExp) => page.getByRole("list", { name: "ตัวเลขของคลิป" }).getByRole("img", { name })
+const gotoInfo = (page: Page, videoId: string) => page.goto(`/v/${videoId}?tab=info`)
 
 const STATS = { views: 123_456, likes: 4567, comments: 89, channelFollowers: 2_000_000 }
 
-test.describe("ข้อมูลคลิป: ยอดดู ถูกใจ คอมเมนต์ หมวดหมู่", () => {
-  test("แถวข้อมูลแสดงตัวเลขย่อแบบไทยพร้อมไอคอน · ชื่อสำหรับโปรแกรมอ่านหน้าจอเป็นตัวเลขเต็ม · หมวดหมู่เป็นป้ายเล็ก", async ({
+test.describe("ช่องตัวเลขที่หัวคลิป", () => {
+  test("ยอดวิว ไลก์ คอมเมนต์ ผู้ติดตาม ความยาว เผยแพร่: ป้ายเล็กด้านบน ค่าย่อแบบไทยตัวใหญ่ด้านล่าง · ชื่อเต็มเป็นตัวเลขเต็ม", async ({
     page,
   }) => {
     await withVideo(page, ZOO, { stats: STATS, categories: ["Education"] })
     await page.goto(`/v/${ZOO}`)
     await expect(heading(page)).toContainText("Me at the zoo")
-    const views = page.getByRole("img", { name: "ยอดดู 123,456 ครั้ง" })
-    await expect(views).toHaveText("1.2 แสน ครั้ง")
-    await expect(views.locator("svg")).toHaveCount(1)
-    await expect(views).toHaveAttribute("title", "ยอดดู 123,456 ครั้ง")
-    await expect(page.getByRole("img", { name: "ถูกใจ 4,567 ครั้ง" })).toHaveText("4.6 พัน")
-    await expect(page.getByRole("img", { name: "คอมเมนต์ 89 รายการ" })).toHaveText("89")
+    const tiles = page.getByRole("list", { name: "ตัวเลขของคลิป" }).getByRole("img")
+    await expect(tiles).toHaveCount(6)
+    const views = tile(page, "ยอดวิว 123,456 ครั้ง")
+    await expect(views).toHaveAttribute("title", "ยอดวิว 123,456 ครั้ง")
+    await expect(views).toHaveText("ยอดวิว1.2 แสน")
+    // ป้ายตัวเล็กกว่าค่า และอยู่เหนือค่า
+    const [label, value] = [views.locator("span").first(), views.locator("span").last()]
+    const labelBox = await label.boundingBox()
+    const valueBox = await value.boundingBox()
+    expect((labelBox?.y ?? 0) + (labelBox?.height ?? 0)).toBeLessThanOrEqual((valueBox?.y ?? 0) + 1)
+    const size = (locator: typeof label) => locator.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
+    expect(await size(value)).toBeGreaterThan(await size(label))
+    await expect(tile(page, "ไลก์ 4,567 ครั้ง")).toHaveText("ไลก์4.6 พัน")
+    await expect(tile(page, "คอมเมนต์ 89 รายการ")).toHaveText("คอมเมนต์89")
+    await expect(tile(page, "ผู้ติดตาม 2,000,000 คน")).toHaveText("ผู้ติดตาม2 ล้าน")
+    await expect(tile(page, "ความยาว 0:19")).toHaveText("ความยาว0:19")
+    await expect(tile(page, /^เผยแพร่ /)).toBeVisible()
     // หมวดหมู่: ตาเห็นชื่อหมวด โปรแกรมอ่านหน้าจอได้คำว่า "หมวดหมู่" นำหน้า
     const category = page.locator('[data-slot="badge"]', { hasText: "Education" })
     await expect(category).toBeVisible()
@@ -96,59 +114,73 @@ test.describe("ข้อมูลคลิป: ยอดดู ถูกใจ �
     await expect(category.getByText("หมวดหมู่")).toHaveClass(/sr-only/)
   })
 
-  test("ไม่ซ้ำจำนวนตอน: แถวข้อมูลไม่มีป้าย '3 ตอน' แล้ว หัวข้อ Chapter บอกจำนวนอยู่", async ({ page }) => {
+  for (const [width, perRow] of [
+    [1280, 6],
+    [360, 3],
+  ] as const) {
+    test(`จอ ${width} px: ช่องตัวเลขแถวละ ${perRow} ช่อง`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 })
+      await withVideo(page, ZOO, { stats: STATS })
+      await page.goto(`/v/${ZOO}`)
+      const tiles = page.getByRole("list", { name: "ตัวเลขของคลิป" }).getByRole("img")
+      await expect(tiles).toHaveCount(6)
+      const tops = await tiles.evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)))
+      expect(new Set(tops.slice(0, perRow)).size).toBe(1)
+      if (perRow < 6) expect(tops[perRow]).toBeGreaterThan(tops[0])
+    })
+  }
+
+  test("ไม่ซ้ำจำนวนตอน: แถวข้อมูลไม่มีป้าย '3 ตอน' · หัวข้อ Chapter ในแท็บข้อมูลคลิปบอกจำนวนอยู่", async ({ page }) => {
     await withVideo(page, ZOO)
-    await page.goto(`/v/${ZOO}`)
+    await gotoInfo(page, ZOO)
     await expect(page.getByRole("heading", { level: 2, name: "Chapter (3 ตอน)" })).toBeVisible()
     await expect(page.getByText("3 ตอน", { exact: true })).toHaveCount(0)
   })
 
-  test("ข้อมูลที่ยูทูปไม่บอกไม่แสดง: ไม่มี stats แท็ก หมวดหมู่ → ไม่มีตัวเลข ไม่มีกล่องแท็ก ไม่มีป้ายหมวดหมู่", async ({
+  test("ข้อมูลที่ยูทูปไม่บอกไม่ขึ้นช่อง: ไม่มี stats → ไม่มีช่องยอดวิว/ไลก์/คอมเมนต์/ผู้ติดตาม · ไม่มีป้ายหมวดหมู่ ไม่มีส่วนแท็ก", async ({
     page,
   }) => {
     await withVideo(page, ZOO)
     await page.goto(`/v/${ZOO}`)
     await expect(heading(page)).toContainText("Me at the zoo")
-    await expect(page.getByRole("img", { name: /^(ยอดดู|ถูกใจ|คอมเมนต์) / })).toHaveCount(0)
+    await expect(tile(page, /^(ยอดวิว|ไลก์|คอมเมนต์|ผู้ติดตาม) /)).toHaveCount(0)
+    // ความยาวและวันที่เผยแพร่มีในชุดทดสอบ จึงยังมีสองช่องนี้
+    await expect(page.getByRole("list", { name: "ตัวเลขของคลิป" }).getByRole("img")).toHaveCount(2)
+    await expect(page.locator('[data-slot="badge"]', { hasText: "หมวดหมู่" })).toHaveCount(0)
+    await tab(page, INFO_TAB).click()
+    await expect(descriptionRegion(page)).toBeVisible()
     await expect(tagsRegion(page)).toHaveCount(0)
     await expect(page.getByRole("button", { name: "คัดลอกแท็ก" })).toHaveCount(0)
-    await expect(page.locator('[data-slot="badge"]', { hasText: "หมวดหมู่" })).toHaveCount(0)
   })
 
-  test("มีแค่บางตัวเลข (ยอดดูอย่างเดียว) แสดงเฉพาะตัวที่มี · ยอด 0 ยังแสดงเป็น 0", async ({ page }) => {
+  test("มีแค่บางตัวเลข (ยอดวิวอย่างเดียว) แสดงเฉพาะตัวที่มี · ยอด 0 ยังแสดงเป็น 0", async ({ page }) => {
     await withVideo(page, ZOO, { stats: { views: 0 } })
     await page.goto(`/v/${ZOO}`)
-    await expect(page.getByRole("img", { name: "ยอดดู 0 ครั้ง" })).toHaveText("0 ครั้ง")
-    await expect(page.getByRole("img", { name: /^(ถูกใจ|คอมเมนต์) / })).toHaveCount(0)
+    await expect(tile(page, "ยอดวิว 0 ครั้ง")).toHaveText("ยอดวิว0")
+    await expect(tile(page, /^(ไลก์|คอมเมนต์|ผู้ติดตาม) /)).toHaveCount(0)
   })
 })
 
-test.describe("ข้อมูลคลิป: แท็ก", () => {
+test.describe("แท็บข้อมูลคลิป: แท็ก", () => {
   const TAGS = ["สวนสัตว์", "ช้าง", "คลิปแรกของยูทูป"]
 
-  test("เริ่มแบบพับ: เห็นแค่ 'แท็ก (3)' · กางแล้วเห็นแท็กเป็นชิป · พับกลับได้", async ({ page }) => {
+  test("แท็กทั้งหมดเห็นเป็นชิปทันที (ไม่มีพับ/กาง) · หัวข้อ 'แท็ก (3)'", async ({ page }) => {
     await withVideo(page, ZOO, { tags: TAGS })
-    await page.goto(`/v/${ZOO}`)
-    const button = toggle(page, "แท็ก (3)")
-    await expect(button).toHaveAttribute("aria-expanded", "false")
+    await gotoInfo(page, ZOO)
     await expect(page.getByRole("heading", { level: 2, name: "แท็ก (3)" })).toBeVisible()
-    // ตอนพับรายการถูกซ่อน (ไม่อยู่ใน accessibility tree) จึงหาด้วยแท็ก ul
-    const list = tagsRegion(page).locator("ul")
-    await expect(list).toBeHidden()
-    await expect(button).toHaveAttribute("aria-controls", (await list.getAttribute("id")) ?? "")
-    await button.click()
-    await expect(button).toHaveAttribute("aria-expanded", "true")
-    await expect(list.getByRole("listitem")).toHaveText(TAGS)
-    await button.click()
-    await expect(list).toBeHidden()
+    await expect(tagsRegion(page).getByRole("listitem")).toHaveText(TAGS)
+    await expect(tagsRegion(page).locator("[aria-expanded]")).toHaveCount(0)
   })
 
-  test("'คัดลอกแท็ก' ได้แท็กคั่นด้วย ', ' (ตัดช่องว่าง ข้ามแท็กว่าง) แม้กล่องพับอยู่ และขึ้น toast", async ({ page, context }) => {
+  test("'คัดลอกแท็ก' ได้แท็กคั่นด้วย ', ' (ตัดช่องว่าง ข้ามแท็กว่าง) และขึ้น toast · หัวคลิปไม่มีปุ่มนี้", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"])
     await recordClipboardWrites(page)
     await withVideo(page, ZOO, { tags: [" สวนสัตว์ ", "", "ช้าง", "   ", "Zoo"] })
     await page.goto(`/v/${ZOO}`)
-    await expect(toggle(page, "แท็ก (3)")).toBeVisible()
+    await expect(heading(page)).toContainText("Me at the zoo")
+    await expect(page.getByRole("button", { name: "คัดลอกแท็ก" })).toHaveCount(0)
+    await tab(page, INFO_TAB).click()
+    await expect(page.getByRole("heading", { level: 2, name: "แท็ก (3)" })).toBeVisible()
     const copy = page.getByRole("button", { name: "คัดลอกแท็ก" })
     await expect(copy).toHaveText("คัดลอก")
     await copy.click()
@@ -156,22 +188,36 @@ test.describe("ข้อมูลคลิป: แท็ก", () => {
     expect(await lastWrite(page)).toBe("สวนสัตว์, ช้าง, Zoo")
   })
 
-  test("แท็กว่างทั้งหมด = ไม่มีกล่องแท็ก", async ({ page }) => {
+  test("แท็กว่างทั้งหมด = ไม่มีส่วนแท็ก", async ({ page }) => {
     await withVideo(page, ZOO, { tags: ["", "  "] })
-    await page.goto(`/v/${ZOO}`)
-    await expect(heading(page)).toContainText("Me at the zoo")
+    await gotoInfo(page, ZOO)
+    await expect(descriptionRegion(page)).toBeVisible()
     await expect(tagsRegion(page)).toHaveCount(0)
   })
 })
 
-test.describe("คอมเมนต์ปักหมุดจากเจ้าของช่อง", () => {
+test.describe("แท็บข้อมูลคลิป: ไม่มีข้อมูลเลย", () => {
+  test("ไม่มีคำอธิบาย chapter ช่วงดูซ้ำ แท็ก และปิดคอมเมนต์ → ข้อความจาง 'คลิปนี้ไม่มีข้อมูลเพิ่มเติม' บรรทัดเดียว", async ({ page }) => {
+    await withVideo(page, ZOO, { description: "", chapters: [], tags: [], stats: { comments: 0 } })
+    const calls = await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: null } }))
+    await gotoInfo(page, ZOO)
+    const empty = page.getByRole("tabpanel").getByText("คลิปนี้ไม่มีข้อมูลเพิ่มเติม")
+    await expect(empty).toBeVisible()
+    await expect(empty).toHaveClass(/text-muted-foreground/)
+    await expect(page.getByRole("tabpanel").getByRole("heading")).toHaveCount(0)
+    expect(calls.count).toBe(0)
+  })
+})
+
+test.describe("แท็บข้อมูลคลิป: คอมเมนต์ปักหมุด", () => {
   const COMMENT = {
     text: "ขอบคุณที่ดูนะครับ\nลิงก์คอร์ส: https://example.com/course\n\nบรรทัดสุดท้าย",
     likes: 1520,
     publishedText: "2 years ago",
+    byUploader: true,
   }
 
-  test("คลิปที่มีคอมเมนต์: แถวพับอยู่และยังไม่ขอข้อมูล · กางแล้วเห็น Skeleton → ข้อความคงการขึ้นบรรทัด ไม่มีลิงก์ · คัดลอกได้ตรงตัว", async ({
+  test("ขอข้อมูลเมื่อเปิดแท็บข้อมูลคลิปครั้งแรกเท่านั้น: Skeleton → ข้อความคงการขึ้นบรรทัด ไม่มีลิงก์ · คัดลอกได้ตรงตัว · สลับแท็บไปมาไม่ขอซ้ำ", async ({
     page,
     context,
   }) => {
@@ -185,15 +231,18 @@ test.describe("คอมเมนต์ปักหมุดจากเจ้�
       await route.fulfill({ json: { comment: COMMENT } })
     })
     await page.goto(`/v/${ZOO}`)
-    const button = toggle(page, PINNED_TITLE)
-    await expect(button).toHaveAttribute("aria-expanded", "false")
-    await expect(page.getByRole("heading", { level: 2, name: PINNED_TITLE })).toBeVisible()
+    await expect(heading(page)).toContainText("Me at the zoo")
+    // เปิดหน้า (แท็บภาพเฟรม) ยังไม่ขอคอมเมนต์ปักหมุด และหัวคลิปไม่มีส่วนนี้
+    await page.waitForTimeout(300)
     expect(calls.count).toBe(0)
+    await expect(pinnedRegion(page)).toHaveCount(0)
 
-    await button.click()
-    await expect(button).toHaveAttribute("aria-expanded", "true")
+    await tab(page, INFO_TAB).click()
+    await expect(page.getByRole("heading", { level: 2, name: PINNED_TITLE, exact: true })).toBeVisible()
     await expect(pinnedRegion(page).getByRole("status")).toHaveText("กำลังโหลดคอมเมนต์ปักหมุด")
     await expect(pinnedRegion(page).locator('[data-slot="skeleton"]').first()).toBeVisible()
+    // ปุ่มคัดลอกขึ้นหลังได้คอมเมนต์เท่านั้น
+    await expect(page.getByRole("button", { name: "คัดลอกคอมเมนต์ปักหมุด" })).toHaveCount(0)
     release()
 
     const text = pinnedRegion(page).getByText(/^ขอบคุณที่ดูนะครับ/)
@@ -210,36 +259,60 @@ test.describe("คอมเมนต์ปักหมุดจากเจ้�
     await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
     expect(await lastWrite(page)).toBe(COMMENT.text)
 
-    // พับแล้วกางใหม่ใช้ผลเดิม ไม่ขอซ้ำ
-    await button.click()
-    await expect(text).toBeHidden()
-    await button.click()
+    // ไปแท็บอื่นแล้วกลับมา ใช้ผลเดิมจาก cache ไม่ขอซ้ำ
+    await tab(page, "ซับ").click()
+    await expect(text).toHaveCount(0)
+    await tab(page, INFO_TAB).click()
     await expect(text).toBeVisible()
     expect(calls.count).toBe(1)
   })
 
-  test("ไม่มีคอมเมนต์ปักหมุด (null): ข้อความจาง และไม่มีปุ่มคัดลอก", async ({ page }) => {
+  for (const [byUploader, label] of [
+    [true, "เจ้าของช่อง"],
+    [false, "ผู้ชม"],
+  ] as const) {
+    test(`ป้ายผู้เขียน: byUploader ${byUploader} → '${label}' ข้างหัวข้อ (ไม่มีชื่อผู้เขียน)`, async ({ page }) => {
+      await withVideo(page, ZOO)
+      await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: { text: "ปักหมุดไว้", byUploader } } }))
+      await gotoInfo(page, ZOO)
+      await expect(pinnedRegion(page).getByText("ปักหมุดไว้")).toBeVisible()
+      const badge = pinnedRegion(page).locator("[data-author]")
+      await expect(badge).toHaveCount(1)
+      await expect(badge).toHaveAttribute("data-author", byUploader ? "owner" : "viewer")
+      // ตาเห็นแค่ป้าย โปรแกรมอ่านหน้าจอได้ "ผู้เขียน: ..."
+      await expect(badge).toHaveText(`ผู้เขียน: ${label}`)
+      await expect(badge.getByText("ผู้เขียน:")).toHaveClass(/sr-only/)
+      const other = byUploader ? "ผู้ชม" : "เจ้าของช่อง"
+      await expect(pinnedRegion(page).getByText(other, { exact: true })).toHaveCount(0)
+    })
+  }
+
+  test("ไม่มีคอมเมนต์ปักหมุด (null): ข้อความจาง ไม่มีป้ายผู้เขียน และไม่มีปุ่มคัดลอก", async ({ page }) => {
     await withVideo(page, ZOO)
     await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: null } }))
-    await page.goto(`/v/${ZOO}`)
-    await toggle(page, PINNED_TITLE).click()
+    await gotoInfo(page, ZOO)
     const none = pinnedRegion(page).getByText(NO_PINNED)
     await expect(none).toBeVisible()
     await expect(none).toHaveClass(/text-muted-foreground/)
+    await expect(pinnedRegion(page).locator("[data-author]")).toHaveCount(0)
     await expect(page.getByRole("button", { name: "คัดลอกคอมเมนต์ปักหมุด" })).toHaveCount(0)
   })
 
-  test("คลิปที่ปิดคอมเมนต์หรือมี 0 คอมเมนต์: ไม่มีแถวคอมเมนต์ปักหมุดเลย", async ({ page }) => {
+  test("คลิปที่ปิดคอมเมนต์หรือมี 0 คอมเมนต์: ไม่มีส่วนคอมเมนต์ปักหมุดเลย และไม่ขอข้อมูล", async ({ page }) => {
     await withVideo(page, ZOO, { stats: { ...STATS, comments: 0 } })
-    await page.goto(`/v/${ZOO}`)
-    await expect(page.getByRole("img", { name: "คอมเมนต์ 0 รายการ" })).toBeVisible()
+    const calls = await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: null } }))
+    await gotoInfo(page, ZOO)
+    await expect(tile(page, "คอมเมนต์ 0 รายการ")).toBeVisible()
+    await expect(descriptionRegion(page)).toBeVisible()
     await expect(pinnedRegion(page)).toHaveCount(0)
+    expect(calls.count).toBe(0)
   })
 
-  test("ไม่รู้จำนวนคอมเมนต์ (ไม่มี stats): มีแถวคอมเมนต์ปักหมุด", async ({ page }) => {
+  test("ไม่รู้จำนวนคอมเมนต์ (ไม่มี stats): มีส่วนคอมเมนต์ปักหมุด", async ({ page }) => {
     await withVideo(page, BBB)
-    await page.goto(`/v/${BBB}`)
-    await expect(toggle(page, PINNED_TITLE)).toBeVisible()
+    await mockPinned(page, BBB, (route) => route.fulfill({ json: { comment: null } }))
+    await gotoInfo(page, BBB)
+    await expect(pinnedRegion(page)).toBeVisible()
   })
 
   test("เน็ตหลุด: Alert ข้อความจาก backend + ลองใหม่ · กดแล้วได้คอมเมนต์", async ({ page }) => {
@@ -248,10 +321,9 @@ test.describe("คอมเมนต์ปักหมุดจากเจ้�
     const calls = await mockPinned(page, ZOO, (route) =>
       fail
         ? route.fulfill({ status: 502, json: envelope("E_NETWORK", "เชื่อมต่อยูทูปไม่ได้ ตรวจอินเทอร์เน็ตแล้วลองใหม่") })
-        : route.fulfill({ json: { comment: { text: "คอมเมนต์จากเจ้าของช่อง" } } }),
+        : route.fulfill({ json: { comment: { text: "คอมเมนต์จากเจ้าของช่อง", byUploader: true } } }),
     )
-    await page.goto(`/v/${ZOO}`)
-    await toggle(page, PINNED_TITLE).click()
+    await gotoInfo(page, ZOO)
     const alert = pinnedRegion(page).getByRole("alert")
     await expect(alert).toContainText("โหลดคอมเมนต์ปักหมุดไม่สำเร็จ")
     await expect(alert).toContainText("เชื่อมต่อยูทูปไม่ได้ ตรวจอินเทอร์เน็ตแล้วลองใหม่")
@@ -261,19 +333,17 @@ test.describe("คอมเมนต์ปักหมุดจากเจ้�
     expect(calls.count).toBe(2)
   })
 
-  test("E_BOT_CHECK: Alert ไม่มีปุ่มลองใหม่ · พับแล้วกางใหม่ไม่ยิงซ้ำ", async ({ page }) => {
+  test("E_BOT_CHECK: Alert ไม่มีปุ่มลองใหม่ · สลับแท็บไปมาไม่ยิงซ้ำ", async ({ page }) => {
     await withVideo(page, ZOO)
     const calls = await mockPinned(page, ZOO, (route) =>
       route.fulfill({ status: 429, json: envelope("E_BOT_CHECK", "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท รอสัก 10 นาทีแล้วค่อยลองใหม่") }),
     )
-    await page.goto(`/v/${ZOO}`)
-    const button = toggle(page, PINNED_TITLE)
-    await button.click()
+    await gotoInfo(page, ZOO)
     const alert = pinnedRegion(page).getByRole("alert")
     await expect(alert).toContainText("ยูทูปขอให้ยืนยันว่าไม่ใช่บอท")
     await expect(alert.getByRole("button", { name: "ลองใหม่" })).toHaveCount(0)
-    await button.click()
-    await button.click()
+    await tab(page, "ภาพเฟรม").click()
+    await tab(page, INFO_TAB).click()
     await expect(alert).toBeVisible()
     expect(calls.count).toBe(1)
   })
@@ -384,7 +454,69 @@ test.describe("บันทึกเป็นโน้ต (.md)", () => {
   })
 })
 
-test.describe("ช่วงที่คนดูซ้ำมากที่สุด", () => {
+test.describe("เปิดในยูทูป และภาพปก", () => {
+  test("ปุ่ม 'เปิดในยูทูป' ที่หัวคลิปเป็นลิงก์ไปหน้าคลิป เปิดแท็บใหม่ (noopener noreferrer) · หน้าตาเป็นปุ่มรอง", async ({ page }) => {
+    await page.goto(`/v/${BBB}`)
+    const link = page.getByRole("link", { name: /^เปิดในยูทูป/ })
+    await expect(link).toHaveAccessibleName("เปิดในยูทูป (เปิดในแท็บใหม่)")
+    await expect(link).toHaveAttribute("href", `https://www.youtube.com/watch?v=${BBB}`)
+    await expect(link).toHaveAttribute("target", "_blank")
+    await expect(link).toHaveAttribute("rel", "noopener noreferrer")
+    await expect(link).toHaveClass(/bg-secondary/)
+  })
+
+  test("ปกไม่ใช่ลิงก์ไปยูทูป: กดแล้วเปิดภาพปกขนาดใหญ่ (กล่องเดียวกับภาพเฟรม) · Esc ปิดแล้วโฟกัสกลับที่ปก", async ({ page }) => {
+    const info = await (await page.request.get(`/api/videos/${ZOO}`)).json() as { thumbnailUrl: string }
+    expect(info.thumbnailUrl).not.toBe("")
+    await page.goto(`/v/${ZOO}`)
+    const cover = page.getByRole("button", { name: COVER })
+    await expect(cover).toHaveAttribute("aria-haspopup", "dialog")
+    // ลิงก์ไปยูทูปในหน้ามีแค่ปุ่ม "เปิดในยูทูป" ปกไม่ได้อยู่ในลิงก์
+    await expect(page.locator("a[href^='https://www.youtube.com/watch']")).toHaveCount(1)
+    await expect(cover.locator("xpath=ancestor::a")).toHaveCount(0)
+    await expect(cover).toHaveCSS("cursor", "zoom-in")
+
+    await cover.click()
+    const dialog = page.getByRole("dialog", { name: "ภาพปกของคลิป" })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator("img")).toHaveAttribute("src", info.thumbnailUrl)
+    await page.keyboard.press("Escape")
+    await expect(dialog).toHaveCount(0)
+    await expect(cover).toBeFocused()
+  })
+
+  for (const key of ["Enter", "Space"]) {
+    test(`คีย์บอร์ด: ${key} ที่ปกเปิดภาพใหญ่ · เห็นไอคอนขยายตอนโฟกัส · คลิกที่ภาพปิดได้`, async ({ page }) => {
+      await page.goto(`/v/${ZOO}`)
+      const cover = page.getByRole("button", { name: COVER })
+      const zoom = cover.locator('[data-slot="cover-zoom"]')
+      await expect(zoom).toHaveCSS("opacity", "0")
+      await cover.focus()
+      await page.keyboard.press("Tab")
+      await page.keyboard.press("Shift+Tab")
+      await expect(cover).toBeFocused()
+      await expect(zoom).toHaveCSS("opacity", "1")
+      await page.keyboard.press(key)
+      const dialog = page.getByRole("dialog", { name: "ภาพปกของคลิป" })
+      await expect(dialog).toBeVisible()
+      await expect(dialog.locator("img")).toBeVisible()
+      await dialog.locator("img").click()
+      await expect(dialog).toHaveCount(0)
+      await expect(cover).toBeFocused()
+    })
+  }
+
+  test("ชี้เมาส์ที่ปกเห็นไอคอนขยาย", async ({ page }) => {
+    await page.goto(`/v/${ZOO}`)
+    const cover = page.getByRole("button", { name: COVER })
+    const zoom = cover.locator('[data-slot="cover-zoom"]')
+    await expect(zoom).toHaveCSS("opacity", "0")
+    await cover.hover()
+    await expect(zoom).toHaveCSS("opacity", "1")
+  })
+})
+
+test.describe("แท็บข้อมูลคลิป: ช่วงที่คนดูซ้ำบ่อย", () => {
   const SEGMENTS = [
     { startMs: 20_000, endMs: 30_000 },
     { startMs: 60_000, endMs: 66_000 },
@@ -415,21 +547,22 @@ test.describe("ช่วงที่คนดูซ้ำมากที่ส�
     const button = frameList(page).getByRole("button").nth(first)
     await expect(button).toHaveAccessibleName(/^ภาพเฟรมที่ \d{2}:\d{2}:\d{2}\s+ดูซ้ำบ่อย$/)
     await expect(button.locator("[data-replayed] svg")).toBeVisible()
+    // บรรทัดเวลาของช่วงย้ายไปแท็บข้อมูลคลิปแล้ว ส่วนภาพเฟรมไม่มีบรรทัดนี้
+    await expect(page.getByRole("region", { name: "ภาพเฟรม" }).getByRole("button", { name: /^ไปภาพเฟรมช่วง / })).toHaveCount(0)
   })
 
-  test("บรรทัด 'ช่วงที่คนดูซ้ำมากที่สุด: 00:00:20, 00:01:00' · กดเวลาแล้วภาพแรกในช่วงถูกไฮไลต์ เลื่อนมาให้เห็น และได้โฟกัส", async ({
+  test("ส่วน 'ช่วงที่คนดูซ้ำบ่อย' มีปุ่มเวลา 00:00:20, 00:01:00 · กดแล้วไปแท็บภาพเฟรม ภาพแรกในช่วงถูกไฮไลต์ เห็นในจอ และได้โฟกัส", async ({
     page,
   }) => {
     await withVideo(page, THAI, { mostReplayed: SEGMENTS })
-    await page.goto(`/v/${THAI}`)
-    const section = page.getByRole("region", { name: "ภาพเฟรม" })
-    await expect(section.getByText("ช่วงที่คนดูซ้ำมากที่สุด:")).toBeVisible()
-    const times = section.getByRole("button", { name: /^ไปภาพเฟรมช่วง / })
+    await gotoInfo(page, THAI)
+    const times = replayedRegion(page).getByRole("button", { name: /^ไปภาพเฟรมช่วง / })
     await expect(times).toHaveText(["00:00:20", "00:01:00"])
     await times.nth(1).click()
     // review M-2: ภาพแรกที่อยู่ในช่วง 60-66 วินาที (ภาพห่างกัน 4895 ms → 63635 ms = 00:01:03) ไม่ใช่ภาพที่ใกล้ 60 วินาที
     // ที่สุด (58740 ms อยู่นอกช่วงและไม่มีป้าย)
-    await expect(page).toHaveURL(/[?&]at=63635(&|$)/)
+    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=63635$`))
+    await expect(tab(page, "ภาพเฟรม")).toHaveAttribute("aria-selected", "true")
     const highlighted = frameList(page).locator("[data-highlighted]")
     await expect(highlighted).toHaveCount(1)
     await expect(highlighted).toBeFocused()
@@ -437,10 +570,9 @@ test.describe("ช่วงที่คนดูซ้ำมากที่ส�
     await expect(highlighted.locator("img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:01:03")
     await expect(highlighted.locator("[data-replayed]")).toHaveCount(1)
 
-    // กดเวลาเดิมซ้ำหลังโฟกัสไปที่อื่น ก็กลับมาที่ภาพเดิม
-    await page.evaluate(() => window.scrollTo(0, 0))
-    await times.nth(1).focus()
-    await times.nth(1).click()
+    // กลับไปแท็บข้อมูลคลิป (ล้างเวลา) แล้วกดเวลาเดิมซ้ำ ก็กลับมาที่ภาพเดิม
+    await tab(page, INFO_TAB).click()
+    await replayedRegion(page).getByRole("button", { name: "ไปภาพเฟรมช่วง 00:01:00" }).click()
     await expect(highlighted).toBeFocused()
     await expect(highlighted).toBeInViewport()
   })
@@ -452,10 +584,21 @@ test.describe("ช่วงที่คนดูซ้ำมากที่ส�
     const marked = frameList(page).locator("button:has([data-replayed])")
     await expect(marked).toHaveCount(1)
     await expect(marked.locator("img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:01:03")
+    await tab(page, INFO_TAB).click()
     await page.getByRole("button", { name: /^ไปภาพเฟรมช่วง 00:01:01/ }).click()
     const highlighted = frameList(page).locator("[data-highlighted]")
     await expect(highlighted).toBeFocused()
     await expect(highlighted.locator("[data-replayed]")).toHaveCount(1)
+  })
+
+  test("'คัดลอกช่วงที่คนดูซ้ำบ่อย' ได้ช่วงละบรรทัด HH:MM:SS - HH:MM:SS", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"])
+    await recordClipboardWrites(page)
+    await withVideo(page, THAI, { mostReplayed: SEGMENTS })
+    await gotoInfo(page, THAI)
+    await replayedRegion(page).getByRole("button", { name: "คัดลอกช่วงที่คนดูซ้ำบ่อย" }).click()
+    await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
+    expect(await lastWrite(page)).toBe("00:00:20 - 00:00:30\n00:01:00 - 00:01:06")
   })
 
   test("ป้ายในแท็บทรานสคริปต์มีคำอธิบายเมื่อชี้เมาส์ (review M-3)", async ({ page }) => {
@@ -465,12 +608,14 @@ test.describe("ช่วงที่คนดูซ้ำมากที่ส�
     await expect(mark).toHaveAttribute("title", "ช่วงที่คนดูซ้ำบ่อย")
   })
 
-  test("คลิปที่ไม่มี heatmap: ไม่มีบรรทัดช่วงที่ดูซ้ำ และไม่มีป้ายบนภาพ", async ({ page }) => {
+  test("คลิปที่ไม่มี heatmap: ไม่มีส่วนช่วงที่ดูซ้ำในแท็บข้อมูลคลิป และไม่มีป้ายบนภาพ", async ({ page }) => {
     await withVideo(page, THAI)
     await page.goto(`/v/${THAI}`)
     await expect(frameList(page).getByRole("listitem").first()).toBeVisible()
-    await expect(page.getByText("ช่วงที่คนดูซ้ำมากที่สุด:")).toHaveCount(0)
     await expect(frameList(page).locator("[data-replayed]")).toHaveCount(0)
+    await tab(page, INFO_TAB).click()
+    await expect(descriptionRegion(page)).toBeVisible()
+    await expect(replayedRegion(page)).toHaveCount(0)
   })
 
   test("แท็บทรานสคริปต์: บรรทัดที่คาบเกี่ยวกับช่วงมีป้ายเดียวกัน บรรทัดอื่นไม่มี", async ({ page }) => {
@@ -495,8 +640,8 @@ test.describe("ช่วงที่คนดูซ้ำมากที่ส�
   })
 })
 
-test.describe("หัวคลิปแบบกระชับ", () => {
-  // กรณีหนักสุดของหัวคลิป: ตัวเลข หมวดหมู่ คำอธิบายยาว chapter แท็กหลายอัน และแถวคอมเมนต์ปักหมุด
+test.describe("หัวคลิปแบบกระชับ (สูงคงที่)", () => {
+  // กรณีหนักสุด: ตัวเลขครบ หมวดหมู่ คำอธิบายยาว chapter แท็กหลายอัน ช่วงดูซ้ำ และคอมเมนต์ปักหมุด
   const FULL = {
     stats: STATS,
     categories: ["People & Blogs"],
@@ -504,18 +649,20 @@ test.describe("หัวคลิปแบบกระชับ", () => {
     mostReplayed: [{ startMs: 5000, endMs: 9000 }],
   }
 
-  test("จอ 360×800: chapter เริ่มแบบพับ · แถบแท็บอยู่ในจอแรก (ไม่เกิน 800 px) · กาง chapter ได้", async ({ page }) => {
+  const tabTop = async (page: Page) => (await page.getByRole("tablist", { name: TAB_LIST }).boundingBox())?.y ?? -1
+
+  test("จอ 360×800: แถบแท็บอยู่ในจอแรก (ไม่เกิน 800 px) · ปุ่มในหัวคลิปสูงอย่างน้อย 44 px · หัวคลิปไม่มีกล่องที่กางได้", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 360, height: 800 })
     await withVideo(page, ZOO, FULL)
     await page.goto(`/v/${ZOO}`)
     await expect(heading(page)).toContainText("Me at the zoo")
-    await expect(page.getByRole("img", { name: "ยอดดู 123,456 ครั้ง" })).toBeVisible()
-    await expect(toggle(page, PINNED_TITLE)).toBeVisible()
-    await expect(toggle(page, "แท็ก (12)")).toBeVisible()
-    const chapters = toggle(page, "Chapter (3 ตอน)")
-    await expect(chapters).toHaveAttribute("aria-expanded", "false")
-    await expect(chapterRegion(page).locator("li")).toHaveCount(3)
-    await expect(chapterRegion(page).locator("ol")).toBeHidden()
+    await expect(tile(page, "ยอดวิว 123,456 ครั้ง")).toBeVisible()
+    // ส่วนที่เคยอยู่ในหัวคลิป (และกางได้) ย้ายไปแท็บข้อมูลคลิปแล้ว
+    await expect(page.locator("[aria-expanded]")).toHaveCount(0)
+    await expect(pinnedRegion(page)).toHaveCount(0)
+    await expect(chapterRegion(page)).toHaveCount(0)
 
     const tabs = await page.getByRole("tablist", { name: TAB_LIST }).boundingBox()
     expect(tabs).not.toBeNull()
@@ -523,15 +670,27 @@ test.describe("หัวคลิปแบบกระชับ", () => {
     await expect(tab(page, "ภาพเฟรม")).toBeInViewport()
 
     // ทุกปุ่มในหัวคลิปสูงอย่างน้อย 44 px และหน้าไม่ล้นแนวนอน
-    for (const name of [NOTE_BUTTON, "คัดลอกคำอธิบาย", "ดูทั้งหมด", PINNED_TITLE, "Chapter (3 ตอน)", "คัดลอก chapter", "แท็ก (12)", "คัดลอกแท็ก"]) {
-      const box = await page.getByRole("button", { name, exact: true }).boundingBox()
-      expect(box?.height ?? 0, name).toBeGreaterThanOrEqual(44)
+    for (const control of [page.getByRole("button", { name: NOTE_BUTTON }), page.getByRole("link", { name: /^เปิดในยูทูป/ })]) {
+      const box = await control.boundingBox()
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
 
-    await chapters.click()
-    await expect(chapters).toHaveAttribute("aria-expanded", "true")
-    await expect(chapterRegion(page).getByRole("listitem")).toHaveText(["00:00:00Intro", "00:00:05The cool thing", "00:00:17End"])
+    // แท็บข้อมูลคลิปที่จอแคบ: คอลัมน์เดียว ปุ่มคัดลอกสูงอย่างน้อย 44 px หน้าไม่ล้น
+    await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: { text: "ปักหมุด", byUploader: true } } }))
+    await tab(page, INFO_TAB).click()
+    await expect(pinnedRegion(page).getByText("ปักหมุด", { exact: true })).toBeVisible()
+    for (const name of ["คัดลอกคำอธิบาย", "คัดลอก chapter", "คัดลอกช่วงที่คนดูซ้ำบ่อย", "คัดลอกคอมเมนต์ปักหมุด", "คัดลอกแท็ก"]) {
+      const box = await page.getByRole("button", { name, exact: true }).boundingBox()
+      expect(box?.height ?? 0, name).toBeGreaterThanOrEqual(44)
+    }
+    const order = await Promise.all(
+      [descriptionRegion(page), chapterRegion(page), replayedRegion(page), pinnedRegion(page), tagsRegion(page)].map(
+        async (region) => (await region.boundingBox())?.y ?? -1,
+      ),
+    )
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
   })
 
   // review I-3: ชื่อคลิปยาวต้องไม่ดันแถบแท็บพ้นจอแรกของมือถือ (ชื่อ BBB 64 ตัว และชื่อไทย 100 ตัว)
@@ -546,7 +705,7 @@ test.describe("หัวคลิปแบบกระชับ", () => {
       await withVideo(page, ZOO, { ...FULL, title })
       await page.goto(`/v/${ZOO}`)
       await expect(heading(page)).toHaveAccessibleName(title)
-      await expect(toggle(page, "แท็ก (12)")).toBeVisible()
+      await expect(tile(page, "ยอดวิว 123,456 ครั้ง")).toBeVisible()
       const tabs = await page.getByRole("tablist", { name: TAB_LIST }).boundingBox()
       expect(tabs).not.toBeNull()
       expect((tabs?.y ?? 0) + (tabs?.height ?? 0)).toBeLessThanOrEqual(800)
@@ -556,66 +715,84 @@ test.describe("หัวคลิปแบบกระชับ", () => {
     })
   }
 
-  test("จอกว้าง: chapter เริ่มแบบกาง (เห็นรายการเลย) พับได้จากหัวข้อ", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 })
-    await withVideo(page, ZOO, FULL)
-    await page.goto(`/v/${ZOO}`)
-    const chapters = toggle(page, "Chapter (3 ตอน)")
-    await expect(chapters).toHaveAttribute("aria-expanded", "true")
-    await expect(chapterRegion(page).getByRole("listitem")).toHaveCount(3)
-    await expect(chapterRegion(page).getByRole("list")).toBeVisible()
-    await chapters.click()
-    await expect(chapterRegion(page).locator("ol")).toBeHidden()
-    // ซ้าย: คำอธิบาย + คอมเมนต์ปักหมุด · ขวา: chapter + แท็ก
-    const description = await page.getByRole("region", { name: "คำอธิบาย" }).boundingBox()
-    const pinned = await pinnedRegion(page).boundingBox()
-    const chapterBox = await chapterRegion(page).boundingBox()
-    const tags = await tagsRegion(page).boundingBox()
-    expect(Math.abs((pinned?.x ?? 0) - (description?.x ?? 1))).toBeLessThan(2)
-    expect(Math.abs((tags?.x ?? 0) - (chapterBox?.x ?? 1))).toBeLessThan(2)
-    expect(chapterBox?.x ?? 0).toBeGreaterThan((description?.x ?? 0) + (description?.width ?? 0))
-  })
+  for (const width of [1280, 360]) {
+    test(`จอ ${width} px: แถบแท็บไม่ขยับหลังข้อมูลที่มาทีหลังโหลดเสร็จ (ป้ายแทร็กซับ) และไม่ขึ้นกับความยาวคำอธิบาย`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 800 })
+      // รายการแทร็กมาช้า: ป้าย "ซับ: …" ขึ้นทีหลังหัวคลิป · หมวดหมู่ยาวช่วยให้แถวป้ายเต็ม
+      let release = () => {}
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      await page.route(`**/api/videos/${THAI}/subtitles`, async (route) => {
+        await gate
+        await route.continue()
+      })
+      await withVideo(page, THAI, { ...FULL, categories: ["People & Blogs", "Education", "Science & Technology"] })
+      await page.goto(`/v/${THAI}`)
+      await expect(heading(page)).toBeVisible()
+      await expect(tile(page, "ยอดวิว 123,456 ครั้ง")).toBeVisible()
+      const before = await tabTop(page)
+      release()
+      await expect(page.getByText("ซับ: ไทย (อัตโนมัติ)")).toBeVisible()
+      expect(await tabTop(page)).toBe(before)
 
-  test("คีย์บอร์ด: ชื่อคลิป → โน้ต → คัดลอกคำอธิบาย → ดูทั้งหมด → คอมเมนต์ปักหมุด → Chapter → คัดลอก chapter → แท็ก → คัดลอกแท็ก → แท็บภาพเฟรม", async ({
-    page,
-  }) => {
+      // คำอธิบายยาวมาก (หลายร้อยบรรทัด) ไม่มีผลกับหัวคลิป
+      await page.unrouteAll({ behavior: "wait" })
+      await withVideo(page, THAI, { ...FULL, categories: ["People & Blogs", "Education", "Science & Technology"], description: "บรรทัด\n".repeat(400) })
+      await page.reload()
+      await expect(page.getByText("ซับ: ไทย (อัตโนมัติ)")).toBeVisible()
+      expect(await tabTop(page)).toBe(before)
+    })
+  }
+
+  test("จอกว้าง แท็บข้อมูลคลิป: ซ้าย คำอธิบาย → Chapter → ช่วงดูซ้ำ · ขวา คอมเมนต์ปักหมุด → แท็ก", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await withVideo(page, ZOO, FULL)
-    await page.goto(`/v/${ZOO}`)
-    await expect(toggle(page, "แท็ก (12)")).toBeVisible()
-    await heading(page).focus()
-    for (const name of [
-      NOTE_BUTTON,
-      "คัดลอกคำอธิบาย",
-      "ดูทั้งหมด",
-      PINNED_TITLE,
-      "Chapter (3 ตอน)",
-      "คัดลอก chapter",
-      "แท็ก (12)",
-      "คัดลอกแท็ก",
-    ]) {
-      await page.keyboard.press("Tab")
-      await expect(page.getByRole("button", { name, exact: true })).toBeFocused()
-    }
-    await page.keyboard.press("Tab")
-    await expect(tab(page, "ภาพเฟรม")).toBeFocused()
+    await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: { text: "ปักหมุด", byUploader: false } } }))
+    await gotoInfo(page, ZOO)
+    await expect(pinnedRegion(page).getByText("ปักหมุด", { exact: true })).toBeVisible()
+    const [description, chapters, replayed, pinned, tags] = await Promise.all(
+      [descriptionRegion(page), chapterRegion(page), replayedRegion(page), pinnedRegion(page), tagsRegion(page)].map((region) =>
+        region.boundingBox(),
+      ),
+    )
+    const x = (box: typeof description) => box?.x ?? -1
+    const y = (box: typeof description) => box?.y ?? -1
+    expect(Math.abs(x(chapters) - x(description))).toBeLessThan(2)
+    expect(Math.abs(x(replayed) - x(description))).toBeLessThan(2)
+    expect(y(description)).toBeLessThan(y(chapters))
+    expect(y(chapters)).toBeLessThan(y(replayed))
+    expect(Math.abs(x(tags) - x(pinned))).toBeLessThan(2)
+    expect(y(pinned)).toBeLessThan(y(tags))
+    expect(x(pinned)).toBeGreaterThan(x(description) + (description?.width ?? 0))
+    // คอลัมน์ขวาเริ่มบรรทัดเดียวกับคอลัมน์ซ้าย
+    expect(Math.abs(y(pinned) - y(description))).toBeLessThan(2)
   })
 
   for (const scheme of ["dark", "light"] as const) {
-    test(`หัวคลิปที่กางทุกกล่อง (แท็ก คอมเมนต์ปักหมุด) และภาพเฟรมที่มีป้ายไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({
+    test(`แท็บข้อมูลคลิปที่มีครบทุกส่วน (ป้ายผู้เขียนทั้งสองแบบ) และภาพเฟรมที่มีป้ายไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({
       page,
     }) => {
       await withVideo(page, THAI, { ...FULL, mostReplayed: [{ startMs: 0, endMs: 20_000 }] })
+      let byUploader = true
       await mockPinned(page, THAI, (route) =>
-        route.fulfill({ json: { comment: { text: "คอมเมนต์ปักหมุด\nบรรทัดสอง", likes: 12 } } }),
+        route.fulfill({ json: { comment: { text: "คอมเมนต์ปักหมุด\nบรรทัดสอง", likes: 12, byUploader } } }),
       )
       await page.emulateMedia({ colorScheme: scheme })
       await page.goto(`/v/${THAI}`)
       await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
-      await toggle(page, "แท็ก (12)").click()
-      await toggle(page, PINNED_TITLE).click()
-      await expect(pinnedRegion(page).getByText(/บรรทัดสอง/)).toBeVisible()
       await expect(frameList(page).locator("[data-replayed]").first()).toBeVisible()
+      expect(await seriousViolations(page)).toEqual([])
+
+      await tab(page, INFO_TAB).click()
+      await expect(pinnedRegion(page).getByText(/บรรทัดสอง/)).toBeVisible()
+      await expect(pinnedRegion(page).locator('[data-author="owner"]')).toBeVisible()
+      expect(await seriousViolations(page)).toEqual([])
+
+      // ป้าย "ผู้ชม" (โหลดหน้าใหม่ = cache ใหม่)
+      byUploader = false
+      await page.reload()
+      await expect(pinnedRegion(page).locator('[data-author="viewer"]')).toBeVisible()
       expect(await seriousViolations(page)).toEqual([])
     })
   }
@@ -638,17 +815,14 @@ test.describe("รอยต่อกับ backend (ไม่ mock)", () => {
       if (request.url().includes("/pinned-comment")) calls.push(new URL(request.url()).pathname)
     })
 
-    await page.goto(`/v/${THAI}`)
-    await toggle(page, PINNED_TITLE).click()
+    await gotoInfo(page, THAI)
     await expect(pinnedRegion(page).getByText(/^ขอบคุณที่ดูคลิปนี้นะครับ/)).toBeVisible()
     await expect(pinnedRegion(page).getByRole("button", { name: "คัดลอกคอมเมนต์ปักหมุด" })).toBeVisible()
 
-    await page.goto(`/v/${BBB}`)
-    await toggle(page, PINNED_TITLE).click()
+    await gotoInfo(page, BBB)
     await expect(pinnedRegion(page).getByText(NO_PINNED)).toBeVisible()
 
-    await page.goto(`/v/${OWNER}`)
-    await toggle(page, PINNED_TITLE).click()
+    await gotoInfo(page, OWNER)
     const alert = pinnedRegion(page).getByRole("alert")
     await expect(alert).toContainText("โหลดคอมเมนต์ปักหมุดไม่สำเร็จ")
     await expect(alert).toContainText("เน็ตหลุด ลองใหม่อีกครั้ง")
@@ -657,6 +831,16 @@ test.describe("รอยต่อกับ backend (ไม่ mock)", () => {
     await alert.getByRole("button", { name: "ลองใหม่" }).click()
     await expect.poll(() => calls.filter((path) => path.includes(OWNER)).length).toBe(before + 1)
     await expect(pinnedRegion(page).getByRole("alert")).toContainText("เน็ตหลุด ลองใหม่อีกครั้ง")
+  })
+
+  // C-A2 v2: backend ปลอมมีคลิป VIEWERPIN01 ที่คอมเมนต์ปักหมุดเป็นของผู้ชม (byUploader: false)
+  // (เพิ่มโดยฝั่ง backend ของ owner round 4: เทสนี้ผ่านเมื่อรวมงานฝั่ง backend แล้ว)
+  test("คอมเมนต์ปักหมุดของผู้ชม: VIEWERPIN01 แสดงข้อความพร้อมป้าย 'ผู้ชม'", async ({ page }) => {
+    await gotoInfo(page, "VIEWERPIN01")
+    const badge = pinnedRegion(page).locator("[data-author]")
+    await expect(badge).toHaveAttribute("data-author", "viewer")
+    await expect(badge).toHaveText("ผู้เขียน: ผู้ชม")
+    await expect(pinnedRegion(page).getByRole("button", { name: "คัดลอกคอมเมนต์ปักหมุด" })).toBeVisible()
   })
 
   test("โน้ต: backend ปลอมส่งไฟล์ .md (LF) ชื่อไทย มี front matter แท็กแบบ Obsidian และทรานสคริปต์", async ({ page }) => {

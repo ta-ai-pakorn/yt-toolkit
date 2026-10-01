@@ -9,6 +9,7 @@ import {
   formatTimecode,
   relativeTime,
   youtubeLinkAt,
+  youtubeWatchUrl,
 } from "./format"
 
 describe("formatDuration", () => {
@@ -112,6 +113,20 @@ describe("youtubeLinkAt", () => {
   it("ค่าที่ผิดปกติได้ t=0", () => {
     expect(youtubeLinkAt("abc", -5)).toBe("https://youtu.be/abc?t=0")
     expect(youtubeLinkAt("abc", Number.NaN)).toBe("https://youtu.be/abc?t=0")
+  })
+})
+
+describe("youtubeWatchUrl", () => {
+  it("ไม่ใส่เวลา = ลิงก์หน้าคลิป", () => {
+    expect(youtubeWatchUrl("aqz-KE-bpKQ")).toBe("https://www.youtube.com/watch?v=aqz-KE-bpKQ")
+  })
+
+  it("ใส่เวลา = &t=วินาทีs ตัดเศษทิ้ง · ค่าผิดปกติได้ t=0s", () => {
+    expect(youtubeWatchUrl("aqz-KE-bpKQ", 4961)).toBe("https://www.youtube.com/watch?v=aqz-KE-bpKQ&t=4s")
+    expect(youtubeWatchUrl("abc", 90_999)).toBe("https://www.youtube.com/watch?v=abc&t=90s")
+    expect(youtubeWatchUrl("abc", 0)).toBe("https://www.youtube.com/watch?v=abc&t=0s")
+    expect(youtubeWatchUrl("abc", -5)).toBe("https://www.youtube.com/watch?v=abc&t=0s")
+    expect(youtubeWatchUrl("abc", Number.NaN)).toBe("https://www.youtube.com/watch?v=abc&t=0s")
   })
 })
 

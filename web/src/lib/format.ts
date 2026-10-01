@@ -50,6 +50,17 @@ export function youtubeLinkAt(videoId: string, ms: number): string {
   return `https://youtu.be/${videoId}?t=${seconds}`
 }
 
+/**
+ * ลิงก์หน้าคลิปบนยูทูป (https://www.youtube.com/watch?v=…) · ใส่ ms = เปิดตรงวินาทีนั้น (&t=…s ตัดเศษทิ้ง เหมือน timecode)
+ * ใช้กับปุ่ม "เปิดในยูทูป" ที่หัวคลิป และรายการ "เปิดในยูทูปตรงเวลานี้" ในเมนูภาพเฟรม
+ */
+export function youtubeWatchUrl(videoId: string, ms?: number): string {
+  const base = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`
+  if (ms === undefined) return base
+  const seconds = Math.max(0, Math.floor((Number.isFinite(ms) ? ms : 0) / 1000))
+  return `${base}&t=${seconds}s`
+}
+
 // ตัวเลขแบบย่อของไทย ("1.2 แสน", "3.4 ล้าน"): compactDisplay long ได้หน่วยเป็นคำไทย (short ได้ "123K" แบบอังกฤษ)
 const compact = new Intl.NumberFormat("th", { notation: "compact", compactDisplay: "long" })
 const full = new Intl.NumberFormat("th")

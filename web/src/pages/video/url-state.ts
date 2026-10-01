@@ -1,20 +1,20 @@
 import { useCallback } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router"
 
-export type VideoTab = "frames" | "subs" | "transcript"
+export type VideoTab = "frames" | "subs" | "transcript" | "info"
 
 export type VideoParams = { tab: VideoTab; trackId: string | null; at: number | null }
 
 export type VideoParamsPatch = { tab?: VideoTab; trackId?: string | null; at?: number | null }
 
-const TABS: readonly VideoTab[] = ["frames", "subs", "transcript"]
+export const VIDEO_TABS: readonly VideoTab[] = ["frames", "subs", "transcript", "info"]
 const DEFAULT_TAB: VideoTab = "frames"
 // รูปแบบรหัสแทร็กตามสัญญา C1 (o./a./t. นำหน้า)
 const TRACK_ID = /^[oat]\.[A-Za-z0-9_-]{1,64}$/
 const DIGITS = /^\d+$/
 
 function validTab(value: string | null): VideoTab {
-  return TABS.find((t) => t === value) ?? DEFAULT_TAB
+  return VIDEO_TABS.find((t) => t === value) ?? DEFAULT_TAB
 }
 
 function validTrack(value: string | null | undefined): string | null {

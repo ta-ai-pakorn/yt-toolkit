@@ -14,7 +14,7 @@ const THAI = "88o5Sk8_m1Y"
 const FRAME_COUNT = 128
 const FRAME_LIST = "รายการภาพเฟรม"
 const TAB_LIST = "เครื่องมือของคลิปนี้"
-const TAB_NAMES = ["ภาพเฟรม", "ซับ", "ทรานสคริปต์"]
+const TAB_NAMES = ["ภาพเฟรม", "ซับ", "ทรานสคริปต์", "ข้อมูลคลิป"]
 const NO_SUBS = "คลิปนี้ไม่มีซับ"
 const RESULT_ROWS = 'section[aria-labelledby="results-title"] [role="listitem"]'
 
@@ -70,6 +70,9 @@ const chapterRows = (page: Page) => chapterRegion(page).getByRole("listitem")
 /** ข้อความถูกตัด (สูงเกินกล่องที่เห็น) อยู่หรือไม่ */
 const isCut = (locator: Locator) => locator.evaluate((el) => el.scrollHeight > el.clientHeight + 1)
 
+/** หน้า W2 ที่แท็บข้อมูลคลิป (คำอธิบาย chapter ช่วงดูซ้ำ คอมเมนต์ปักหมุด แท็ก อยู่ในแท็บนี้ตั้งแต่ owner round 4) */
+const gotoInfo = (page: Page, videoId: string) => page.goto(`/v/${videoId}?tab=info`)
+
 /** แก้ข้อมูลคลิปที่ backend ส่งมาบางช่อง (เช่น chapter หลายตอน คำอธิบายว่าง) ส่วนอื่นมาจากชุดทดสอบตามปกติ */
 async function withVideo(page: Page, videoId: string, patch: Record<string, unknown>) {
   await page.route(
@@ -89,7 +92,7 @@ const toLf = (text: string) => text.replaceAll("\r\n", "\n")
 const readClipboardLf = async (page: Page) => toLf(await readClipboard(page))
 
 test.describe("W2 แถบแท็บ", () => {
-  test("มี 3 แท็บตามลำดับ · เริ่มที่ภาพเฟรมพร้อมภาพครบ 128 ภาพ", async ({ page }) => {
+  test("มี 4 แท็บตามลำดับ (ภาพเฟรม · ซับ · ทรานสคริปต์ · ข้อมูลคลิป) · เริ่มที่ภาพเฟรมพร้อมภาพครบ 128 ภาพ", async ({ page }) => {
     await page.goto(`/v/${BBB}`)
     await expect(tabList(page).getByRole("tab")).toHaveText(TAB_NAMES)
     await expect(tab(page, "ภาพเฟรม")).toHaveAttribute("aria-selected", "true")
@@ -109,6 +112,34 @@ test.describe("W2 แถบแท็บ", () => {
     await page.reload()
     await expect(tab(page, "ซับ")).toHaveAttribute("aria-selected", "true")
     await expect(page.getByText(NO_SUBS)).toBeVisible()
+  })
+
+  test("?tab=info เปิดแท็บข้อมูลคลิป · โหลดหน้าใหม่ยังอยู่ที่แท็บนี้ · ค่า tab ที่ไม่รู้จักกลับไปภาพเฟรม", async ({ page }) => {
+    await page.goto(`/v/${ZOO}?tab=info`)
+    await expect(tab(page, "ข้อมูลคลิป")).toHaveAttribute("aria-selected", "true")
+    await expect(descriptionRegion(page)).toBeVisible()
+    await expect(page.getByRole("tabpanel")).toHaveAccessibleName("ข้อมูลคลิป")
+    await page.reload()
+    await expect(tab(page, "ข้อมูลคลิป")).toHaveAttribute("aria-selected", "true")
+
+    for (const bad of ["Info", "about", ""]) {
+      await page.goto(`/v/${ZOO}?tab=${bad}`)
+      await expect(tab(page, "ภาพเฟรม")).toHaveAttribute("aria-selected", "true")
+    }
+  })
+
+  test("คีย์บอร์ด: จากแท็บภาพเฟรมกด End ไปแท็บข้อมูลคลิป · เปิดแท็บด้วย Enter → URL ?tab=info", async ({ page }) => {
+    await page.goto(`/v/${ZOO}`)
+    await tab(page, "ภาพเฟรม").focus()
+    await page.keyboard.press("End")
+    await expect(tab(page, "ข้อมูลคลิป")).toBeFocused()
+    await page.keyboard.press("Enter")
+    await expect(tab(page, "ข้อมูลคลิป")).toHaveAttribute("aria-selected", "true")
+    await expect(page).toHaveURL(new RegExp(`/v/${ZOO}\\?tab=info$`))
+    await expect(descriptionRegion(page)).toBeVisible()
+    // ลูกศรซ้ายกลับไปแท็บทรานสคริปต์ได้ (วนตามลำดับแท็บ)
+    await page.keyboard.press("ArrowLeft")
+    await expect(tab(page, "ทรานสคริปต์")).toBeFocused()
   })
 
   test("แท็บทรานสคริปต์ของคลิปที่ไม่มีซับก็บอก 'คลิปนี้ไม่มีซับ'", async ({ page }) => {
@@ -162,7 +193,7 @@ test.describe("W2 แถบแท็บ", () => {
   test("จอกว้าง 360 px: แถวแท็บไม่ตัดขึ้นบรรทัดใหม่ (เลื่อนแนวนอนได้) และแต่ละแท็บสูงอย่างน้อย 44 px", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 800 })
     await page.goto(`/v/${BBB}`)
-    await expect(tabList(page).getByRole("tab")).toHaveCount(3)
+    await expect(tabList(page).getByRole("tab")).toHaveCount(4)
     const layout = await tabList(page).evaluate((list) => {
       const tabs = [...list.querySelectorAll<HTMLElement>('[role="tab"]')]
       return {
@@ -192,7 +223,7 @@ test.describe("W2 แถบแท็บ ไม่มีแถบเลื่อ�
     test(`${label}: แถวแท็บไม่ล้นแนวตั้ง และไม่แสดงแถบเลื่อน`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 })
       await page.goto(`/v/${BBB}`)
-      await expect(tabList(page).getByRole("tab")).toHaveCount(3)
+      await expect(tabList(page).getByRole("tab")).toHaveCount(4)
       expect(await tabListBox(page)).toEqual(NO_SCROLLBARS)
     })
   }
@@ -201,9 +232,8 @@ test.describe("W2 แถบแท็บ ไม่มีแถบเลื่อ�
     await page.setViewportSize({ width: 360, height: 800 })
     await page.goto(`/v/${BBB}`)
     await tab(page, "ภาพเฟรม").focus()
-    await page.keyboard.press("ArrowRight")
-    await page.keyboard.press("ArrowRight")
-    const last = tab(page, "ทรานสคริปต์")
+    for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight")
+    const last = tab(page, "ข้อมูลคลิป")
     await expect(last).toBeFocused()
     const inView = await tabList(page).evaluate((list) => {
       const box = list.getBoundingClientRect()
@@ -219,11 +249,11 @@ test.describe("W2 แถบแท็บ ไม่มีแถบเลื่อ�
     // review owner fb1: เทสที่ 360 px อาจไม่ล้นเลย (แท็บพอดีจอ) จอ 280 px ล้นแน่นอน จึงพิสูจน์การเลื่อนแนวนอนได้จริง
     await page.setViewportSize({ width: 280, height: 700 })
     await page.goto(`/v/${BBB}`)
-    await expect(tabList(page).getByRole("tab")).toHaveCount(3)
+    await expect(tabList(page).getByRole("tab")).toHaveCount(4)
     const sizes = await tabList(page).evaluate((list) => ({ scroll: list.scrollWidth, client: list.clientWidth, left: list.scrollLeft }))
     expect(sizes.scroll).toBeGreaterThan(sizes.client)
     expect(sizes.left).toBe(0)
-    const last = tab(page, "ทรานสคริปต์")
+    const last = tab(page, "ข้อมูลคลิป")
     // แท็บสุดท้ายเริ่มแรกอยู่นอกกรอบ (ล้นไปทางขวา)
     const startsOutside = await tabList(page).evaluate((list) => {
       const box = list.getBoundingClientRect()
@@ -269,26 +299,48 @@ test.describe("W2 แถบแท็บ คีย์บอร์ด", () => {
   })
 })
 
-test.describe("W2 คำอธิบายและ chapter ที่หัวคลิป", () => {
-  test("จอแคบ 360 px: ปุ่มคัดลอกและปุ่มดูทั้งหมดสูงอย่างน้อย 44 px · หน้าไม่ล้นแนวนอน", async ({ page }) => {
-    await page.setViewportSize({ width: 360, height: 800 })
+// owner round 4: คำอธิบายและ chapter ย้ายจากหัวคลิปมาอยู่ในแท็บข้อมูลคลิป แสดงเต็ม ไม่มีพับ/กาง ("ดูทั้งหมด") แล้ว
+// เทสชุดนี้ยังตรวจเจตนาเดิม (เห็นก่อนคัดลอก คัดลอกได้ตรงตัว ปุ่มใหญ่พอบนมือถือ ไม่ล้นจอ คีย์บอร์ด axe) แต่ในแท็บใหม่
+test.describe("W2 คำอธิบายและ chapter ในแท็บข้อมูลคลิป", () => {
+  test("หัวคลิปไม่มีคำอธิบาย chapter หรือปุ่มคัดลอกแล้ว (แท็บภาพเฟรม)", async ({ page }) => {
     await page.goto(`/v/${ZOO}`)
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Me at the zoo")
+    await expect(tab(page, "ภาพเฟรม")).toHaveAttribute("aria-selected", "true")
+    await expect(descriptionRegion(page)).toHaveCount(0)
+    await expect(chapterRegion(page)).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /^คัดลอก/ })).toHaveCount(0)
+  })
+
+  test("จอแคบ 360 px: ปุ่มคัดลอกและปุ่มเวลาของ chapter สูงอย่างน้อย 44 px · หน้าไม่ล้นแนวนอน", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 })
+    await gotoInfo(page, ZOO)
     await expect(page.getByRole("button", { name: "คัดลอก chapter" })).toBeVisible()
-    for (const name of ["คัดลอก chapter", "คัดลอกคำอธิบาย", "ดูทั้งหมด"]) {
+    for (const name of ["คัดลอก chapter", "คัดลอกคำอธิบาย", "ไปภาพเฟรมช่วง 00:00:05"]) {
       const box = await page.getByRole("button", { name, exact: true }).boundingBox()
       expect(box?.height ?? 0, name).toBeGreaterThanOrEqual(44)
     }
-    // ลิงก์ยาวในคำอธิบายตัดขึ้นบรรทัดใหม่ได้ ไม่ดันหน้าให้กว้างเกินจอ
-    await page.getByRole("button", { name: "ดูทั้งหมด" }).click()
+    // ลิงก์ยาวในคำอธิบาย (แสดงเต็ม) ตัดขึ้นบรรทัดใหม่ได้ ไม่ดันหน้าให้กว้างเกินจอ
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
   })
 
   test("เห็นรายการ chapter ก่อนคัดลอก: หัวข้อ 'Chapter (3 ตอน)' และบรรทัด HH:MM:SS ชื่อตอน", async ({ page }) => {
-    await page.goto(`/v/${ZOO}`)
+    await gotoInfo(page, ZOO)
     await expect(page.getByRole("heading", { level: 2, name: "Chapter (3 ตอน)" })).toBeVisible()
     await expect(chapterRows(page)).toHaveText(["00:00:00Intro", "00:00:05The cool thing", "00:00:17End"])
-    // 3 ตอนแสดงครบแล้ว ไม่มีปุ่มดูทั้งหมดของ chapter
-    await expect(chapterRegion(page).getByRole("button", { name: "ดูทั้งหมด" })).toHaveCount(0)
+    // แสดงครบทุกตอน ไม่มีพับ/กาง
+    await expect(chapterRegion(page).getByRole("button", { name: /ดูทั้งหมด|ย่อ/ })).toHaveCount(0)
+    await expect(chapterRegion(page).locator("[aria-expanded]")).toHaveCount(0)
+  })
+
+  test("กดเวลาของ chapter → ไปแท็บภาพเฟรมที่เวลานั้น (?at=)", async ({ page }) => {
+    await withVideo(page, BBB, { chapters: [{ startS: 0, endS: 9, title: "เปิดเรื่อง" }, { startS: 9, endS: 60, title: "ตอนสอง" }] })
+    await gotoInfo(page, BBB)
+    await chapterRegion(page).getByRole("button", { name: "ไปภาพเฟรมช่วง 00:00:09" }).click()
+    await expect(page).toHaveURL(new RegExp(`/v/${BBB}\\?at=9000$`))
+    await expect(tab(page, "ภาพเฟรม")).toHaveAttribute("aria-selected", "true")
+    const highlighted = page.getByRole("list", { name: FRAME_LIST }).locator("[data-highlighted]")
+    await expect(highlighted).toHaveCount(1)
+    await expect(highlighted).toBeFocused()
   })
 
   test("AC-PROBE-03: 'คัดลอก chapter' ได้บรรทัด HH:MM:SS ชื่อตอน ครบ 3 ตอน และขึ้น toast", async ({ page, context }) => {
@@ -296,7 +348,7 @@ test.describe("W2 คำอธิบายและ chapter ที่หัว�
     const chapters = probeFixture(ZOO).chapters ?? []
     expect(chapters).toHaveLength(3)
     await recordClipboardWrites(page)
-    await page.goto(`/v/${ZOO}`)
+    await gotoInfo(page, ZOO)
     // ปุ่มที่ตาเห็นเขียนว่า "คัดลอก" ชื่อสำหรับโปรแกรมอ่านหน้าจอบอกว่าคัดลอกอะไร
     const button = page.getByRole("button", { name: "คัดลอก chapter" })
     await expect(button).toHaveText("คัดลอก")
@@ -319,103 +371,79 @@ test.describe("W2 คำอธิบายและ chapter ที่หัว�
     expect(await readClipboardLf(page)).toBe(expected)
   })
 
-  test("chapter เกิน 5 ตอน: แสดง 5 ตอนแรก กด 'ดูทั้งหมด' เห็นครบ กด 'ย่อ' กลับเหลือ 5 · คัดลอกได้ครบทุกตอนเสมอ", async ({
-    page,
-    context,
-  }) => {
+  test("chapter เกิน 5 ตอน: แสดงครบทุกตอนเรียงตามเวลา (ไม่มี 'ดูทั้งหมด') · คัดลอกได้ครบทุกตอน", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"])
     await recordClipboardWrites(page)
     // ส่งคืนลำดับสลับกันโดยตั้งใจ: หน้าเว็บต้องเรียงตามเวลาเอง
     const titles = ["ตอนที่ 1", "ตอนที่ 2", "ตอนที่ 3", "ตอนที่ 4", "ตอนที่ 5", "ตอนที่ 6", "ตอนที่ 7", "ตอนที่ 8"]
     const chapters = titles.map((title, i) => ({ startS: i * 60, endS: i * 60 + 60, title })).reverse()
     await withVideo(page, ZOO, { chapters })
-    await page.goto(`/v/${ZOO}`)
+    await gotoInfo(page, ZOO)
     await expect(page.getByRole("heading", { level: 2, name: "Chapter (8 ตอน)" })).toBeVisible()
-    await expect(chapterRows(page)).toHaveCount(5)
-    await expect(chapterRows(page).first()).toHaveText("00:00:00ตอนที่ 1")
-    const more = chapterRegion(page).getByRole("button", { name: "ดูทั้งหมด" })
-    await expect(more).toHaveAttribute("aria-expanded", "false")
-    await more.click()
-    const less = chapterRegion(page).getByRole("button", { name: "ย่อ" })
-    await expect(less).toHaveAttribute("aria-expanded", "true")
-    await expect(less).toBeFocused()
     await expect(chapterRows(page)).toHaveCount(8)
+    await expect(chapterRows(page).first()).toHaveText("00:00:00ตอนที่ 1")
     await expect(chapterRows(page).last()).toHaveText("00:07:00ตอนที่ 8")
-    await less.click()
-    await expect(chapterRows(page)).toHaveCount(5)
-    await expect(chapterRegion(page).getByRole("button", { name: "ดูทั้งหมด" })).toBeFocused()
+    await expect(page.getByRole("button", { name: /ดูทั้งหมด|ย่อ/ })).toHaveCount(0)
 
     await page.getByRole("button", { name: "คัดลอก chapter" }).click()
     await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
     expect(((await lastWrite(page)) ?? "").split("\n")).toEqual(titles.map((t, i) => `00:0${i}:00 ${t}`))
   })
 
-  test("คลิปไม่มี chapter ไม่มีกล่อง chapter และไม่มีปุ่ม 'คัดลอก chapter'", async ({ page }) => {
-    await page.goto(`/v/${BBB}`)
+  test("คลิปไม่มี chapter ไม่มีส่วน chapter และไม่มีปุ่ม 'คัดลอก chapter'", async ({ page }) => {
+    await gotoInfo(page, BBB)
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
     await expect(page.getByRole("heading", { level: 2, name: "คำอธิบาย" })).toBeVisible()
     await expect(page.getByRole("heading", { name: /^Chapter/ })).toHaveCount(0)
     await expect(page.getByRole("button", { name: "คัดลอก chapter" })).toHaveCount(0)
   })
 
-  test("คลิปไม่มีทั้งคำอธิบายและ chapter (หรือคำอธิบายมีแต่ช่องว่าง) ไม่มีทั้งสองกล่อง", async ({ page }) => {
+  test("คลิปไม่มีทั้งคำอธิบายและ chapter (หรือคำอธิบายมีแต่ช่องว่าง) ไม่มีทั้งสองส่วน", async ({ page }) => {
     await withVideo(page, BBB, { description: "  \n ", chapters: [] })
-    await page.goto(`/v/${BBB}`)
+    await gotoInfo(page, BBB)
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
-    await expect(tab(page, "ภาพเฟรม")).toBeVisible()
+    await expect(tab(page, "ข้อมูลคลิป")).toHaveAttribute("aria-selected", "true")
     await expect(page.getByRole("heading", { level: 2, name: "คำอธิบาย" })).toHaveCount(0)
-    // ไม่มีปุ่มคัดลอกของสองกล่องนี้ (ปุ่ม "คัดลอกแท็ก" ของกล่องแท็กที่เพิ่มใน owner round 2 เป็นคนละเรื่อง ยังอยู่ได้)
+    // ไม่มีปุ่มคัดลอกของสองส่วนนี้ (ส่วนแท็กมีปุ่ม "คัดลอกแท็ก" ของตัวเอง เป็นคนละเรื่อง)
     await expect(page.getByRole("button", { name: /^คัดลอก(คำอธิบาย| chapter)/ })).toHaveCount(0)
     await expect(page.getByRole("heading", { name: /^Chapter/ })).toHaveCount(0)
   })
 
-  test("คำอธิบาย: แสดง 3 บรรทัดแรก กด 'ดูทั้งหมด' เห็นครบ กด 'ย่อ' กลับเป็น 3 บรรทัด · ลิงก์เป็นข้อความธรรมดา", async ({
+  test("คำอธิบาย: แสดงเต็มทุกบรรทัด (ไม่ตัด 3 บรรทัด ไม่มี 'ดูทั้งหมด') ขึ้นบรรทัดตามต้นฉบับ · ลิงก์เป็นข้อความธรรมดา", async ({
     page,
   }) => {
     const { description } = probeFixture(BBB)
-    await page.goto(`/v/${BBB}`)
+    await gotoInfo(page, BBB)
     const region = descriptionRegion(page)
     const text = region.getByText(/^UHD High Frame rate/)
     await expect(text).toBeVisible()
-    // ข้อความครบทุกตัว (ขึ้นบรรทัดตามต้นฉบับ) แต่ตัดที่ 3 บรรทัด
     expect(await text.evaluate((el) => el.textContent)).toBe(description)
     await expect(text).toHaveCSS("white-space", "pre-line")
-    await expect(text).toHaveCSS("-webkit-line-clamp", "3")
-    expect(await isCut(text)).toBe(true)
-    await expect(region.getByRole("link")).toHaveCount(0)
-
-    const more = region.getByRole("button", { name: "ดูทั้งหมด" })
-    await expect(more).toHaveAttribute("aria-expanded", "false")
-    await expect(more).toHaveAttribute("aria-controls", (await text.getAttribute("id")) ?? "")
-    await more.click()
-    const less = region.getByRole("button", { name: "ย่อ" })
-    await expect(less).toHaveAttribute("aria-expanded", "true")
     await expect(text).toHaveCSS("-webkit-line-clamp", "none")
     expect(await isCut(text)).toBe(false)
-    await less.click()
-    await expect(region.getByRole("button", { name: "ดูทั้งหมด" })).toHaveAttribute("aria-expanded", "false")
-    expect(await isCut(text)).toBe(true)
+    await expect(region.getByRole("link")).toHaveCount(0)
+    await expect(region.getByRole("button", { name: /ดูทั้งหมด|ย่อ/ })).toHaveCount(0)
   })
 
-  test("คำอธิบายสั้น (ไม่เกิน 3 บรรทัด) ไม่มีปุ่ม 'ดูทั้งหมด'", async ({ page }) => {
+  test("คำอธิบายสั้นบรรทัดเดียวก็มีปุ่ม 'คัดลอกคำอธิบาย'", async ({ page }) => {
     await withVideo(page, BBB, { description: "คำอธิบายสั้น ๆ บรรทัดเดียว" })
-    await page.goto(`/v/${BBB}`)
+    await gotoInfo(page, BBB)
     await expect(descriptionRegion(page).getByText("คำอธิบายสั้น ๆ บรรทัดเดียว")).toBeVisible()
-    await expect(page.getByRole("button", { name: "ดูทั้งหมด" })).toHaveCount(0)
     await expect(page.getByRole("button", { name: "คัดลอกคำอธิบาย" })).toBeVisible()
   })
 
-  test("จอกว้างที่มีทั้งสองกล่อง: วางคู่กัน 2 คอลัมน์ ปกยังเป็น 16:9 แม้กางคำอธิบาย", async ({ page }) => {
+  test("จอกว้าง: คำอธิบายอยู่เหนือ chapter ในคอลัมน์ซ้าย คอมเมนต์ปักหมุดอยู่คอลัมน์ขวา · ปกยังเป็น 16:9", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
-    await page.goto(`/v/${ZOO}`)
+    await page.route(`**/api/videos/${ZOO}/pinned-comment`, (route) => route.fulfill({ json: { comment: null } }))
+    await gotoInfo(page, ZOO)
     const description = await descriptionRegion(page).boundingBox()
     const chapters = await chapterRegion(page).boundingBox()
-    expect(description && chapters).toBeTruthy()
-    expect(Math.abs((description?.y ?? 0) - (chapters?.y ?? 1))).toBeLessThan(2)
-    expect(chapters?.x ?? 0).toBeGreaterThan((description?.x ?? 0) + (description?.width ?? 0))
-    await descriptionRegion(page).getByRole("button", { name: "ดูทั้งหมด" }).click()
-    // ปก = กล่องข้างคอลัมน์ข้อมูล (ไม่ใช้ <img> เพราะภาพจริงอาจโหลดไม่ได้ในเครื่องทดสอบ)
-    const cover = await page.getByRole("heading", { level: 1 }).locator("xpath=../preceding-sibling::div[1]").boundingBox()
+    const pinned = await page.getByRole("region", { name: "คอมเมนต์ปักหมุด" }).boundingBox()
+    expect(description && chapters && pinned).toBeTruthy()
+    expect(Math.abs((description?.x ?? 0) - (chapters?.x ?? 1))).toBeLessThan(2)
+    expect(chapters?.y ?? 0).toBeGreaterThan((description?.y ?? 0) + (description?.height ?? 0) - 1)
+    expect(pinned?.x ?? 0).toBeGreaterThan((description?.x ?? 0) + (description?.width ?? 0))
+    const cover = await page.getByRole("button", { name: "ดูภาพปกขนาดใหญ่" }).boundingBox()
     expect((cover?.width ?? 0) / (cover?.height ?? 1)).toBeCloseTo(16 / 9, 1)
   })
 
@@ -424,7 +452,7 @@ test.describe("W2 คำอธิบายและ chapter ที่หัว�
     const { description } = probeFixture(BBB)
     expect(typeof description).toBe("string")
     await recordClipboardWrites(page)
-    await page.goto(`/v/${BBB}`)
+    await gotoInfo(page, BBB)
     const button = descriptionRegion(page).getByRole("button", { name: "คัดลอกคำอธิบาย" })
     await expect(button).toHaveText("คัดลอก")
     await button.click()
@@ -437,46 +465,49 @@ test.describe("W2 คำอธิบายและ chapter ที่หัว�
     await page.addInitScript(() => {
       Object.defineProperty(navigator.clipboard, "writeText", { value: () => Promise.reject(new Error("denied")) })
     })
-    await page.goto(`/v/${ZOO}`)
+    await gotoInfo(page, ZOO)
     await page.getByRole("button", { name: "คัดลอก chapter" }).click()
     await expect(page.getByText("คัดลอกไม่สำเร็จ ลองอีกครั้ง")).toBeVisible()
   })
 
-  test("คีย์บอร์ด: จากชื่อคลิป Tab ไป โน้ต → คัดลอกคำอธิบาย → ดูทั้งหมด → คอมเมนต์ปักหมุด → Chapter → คัดลอก chapter → แท็บภาพเฟรม", async ({
-    page,
-  }) => {
-    // ไม่มีแท็ก (กล่องแท็กเพิ่มจุด Tab อีกสองจุด ทดสอบไว้ใน clip-info.spec) และไม่รู้จำนวนคอมเมนต์ (มีแถวคอมเมนต์ปักหมุด)
-    await withVideo(page, ZOO, { tags: [], stats: undefined })
+  test("คีย์บอร์ด: หัวคลิป ชื่อคลิป → โน้ต → เปิดในยูทูป → แท็บภาพเฟรม (ไม่มีจุด Tab ของคำอธิบาย/chapter แล้ว)", async ({ page }) => {
     await page.goto(`/v/${ZOO}`)
     const heading = page.getByRole("heading", { level: 1 })
     await expect(heading).toContainText("Me at the zoo")
-    await expect(page.getByRole("button", { name: "ดูทั้งหมด" })).toBeVisible()
     await heading.focus()
-    for (const name of [
-      "บันทึกเป็นโน้ต (.md)",
-      "คัดลอกคำอธิบาย",
-      "ดูทั้งหมด",
-      "คอมเมนต์ปักหมุดจากเจ้าของช่อง",
-      "Chapter (3 ตอน)",
-      "คัดลอก chapter",
-    ]) {
-      await page.keyboard.press("Tab")
-      await expect(page.getByRole("button", { name, exact: true })).toBeFocused()
-    }
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "บันทึกเป็นโน้ต (.md)", exact: true })).toBeFocused()
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("link", { name: /^เปิดในยูทูป/ })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(tab(page, "ภาพเฟรม")).toBeFocused()
   })
 
+  test("คีย์บอร์ด: แท็บข้อมูลคลิป → คัดลอกคำอธิบาย → คัดลอก chapter → ปุ่มเวลาของ chapter ทีละตอน (แผงไม่เป็นจุด Tab เพิ่ม)", async ({
+    page,
+  }) => {
+    // ไม่มีแท็ก ไม่มีช่วงดูซ้ำ และไม่มีคอมเมนต์ปักหมุด (ส่วนคอมเมนต์ไม่มีปุ่ม): ลำดับ Tab ไม่ขึ้นกับข้อมูลในชุดทดสอบ
+    await withVideo(page, ZOO, { tags: [], mostReplayed: undefined, stats: undefined })
+    await page.route(`**/api/videos/${ZOO}/pinned-comment`, (route) => route.fulfill({ json: { comment: null } }))
+    await gotoInfo(page, ZOO)
+    await expect(page.getByText("ไม่มีคอมเมนต์ปักหมุด")).toBeVisible()
+    await tab(page, "ข้อมูลคลิป").focus()
+    for (const name of ["คัดลอกคำอธิบาย", "คัดลอก chapter", "ไปภาพเฟรมช่วง 00:00:00", "ไปภาพเฟรมช่วง 00:00:05", "ไปภาพเฟรมช่วง 00:00:17"]) {
+      await page.keyboard.press("Tab")
+      await expect(page.getByRole("button", { name, exact: true })).toBeFocused()
+    }
+  })
+
   for (const scheme of ["dark", "light"] as const) {
-    test(`หัวคลิปที่กางคำอธิบายและ chapter แล้วไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
+    test(`แท็บข้อมูลคลิปที่มีคำอธิบายและ chapter 6 ตอนไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
       const titles = ["หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก"]
       await withVideo(page, ZOO, { chapters: titles.map((title, i) => ({ startS: i * 3, endS: i * 3 + 3, title })) })
+      await page.route(`**/api/videos/${ZOO}/pinned-comment`, (route) => route.fulfill({ json: { comment: null } }))
       await page.emulateMedia({ colorScheme: scheme })
-      await page.goto(`/v/${ZOO}`)
+      await gotoInfo(page, ZOO)
       await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
-      await descriptionRegion(page).getByRole("button", { name: "ดูทั้งหมด" }).click()
-      await chapterRegion(page).getByRole("button", { name: "ดูทั้งหมด" }).click()
       await expect(chapterRows(page)).toHaveCount(6)
+      await expect(page.getByText("ไม่มีคอมเมนต์ปักหมุด")).toBeVisible()
       expect(await seriousViolations(page)).toEqual([])
     })
   }
