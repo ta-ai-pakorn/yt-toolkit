@@ -272,7 +272,9 @@ class JobStore:
     def running(self) -> list[Job]
     def transition(self, job_id: str, to: str, **fields: Any) -> Job     # validates TRANSITIONS; sets started_at (→running), finished_at (→terminal)
     def update(self, job_id: str, **fields: Any) -> Job                  # running jobs only: stage, progress, speed_bps, eta_s, attempt, title
-    def requeue(self, job_id: str, *, front: bool = False) -> Job       # failed|interrupted|running → queued; clears error/progress/outputs/notes/attempt/stage
+    def requeue(self, job_id: str, *, front: bool = False, bot_checks: int | None = None, reset_bot_checks: bool = False) -> Job
+        # failed|interrupted|running → queued in ONE transaction; clears error/progress/outputs/notes/attempt/stage
+        # (gate 1) transition(id, "queued") always raises InvalidTransition: requeue() is the only way back into the queue
     def reorder(self, ids: Sequence[str]) -> None                        # see C4 PUT /jobs/order
     def interrupt_running(self, message: str) -> int                     # every running → interrupted, error_code E_INTERRUPTED
     def pending_count(self) -> int                                       # queued + running
@@ -450,7 +452,7 @@ Worker outcome rules:
 - `JobResult` → `done` with `outputs`, `notes`, `title`, `progress=1`.
 - `JobCancelled` → `cancelled` (user) or `interrupted` with `E_INTERRUPTED` (shutdown).
 - `YtError("E_NETWORK")` while `attempt < 3` → `attempt += 1`, publish, `ctx.wait(retry_waits[attempt-1])`, run the handler again (same workdir). After the third retry fails → `failed` `E_NETWORK` with `MESSAGES["E_NETWORK"]`.
-- `YtError("E_BOT_CHECK")` → `brake()`; if `bot_checks == 0` → `bot_checks=1`, `store.requeue(id, front=True)` (Q1); else `failed`. **Only the code decides; HTTP status is never consulted.** `E_TRANSLATION_BLOCKED`, `E_SESSION_WARMING` and every other code never brake.
+- `YtError("E_BOT_CHECK")` → `brake()`; if `bot_checks == 0` → `store.requeue(id, front=True, bot_checks=1)` (Q1, one transaction); else `transition(id, "failed", error_code="E_BOT_CHECK")`. A manual retry calls `store.requeue(id, reset_bot_checks=True)` and returns 409 E_JOB_STATE unless the job is failed or interrupted. **Only the code decides; HTTP status is never consulted.** `E_TRANSLATION_BLOCKED`, `E_SESSION_WARMING` and every other code never brake.
 - Other `YtError` → `failed` with `code`, `exc.message`, `exc.detail`. Any other exception → `failed` `E_UNKNOWN` (`log.exception` with the job id).
 - Always: `shutil.rmtree(workdir, ignore_errors=True)`, wake the dispatcher, log `"งาน %s (%s) จบด้วย %s"` with id, kind, status/code (no absolute paths).
 
