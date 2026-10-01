@@ -20,6 +20,7 @@ from yttoolkit.core.srt_builder import (
     build_cues,
     cue_text,
     display_len,
+    _fits,
     is_punct_only,
     options_from_dict,
     to_md,
@@ -55,7 +56,7 @@ def test_cases_file_shape() -> None:
         "word-preset-punctuation", "word-preset-leading-punctuation-and-gap",
         "tokens-mode-punctuation-two-lines", "short-preset-punctuation-unchanged",
         "word-preset-openers", "word-preset-straight-quotes", "word-preset-trailing-opener",
-        "tokens-mode-opener-keeps-its-word",
+        "tokens-mode-opener-keeps-its-word", "word-preset-punctuation-respects-max-duration",
     ):
         assert required in names
     raw = (FIXTURES / "subs" / "builder-cases.json").read_bytes()
@@ -293,19 +294,27 @@ def _check(tokens: list[Token], opts: SubOptions) -> None:
         # (FR-SUB-9: never cut inside a word). Stricter than "single-token lines exempt".
         punct = [opts.mode == "tokens" and is_punct_only(t) for t in g]
         if len(g) > 1:
-            # โหมดนับคำ: เครื่องหมายที่เกาะมาไม่นับเป็นคำ และยกเว้นกฎความยาวบรรทัดเหมือนคำเดียวที่ยาวเกิน
-            if not any(punct):
-                assert all(display_len(line) <= opts.max_chars for line in c.lines), (c, opts)
+            # fix round 2 (review #1): เครื่องหมายก็ต้องไม่ทำให้บรรทัดเกินขีดจำกัด
+            assert all(display_len(line) <= opts.max_chars for line in c.lines), (c, opts)
             if opts.mode == "tokens":
                 assert punct.count(False) <= opts.tokens_per_cue
         if len(c.lines) == 2:
             assert display_len(" ".join(c.lines)) > opts.max_chars
 
-    # ซับที่มีแต่เครื่องหมาย (โหมดนับคำ) เกิดได้เฉพาะเมื่อเงียบ >= 1 วินาทีทั้งก่อนและหลัง
+    # ซับที่มีแต่เครื่องหมาย (โหมดนับคำ) เกิดได้เฉพาะเมื่อถูกบังคับ: เงียบ >= 1 วินาที หรือรวมกับซับข้างเคียงแล้ว
+    # เกินขีดจำกัดตัวอักษร/เวลานานสุด (ทั้งข้างหน้าหรือข้างหลัง) หรือมีแค่ token นี้ทั้งแทร็ก
+    def blocked(left: list[Token], right: list[Token]) -> bool:
+        return (
+            right[0].s - left[-1].e >= 1000
+            or not _fits([*left, right[0]], opts, opts.max_chars)
+            or right[0].e - left[0].s > opts.max_ms
+        )
+
     for idx, g in enumerate(groups):
-        if opts.mode == "tokens" and all(is_punct_only(t) for t in g):
-            assert idx == 0 or g[0].s - groups[idx - 1][-1].e >= 1000, g
-            assert idx == len(groups) - 1 or groups[idx + 1][0].s - g[-1].e >= 1000, g
+        if opts.mode == "tokens" and all(is_punct_only(t) for t in g) and len(groups) > 1:
+            before = idx == 0 or blocked(groups[idx - 1], g)
+            after = idx == len(groups) - 1 or blocked(g, groups[idx + 1])
+            assert before or after, g
 
     for idx, c in enumerate(cues):
         nxt = cues[idx + 1] if idx + 1 < len(cues) else None

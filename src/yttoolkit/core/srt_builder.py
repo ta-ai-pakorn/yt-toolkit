@@ -283,7 +283,7 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
     per_cue = opts.tokens_per_cue or 0
 
     # โหมดนับคำ (owner round 3 + fix round 1): token ที่เป็นเครื่องหมายล้วนไม่นับเป็นคำ
-    # - เครื่องหมายทั่วไปเกาะซับของคำก่อนหน้า (ไม่ใช้กฎความยาวบรรทัด/เวลานานสุด/จำนวนคำ) ตัวแรกสุดเกาะซับถัดไป
+    # - เครื่องหมายทั่วไปเกาะซับของคำก่อนหน้า (ไม่ใช้กฎจำนวนคำ แต่ยังต้องไม่เกินตัวอักษร/เวลานานสุด) ตัวแรกสุดเกาะซับถัดไป
     # - เครื่องหมายเปิด ( “ และอัญประกาศตรงที่ทำหน้าที่เปิด เกาะหน้าคำถัดไป (_kinds)
     # จึงไม่มีซับที่มีแค่เครื่องหมาย ยกเว้นเงียบ >= 1 วินาที ซึ่งยังขึ้นซับใหม่เหมือนเดิม
     kinds = _kinds(tokens) if tokens_mode else [_WORD] * len(tokens)
@@ -306,26 +306,18 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
     for i, tok in enumerate(tokens):
         if cur:
             gap = tok.s - cur[-1].e >= GAP_SPLIT_MS
-            if kinds[i] == _BACK or (tokens_mode and words(cur_from, i) == 0) or kinds[i - 1] == _FORWARD:
-                # เครื่องหมายเกาะซับที่กำลังสร้าง / ซับที่มีแต่เครื่องหมายนำหน้า / คำที่มีเครื่องหมายเปิดนำหน้า
-                # ให้ token นี้อยู่ซับเดียวกัน
-                close = gap
-            elif kinds[i] == _FORWARD:
-                # เครื่องหมายเปิดตัดสินพร้อมคำที่มันเกาะ: ถ้าคำนั้นต้องขึ้นซับใหม่ เครื่องหมายก็ขึ้นไปด้วย
-                j = chain_end(i)
-                close = (
-                    not _fits([*cur, *tokens[i : j + 1]], opts, opts.max_chars)
-                    or gap
-                    or tokens[j].e - cur[0].s > opts.max_ms
-                    or words(cur_from, i) >= per_cue
-                )
-            else:
-                close = (
-                    not _fits([*cur, tok], opts, opts.max_chars)
-                    or gap
-                    or tok.e - cur[0].s > opts.max_ms
-                    or (tokens_mode and words(cur_from, i) >= per_cue)
-                )
+            # เครื่องหมายเปิดตัดสินพร้อมคำที่มันเกาะ (ช่วง i..j): ถ้าคำนั้นต้องขึ้นซับใหม่ เครื่องหมายก็ขึ้นไปด้วย
+            j = chain_end(i) if kinds[i] == _FORWARD else i
+            # ทุก token (รวมเครื่องหมาย) ต้องไม่ทำให้เกินขีดจำกัดตัวอักษร/เวลานานสุด (fix round 2, review #1)
+            # เกินเมื่อไรก็ขึ้นซับใหม่ตามปกติ แม้จะได้ซับที่ขึ้นต้นด้วยเครื่องหมาย
+            capped = (
+                not _fits([*cur, *tokens[i : j + 1]], opts, opts.max_chars)
+                or tokens[j].e - cur[0].s > opts.max_ms
+            )
+            # กฎจำนวนคำใช้กับคำและเครื่องหมายเปิดเท่านั้น: เครื่องหมายที่เกาะคำก่อนหน้า และคำที่มีเครื่องหมายเปิด
+            # นำหน้าอยู่แล้ว ไม่ขึ้นซับใหม่เพราะจำนวนคำ (ซับที่มีแต่เครื่องหมายนำหน้ามีคำ 0 จึงไม่ถึงเกณฑ์เอง)
+            counted = kinds[i] != _BACK and kinds[i - 1] != _FORWARD
+            close = gap or capped or (tokens_mode and counted and words(cur_from, i) >= per_cue)
             if close:
                 drafts.append(_draft(cur))
                 cur = []

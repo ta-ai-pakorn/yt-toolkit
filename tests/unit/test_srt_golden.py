@@ -181,11 +181,21 @@ def test_word_goldens_have_one_token_per_cue():
         stored = json.loads(_token_file(name).read_bytes().decode("utf-8"))
         tokens = [Token(**t) for t in stored["tokens"]]
         cues = build_cues(tokens, PRESETS["word"])
-        # owner round 3: เครื่องหมายล้วน ("." "," ...) ไม่นับเป็นคำ เกาะท้ายคำก่อนหน้า จึงได้ 1 คำต่อซับพอดี
+        # owner round 3: เครื่องหมายล้วน ("." "," ...) ไม่นับเป็นคำ เกาะคำข้างเคียง จึงได้ไม่เกิน 1 คำต่อซับ
+        # fix round 2 (review #1): ซับที่มีแต่เครื่องหมายเกิดได้เฉพาะเมื่อเกาะแล้วเกินเวลานานสุดหรือตัวอักษรสูงสุด
+        # (en-asr มี 2 ซับ: "." ที่ยาวราว 6 และ 3 วินาที)
         words = [t for t in tokens if not is_punct_only(t)]
-        assert len(cues) == len(words)
-        assert all(display_len(line) > 0 for c in cues for line in c.lines)
-        assert not any(c.lines == (".",) or c.lines == (",",) for c in cues)
+        opts = PRESETS["word"]
+        alone = 0
+        for k, c in enumerate(cues):
+            text = " ".join(c.lines)
+            assert display_len(text) > 0
+            if is_punct_only(Token(text, 0, 0)):
+                alone += 1
+                prev = cues[k - 1]
+                assert c.end_ms - prev.start_ms > opts.max_ms or display_len(prev.lines[-1] + text) > opts.max_chars
+        assert len(cues) == len(words) + alone
+        assert alone <= 2
         # ต่อข้อความทุกซับกลับได้ทั้งแทร็ก (ไม่มีอะไรหาย)
         assert " ".join(" ".join(c.lines) for c in cues).replace(" ", "") == cue_text(tokens).replace(" ", "")
 

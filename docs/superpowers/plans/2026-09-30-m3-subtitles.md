@@ -370,28 +370,20 @@ cues = []; cur = []
 for tok in tokens:
     if cur:
         gap = tok.s - cur[-1].e >= 1000
-        if kind(tok) == "back" or (mode == "tokens" and words(cur) == 0) or kind(prev token) == "forward":
-            close = gap        # punctuation attaches to the cue being built; a cue that so far holds only
-                               # leading punctuation takes the next word in; a word never leaves its opener
-        elif kind(tok) == "forward":
-            j = first token after tok whose kind is not "forward"   # the word the opener(s) attach to
-            close = not fits(cur + tokens[tok..j], maxChars)
-                 or gap
-                 or tokens[j].e - cur[0].s > maxMs
-                 or words(cur) >= tokensPerCue
-        else:
-            close = not fits(cur + [tok], maxChars)
-                 or gap
-                 or tok.e - cur[0].s > maxMs
-                 or (mode == "tokens" and words(cur) >= tokensPerCue)
+        j = (first token after tok whose kind is not "forward") if kind(tok) == "forward" else tok
+                                       # an opener decides together with the word it attaches to
+        capped = not fits(cur + tokens[tok..j], maxChars) or tokens[j].e - cur[0].s > maxMs
+        counted = kind(tok) != "back" and kind(prev token) != "forward"
+                                       # back punctuation and a word right after its opener never close on count
+        close = gap or capped or (mode == "tokens" and counted and words(cur) >= tokensPerCue)
         if close: cues.append(Cue(cur)); cur = []
     cur.append(tok)
 if cur: cues.append(Cue(cur))
 # Cue(cur): startMs = cur[0].s, endMs = cur[-1].e
 ```
-- **Punctuation-only tokens in tokens mode (owner round 3; openers: fix round 1):** they never count toward `tokensPerCue`. `forward` openers move with the word after them (the opener decides with that word, so `(`/`“`/an opening `"` starts the word's cue); `back` tokens attach to the previous word's cue, bypassing the line-length, `maxMs` and count rules (like a single over-long token, a word plus its attached punctuation may exceed `maxChars`). A leading one attaches to the next word's cue. The **only** exception is silence: a gap of ≥ 1000 ms still starts a new cue, so a punctuation-only cue can exist only with ≥ 1 s of silence on both sides. Reason: in ทีละคำ on English ASR, 13% of cues were a lone "." or ",".
+- **Punctuation-only tokens in tokens mode (owner round 3; openers: fix round 1):** they never count toward `tokensPerCue`. `forward` openers move with the word after them (the opener decides with that word, so `(`/`“`/an opening `"` starts the word's cue); `back` tokens attach to the previous word's cue. They bypass **only the count rule**: since fix round 2 (review #1) the line-length (`fits`) and `maxMs` caps apply to every token, so when attaching would break a cap the cue closes as usual and a punctuation-only token may start a cue (in ทีละคำ only when a cap forces it, e.g. a 6 s "." after a word; en-asr has 2 such cues). A leading one attaches to the next word's cue. Silence still splits: a gap of ≥ 1000 ms always starts a new cue. Reason: in ทีละคำ on English ASR, 13% of cues were a lone "." or ",".
 - Step 4 consequence: a 2-line cue may now have **no** valid split (an over-long word plus attached punctuation); it then stays on one line.
-- Shared cases: `word-preset-punctuation`, `word-preset-leading-punctuation-and-gap`, `tokens-mode-punctuation-two-lines`, `short-preset-punctuation-unchanged` (chars mode keeps the lone "." cue), and (fix round 1) `word-preset-openers`, `word-preset-straight-quotes`, `word-preset-trailing-opener` (an opener at the end of the track, or before ≥ 1 s of silence, attaches backward), `tokens-mode-opener-keeps-its-word`. Goldens: only `en-asr.word.srt` changed (e.g. `movie "` / `Dang` became `movie` / `"Dang`); all other presets and `th-asr.custom-tokens.srt` are byte-identical.
+- Shared cases: `word-preset-punctuation`, `word-preset-leading-punctuation-and-gap`, `tokens-mode-punctuation-two-lines`, `short-preset-punctuation-unchanged` (chars mode keeps the lone "." cue), and (fix round 1) `word-preset-openers`, `word-preset-straight-quotes`, `word-preset-trailing-opener` (an opener at the end of the track, or before ≥ 1 s of silence, attaches backward), `tokens-mode-opener-keeps-its-word`, and (fix round 2) `word-preset-punctuation-respects-max-duration` ("Hello" + 40 " ♪" 600 ms apart: maxMs closes the cues, so most cues hold only notes); `tokens-mode-punctuation-two-lines` now expects `internationally` / `, yes no.` (the comma would break maxChars). Goldens: only `en-asr.word.srt` changed (e.g. `movie "` / `Dang` became `movie` / `"Dang`); all other presets and `th-asr.custom-tokens.srt` are byte-identical.
 
 **2. Minimum duration** (index loop, re-check the same index after a merge)
 ```

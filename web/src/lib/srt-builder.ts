@@ -225,25 +225,13 @@ export function buildCues(tokens: readonly SubToken[], o: SubOptions): Cue[] {
   for (let i = 1; i < tokens.length; i++) {
     const tok = tokens[i]
     const gap = tok.s - tokens[i - 1].e >= GAP_SPLIT_MS
-    let close: boolean
-    if (kinds[i] === BACK || (tokensMode && words(curFrom, i) === 0) || kinds[i - 1] === FORWARD) {
-      // เครื่องหมายเกาะซับที่กำลังสร้าง / ซับที่มีแต่เครื่องหมายนำหน้า / คำที่มีเครื่องหมายเปิดนำหน้า อยู่ซับเดียวกัน
-      close = gap
-    } else if (kinds[i] === FORWARD) {
-      // เครื่องหมายเปิดตัดสินพร้อมคำที่มันเกาะ: ถ้าคำนั้นต้องขึ้นซับใหม่ เครื่องหมายก็ขึ้นไปด้วย
-      const j = chainEnd(i)
-      close =
-        !fits(m, curFrom, j + 1, o, o.maxChars) ||
-        gap ||
-        tokens[j].e - tokens[curFrom].s > o.maxMs ||
-        words(curFrom, i) >= perCue
-    } else {
-      close =
-        !fits(m, curFrom, i + 1, o, o.maxChars) ||
-        gap ||
-        tok.e - tokens[curFrom].s > o.maxMs ||
-        (tokensMode && words(curFrom, i) >= perCue)
-    }
+    // เครื่องหมายเปิดตัดสินพร้อมคำที่มันเกาะ (ช่วง i..j): ถ้าคำนั้นต้องขึ้นซับใหม่ เครื่องหมายก็ขึ้นไปด้วย
+    const j = kinds[i] === FORWARD ? chainEnd(i) : i
+    // ทุก token (รวมเครื่องหมาย) ต้องไม่ทำให้เกินขีดจำกัดตัวอักษร/เวลานานสุด (fix round 2, review #1)
+    const capped = !fits(m, curFrom, j + 1, o, o.maxChars) || tokens[j].e - tokens[curFrom].s > o.maxMs
+    // กฎจำนวนคำใช้กับคำและเครื่องหมายเปิดเท่านั้น (เหมือนฝั่ง Python)
+    const counted = kinds[i] !== BACK && kinds[i - 1] !== FORWARD
+    const close = gap || capped || (tokensMode && counted && words(curFrom, i) >= perCue)
     if (close) {
       drafts.push(draft(curFrom, i))
       curFrom = i
