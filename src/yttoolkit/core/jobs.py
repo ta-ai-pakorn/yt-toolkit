@@ -1,0 +1,449 @@
+"""งานในคิว (jobs): โมเดล กฎการเปลี่ยนสถานะ และที่เก็บในตาราง jobs ของ SQLite
+
+ทุกการเขียนผ่าน `db.transaction()` จึงไม่มีงานไหนเห็นสถานะครึ่งๆ กลางๆ
+เวลาเก็บเป็น ISO 8601 UTC (`+00:00`) แบบมีไมโครวินาทีเสมอ จึงเรียงตามตัวอักษรได้ตรงกับเวลา
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+from collections.abc import Callable, Collection, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path, PurePosixPath
+from typing import Any, Protocol
+
+from .db import Database, Transaction
+from .yterrors import MESSAGES
+
+JOB_KINDS = ("video", "audio", "subtitle", "frames_sharp", "contact_sheet", "frames_zip")
+STATUSES = ("queued", "running", "done", "failed", "cancelled", "interrupted")
+STAGES = ("probing", "downloading_video", "downloading_audio", "merging", "converting", "writing")
+TERMINAL = frozenset({"done", "failed", "cancelled", "interrupted"})
+# PRD 6.1 บวก running -> queued (Q1: เจอเช็กบอทครั้งแรก กลับไปหัวคิว)
+TRANSITIONS = frozenset({
+    ("queued", "running"), ("queued", "cancelled"),
+    ("running", "done"), ("running", "failed"), ("running", "cancelled"),
+    ("running", "interrupted"), ("running", "queued"),
+    ("failed", "queued"), ("interrupted", "queued"),
+})
+NOTES = {
+    "AUDIO_LANG_FALLBACK": "คลิปนี้ไม่มีเสียงภาษาที่เลือก ใช้เสียงต้นฉบับแทน",
+    "NO_SUBTITLES": "คลิปนี้ไม่มีซับ",
+    "EMBED_SUBS_SKIPPED": "ฝังซับไม่สำเร็จ ได้ไฟล์วิดีโอที่ไม่มีซับ",
+    "QUALITY_FALLBACK": "คุณภาพที่เลือกไม่มีแล้ว ใช้คุณภาพที่ใกล้ที่สุดแทน",
+}
+
+# ชื่อช่องฝั่ง Python -> คอลัมน์ ที่ transition() เขียนได้
+_FIELD_COLUMNS = {
+    "title": "title",
+    "stage": "stage",
+    "progress": "progress",
+    "speed_bps": "speed_bps",
+    "eta_s": "eta_s",
+    "attempt": "attempt",
+    "bot_checks": "bot_checks",
+    "error_code": "error_code",
+    "error_message": "error_message",
+    "error_detail": "error_detail",
+    "notes": "notes_json",
+    "outputs": "outputs_json",
+}
+# update() แก้ได้เฉพาะค่าระหว่างรัน (งานต้องอยู่ในสถานะ running)
+_UPDATE_FIELDS = frozenset({"stage", "progress", "speed_bps", "eta_s", "attempt", "title", "bot_checks"})
+# requeue() ล้างผลของรอบก่อนทิ้งทั้งหมด ยกเว้น bot_checks (Q1 นับข้ามรอบ)
+_REQUEUE_CLEARS = (
+    "stage = NULL, progress = NULL, speed_bps = NULL, eta_s = NULL, attempt = 0, "
+    "error_code = NULL, error_message = NULL, error_detail = NULL, notes_json = NULL, "
+    "outputs_json = NULL, started_at = NULL, finished_at = NULL"
+)
+_REQUEUE_FROM = frozenset({"failed", "interrupted", "running"})
+_DEFAULT_FINISHED_LIMIT = 20
+
+
+class InvalidTransition(Exception):
+    """เปลี่ยนสถานะแบบนี้ไม่ได้ (API ตอบ 409 E_JOB_STATE)"""
+
+
+# ---------- uuid7 ----------
+
+_uuid_lock = threading.Lock()
+_uuid_last_ms = 0
+_uuid_counter = 0
+
+
+def uuid7() -> str:
+    """UUID เวอร์ชัน 7 (RFC 9562) เป็นข้อความ 36 ตัว เรียงตามตัวอักษรได้ตามเวลาที่สร้าง
+    ในมิลลิวินาทีเดียวกันใช้ 12 บิต rand_a เป็นตัวนับ จึงเรียงต่อกันได้แม้สร้างถี่ๆ"""
+    global _uuid_last_ms, _uuid_counter
+    with _uuid_lock:
+        ms = time.time_ns() // 1_000_000
+        if ms > _uuid_last_ms:
+            _uuid_last_ms = ms
+            _uuid_counter = int.from_bytes(os.urandom(2)) & 0x7FF  # เว้นที่ให้นับต่อ
+        else:
+            _uuid_counter += 1
+            if _uuid_counter > 0xFFF:  # ตัวนับเต็ม ขยับเวลาไป 1 ms เพื่อให้ยังเรียงได้
+                _uuid_last_ms += 1
+                _uuid_counter = 0
+        ms, counter = _uuid_last_ms, _uuid_counter
+    rand_b = int.from_bytes(os.urandom(8)) & ((1 << 62) - 1)
+    value = (ms & ((1 << 48) - 1)) << 80 | 0x7 << 76 | counter << 64 | 0b10 << 62 | rand_b
+    text = f"{value:032x}"
+    return f"{text[:8]}-{text[8:12]}-{text[12:16]}-{text[16:20]}-{text[20:]}"
+
+
+# ---------- model ----------
+
+@dataclass(frozen=True)
+class OutputFile:
+    root: str        # โฟลเดอร์ผลลัพธ์ (absolute) ตอนทำงาน ไม่ส่งให้เบราว์เซอร์
+    rel: str         # "<folder>/<file>" ใช้ "/" คั่น
+    size_bytes: int
+    kind: str        # "video" | "audio" | "subtitle" | "image" | "archive"
+
+
+@dataclass(frozen=True)
+class NewJob:
+    video_id: str
+    kind: str
+    params: dict
+    title: str = ""
+
+
+@dataclass(frozen=True)
+class JobResult:
+    outputs: tuple[OutputFile, ...] = ()
+    notes: tuple[str, ...] = ()
+    title: str | None = None
+
+
+class JobContext(Protocol):
+    job_id: str
+    workdir: Path        # work/<jobId>/ ตัวรันคิวสร้างให้ และลบทิ้งหลังงานจบ
+    output_root: Path    # outputDir ณ ตอนเริ่มงาน
+
+    def stage(self, stage: str) -> None: ...
+    def progress(self, fraction: float | None, speed_bps: int | None = None, eta_s: int | None = None) -> None: ...
+    def set_title(self, title: str) -> None: ...
+    def cancelled(self) -> bool: ...
+    def check_cancelled(self) -> None: ...      # raise JobCancelled
+    def wait(self, seconds: float) -> None: ... # หลับแบบยกเลิกได้ raise JobCancelled
+
+
+@dataclass
+class Job:
+    id: str
+    video_id: str
+    title: str
+    kind: str
+    params: dict
+    status: str
+    stage: str | None
+    progress: float | None
+    speed_bps: int | None
+    eta_s: int | None
+    attempt: int
+    bot_checks: int
+    position: int
+    error_code: str | None
+    error_message: str | None
+    error_detail: str | None
+    notes: tuple[str, ...]
+    outputs: tuple[OutputFile, ...]
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+
+    def to_api(self) -> dict:
+        """รูป Job ของ API/SSE (C2) ไม่มี "cancelling" (ชั้น API เติมเอง) และไม่มี path เต็มของไฟล์"""
+        data: dict[str, Any] = {
+            "id": self.id,
+            "videoId": self.video_id,
+            "title": self.title,
+            "kind": self.kind,
+            "params": self.params,
+            "status": self.status,
+            "position": self.position,
+            "createdAt": self.created_at,
+        }
+        optional = {
+            "stage": self.stage,
+            "progress": self.progress,
+            "speedBps": self.speed_bps,
+            "etaS": self.eta_s,
+            "startedAt": self.started_at,
+            "finishedAt": self.finished_at,
+        }
+        data.update({k: v for k, v in optional.items() if v is not None})
+        if self.attempt:
+            data["attempt"] = self.attempt
+        if self.error_code is not None:
+            data["error"] = {
+                "code": self.error_code,
+                "message": self.error_message or MESSAGES.get(self.error_code, MESSAGES["E_UNKNOWN"]),
+                "detail": self.error_detail,
+            }
+        notes = [{"code": code, "message": NOTES[code]} for code in self.notes if code in NOTES]
+        if notes:
+            data["notes"] = notes
+        if self.outputs:
+            data["outputs"] = [
+                {"index": i, "name": PurePosixPath(out.rel).name, "sizeBytes": out.size_bytes}
+                for i, out in enumerate(self.outputs)
+            ]
+        return data
+
+
+Handler = Callable[[Job, JobContext], JobResult]
+
+
+def _dump_outputs(outputs: Sequence[OutputFile] | None) -> str | None:
+    if not outputs:
+        return None
+    return json.dumps(
+        [{"root": o.root, "rel": o.rel, "sizeBytes": o.size_bytes, "kind": o.kind} for o in outputs],
+        ensure_ascii=False,
+    )
+
+
+def _load_outputs(text: str | None) -> tuple[OutputFile, ...]:
+    if not text:
+        return ()
+    return tuple(
+        OutputFile(str(o["root"]), str(o["rel"]), int(o["sizeBytes"]), str(o["kind"])) for o in json.loads(text)
+    )
+
+
+def _dump_notes(notes: Sequence[str] | None) -> str | None:
+    return json.dumps(list(notes), ensure_ascii=False) if notes else None
+
+
+def _from_row(row: Any) -> Job:
+    return Job(
+        id=row["id"],
+        video_id=row["video_id"],
+        title=row["title"],
+        kind=row["kind"],
+        params=json.loads(row["params_json"]),
+        status=row["status"],
+        stage=row["stage"],
+        progress=row["progress"],
+        speed_bps=row["speed_bps"],
+        eta_s=row["eta_s"],
+        attempt=row["attempt"],
+        bot_checks=row["bot_checks"],
+        position=row["position"],
+        error_code=row["error_code"],
+        error_message=row["error_message"],
+        error_detail=row["error_detail"],
+        notes=tuple(json.loads(row["notes_json"])) if row["notes_json"] else (),
+        outputs=_load_outputs(row["outputs_json"]),
+        created_at=row["created_at"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+    )
+
+
+def _encode(field: str, value: Any) -> Any:
+    if field == "notes":
+        return _dump_notes(value)
+    if field == "outputs":
+        return _dump_outputs(value)
+    if field == "stage" and value is not None and value not in STAGES:
+        raise ValueError(f"stage ไม่รู้จัก: {value!r}")
+    if field == "title":
+        return value or ""
+    if field in ("attempt", "bot_checks"):
+        return int(value or 0)
+    return value
+
+
+def _assignments(fields: dict[str, Any]) -> tuple[list[str], list[Any]]:
+    sets: list[str] = []
+    values: list[Any] = []
+    for field, value in fields.items():
+        sets.append(f"{_FIELD_COLUMNS[field]} = ?")
+        values.append(_encode(field, value))
+    return sets, values
+
+
+def _check_fields(fields: dict[str, Any], allowed: Collection[str]) -> None:
+    unknown = sorted(set(fields) - set(allowed))
+    if unknown:
+        raise ValueError(f"แก้ช่องเหล่านี้ไม่ได้: {', '.join(unknown)}")
+
+
+# ---------- store ----------
+
+class JobStore:
+    def __init__(
+        self,
+        db: Database,
+        *,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        new_id: Callable[[], str] = uuid7,
+    ) -> None:
+        self._db = db
+        self._now = now
+        self._new_id = new_id
+
+    def _stamp(self, moment: datetime | None = None) -> str:
+        return (moment or self._now()).astimezone(UTC).isoformat(timespec="microseconds")
+
+    @staticmethod
+    def _row(tx: Transaction, job_id: str) -> Any:
+        rows = tx.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        if not rows:
+            raise KeyError(job_id)
+        return rows[0]
+
+    def add(self, items: Sequence[NewJob]) -> list[Job]:
+        for item in items:
+            if item.kind not in JOB_KINDS:
+                raise ValueError(f"ชนิดงานไม่รู้จัก: {item.kind!r}")
+        created = self._stamp()
+        with self._db.transaction() as tx:
+            base = tx.execute("SELECT COALESCE(MAX(position), 0) AS p FROM jobs")[0]["p"]
+            ids: list[str] = []
+            for offset, item in enumerate(items, start=1):
+                job_id = self._new_id()
+                tx.execute(
+                    "INSERT INTO jobs (id, video_id, title, kind, params_json, status, position, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)",
+                    (job_id, item.video_id, item.title or "", item.kind,
+                     json.dumps(item.params, ensure_ascii=False), base + offset, created),
+                )
+                ids.append(job_id)
+            return [_from_row(self._row(tx, job_id)) for job_id in ids]
+
+    def get(self, job_id: str) -> Job | None:
+        rows = self._db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        return _from_row(rows[0]) if rows else None
+
+    def queued(self) -> list[Job]:
+        return self.list_status("queued", -1)
+
+    def running(self) -> list[Job]:
+        return self.list_status("running", -1)
+
+    def list_status(self, status: str, limit: int) -> list[Job]:
+        """queued เรียงตามลำดับคิว running ตามเวลาเริ่ม สถานะอื่นตามเวลาจบ ใหม่สุดก่อน
+        limit < 0 = ไม่จำกัด"""
+        if status not in STATUSES:
+            raise ValueError(f"สถานะไม่รู้จัก: {status!r}")
+        order = {
+            "queued": "position ASC, created_at ASC",
+            "running": "started_at ASC, position ASC",
+        }.get(status, "finished_at DESC, position DESC")
+        rows = self._db.execute(
+            f"SELECT * FROM jobs WHERE status = ? ORDER BY {order} LIMIT ?", (status, int(limit))
+        )
+        return [_from_row(r) for r in rows]
+
+    def list_default(self) -> list[Job]:
+        """running ทั้งหมด, queued ทั้งหมด, failed/interrupted 20 งานล่าสุดใน 7 วัน
+        และ done 20 งานล่าสุดใน 24 ชม. (สองกลุ่มหลังรวมกันเรียงตามเวลาจบ ใหม่สุดก่อน) ไม่มี cancelled"""
+        now = self._now()
+        with self._db.transaction() as tx:  # อ่านทั้งชุดจากภาพเดียวกัน
+            running = tx.execute("SELECT * FROM jobs WHERE status = 'running' ORDER BY started_at, position")
+            queued = tx.execute("SELECT * FROM jobs WHERE status = 'queued' ORDER BY position, created_at")
+            failed = tx.execute(
+                "SELECT * FROM jobs WHERE status IN ('failed', 'interrupted') AND finished_at >= ? "
+                "ORDER BY finished_at DESC LIMIT ?",
+                (self._stamp(now - timedelta(days=7)), _DEFAULT_FINISHED_LIMIT),
+            )
+            done = tx.execute(
+                "SELECT * FROM jobs WHERE status = 'done' AND finished_at >= ? ORDER BY finished_at DESC LIMIT ?",
+                (self._stamp(now - timedelta(hours=24)), _DEFAULT_FINISHED_LIMIT),
+            )
+        finished = sorted([*failed, *done], key=lambda r: r["finished_at"], reverse=True)
+        return [_from_row(r) for r in [*running, *queued, *finished]]
+
+    def transition(self, job_id: str, to: str, **fields: Any) -> Job:
+        """เปลี่ยนสถานะตาม TRANSITIONS และเขียนช่องที่ส่งมาพร้อมกัน
+        ->running ตั้ง started_at, ->สถานะจบ ตั้ง finished_at, ->queued ล้างเวลาทั้งสอง"""
+        _check_fields(fields, _FIELD_COLUMNS.keys())
+        if to not in STATUSES:
+            raise InvalidTransition(f"สถานะไม่รู้จัก: {to!r}")
+        sets, values = _assignments(fields)
+        stamp = self._stamp()
+        with self._db.transaction() as tx:
+            current = self._row(tx, job_id)["status"]
+            if (current, to) not in TRANSITIONS:
+                raise InvalidTransition(f"{current} -> {to}")
+            sets.insert(0, "status = ?")
+            values.insert(0, to)
+            if to == "running":
+                sets += ["started_at = ?", "finished_at = NULL"]
+                values.append(stamp)
+            elif to in TERMINAL:
+                sets.append("finished_at = ?")
+                values.append(stamp)
+            else:
+                sets += ["started_at = NULL", "finished_at = NULL"]
+            tx.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", (*values, job_id))
+            return _from_row(self._row(tx, job_id))
+
+    def update(self, job_id: str, **fields: Any) -> Job:
+        """แก้ค่าระหว่างรัน (stage, progress, speed_bps, eta_s, attempt, title, bot_checks) ของงานที่ running"""
+        _check_fields(fields, _UPDATE_FIELDS)
+        sets, values = _assignments(fields)
+        with self._db.transaction() as tx:
+            current = self._row(tx, job_id)["status"]
+            if current != "running":
+                raise InvalidTransition(f"แก้งานที่ไม่ได้รันอยู่ไม่ได้ ({current})")
+            if sets:
+                tx.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", (*values, job_id))
+            return _from_row(self._row(tx, job_id))
+
+    def requeue(self, job_id: str, *, front: bool = False) -> Job:
+        """failed/interrupted/running -> queued ต่อท้ายคิว (front=True ไปหัวคิว)
+        ล้างผลของรอบก่อน (error, progress, outputs, notes, attempt, stage, เวลา) แต่เก็บ bot_checks"""
+        with self._db.transaction() as tx:
+            current = self._row(tx, job_id)["status"]
+            if current not in _REQUEUE_FROM:
+                raise InvalidTransition(f"{current} -> queued")
+            if front:
+                first = tx.execute("SELECT MIN(position) AS p FROM jobs WHERE status = 'queued'")[0]["p"]
+                if first is not None:
+                    position = first - 1
+                else:
+                    position = tx.execute("SELECT COALESCE(MAX(position), 0) AS p FROM jobs")[0]["p"] + 1
+            else:
+                position = tx.execute("SELECT COALESCE(MAX(position), 0) AS p FROM jobs")[0]["p"] + 1
+            tx.execute(
+                f"UPDATE jobs SET status = 'queued', position = ?, {_REQUEUE_CLEARS} WHERE id = ?",
+                (position, job_id),
+            )
+            return _from_row(self._row(tx, job_id))
+
+    def reorder(self, ids: Sequence[str]) -> None:
+        """id ที่ไม่ได้ queued อยู่จะถูกข้าม ที่เหลือได้ตำแหน่งเดิมของกลุ่มตัวเองเรียงจากน้อยไปมาก
+        ตามลำดับที่ส่งมา งาน queued อื่นอยู่ที่เดิม"""
+        with self._db.transaction() as tx:
+            queued = {r["id"]: r["position"] for r in tx.execute(
+                "SELECT id, position FROM jobs WHERE status = 'queued'")}
+            wanted = [job_id for job_id in dict.fromkeys(ids) if job_id in queued]
+            slots = sorted(queued[job_id] for job_id in wanted)
+            for job_id, position in zip(wanted, slots, strict=True):
+                if queued[job_id] != position:
+                    tx.execute("UPDATE jobs SET position = ? WHERE id = ?", (position, job_id))
+
+    def interrupt_running(self, message: str) -> int:
+        """ทุกงาน running -> interrupted (E_INTERRUPTED) ใช้ตอนเปิดโปรแกรมใหม่และตอนปิดโปรแกรม"""
+        stamp = self._stamp()
+        with self._db.transaction() as tx:
+            rows = tx.execute(
+                "UPDATE jobs SET status = 'interrupted', error_code = 'E_INTERRUPTED', error_message = ?, "
+                "finished_at = ? WHERE status = 'running' RETURNING id",
+                (message, stamp),
+            )
+        return len(rows)
+
+    def pending_count(self) -> int:
+        rows = self._db.execute("SELECT count(*) AS n FROM jobs WHERE status IN ('queued', 'running')")
+        return int(rows[0]["n"])

@@ -16,9 +16,37 @@ from .inputs import VIDEO_ID
 
 log = logging.getLogger("yttoolkit")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
-_SCHEMA = """
+# v2: ไม่มี foreign key ไป videos (W3 เข้าคิวคลิปที่ยังไม่เคย probe ได้) และมีช่องของงาน M4 เพิ่ม
+_JOBS = """
+CREATE TABLE jobs (
+  id            TEXT PRIMARY KEY,
+  video_id      TEXT NOT NULL,
+  title         TEXT NOT NULL DEFAULT '',
+  kind          TEXT NOT NULL,
+  params_json   TEXT NOT NULL,
+  status        TEXT NOT NULL,
+  stage         TEXT,
+  progress      REAL,
+  speed_bps     INTEGER,
+  eta_s         INTEGER,
+  attempt       INTEGER NOT NULL DEFAULT 0,
+  bot_checks    INTEGER NOT NULL DEFAULT 0,
+  position      INTEGER NOT NULL,
+  error_code    TEXT,
+  error_message TEXT,
+  error_detail  TEXT,
+  notes_json    TEXT,
+  outputs_json  TEXT,
+  created_at    TEXT NOT NULL,
+  started_at    TEXT,
+  finished_at   TEXT
+);
+CREATE INDEX jobs_status_position ON jobs(status, position);
+"""
+
+_SCHEMA = f"""
 CREATE TABLE schema_version (version INTEGER NOT NULL);
 
 CREATE TABLE videos (
@@ -33,28 +61,25 @@ CREATE TABLE videos (
   opened_at     TEXT NOT NULL
 );
 
-CREATE TABLE jobs (
-  id            TEXT PRIMARY KEY,
-  video_id      TEXT NOT NULL REFERENCES videos(video_id),
-  kind          TEXT NOT NULL,
-  params_json   TEXT NOT NULL,
-  status        TEXT NOT NULL,
-  stage         TEXT,
-  progress      REAL,
-  speed_bps     INTEGER,
-  eta_s         INTEGER,
-  position      INTEGER NOT NULL,
-  error_code    TEXT,
-  error_detail  TEXT,
-  outputs_json  TEXT,
-  created_at    TEXT NOT NULL,
-  started_at    TEXT,
-  finished_at   TEXT
-);
-CREATE INDEX jobs_status_position ON jobs(status, position);
-
-CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
+{_JOBS}CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
 """
+
+_V1_JOB_COLUMNS = (
+    "id, video_id, kind, params_json, status, stage, progress, speed_bps, eta_s, position, "
+    "error_code, error_detail, outputs_json, created_at, started_at, finished_at"
+)
+
+# สคริปต์อัปเกรดจากเวอร์ชัน (key - 1) ไปเป็น key แต่ละตัวรันใน transaction เดียว
+_MIGRATIONS: dict[int, str] = {
+    2: f"""
+DROP INDEX IF EXISTS jobs_status_position;
+ALTER TABLE jobs RENAME TO jobs_v1;
+{_JOBS}
+INSERT INTO jobs ({_V1_JOB_COLUMNS}) SELECT {_V1_JOB_COLUMNS} FROM jobs_v1;
+DROP TABLE jobs_v1;
+UPDATE schema_version SET version = 2;
+""",
+}
 
 
 class Transaction:
@@ -105,6 +130,11 @@ class Database:
                 f"ฐานข้อมูลเป็นเวอร์ชัน {found} ใหม่กว่าโปรแกรมนี้ ({SCHEMA_VERSION}) "
                 "ให้อัปเดตโปรแกรมก่อนเปิดใช้"
             )
+        if found < 1:
+            return  # ตาราง schema_version ว่าง ไม่รู้ว่าเป็นเวอร์ชันไหน จึงไม่แตะ (เหมือนเดิม)
+        for version in range(found + 1, SCHEMA_VERSION + 1):
+            # แต่ละขั้นทำใน transaction เดียว พังกลางทางแล้วย้อนกลับเป็นเวอร์ชันเดิมทั้งก้อน
+            self._conn.executescript(f"BEGIN;{_MIGRATIONS[version]}COMMIT;")
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
         with self._lock:
