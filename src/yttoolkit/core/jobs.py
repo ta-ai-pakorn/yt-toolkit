@@ -24,6 +24,8 @@ STATUSES = ("queued", "running", "done", "failed", "cancelled", "interrupted")
 STAGES = ("probing", "downloading_video", "downloading_audio", "merging", "converting", "writing")
 TERMINAL = frozenset({"done", "failed", "cancelled", "interrupted"})
 # PRD 6.1 บวก running -> queued (Q1: เจอเช็กบอทครั้งแรก กลับไปหัวคิว)
+# ทุกคู่ที่ไปเป็น "queued" ทำได้ผ่าน JobStore.requeue() เท่านั้น (ล้างผลรอบก่อนและจัดตำแหน่งคิว)
+# transition(..., "queued") จึงถูกปฏิเสธเสมอ
 TRANSITIONS = frozenset({
     ("queued", "running"), ("queued", "cancelled"),
     ("running", "done"), ("running", "failed"), ("running", "cancelled"),
@@ -53,14 +55,15 @@ _FIELD_COLUMNS = {
     "outputs": "outputs_json",
 }
 # update() แก้ได้เฉพาะค่าระหว่างรัน (งานต้องอยู่ในสถานะ running)
-_UPDATE_FIELDS = frozenset({"stage", "progress", "speed_bps", "eta_s", "attempt", "title", "bot_checks"})
-# requeue() ล้างผลของรอบก่อนทิ้งทั้งหมด ยกเว้น bot_checks (Q1 นับข้ามรอบ)
+_UPDATE_FIELDS = frozenset({"stage", "progress", "speed_bps", "eta_s", "attempt", "title"})
+# requeue() ล้างผลของรอบก่อนทิ้งทั้งหมด ยกเว้น bot_checks (Q1 นับข้ามรอบ ลองใหม่เองค่อยรีเซ็ต)
 _REQUEUE_CLEARS = (
     "stage = NULL, progress = NULL, speed_bps = NULL, eta_s = NULL, attempt = 0, "
     "error_code = NULL, error_message = NULL, error_detail = NULL, notes_json = NULL, "
     "outputs_json = NULL, started_at = NULL, finished_at = NULL"
 )
-_REQUEUE_FROM = frozenset({"failed", "interrupted", "running"})
+# ค่าระหว่างรันที่ไม่มีความหมายแล้วเมื่องานหยุด (ผู้เรียกส่งค่าเองได้ ค่าที่ส่งมาชนะ)
+_STOP_CLEARS = {"stage": None, "speed_bps": None, "eta_s": None, "attempt": 0}
 _DEFAULT_FINISHED_LIMIT = 20
 
 
@@ -256,7 +259,7 @@ def _encode(field: str, value: Any) -> Any:
     if field == "stage" and value is not None and value not in STAGES:
         raise ValueError(f"stage ไม่รู้จัก: {value!r}")
     if field == "title":
-        return value or ""
+        return value
     if field in ("attempt", "bot_checks"):
         return int(value or 0)
     return value
@@ -266,6 +269,8 @@ def _assignments(fields: dict[str, Any]) -> tuple[list[str], list[Any]]:
     sets: list[str] = []
     values: list[Any] = []
     for field, value in fields.items():
+        if field == "title" and value is None:
+            continue  # title=None = ไม่แก้ชื่อเดิม
         sets.append(f"{_FIELD_COLUMNS[field]} = ?")
         values.append(_encode(field, value))
     return sets, values
@@ -365,10 +370,15 @@ class JobStore:
 
     def transition(self, job_id: str, to: str, **fields: Any) -> Job:
         """เปลี่ยนสถานะตาม TRANSITIONS และเขียนช่องที่ส่งมาพร้อมกัน
-        ->running ตั้ง started_at, ->สถานะจบ ตั้ง finished_at, ->queued ล้างเวลาทั้งสอง"""
+        ->running ตั้ง started_at, ->สถานะจบ ตั้ง finished_at และล้าง stage/speed_bps/eta_s/attempt
+        (ค่าที่ส่งมาเองชนะ) ส่วน ->queued ต้องใช้ requeue()"""
         _check_fields(fields, _FIELD_COLUMNS.keys())
         if to not in STATUSES:
-            raise InvalidTransition(f"สถานะไม่รู้จัก: {to!r}")
+            raise ValueError(f"สถานะไม่รู้จัก: {to!r}")
+        if to == "queued":
+            raise InvalidTransition("ใช้ requeue() เพื่อส่งงานกลับเข้าคิว ไม่ใช่ transition(..., 'queued')")
+        if to in TERMINAL:
+            fields = {**_STOP_CLEARS, **fields}
         sets, values = _assignments(fields)
         stamp = self._stamp()
         with self._db.transaction() as tx:
@@ -379,17 +389,15 @@ class JobStore:
             values.insert(0, to)
             if to == "running":
                 sets += ["started_at = ?", "finished_at = NULL"]
-                values.append(stamp)
-            elif to in TERMINAL:
-                sets.append("finished_at = ?")
-                values.append(stamp)
             else:
-                sets += ["started_at = NULL", "finished_at = NULL"]
+                sets.append("finished_at = ?")
+            values.append(stamp)
             tx.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", (*values, job_id))
             return _from_row(self._row(tx, job_id))
 
     def update(self, job_id: str, **fields: Any) -> Job:
-        """แก้ค่าระหว่างรัน (stage, progress, speed_bps, eta_s, attempt, title, bot_checks) ของงานที่ running"""
+        """แก้ค่าระหว่างรัน (stage, progress, speed_bps, eta_s, attempt, title) ของงานที่ running
+        title=None = ไม่แก้ชื่อ bot_checks ตั้งผ่าน requeue(..., bot_checks=n) เท่านั้น"""
         _check_fields(fields, _UPDATE_FIELDS)
         sets, values = _assignments(fields)
         with self._db.transaction() as tx:
@@ -400,12 +408,24 @@ class JobStore:
                 tx.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", (*values, job_id))
             return _from_row(self._row(tx, job_id))
 
-    def requeue(self, job_id: str, *, front: bool = False) -> Job:
-        """failed/interrupted/running -> queued ต่อท้ายคิว (front=True ไปหัวคิว)
-        ล้างผลของรอบก่อน (error, progress, outputs, notes, attempt, stage, เวลา) แต่เก็บ bot_checks"""
+    def requeue(
+        self,
+        job_id: str,
+        *,
+        front: bool = False,
+        bot_checks: int | None = None,
+        reset_bot_checks: bool = False,
+    ) -> Job:
+        """failed/interrupted/running -> queued ต่อท้ายคิว (front=True ไปหัวคิว) ทางเดียวที่ส่งงานกลับเข้าคิว
+        ล้างผลของรอบก่อน (error, progress, outputs, notes, attempt, stage, เวลา)
+        bot_checks: ปกติเก็บค่าเดิม; bot_checks=n ตั้งค่าใน transaction เดียวกัน (Q1 เจอเช็กบอท)
+        reset_bot_checks=True ตั้งเป็น 0 (ผู้ใช้กดลองใหม่เอง)"""
+        if bot_checks is not None and reset_bot_checks:
+            raise ValueError("ส่ง bot_checks กับ reset_bot_checks พร้อมกันไม่ได้")
+        new_checks = 0 if reset_bot_checks else bot_checks
         with self._db.transaction() as tx:
             current = self._row(tx, job_id)["status"]
-            if current not in _REQUEUE_FROM:
+            if (current, "queued") not in TRANSITIONS:
                 raise InvalidTransition(f"{current} -> queued")
             if front:
                 first = tx.execute("SELECT MIN(position) AS p FROM jobs WHERE status = 'queued'")[0]["p"]
@@ -416,8 +436,9 @@ class JobStore:
             else:
                 position = tx.execute("SELECT COALESCE(MAX(position), 0) AS p FROM jobs")[0]["p"] + 1
             tx.execute(
-                f"UPDATE jobs SET status = 'queued', position = ?, {_REQUEUE_CLEARS} WHERE id = ?",
-                (position, job_id),
+                f"UPDATE jobs SET status = 'queued', position = ?, {_REQUEUE_CLEARS}, "
+                "bot_checks = COALESCE(?, bot_checks) WHERE id = ?",
+                (position, None if new_checks is None else int(new_checks), job_id),
             )
             return _from_row(self._row(tx, job_id))
 
@@ -439,7 +460,8 @@ class JobStore:
         with self._db.transaction() as tx:
             rows = tx.execute(
                 "UPDATE jobs SET status = 'interrupted', error_code = 'E_INTERRUPTED', error_message = ?, "
-                "finished_at = ? WHERE status = 'running' RETURNING id",
+                "finished_at = ?, stage = NULL, speed_bps = NULL, eta_s = NULL, attempt = 0 "
+                "WHERE status = 'running' RETURNING id",
                 (message, stamp),
             )
         return len(rows)
