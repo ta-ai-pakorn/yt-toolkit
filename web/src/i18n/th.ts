@@ -345,6 +345,7 @@ export const th = {
     counts: "กำลังทำ {running} · รอ {queued} · เสร็จ {done}",
     sheetTitle: "คิวงาน",
     sheetHint: "ปิดแท็บนี้ได้ งานยังทำต่อ",
+    empty: "ยังไม่มีงานในคิว",
     groups: { running: "กำลังทำ", queued: "รอ", failed: "ผิดพลาด", done: "เสร็จแล้ว" },
     stages: { probing: "ดึงข้อมูล", downloading_video: "โหลดภาพ", downloading_audio: "โหลดเสียง", merging: "รวมไฟล์", converting: "แปลงไฟล์", writing: "บันทึกไฟล์" },
     starting: "กำลังเริ่ม",
@@ -372,6 +373,7 @@ export const th = {
       moved: "{title} อยู่ลำดับที่ {n}",
       dropped: "วาง {title} ไว้ลำดับที่ {n}",
       cancelled: "ยกเลิกการย้าย {title}",
+      roleDescription: "รายการที่ลากเปลี่ยนลำดับได้",
     },
     paused: {
       title: "พักคิวไว้ชั่วคราว",

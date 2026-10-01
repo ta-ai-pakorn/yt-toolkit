@@ -1,15 +1,18 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
 import { CircleAlert, CircleCheck, CircleX, FlaskConical, Power, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
+import { ShutdownDialog } from "@/components/queue/shutdown-dialog"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
-import { fill, th } from "@/i18n/th"
+import { th } from "@/i18n/th"
 import { ApiError, api } from "@/lib/api"
+import { appShutdown } from "@/lib/events"
 import type { Health, ToolState, ToolStatus } from "@/lib/types"
 
 import { useHealth } from "./use-health"
@@ -43,6 +46,8 @@ function detail(key: RowKey, tool: ToolStatus): string {
 export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
   const queryClient = useQueryClient()
   const health = useHealth()
+  // มีงานค้าง (409) = ถามยืนยันก่อน พร้อมจำนวนงานจาก backend
+  const [pendingJobs, setPendingJobs] = useState<number | null>(null)
 
   const install = useMutation({
     mutationFn: () => api<ToolStatus>("/tools/ffmpeg/install", { method: "POST" }),
@@ -63,11 +68,11 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
     onSuccess: () => {
       toast.dismiss()
       onShutdown()
+      appShutdown.set()
     },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        const pending = (error.body as { pendingJobs?: number }).pendingJobs ?? 0
-        toast.warning(fill(th.shutdown.pending, { n: pending }))
+        setPendingJobs((error.body as { pendingJobs?: number } | null)?.pendingJobs ?? 0)
         return
       }
       toast.error(error.message)
@@ -144,6 +149,12 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
           {th.health.shutdown}
         </Button>
       </div>
+      <ShutdownDialog
+        open={pendingJobs !== null}
+        pendingJobs={pendingJobs ?? 0}
+        onClose={() => setPendingJobs(null)}
+        onShutdown={onShutdown}
+      />
     </div>
   )
 }

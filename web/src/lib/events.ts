@@ -117,6 +117,7 @@ export type ConnectOptions = {
 /**
  * ต่อ SSE ครั้งเดียวต่อหน้า แล้วคอยใส่เหตุการณ์ลงแคช คืนฟังก์ชันตัดการเชื่อมต่อ
  * เบราว์เซอร์ต่อใหม่เองเมื่อหลุด ("error" แล้ว "open") ระหว่างหลุดอาจพลาดเหตุการณ์ จึงโหลดรายการงานและสถานะคิวใหม่
+ * open ครั้งแรกก็โหลดใหม่หนึ่งครั้ง: เหตุการณ์ที่มาถึงก่อนรายการงานแรกโหลดเสร็จถูกข้ามไป (แคชยังไม่มี)
  * app.shutdown = ปิดการเชื่อมต่อถาวร (backend ไม่กลับมาแล้ว ไม่ต้องลองต่อใหม่ทุก 3 วิ)
  */
 export function connectEvents(
@@ -126,7 +127,8 @@ export function connectEvents(
   const source = (opts.createSource ?? ((url: string) => new EventSource(url)))(
     EVENTS_URL
   )
-  let lostConnection = false
+  // ยังไม่เคยต่อติด = ต้องโหลดใหม่ตอน open ครั้งแรกด้วย: เหตุการณ์ที่มาก่อนรายการงานโหลดเสร็จ (แคชว่าง) ถูกข้ามไป
+  let lostConnection = true
 
   const handlers = EVENT_NAMES.map((name) => {
     const handler = (message: Event) => {
