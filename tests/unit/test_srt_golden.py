@@ -22,6 +22,8 @@ from yttoolkit.core.srt_builder import (
     Token,
     build_cues,
     cue_text,
+    display_len,
+    is_punct_only,
     to_md,
     to_srt,
     to_txt,
@@ -179,8 +181,13 @@ def test_word_goldens_have_one_token_per_cue():
         stored = json.loads(_token_file(name).read_bytes().decode("utf-8"))
         tokens = [Token(**t) for t in stored["tokens"]]
         cues = build_cues(tokens, PRESETS["word"])
-        assert len(cues) == len(tokens)
-        assert [c.lines for c in cues] == [(cue_text([t]),) for t in tokens]
+        # owner round 3: เครื่องหมายล้วน ("." "," ...) ไม่นับเป็นคำ เกาะท้ายคำก่อนหน้า จึงได้ 1 คำต่อซับพอดี
+        words = [t for t in tokens if not is_punct_only(t)]
+        assert len(cues) == len(words)
+        assert all(display_len(line) > 0 for c in cues for line in c.lines)
+        assert not any(c.lines == (".",) or c.lines == (",",) for c in cues)
+        # ต่อข้อความทุกซับกลับได้ทั้งแทร็ก (ไม่มีอะไรหาย)
+        assert " ".join(" ".join(c.lines) for c in cues).replace(" ", "") == cue_text(tokens).replace(" ", "")
 
 
 def test_zz_goldens_were_not_regenerated():

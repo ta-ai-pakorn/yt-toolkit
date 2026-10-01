@@ -44,6 +44,16 @@ export function cueText(tokens: readonly SubToken[]): string {
   return tidy(text)
 }
 
+const PUNCT_ONLY = /^[\p{P}\p{S}]+$/u
+
+/**
+ * ข้อความที่เห็นของ token (ตัด U+0020 หัวท้าย) เป็นเครื่องหมายล้วน: หมวด Unicode P* หรือ S* ทุกตัว
+ * เช่น "." "," " ?" "♪" "--" นับ ส่วน "a." "1" ". ." (มีช่องว่างกลาง) ไม่นับ (เหมือน `is_punct_only` ฝั่ง Python)
+ */
+export function isPunctOnly(tok: SubToken): boolean {
+  return PUNCT_ONLY.test(tidy(tok.t))
+}
+
 /** ใช้กับชื่อคลิปและชื่อ chapter เท่านั้น: ช่องว่างทุกแบบของ JS (\s) ยุบเหลือช่องเดียว แล้วตัดหัวท้าย */
 function collapse(text: string): string {
   return text.replace(/\s+/g, " ").trim()
@@ -117,7 +127,7 @@ function fits(m: Measure, from: number, to: number, o: SubOptions, cap: number):
 
 function splitLines(m: Measure, from: number, to: number, o: SubOptions): string[] {
   if (o.lines === 2 && to - from >= 2 && m.len(from, to) > o.maxChars) {
-    // ทุกซับที่มาถึงตรงนี้ผ่าน fits แล้ว จึงมีจุดแบ่งที่ใช้ได้อย่างน้อย 1 จุดเสมอ
+    // ซับที่ผ่าน fits มีจุดแบ่งอย่างน้อย 1 จุดเสมอ ยกเว้นคำยาวเกินที่มีเครื่องหมายเกาะท้าย (โหมดนับคำ) = บรรทัดเดียว
     const cap = o.maxChars * MERGE_LIMIT_FACTOR
     let bestK = -1
     let bestDiff = Infinity
@@ -150,16 +160,28 @@ export function buildCues(tokens: readonly SubToken[], o: SubOptions): Cue[] {
   const m = measure(tokens)
   const draft = (from: number, to: number): Draft => ({ from, to, startMs: tokens[from].s, endMs: tokens[to - 1].e })
 
+  // โหมดนับคำ (owner round 3): token ที่เป็นเครื่องหมายล้วนไม่นับเป็นคำ และเกาะซับของคำก่อนหน้าเสมอ
+  // (ไม่ใช้กฎความยาวบรรทัด/เวลานานสุด/จำนวนคำ) ตัวแรกสุดเกาะซับถัดไป จึงไม่มีซับที่มีแค่ "." หรือ "," อีก
+  // ยกเว้นเงียบ >= 1 วินาที ซึ่งยังขึ้นซับใหม่เหมือนเดิม · wordsBefore[k] = จำนวนคำ (ไม่นับเครื่องหมาย) ใน token [0, k)
+  const punct = tokens.map((tok) => tokensMode && isPunctOnly(tok))
+  const wordsBefore = [0]
+  for (const p of punct) wordsBefore.push(wordsBefore[wordsBefore.length - 1] + (p ? 0 : 1))
+  const words = (from: number, to: number) => wordsBefore[to] - wordsBefore[from]
+
   // 1. จับกลุ่มแบบ greedy (โหมดนับคำก็ใช้กฎปิดซับครบทุกข้อ) ซับที่กำลังสร้าง = [curFrom, i)
   const drafts: Draft[] = []
   let curFrom = 0
   for (let i = 1; i < tokens.length; i++) {
     const tok = tokens[i]
+    const gap = tok.s - tokens[i - 1].e >= GAP_SPLIT_MS
+    // เครื่องหมายเกาะซับที่กำลังสร้าง / ซับที่มีแต่เครื่องหมายนำหน้า ให้คำนี้เข้ามาอยู่ด้วย
     const close =
-      !fits(m, curFrom, i + 1, o, o.maxChars) ||
-      tok.s - tokens[i - 1].e >= GAP_SPLIT_MS ||
-      tok.e - tokens[curFrom].s > o.maxMs ||
-      (tokensMode && i - curFrom >= perCue)
+      punct[i] || (tokensMode && words(curFrom, i) === 0)
+        ? gap
+        : !fits(m, curFrom, i + 1, o, o.maxChars) ||
+          gap ||
+          tok.e - tokens[curFrom].s > o.maxMs ||
+          (tokensMode && words(curFrom, i) >= perCue)
     if (close) {
       drafts.push(draft(curFrom, i))
       curFrom = i
@@ -179,7 +201,7 @@ export function buildCues(tokens: readonly SubToken[], o: SubOptions): Cue[] {
         if (
           fits(m, c.from, nxt.to, o, o.maxChars * MERGE_LIMIT_FACTOR) &&
           nxt.endMs - c.startMs <= o.maxMs &&
-          (!tokensMode || nxt.to - c.from <= perCue)
+          (!tokensMode || words(c.from, nxt.to) <= perCue)
         ) {
           drafts.splice(i, 2, { from: c.from, to: nxt.to, startMs: c.startMs, endMs: nxt.endMs })
           continue

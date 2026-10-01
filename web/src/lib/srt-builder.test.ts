@@ -8,6 +8,7 @@ import {
   cueStats,
   cueText,
   displayLen,
+  isPunctOnly,
   MERGE_LIMIT_FACTOR,
   toMd,
   toSrt,
@@ -31,8 +32,8 @@ type BuilderCase = {
 const { cases } = JSON.parse(casesRaw) as { cases: BuilderCase[] }
 
 describe("shared builder cases", () => {
-  it("มีครบ 23 เคส", () => {
-    expect(cases).toHaveLength(23)
+  it("มีครบ 27 เคส", () => {
+    expect(cases).toHaveLength(27)
   })
 })
 
@@ -136,5 +137,33 @@ describe.each(["medium", "long"] as const)("performance (%s)", (preset) => {
     }
     runs.sort((a, b) => a - b)
     expect(runs[2]).toBeLessThan(100)
+  })
+})
+
+describe("isPunctOnly (owner round 3, เหมือน is_punct_only ฝั่ง Python)", () => {
+  const tok = (t: string): SubToken => ({ t, s: 0, e: 1 })
+
+  it.each([".", ",", " ?", "!?", "...", "\u2026", "--", '"', "(", ")", "\u266a", "$", "+", "\u{1F600}", "\u0E5A", " . "])(
+    "%j เป็นเครื่องหมายล้วน",
+    (text) => {
+      expect(isPunctOnly(tok(text))).toBe(true)
+    }
+  )
+
+  it.each(["a.", "1", ". .", "ok", "\u0E19\u0E30", "\u0E2F", "\u00a0.", "x\u266a"])("%j ไม่ใช่", (text) => {
+    expect(isPunctOnly(tok(text))).toBe(false)
+  })
+})
+
+describe("word preset + punctuation (owner round 3)", () => {
+  it("ไม่มีซับที่มีแค่ . หรือ , และ 1 คำต่อซับ", () => {
+    const tokens: SubToken[] = [
+      { t: "Yes", s: 0, e: 300 },
+      { t: ",", s: 300, e: 320 },
+      { t: " sir", s: 320, e: 700 },
+      { t: ".", s: 700, e: 900 },
+    ]
+    const cues = buildCues(tokens, PRESETS.word)
+    expect(cues.map((cue) => cue.lines)).toEqual([["Yes,"], ["sir."]])
   })
 })

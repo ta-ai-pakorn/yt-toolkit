@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest"
 
-import { buildCues, toMd, toSrt, toTxt, type MdMeta } from "./srt-builder"
+import { buildCues, isPunctOnly, toMd, toSrt, toTxt, type MdMeta } from "./srt-builder"
 import { PRESETS } from "./sub-options"
 import type { SubOptions, SubToken } from "./types"
 
@@ -88,7 +88,8 @@ describe.each(WORD_NAMES)("%s word preset parity", (name) => {
     const doc = tokenDocs.get(name)
     if (!doc) throw new Error(`tokens/${name}.json is missing`)
     const cues = buildCues(doc.tokens, PRESETS.word)
-    expect(cues).toHaveLength(doc.tokens.length)
+    // owner round 3: เครื่องหมายล้วนไม่นับเป็นคำ เกาะท้ายคำก่อนหน้า จึงได้ 1 คำต่อซับพอดี
+    expect(cues).toHaveLength(doc.tokens.filter((tok) => !isPunctOnly(tok)).length)
     expect(toSrt(cues)).toBe(expected(`${name}.word.srt`))
   })
 })

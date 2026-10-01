@@ -16,6 +16,7 @@ token มาจาก parser (T7) ซึ่งรับประกันว่�
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -93,6 +94,15 @@ def display_len(text: str) -> int:
 def cue_text(tokens: Sequence[Token]) -> str:
     """ต่อข้อความ token ยุบช่องว่างที่ติดกันเหลือช่องเดียว แล้วตัดช่องว่างหัวท้าย"""
     return _SPACE_RUN.sub(" ", "".join(tok.t for tok in tokens)).strip(" ")
+
+
+def is_punct_only(token: Token) -> bool:
+    """ข้อความที่เห็นของ token (ตัด U+0020 หัวท้าย) เป็นเครื่องหมายล้วน: หมวด Unicode P* หรือ S* ทุกตัว
+
+    เช่น "." "," " ?" "♪" "--" นับ ส่วน "a." "1" ". ." (มีช่องว่างกลาง) ไม่นับ (ฝั่ง TS ใช้ regex หมวด P กับ S แบบ u)
+    """
+    text = token.t.strip(" ")
+    return bool(text) and all(unicodedata.category(ch)[0] in "PS" for ch in text)
 
 
 def _collapse(text: str) -> str:
@@ -199,9 +209,13 @@ def _has_split(tokens: Sequence[Token], cap: float) -> bool:
 
 def _lines(tokens: list[Token], opts: SubOptions) -> tuple[str, ...]:
     text = cue_text(tokens)
-    if opts.lines == 2 and len(tokens) >= 2 and display_len(text) > opts.max_chars:
-        # ทุกซับที่มาถึงตรงนี้ผ่าน _fits แล้ว จึงมีจุดแบ่งที่ใช้ได้อย่างน้อย 1 จุดเสมอ
-        cands = _splits(tokens, opts.max_chars * MERGE_LIMIT_FACTOR)
+    cands = (
+        _splits(tokens, opts.max_chars * MERGE_LIMIT_FACTOR)
+        if opts.lines == 2 and len(tokens) >= 2 and display_len(text) > opts.max_chars
+        else []
+    )
+    if cands:
+        # ซับที่ผ่าน _fits มีจุดแบ่งอย่างน้อย 1 จุดเสมอ ยกเว้นคำยาวเกินที่มีเครื่องหมายเกาะท้าย (โหมดนับคำ) = บรรทัดเดียว
         best_k, best_diff = cands[0][0], abs(cands[0][1] - cands[0][2])
         for k, left, right in cands[1:]:
             if abs(left - right) < best_diff:  # เท่ากันให้ k ที่น้อยกว่า
@@ -221,23 +235,44 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
         raise ValueError("tokens mode needs tokens_per_cue")
     per_cue = opts.tokens_per_cue or 0
 
-    # 1. จับกลุ่มแบบ greedy
+    # โหมดนับคำ (owner round 3): token ที่เป็นเครื่องหมายล้วนไม่นับเป็นคำ และเกาะซับของคำก่อนหน้าเสมอ
+    # (ไม่ใช้กฎความยาวบรรทัด/เวลานานสุด/จำนวนคำ) ตัวแรกสุดเกาะซับถัดไป จึงไม่มีซับที่มีแค่ "." หรือ "," อีก
+    # ยกเว้นเงียบ >= 1 วินาที ซึ่งยังขึ้นซับใหม่เหมือนเดิม
+    punct = [tokens_mode and is_punct_only(tok) for tok in tokens]
+
+    def words(start: int, end: int) -> int:
+        return sum(1 for k in range(start, end) if not punct[k])
+
+    # 1. จับกลุ่มแบบ greedy (cur = token ช่วง [cur_from, i))
     drafts: list[_Draft] = []
     cur: list[Token] = []
-    for tok in tokens:
+    cur_from = 0
+    for i, tok in enumerate(tokens):
         if cur:
-            close = (
-                not _fits([*cur, tok], opts, opts.max_chars)
-                or tok.s - cur[-1].e >= GAP_SPLIT_MS
-                or tok.e - cur[0].s > opts.max_ms
-                or (tokens_mode and len(cur) >= per_cue)
-            )
+            gap = tok.s - cur[-1].e >= GAP_SPLIT_MS
+            if punct[i] or (tokens_mode and words(cur_from, i) == 0):
+                # เครื่องหมายเกาะซับที่กำลังสร้าง / ซับที่มีแต่เครื่องหมายนำหน้า ให้คำนี้เข้ามาอยู่ด้วย
+                close = gap
+            else:
+                close = (
+                    not _fits([*cur, tok], opts, opts.max_chars)
+                    or gap
+                    or tok.e - cur[0].s > opts.max_ms
+                    or (tokens_mode and words(cur_from, i) >= per_cue)
+                )
             if close:
                 drafts.append(_draft(cur))
                 cur = []
+                cur_from = i
         cur.append(tok)
     if cur:
         drafts.append(_draft(cur))
+    # ช่วง token ของแต่ละซับ (ใช้นับคำตอนรวมซับในขั้น 2)
+    first: list[int] = []
+    pos = 0
+    for d in drafts:
+        first.append(pos)
+        pos += len(d.tokens)
 
     # 2. เวลาขั้นต่ำ: ยืดไปได้ถึงต้นซับถัดไป ถ้ายังสั้นอยู่ลองรวมกับตัวถัดไป แล้วตรวจตัวเดิมซ้ำ
     i = 0
@@ -249,12 +284,14 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
             c.end_ms = min(want, nxt.start_ms) if nxt is not None else want
             if c.end_ms - c.start_ms < opts.min_ms and nxt is not None:
                 merged = c.tokens + nxt.tokens
+                start = first[i]
                 if (
                     _fits(merged, opts, opts.max_chars * MERGE_LIMIT_FACTOR)
                     and nxt.end_ms - c.start_ms <= opts.max_ms
-                    and (not tokens_mode or len(merged) <= per_cue)
+                    and (not tokens_mode or words(start, start + len(merged)) <= per_cue)
                 ):
                     drafts[i : i + 2] = [_Draft(merged, c.start_ms, nxt.end_ms)]
+                    first[i : i + 2] = [start]
                     continue
         i += 1
 
