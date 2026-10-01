@@ -46,6 +46,11 @@ const iframe = (page: Page) => page.locator('[data-slot="player-host"] iframe')
 const dock = (page: Page) => page.getByRole("region", { name: DOCK })
 const slot = (page: Page) => page.locator('[data-slot="player-slot"]')
 const timeline = (page: Page) => page.getByRole("slider", { name: TIMELINE })
+/** "ช่วง i จาก n" ที่เห็นบนจอ (แถวไทม์ไลน์ หรือบนตัวเล่นลอย) ไม่รวมข้อความ aria-live ที่ซ่อนไว้ให้โปรแกรมอ่านหน้าจอ */
+const reelStatus = (page: Page) => page.locator('[data-slot="reel-status"]')
+const reelButton = (page: Page) => page.getByRole("button", { name: REEL, exact: true })
+const actionRow = (page: Page) => page.locator('[data-slot="cover-button"]').locator("..")
+const frameList = (page: Page) => page.getByRole("list", { name: "รายการภาพเฟรม" })
 
 async function open(page: Page, patch: Record<string, unknown> = {}) {
   await withVideo(page, THAI, patch)
@@ -92,6 +97,8 @@ test.describe("ช่องตัวเล่นที่หัวคลิป",
     expect(requests.some((url) => url === "https://www.youtube.com/iframe_api")).toBe(true)
     const frame = iframe(page)
     await expect(frame).toHaveAttribute("referrerpolicy", "strict-origin-when-cross-origin")
+    // เล่นต่อได้ทันทีหลังโหลด (ยูทูปต้องได้สิทธิ์ autoplay จาก iframe) และเต็มจอ/ภาพซ้อนภาพได้
+    await expect(frame).toHaveAttribute("allow", "autoplay; encrypted-media; picture-in-picture; fullscreen")
     await expect(frame).toHaveAttribute("src", new RegExp(`^https://www\\.youtube-nocookie\\.com/embed/${THAI}\\?`))
     await expect(frame).toHaveAttribute("src", /enablejsapi=1/)
     const title = await heading(page).textContent()
@@ -234,39 +241,53 @@ test.describe("เล่นเฉพาะช่วงที่ดูซ้ำ�
     await expect(page.getByRole("button", { name: REEL })).toHaveCount(0)
   })
 
+  test("ปุ่มอยู่ในแถวปุ่มของหัวคลิป (ข้าง 'ดูภาพปก') ตั้งแต่ก่อนเล่น · ไม่มีแถวใต้ตัวเล่นก่อนเล่น", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installFakeYT(page)
+    await open(page, { mostReplayed: REPLAYED })
+    await expect(actionRow(page).getByRole("button", { name: REEL, exact: true })).toBeVisible()
+    const cover = await page.getByRole("button", { name: COVER, exact: true }).boundingBox()
+    const reel = await reelButton(page).boundingBox()
+    expect(Math.abs((reel?.y ?? 0) - (cover?.y ?? 0))).toBeLessThan(4)
+    await expect(page.locator('[data-slot="player-controls"]')).toHaveCount(0)
+  })
+
   test("เล่นทีละช่วงตามลำดับ 'ช่วง 1 จาก 2' → 'ช่วง 2 จาก 2' แล้วหยุดหลังช่วงสุดท้าย", async ({ page }) => {
     await installFakeYT(page, { rate: 20 })
     await open(page, { mostReplayed: REPLAYED })
-    const button = page.getByRole("button", { name: REEL })
+    const button = reelButton(page)
     await expect(button).toBeVisible()
     await button.click()
-    await expect(page.getByText("ช่วง 1 จาก 2")).toBeVisible()
-    const stop = page.getByRole("button", { name: REEL_STOP })
-    await expect(stop).toBeVisible()
-    await expect(page.getByText("ช่วง 2 จาก 2")).toBeVisible()
-    await expect(page.getByRole("button", { name: REEL })).toBeVisible({ timeout: 5000 })
-    await expect(page.getByText(/^ช่วง \d จาก 2$/)).toHaveCount(0)
+    // สถานะกับปุ่มหยุดอยู่ในแถวไทม์ไลน์ใต้ตัวเล่น (มีหลังกดเล่น)
+    const controls = page.locator('[data-slot="player-controls"]')
+    await expect(controls.locator('[data-slot="reel-status"]')).toHaveText(/ช่วง 1 จาก 2/)
+    await expect(controls.getByRole("button", { name: REEL_STOP })).toBeVisible()
+    await expect(reelStatus(page)).toHaveText(/ช่วง 2 จาก 2/)
+    await expect(reelStatus(page)).toHaveCount(0, { timeout: 5000 })
+    await expect(page.getByRole("button", { name: REEL_STOP })).toHaveCount(0)
     const log = await fakeYTLog(page)
     expect(log.seeks.slice(0, 2)).toEqual([20, 60])
     expect(log.calls.at(-1)).toBe("pause")
   })
 
-  test("'หยุดเล่นช่วงไฮไลต์' หยุดคลิป · seek เองที่แถบไทม์ไลน์ยกเลิกช่วงไฮไลต์", async ({ page }) => {
+  test("'หยุดเล่นช่วงไฮไลต์' หยุดคลิป (โฟกัสไปแถบไทม์ไลน์ข้าง ๆ) · seek เองที่แถบไทม์ไลน์ยกเลิกช่วงไฮไลต์", async ({ page }) => {
     await installFakeYT(page, { rate: 1 })
     await open(page, { mostReplayed: REPLAYED })
-    await page.getByRole("button", { name: REEL }).click()
-    await expect(page.getByText("ช่วง 1 จาก 2")).toBeVisible()
+    await reelButton(page).click()
+    await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 2/)
+    // ประกาศให้โปรแกรมอ่านหน้าจอจาก aria-live ที่อยู่ตลอดข้างปุ่ม
+    await expect(actionRow(page).locator('[aria-live="polite"]')).toHaveText("ช่วง 1 จาก 2")
     await page.getByRole("button", { name: REEL_STOP }).click()
-    await expect(page.getByText("ช่วง 1 จาก 2")).toHaveCount(0)
-    // ปุ่มเดียวกัน โฟกัสไม่หลุด
-    await expect(page.getByRole("button", { name: REEL })).toBeFocused()
+    await expect(reelStatus(page)).toHaveCount(0)
+    // ปุ่มหยุดหายไป โฟกัสไม่หลุดไป body: ไปที่แถบไทม์ไลน์ในแถวเดียวกัน
+    await expect(timeline(page)).toBeFocused()
     expect((await fakeYTLog(page)).calls.at(-1)).toBe("pause")
 
-    await page.getByRole("button", { name: REEL }).click()
-    await expect(page.getByText("ช่วง 1 จาก 2")).toBeVisible()
+    await reelButton(page).click()
+    await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 2/)
     await timeline(page).click({ position: { x: 5, y: 10 } })
-    await expect(page.getByText("ช่วง 1 จาก 2")).toHaveCount(0)
-    await expect(page.getByRole("button", { name: REEL })).toBeVisible()
+    await expect(reelStatus(page)).toHaveCount(0)
+    await expect(reelButton(page)).toBeVisible()
   })
 })
 
@@ -358,7 +379,7 @@ test.describe("ปุ่ม 'ดูภาพปก'", () => {
 })
 
 test.describe("จอแคบ 360 px", () => {
-  test("ตัวเล่นในช่องปกเล็ก แถบไทม์ไลน์และปุ่มช่วงไฮไลต์เต็มแถว · ลอย = แถบเต็มความกว้างล่างจอ วิดีโอราว 40% · ไม่มีเลื่อนแนวนอน", async ({
+  test("ตัวเล่นในช่องปกเล็ก แถบไทม์ไลน์เต็มแถวใต้ชื่อคลิป · ปุ่มช่วงไฮไลต์ในแถวปุ่ม สูง 44 px · ลอย = แถบเต็มความกว้างล่างจอ วิดีโอราว 40% · ไม่มีเลื่อนแนวนอน", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 360, height: 740 })
@@ -368,8 +389,14 @@ test.describe("จอแคบ 360 px", () => {
     const bar = await timeline(page).boundingBox()
     expect(bar?.width ?? 0).toBeGreaterThan(300)
     expect(bar?.height ?? 0).toBeGreaterThanOrEqual(44)
-    const reel = await page.getByRole("button", { name: REEL }).boundingBox()
+    // แถบไทม์ไลน์อยู่ใต้ชื่อคลิป ทั้งที่ตาเห็นและใน DOM
+    const title = await heading(page).boundingBox()
+    expect(bar?.y ?? 0).toBeGreaterThan((title?.y ?? 0) + (title?.height ?? 0) - 1)
+    const reel = await reelButton(page).boundingBox()
     expect(reel?.height ?? 0).toBeGreaterThanOrEqual(44)
+    for (const control of [page.getByRole("button", { name: COVER, exact: true }), page.getByRole("button", { name: "บันทึกเป็นโน้ต (.md)" })]) {
+      expect((await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
 
     await scrollAway(page)
@@ -390,6 +417,157 @@ test.describe("จอแคบ 360 px", () => {
   })
 })
 
+test.describe("สั่งเล่นตอนหัวคลิปพ้นจอ", () => {
+  test("เลื่อนลงในแท็บภาพเฟรมแล้วกด ▶ ของภาพ → ตัวเล่นลอยมุมขวาล่างทันที (ตั้งแต่กำลังโหลด) · หน้าไม่เด้งขึ้น · seek ตรงเวลาของภาพ", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installFakeYT(page, { rate: 1 })
+    // หน่วงสคริปต์ยูทูปไว้ จะได้เห็นว่าลอยตั้งแต่ยังโหลดไม่เสร็จ (ลงทะเบียนทีหลัง = ทำงานก่อน route ของ installFakeYT)
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    await page.route("https://www.youtube.com/iframe_api", async (route) => {
+      await gate
+      await route.fallback()
+    })
+    await open(page)
+    await scrollAway(page)
+    // ภาพเฟรมแถวล่าง ๆ (คลิปนี้มี 76 ภาพ) อยู่ในจอตอนเลื่อนลงแล้ว ช่องตัวเล่นที่หัวคลิปพ้นจอ
+    const target = frameList(page).getByRole("listitem").nth(60)
+    await target.scrollIntoViewIfNeeded()
+    await expect(slot(page)).not.toBeInViewport()
+    const imageButton = target.getByRole("button", { name: /^ภาพเฟรมที่ / })
+    const time = /\d{2}:\d{2}:\d{2}/.exec((await imageButton.getAttribute("aria-label")) ?? (await target.locator("img").getAttribute("alt")) ?? "")?.[0] ?? ""
+    expect(time).not.toBe("")
+    const afterScroll = await page.evaluate(() => window.scrollY)
+    await imageButton.hover()
+    await target.getByRole("button", { name: `เล่นจากตรงนี้ ${time}`, exact: true }).click()
+
+    // ยังโหลดสคริปต์ไม่เสร็จ แต่ตัวเล่นลอยมุมจอแล้ว (มีวงหมุน "กำลังโหลดตัวเล่น")
+    await expect(dock(page)).toBeVisible()
+    await expect(dock(page)).toHaveCSS("position", "fixed")
+    await expect(dock(page).getByLabel("กำลังโหลดตัวเล่น")).toBeVisible()
+    // รอแอนิเมชันตอนลอยขึ้นมาจบ (วงหมุนยังหมุนอยู่ จึงดูเฉพาะของกล่องตัวเล่นลอย)
+    await expect.poll(() => dock(page).evaluate((el) => el.getAnimations().filter((a) => a.playState === "running").length)).toBe(0)
+    const box = await dock(page).boundingBox()
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeGreaterThan(1240)
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeGreaterThan(760)
+    // หน้าไม่ถูกดึงกลับขึ้นไปที่หัวคลิป
+    expect(await page.evaluate(() => window.scrollY)).toBe(afterScroll)
+
+    release()
+    await expect(dock(page).locator("iframe")).toHaveCount(1)
+    const [h, m, sec] = time.split(":").map(Number)
+    const seconds = (h * 60 + m) * 60 + sec
+    // เวลาของภาพมีเศษ ms (ช่วงห่างของภาพ 4895 ms) seek ต้องตกในวินาทีนั้น
+    await expect
+      .poll(async () => (await fakeYTLog(page)).seeks.some((value) => value >= seconds && value < seconds + 1))
+      .toBe(true)
+    await expect.poll(async () => (await fakeYTLog(page)).calls).toContain("play")
+    await expect(dock(page)).toBeVisible()
+    expect((await fakeYTLog(page)).players).toBe(1)
+  })
+})
+
+test.describe("toast กับตัวเล่นลอย", () => {
+  /** สองกล่องทับกันไหม (เว้นขอบให้ 1 px) */
+  const overlaps = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
+    a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1
+
+  async function toastWhileDocked(page: Page) {
+    await installFakeYT(page, { rate: 1 })
+    await open(page)
+    await play(page)
+    await scrollAway(page)
+    await expect(dock(page)).toBeVisible()
+    await settle(page)
+    // toast จากเมนูภาพเฟรม "คัดลอกเวลา" (คัดลอกได้หรือไม่ได้ก็ขึ้น toast)
+    // ภาพแถวล่าง ๆ: เลื่อนมาให้เห็นแล้วหัวคลิปยังพ้นจอ (ตัวเล่นยังลอย)
+    const image = frameList(page).getByRole("button", { name: /^ภาพเฟรมที่ / }).nth(60)
+    await image.scrollIntoViewIfNeeded()
+    await expect(dock(page)).toBeVisible()
+    await image.click({ button: "right" })
+    await page.getByRole("menuitem", { name: "คัดลอกเวลา" }).click()
+    const toast = page.locator("[data-sonner-toast]").first()
+    await expect(toast).toBeVisible()
+    await settle(page)
+    return toast
+  }
+
+  for (const size of [
+    { width: 1280, height: 800 },
+    { width: 360, height: 740 },
+  ]) {
+    test(`จอ ${size.width} px: toast ขึ้นเหนือตัวเล่นลอย ไม่ทับกัน`, async ({ page }) => {
+      await page.setViewportSize(size)
+      const toast = await toastWhileDocked(page)
+      const toastBox = (await toast.boundingBox())!
+      const dockBox = (await dock(page).boundingBox())!
+      expect(overlaps(toastBox, dockBox)).toBe(false)
+      expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(dockBox.y)
+      expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(size.height)
+    })
+  }
+
+  test("แถบคิวของ M4 (--dock-bottom-offset) ดันทั้งตัวเล่นลอยและ toast ขึ้น ยังไม่ทับกัน", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.addInitScript(() => {
+      document.addEventListener("DOMContentLoaded", () => document.documentElement.style.setProperty("--dock-bottom-offset", "64px"))
+    })
+    const toast = await toastWhileDocked(page)
+    const toastBox = (await toast.boundingBox())!
+    const dockBox = (await dock(page).boundingBox())!
+    // ตัวเล่นลอยสูงจากขอบล่าง 1rem + 64 px
+    expect(Math.round(800 - (dockBox.y + dockBox.height))).toBe(16 + 64)
+    expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(dockBox.y)
+  })
+
+  test("ไม่ได้ลอย: toast อยู่ตำแหน่งเดิมของ sonner (ห่างขอบล่าง 24 px)", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installFakeYT(page)
+    await open(page)
+    const image = frameList(page).getByRole("button", { name: /^ภาพเฟรมที่ / }).first()
+    await image.click({ button: "right" })
+    await page.getByRole("menuitem", { name: "คัดลอกเวลา" }).click()
+    const toast = page.locator("[data-sonner-toast]").first()
+    await expect(toast).toBeVisible()
+    await settle(page)
+    const box = (await toast.boundingBox())!
+    expect(Math.round(800 - (box.y + box.height))).toBe(24)
+  })
+})
+
+test.describe("จอแคบ: ลำดับ DOM ตรงกับที่ตาเห็น", () => {
+  test("หลังกดเล่น Tab จากชื่อคลิปไปแถบไทม์ไลน์ (แถบอยู่ใต้ชื่อ ทั้งในจอและใน DOM)", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 })
+    await installFakeYT(page, { durationS: 372 })
+    await open(page, { mostReplayed: REPLAYED })
+    await play(page)
+    await expect(timeline(page)).toBeVisible()
+    const order = await page.evaluate(() => {
+      const title = document.querySelector("h1")!
+      const slider = document.querySelector('[role="slider"]')!
+      return Boolean(title.compareDocumentPosition(slider) & Node.DOCUMENT_POSITION_FOLLOWING)
+    })
+    expect(order).toBe(true)
+    await heading(page).focus()
+    await page.keyboard.press("Tab")
+    await expect(timeline(page)).toBeFocused()
+  })
+
+  test("จอกว้าง: แถบไทม์ไลน์อยู่ใต้ตัวเล่นในคอลัมน์ซ้าย กว้างเท่าตัวเล่น", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await installFakeYT(page, { durationS: 372 })
+    await open(page)
+    await play(page)
+    const bar = (await timeline(page).boundingBox())!
+    const box = (await slot(page).boundingBox())!
+    expect(Math.abs(bar.x - box.x)).toBeLessThan(2)
+    expect(bar.y).toBeGreaterThan(box.y + box.height - 1)
+    expect(bar.y - (box.y + box.height)).toBeLessThan(24)
+  })
+})
+
 test.describe("axe ทุกสถานะของตัวเล่น", () => {
   const axe = async (page: Page) => {
     await settle(page)
@@ -404,8 +582,8 @@ test.describe("axe ทุกสถานะของตัวเล่น", () =
     await play(page)
     await expect(timeline(page)).toBeVisible()
     await axe(page)
-    await page.getByRole("button", { name: REEL }).click()
-    await expect(page.getByText("ช่วง 1 จาก 2")).toBeVisible()
+    await reelButton(page).click()
+    await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 2/)
     await axe(page)
     await scrollAway(page)
     await expect(dock(page)).toBeVisible()

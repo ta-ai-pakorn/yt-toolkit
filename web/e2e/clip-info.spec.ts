@@ -757,29 +757,54 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     })
   }
 
-  for (const width of [1280, 360]) {
-    test(`จอ ${width} px: Skeleton หัวคลิปสูงใกล้เคียงของจริง แถบแท็บขยับไม่เกิน 40 px ตอนโหลดเสร็จ`, async ({ page }) => {
+  // หัวคลิปก่อนเล่นสูงไม่ขึ้นกับ mostReplayed (M3.5 integration): ปุ่มช่วงไฮไลต์อยู่ในแถวปุ่ม ไม่มีแถวที่จองไว้ใต้ตัวเล่น
+  const WITHOUT_REPLAYED = { ...FULL, mostReplayed: undefined }
+  const CASES = [
+    ["มีช่วงดูซ้ำบ่อย", FULL],
+    ["ไม่มีช่วงดูซ้ำบ่อย", WITHOUT_REPLAYED],
+  ] as const
+  // จอ 360 px แถวปุ่มตัดขึ้นบรรทัดใหม่ได้ (ปุ่ม "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" ลงบรรทัดสอง) แต่ยังอยู่ในระยะ 40 px จาก Skeleton (เทสต์ถัดไป)
+  for (const width of [1280]) {
+    test(`จอ ${width} px: หัวคลิปก่อนเล่นสูงเท่ากันทั้งคลิปที่มีและไม่มีช่วงดูซ้ำบ่อย`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 })
-      await withVideo(page, BBB, FULL)
-      let release = () => {}
-      const gate = new Promise<void>((resolve) => (release = resolve))
-      // ลงทะเบียนทีหลัง = ทำงานก่อน: หน่วงคำขอข้อมูลคลิปแล้วส่งต่อให้ตัวแก้ข้อมูลด้านบน
-      await page.route(
-        (url) => url.pathname === `/api/videos/${BBB}`,
-        async (route) => {
-          await gate
-          await route.fallback()
-        },
-      )
-      await page.goto(`/v/${BBB}`)
-      await expect(page.getByRole("status").filter({ hasText: "กำลังโหลด" }).first()).toBeAttached()
-      const skeletonTop = await tabTop(page)
-      expect(skeletonTop).toBeGreaterThan(0)
-      release()
-      await expect(tile(page, "ยอดวิว 123,456 ครั้ง")).toBeVisible()
-      const loadedTop = await tabTop(page)
-      expect(Math.abs(loadedTop - skeletonTop)).toBeLessThanOrEqual(40)
+      const tops: number[] = []
+      for (const [, patch] of CASES) {
+        await page.unrouteAll({ behavior: "wait" })
+        await withVideo(page, BBB, patch)
+        await page.goto(`/v/${BBB}`)
+        await expect(tile(page, "ยอดวิว 123,456 ครั้ง")).toBeVisible()
+        await expect(page.getByRole("button", { name: "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" })).toHaveCount(patch.mostReplayed ? 1 : 0)
+        tops.push(await tabTop(page))
+      }
+      expect(tops[0]).toBe(tops[1])
     })
+  }
+
+  for (const [label, patch] of CASES) {
+    for (const width of [1280, 360]) {
+      test(`จอ ${width} px (${label}): Skeleton หัวคลิปสูงใกล้เคียงของจริง แถบแท็บขยับไม่เกิน 40 px ตอนโหลดเสร็จ`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 800 })
+        await withVideo(page, BBB, patch)
+        let release = () => {}
+        const gate = new Promise<void>((resolve) => (release = resolve))
+        // ลงทะเบียนทีหลัง = ทำงานก่อน: หน่วงคำขอข้อมูลคลิปแล้วส่งต่อให้ตัวแก้ข้อมูลด้านบน
+        await page.route(
+          (url) => url.pathname === `/api/videos/${BBB}`,
+          async (route) => {
+            await gate
+            await route.fallback()
+          },
+        )
+        await page.goto(`/v/${BBB}`)
+        await expect(page.getByRole("status").filter({ hasText: "กำลังโหลด" }).first()).toBeAttached()
+        const skeletonTop = await tabTop(page)
+        expect(skeletonTop).toBeGreaterThan(0)
+        release()
+        await expect(tile(page, "ยอดวิว 123,456 ครั้ง")).toBeVisible()
+        const loadedTop = await tabTop(page)
+        expect(Math.abs(loadedTop - skeletonTop)).toBeLessThanOrEqual(40)
+      })
+    }
   }
 
   test("จอกว้าง 1280 px แท็บข้อมูลคลิป: ซ้าย คำอธิบาย → Chapter · ขวา ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก (owner round 5)", async ({
