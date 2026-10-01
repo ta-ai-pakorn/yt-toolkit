@@ -1,5 +1,7 @@
 import { fill } from "@/i18n/th"
 
+import { audioLanguageName } from "./languages"
+
 import type {
   AudioFormat,
   AudioJobParams,
@@ -64,12 +66,15 @@ export type LanguageOption = { value: string; label: string }
  * ตัวเลือกภาษาเสียง: คลิปที่มีเสียงไม่ถึง 2 ภาษา = null (หน้าเว็บซ่อนช่องเลือก)
  * ตัวแรกเสมอ = "original" ชื่อตามภาษาของเสียงต้นฉบับ (labels.original ใส่ {lang}; ไม่รู้ภาษา = labels.originalUnknown)
  * ตามด้วยภาษาอื่นตามลำดับที่พบครั้งแรก value = รหัสภาษาตามที่ยูทูปให้มา
+ * languageName ไม่ส่ง (undefined) = audioLanguageName ("อังกฤษ (สหรัฐอเมริกา)")
+ * ป้ายต้นฉบับใช้เฉพาะภาษาหลัก (en-US → อังกฤษ) วงเล็บจึงไม่ซ้อนกัน: "ต้นฉบับ (อังกฤษ)"
  */
 export function audioLanguageOptions(
   video: VideoInfo,
-  languageName: (tag: string) => string,
+  languageName: ((tag: string) => string) | undefined,
   labels: { original: string; originalUnknown: string }
 ): LanguageOption[] | null {
+  const name = languageName ?? audioLanguageName
   const tags = distinctLanguages(video.audio)
   if (tags.length < 2) return null
   const originalTag = video.audio.find((a) => a.isOriginal)?.language
@@ -77,13 +82,22 @@ export function audioLanguageOptions(
   const original: LanguageOption = {
     value: "original",
     label: originalTag
-      ? fill(labels.original, { lang: languageName(originalTag) })
+      ? fill(labels.original, { lang: name(baseLanguage(originalTag)) })
       : labels.originalUnknown,
   }
   const others = tags
     .filter((tag) => tag.toLowerCase() !== originalKey)
-    .map((tag) => ({ value: tag, label: languageName(tag) }))
+    .map((tag) => ({ value: tag, label: name(tag) }))
   return [original, ...others]
+}
+
+/** ภาษาหลักของรหัส (en-US → en) รหัสรูปแบบผิดคืนรหัสเดิม */
+function baseLanguage(tag: string): string {
+  try {
+    return new Intl.Locale(tag).language
+  } catch {
+    return tag
+  }
 }
 
 /** ภาษาเสียงไม่ซ้ำกัน (เทียบแบบไม่สนตัวพิมพ์) ตามลำดับที่พบครั้งแรก */

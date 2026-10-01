@@ -74,7 +74,11 @@ export async function listJobs(
   return ((await response.json()) as { jobs: Job[] }).jobs
 }
 
-/** รอจนมีงานที่ตรงเงื่อนไขในรายการค่าเริ่มต้น (ถามทุก 250 ms) หมดเวลา = โยน error พร้อมสถานะงานล่าสุด */
+/**
+ * รอจนมีงานที่ตรงเงื่อนไขในรายการค่าเริ่มต้น (ถามทุก 250 ms) หมดเวลา = โยน error พร้อมสถานะงานล่าสุด
+ * รายการค่าเริ่มต้นไม่มีงานที่ยกเลิกแล้ว (C4) จึงรอ status "cancelled" ด้วยตัวนี้ไม่ได้:
+ * ใช้ listJobs(request, "cancelled") แทน (เช่นใน expect.poll)
+ */
 export async function waitForJob(
   request: APIRequestContext,
   match: (job: Job) => boolean,

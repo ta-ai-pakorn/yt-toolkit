@@ -274,6 +274,7 @@ describe("API ของคิว", () => {
 
   it("outputUrl", () => {
     expect(outputUrl("abc", 0)).toBe("/api/jobs/abc/outputs/0")
+    expect(outputUrl("a/b?c", 2)).toBe("/api/jobs/a%2Fb%3Fc/outputs/2")
   })
 })
 
@@ -293,6 +294,26 @@ describe("submitEnqueue", () => {
     expect(ok).toBe(true)
     expect(toastMock.success).toHaveBeenCalledWith("เพิ่มเข้าคิวแล้ว")
     expect(client.getQueryData(JOBS_KEY)).toEqual([old, created])
+  })
+
+  it("คำตอบมาช้ากว่า SSE: งานที่แคชรู้สถานะใหม่แล้วไม่ถูกย้อนกลับเป็น queued", async () => {
+    const client = new QueryClient()
+    const created = job()
+    const running = {
+      ...created,
+      status: "running" as const,
+      startedAt: "2026-10-01T10:00:03Z",
+    }
+    client.setQueryData(JOBS_KEY, [running])
+    const other = job()
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { jobs: [created, other] }))
+    await submitEnqueue(client, [newJob, newJob], messages, {
+      navigate: vi.fn(),
+      deps: { fetch, token: "t" },
+    })
+    expect(client.getQueryData(JOBS_KEY)).toEqual([running, other])
   })
 
   it("สำเร็จหลายงาน: toast addedMany พร้อมจำนวน และแคชที่ยังไม่โหลดก็ได้รายการ", async () => {

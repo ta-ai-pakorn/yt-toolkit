@@ -91,7 +91,7 @@ export async function revealOutput(
 
 /** ลิงก์ดาวน์โหลดไฟล์ของงานผ่านเบราว์เซอร์ */
 export const outputUrl = (id: string, index: number) =>
-  `/api/jobs/${id}/outputs/${index}`
+  `/api/jobs/${encodeURIComponent(id)}/outputs/${index}`
 
 /** ใส่งานลงรายการ: มีรหัสนี้อยู่แล้วแทนที่ตำแหน่งเดิม ไม่มีก็ต่อท้าย (คืนรายการใหม่เสมอ) */
 export function upsertJob(jobs: readonly Job[], job: Job): Job[] {
@@ -209,8 +209,13 @@ export async function submitEnqueue(
 ): Promise<boolean> {
   try {
     const jobs = await enqueueJobs(items, env.deps)
+    // ใส่เฉพาะงานที่แคชยังไม่มี: SSE อาจมาถึงก่อนคำตอบนี้ (เช่นงานเริ่มทำไปแล้ว) ห้ามย้อนกลับเป็น queued
     client.setQueryData<Job[]>(JOBS_KEY, (old) =>
-      jobs.reduce(upsertJob, old ?? [])
+      jobs.reduce(
+        (list, job) =>
+          list.some((known) => known.id === job.id) ? list : [...list, job],
+        old ?? []
+      )
     )
     toast.success(
       jobs.length === 1
