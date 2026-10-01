@@ -66,6 +66,7 @@ def test_fresh_database_migrates(db: Database):
 def test_pragmas(db: Database):
     assert db.execute("PRAGMA journal_mode")[0][0] == "wal"
     assert db.execute("PRAGMA foreign_keys")[0][0] == 1
+    assert db.execute("PRAGMA synchronous")[0][0] == 1  # NORMAL
 
 
 def test_migrate_twice_is_noop(db: Database):
@@ -399,6 +400,13 @@ def test_v1_database_migrates_and_keeps_rows(tmp_path):
     assert (row["status"], row["position"], row["title"], row["attempt"]) == ("done", 3, "", 0)
     assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 2
     assert not db.execute("SELECT 1 FROM sqlite_master WHERE name = 'jobs_v1'")
+    # v2 ไม่มี foreign key แล้ว: งานของคลิปที่ไม่เคย probe ใส่ได้
+    db.execute(
+        "INSERT INTO jobs (id, video_id, kind, params_json, status, position, created_at) "
+        "VALUES ('new', 'notprobed01', 'video', '{}', 'queued', 4, '2026-10-01T00:00:00+00:00')"
+    )
+    assert db.execute("SELECT video_id FROM jobs WHERE id = 'new'")[0]["video_id"] == "notprobed01"
+    assert db.execute("PRAGMA foreign_key_list(jobs)") == []
     db.close()
 
 

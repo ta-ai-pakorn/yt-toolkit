@@ -124,11 +124,22 @@ def test_update_only_while_running(store):
         store.update(job.id, status="done")
     with pytest.raises(ValueError):
         store.update(job.id, position=7)
+    with pytest.raises(ValueError):
+        store.update(job.id, bot_checks=1)          # bot_checks goes through requeue() only
+
+
+def test_update_title_none_keeps_title(store):
+    (job,) = add(store)
+    store.transition(job.id, "running")
+    got = store.update(job.id, title=None, progress=0.5)
+    assert (got.title, got.progress) == ("คลิป 0", 0.5)
+    done = store.transition(job.id, "done", title=None)
+    assert done.title == "คลิป 0"
 
 
 def test_transition_rejects_unknown_status_and_fields(store):
     (job,) = add(store)
-    with pytest.raises(InvalidTransition):
+    with pytest.raises(ValueError):
         store.transition(job.id, "paused")
     with pytest.raises(ValueError):
         store.transition(job.id, "running", position=3)
@@ -166,14 +177,69 @@ def test_to_api_outputs_notes_and_attempt(store):
     assert got.notes == ("NO_SUBTITLES", "SOMETHING_UNKNOWN")
 
 
-def test_requeue_clears_run_state_but_keeps_bot_checks(store):
-    (job,) = add(store)
-    store.transition(job.id, "running")
-    store.update(job.id, stage="merging", progress=0.5, attempt=1, bot_checks=1)
-    again = store.requeue(job.id, front=True)
+def test_requeue_clears_run_state_and_sets_bot_checks_at_once(store):
+    a, b = add(store, 2)
+    store.transition(b.id, "running")
+    store.update(b.id, stage="merging", progress=0.5, attempt=1)
+    again = store.requeue(b.id, front=True, bot_checks=1)       # Q1: one transaction
     assert (again.status, again.stage, again.progress, again.attempt, again.bot_checks) == (
         "queued", None, None, 0, 1)
     assert again.started_at is None and again.finished_at is None
+    assert again.position < a.position
+
+
+def test_requeue_keeps_bot_checks_unless_reset(store):
+    (job,) = add(store)
+    store.transition(job.id, "running")
+    store.requeue(job.id, front=True, bot_checks=1)
+    store.transition(job.id, "running")
+    store.transition(job.id, "failed", error_code="E_BOT_CHECK")
+    kept = store.requeue(job.id)
+    assert kept.bot_checks == 1
+    store.transition(job.id, "running")
+    store.transition(job.id, "failed", error_code="E_BOT_CHECK")
+    retried = store.requeue(job.id, reset_bot_checks=True)     # manual retry
+    assert retried.bot_checks == 0
+    with pytest.raises(ValueError):
+        store.requeue(job.id, bot_checks=1, reset_bot_checks=True)
+
+
+def test_transition_to_queued_points_to_requeue(store):
+    a, b, c = add(store, 3)
+    store.transition(c.id, "running"); store.interrupt_running("หยุด")
+    store.transition(a.id, "running")
+    store.transition(b.id, "running"); store.transition(b.id, "failed")
+    for job_id in (a.id, b.id, c.id):
+        with pytest.raises(InvalidTransition, match="requeue"):
+            store.transition(job_id, "queued")
+    assert [store.get(j).status for j in (a.id, b.id, c.id)] == ["running", "failed", "interrupted"]
+
+
+@pytest.mark.parametrize("to", ["done", "failed", "cancelled", "interrupted"])
+def test_stopping_clears_run_fields(store, to):
+    (job,) = add(store)
+    store.transition(job.id, "running")
+    store.update(job.id, stage="merging", progress=0.7, speed_bps=500, eta_s=4, attempt=2)
+    got = store.transition(job.id, to)
+    assert (got.stage, got.speed_bps, got.eta_s, got.attempt, got.progress) == (None, None, None, 0, 0.7)
+    assert "attempt" not in got.to_api() and "speedBps" not in got.to_api()
+
+
+def test_stopping_keeps_explicit_run_fields(store):
+    (job,) = add(store)
+    store.transition(job.id, "running")
+    store.update(job.id, stage="merging", speed_bps=500, eta_s=4, attempt=3)
+    got = store.transition(job.id, "failed", stage="writing", attempt=3, error_code="E_NETWORK")
+    assert (got.stage, got.attempt, got.speed_bps, got.eta_s) == ("writing", 3, None, None)
+
+
+def test_interrupt_running_clears_run_fields(store):
+    (job,) = add(store)
+    store.transition(job.id, "running")
+    store.update(job.id, stage="downloading_audio", speed_bps=500, eta_s=4, attempt=1)
+    store.interrupt_running("หยุด")
+    got = store.get(job.id)
+    assert (got.stage, got.speed_bps, got.eta_s, got.attempt) == (None, None, None, 0)
 
 
 def test_requeue_rejects_done_queued_and_cancelled(store):

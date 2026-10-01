@@ -102,6 +102,8 @@ class Database:
         self._conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        # WAL + NORMAL: ไม่ fsync ทุก commit (คิวเขียนบ่อย) ไฟดับอาจเสียแค่ commit ท้ายๆ ไม่ทำให้ไฟล์พัง
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
 
     def migrate(self) -> None:
