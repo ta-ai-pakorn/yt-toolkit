@@ -1,0 +1,12 @@
+{
+  "default": {"steps": 6, "stepMs": 120},
+  "videos": {
+    "SLOWDOWNLD1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปโหลดช้า 1", "steps": 40, "stepMs": 250},
+    "SLOWDOWNLD2": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปโหลดช้า 2", "steps": 40, "stepMs": 250},
+    "SLOWDOWNLD3": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปโหลดช้า 3", "steps": 40, "stepMs": 250},
+    "SLOWDOWNLD4": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปโหลดช้า 4", "steps": 40, "stepMs": 250},
+    "BOTCHECKDL1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปติดบอท", "steps": 6, "stepMs": 120, "failAtStep": 2, "error": "E_BOT_CHECK", "failTimes": 1},
+    "NETRETRYDL1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปเน็ตหลุด", "steps": 6, "stepMs": 120, "failAtStep": 1, "error": "E_NETWORK", "failTimes": 1},
+    "REFUSEDDL01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปที่ยูทูปไม่ส่งไฟล์", "steps": 6, "stepMs": 120, "failAtStep": 0, "error": "E_YT_REFUSED", "failTimes": 99}
+  }
+}

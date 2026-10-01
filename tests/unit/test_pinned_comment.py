@@ -201,6 +201,8 @@ def test_public_probe_without_comments_is_none(ydl: type[FakeYDL]) -> None:
     [
         (ExtractorError("Unable to download API page: HTTP Error 429: Too Many Requests"), "E_BOT_CHECK"),
         (DownloadError("ERROR: Unable to download API page: timed out"), "E_NETWORK"),
+        # ยูทูปตอบ 4xx (ไม่ใช่ 429): ทางสำรองก็ได้คำตอบเดิม (M4 T4 review M-1)
+        (ExtractorError("Unable to download API page: HTTP Error 403: Forbidden"), "E_YT_REFUSED"),
     ],
 )
 def test_network_and_bot_errors_are_raised_without_fallback(
