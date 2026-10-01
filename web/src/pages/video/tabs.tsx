@@ -14,7 +14,14 @@ const TABS: readonly VideoTab[] = ["frames", "subs", "transcript"]
 const isTab = (value: unknown): value is VideoTab => TABS.some((tab) => tab === value)
 
 // แท็บที่ไม่ได้เลือก: สีตัวอักษรแบบ muted ผ่านเกณฑ์ contrast บนพื้น bg-muted ทั้งธีมสว่างและมืด (สีของแท็บที่เลือกคงเดิม)
-const TRIGGER = "h-11 flex-none shrink-0 px-4 text-muted-foreground"
+// after:hidden = ปิดเส้นใต้ของแบบ line ที่ซ่อนอยู่ (โปร่งใส แต่ยื่นต่ำกว่าแท็บ 5 px จนแถวสูงเกินกล่อง
+// Windows จึงขึ้นแถบเลื่อนแนวตั้งที่ปลายแถว) แถบแท็บของเราเป็นแบบพื้นทึบ ไม่ใช้เส้นใต้นี้
+const TRIGGER = "h-11 flex-none shrink-0 px-4 text-muted-foreground after:hidden"
+
+// จอแคบแถวแท็บเลื่อนแนวนอนได้ (ลากด้วยนิ้ว หรือกดลูกศรแล้วแท็บที่โฟกัสเลื่อนมาให้เห็นเอง) แต่ไม่แสดงแถบเลื่อน
+// และไม่เลื่อนแนวตั้งเลย (overflow-x-auto อย่างเดียวทำให้แนวตั้งเป็น auto ตามไปด้วย)
+const LIST =
+  "w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden group-data-horizontal/tabs:h-auto"
 
 // แผงของแท็บรับโฟกัสได้ (Base UI ตั้ง tabIndex 0) จึงต้องมีวงโฟกัสให้เห็น แบบเดียวกับ breadcrumb
 const PANEL = "rounded-md pt-2 focus-visible:ring-3 focus-visible:ring-ring/50"
@@ -37,7 +44,7 @@ export function VideoTabs({ videoId, enabled }: Props) {
     <Tabs value={tab} onValueChange={onValueChange}>
       <TabsList
         aria-label={t.label}
-        className="w-full flex-nowrap justify-start overflow-x-auto group-data-horizontal/tabs:h-auto"
+        className={LIST}
       >
         {TABS.map((value) => (
           <TabsTrigger key={value} value={value} className={TRIGGER}>

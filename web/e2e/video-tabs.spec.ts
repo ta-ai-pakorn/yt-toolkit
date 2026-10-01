@@ -31,6 +31,18 @@ const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: t
 const frameItems = (page: Page) => page.getByRole("list", { name: FRAME_LIST }).getByRole("listitem")
 const readClipboard = (page: Page) => page.evaluate(() => navigator.clipboard.readText())
 
+/** ความสูงของของในแถวแท็บเทียบกับกล่อง (scrollHeight ยังนับส่วนที่ล้นแม้ซ่อนไว้) และแถบเลื่อนที่เบราว์เซอร์จะวาด */
+const tabListBox = (page: Page) =>
+  tabList(page).evaluate((list) => {
+    const style = getComputedStyle(list)
+    return {
+      overflowsVertically: list.scrollHeight > list.clientHeight,
+      overflowY: style.overflowY,
+      scrollbarWidth: style.scrollbarWidth,
+    }
+  })
+const NO_SCROLLBARS = { overflowsVertically: false, overflowY: "hidden", scrollbarWidth: "none" }
+
 /**
  * จดข้อความที่หน้าเว็บส่งให้ navigator.clipboard.writeText ตามตัวอักษร แล้วส่งต่อให้คลิปบอร์ดจริง
  * คลิปบอร์ดของ Windows แปลง LF เป็น CRLF เอง ข้อความที่อ่านกลับจึงไม่ตรงไบต์กับที่แอปเขียน
@@ -145,10 +157,42 @@ test.describe("W2 แถบแท็บ", () => {
     // แท็บทั้งหมดอยู่บรรทัดเดียวกันเสมอ: ถ้าจอแคบกว่าแถว แถวต้องเลื่อนแนวนอนได้ (ไม่ตัดขึ้นบรรทัดใหม่)
     expect(layout.tops).toHaveLength(1)
     expect(layout.overflowX).toBe("auto")
+    expect(await tabListBox(page)).toEqual(NO_SCROLLBARS)
     if (layout.scrolls) await tabList(page).evaluate((list) => list.scrollTo({ left: list.scrollWidth }))
     await tab(page, "ทรานสคริปต์").click()
     await expect(tab(page, "ทรานสคริปต์")).toHaveAttribute("aria-selected", "true")
     for (const height of layout.heights) expect(height).toBeGreaterThanOrEqual(44)
+  })
+})
+
+test.describe("W2 แถบแท็บ ไม่มีแถบเลื่อน", () => {
+  // Windows แสดงแถบเลื่อนแนวตั้ง (มีลูกศรขึ้น/ลง) ที่ปลายแถวแท็บ ถ้าของในแถวสูงเกินกล่องแม้ 1-2 px
+  for (const [label, width] of [
+    ["จอกว้าง", 1280],
+    ["จอ 360 px", 360],
+  ] as const) {
+    test(`${label}: แถวแท็บไม่ล้นแนวตั้ง และไม่แสดงแถบเลื่อน`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 })
+      await page.goto(`/v/${BBB}`)
+      await expect(tabList(page).getByRole("tab")).toHaveCount(3)
+      expect(await tabListBox(page)).toEqual(NO_SCROLLBARS)
+    })
+  }
+
+  test("จอ 360 px: กดลูกศรขวาไปแท็บสุดท้าย แท็บที่โฟกัสเลื่อนมาอยู่ในกรอบแถว", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 })
+    await page.goto(`/v/${BBB}`)
+    await tab(page, "ภาพเฟรม").focus()
+    await page.keyboard.press("ArrowRight")
+    await page.keyboard.press("ArrowRight")
+    const last = tab(page, "ทรานสคริปต์")
+    await expect(last).toBeFocused()
+    const inView = await tabList(page).evaluate((list) => {
+      const box = list.getBoundingClientRect()
+      const item = list.querySelector<HTMLElement>('[role="tab"]:last-child')!.getBoundingClientRect()
+      return item.left >= box.left - 1 && item.right <= box.right + 1
+    })
+    expect(inView).toBe(true)
   })
 })
 
