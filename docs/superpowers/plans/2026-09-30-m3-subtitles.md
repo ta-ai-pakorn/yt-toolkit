@@ -311,6 +311,7 @@ PRESETS = {
   short:  { maxChars: 15, lines: 1, minMs: 800,  maxMs: 3000, mode: "chars" },
   medium: { maxChars: 25, lines: 1, minMs: 1200, maxMs: 5000, mode: "chars" },   // default
   long:   { maxChars: 42, lines: 2, minMs: 1500, maxMs: 7000, mode: "chars" },
+  word:   { maxChars: 15, lines: 1, minMs: 800,  maxMs: 3000, mode: "tokens", tokensPerCue: 1 },  // owner round 1 (2026-10-01, BRD #61)
 }
 LIMITS = { maxChars: [10, 60], lines: [1, 2], minMs: [300, 3000] /*step 100*/,
            maxMs: [1000, 10000] /*step 500*/, tokensPerCue: [1, 20] }
@@ -455,7 +456,7 @@ export type SubToken = { t: string; s: number; e: number }
 export type SubTokens = { hasWordTiming: boolean; tokens: SubToken[] }
 export type SubMode = "chars" | "tokens"
 export type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number; mode: SubMode; tokensPerCue?: number }
-export type SubPreset = "short" | "medium" | "long"
+export type SubPreset = "short" | "medium" | "long" | "word"  // "word" added in owner round 1
 export type Cue = { startMs: number; endMs: number; lines: string[] }
 export type SubExportFormat = "srt" | "txt" | "md"
 // VideoInfo gains: description?: string
