@@ -10,6 +10,7 @@ import { api } from "@/lib/api"
 import { formatDuration, relativeTime } from "@/lib/format"
 import type { HistoryPage } from "@/lib/types"
 
+import { historyPath } from "../history/queries"
 import { Thumbnail } from "./thumbnail"
 
 const LIMIT = 5
@@ -18,8 +19,9 @@ const SKELETON_DELAY_MS = 300
 // ข้อมูลรอง: โหลดไม่ได้ก็ซ่อนเงียบ ๆ ไม่เด้ง toast ไม่ให้กวนงานหลักของหน้า
 export function RecentSection() {
   const history = useQuery({
-    queryKey: ["history", { limit: LIMIT }],
-    queryFn: () => api<HistoryPage>(`/history?limit=${LIMIT}`),
+    // "ล่าสุด" = เฉพาะคลิปที่เคยเปิดดูในหน้า W2 (หน้า /history แสดงคลิปที่โหลดไฟล์ด้วย)
+    queryKey: ["history", { limit: LIMIT, scope: "opened" }],
+    queryFn: () => api<HistoryPage>(historyPath({ limit: LIMIT, scope: "opened" })),
   })
 
   // โหลดเร็ว (ปกติคือเสี้ยววินาที) ไม่ต้องขึ้นโครงรอให้หน้ากระตุก: ขึ้นเมื่อช้าเกิน 300 ms เท่านั้น
