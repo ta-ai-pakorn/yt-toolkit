@@ -72,7 +72,7 @@ function ClipRow({
 /** ลิงก์ที่อ่านไม่ออก: แถวแดง เลือกไม่ได้ (ไม่มีช่องติ๊ก) */
 function InvalidRow({ input }: { input: string }) {
   return (
-    <TableRow className="bg-destructive/5 hover:bg-destructive/5">
+    <TableRow className="hover:bg-transparent">
       <TableCell className={SELECT_COL}>
         <CircleX aria-hidden className="size-4 text-destructive" />
       </TableCell>

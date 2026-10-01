@@ -250,7 +250,6 @@ for (const scheme of ["dark", "light"] as const) {
     expect(await seriousViolations(page)).toEqual([])
   })
 
-
   test(`axe: หน้า W3 (รายการหลายลิงก์ และกล่องยืนยัน) ไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme })
     await openBatchFromList(page)
