@@ -55,6 +55,9 @@ STALE_OK_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK", "E_YT_REFUSED"})
 # นาฬิกาเครื่องเลื่อนถอยได้ไม่เกินนี้ยังถือว่า probe ล่าสุดยังใหม่
 CLOCK_SKEW = timedelta(minutes=5)
 PLAYLIST_LIMIT = 200
+# ประวัติ (C15): scope ที่รองรับ และลำดับชนิดงานใน outputs
+HISTORY_SCOPES = ("all", "opened")
+HISTORY_KIND_ORDER = ("video", "audio", "subtitle", "contact_sheet", "frames_zip")
 # มิกซ์อัตโนมัติของยูทูปยาวได้ไม่รู้จบ เอาแค่ช่วงต้น (เจ้าของตัดสิน 2026-09-30)
 MIX_LIMIT = 25
 
@@ -709,37 +712,83 @@ class VideoService:
                     data = None
                 if isinstance(data, dict):
                     return data
-            self.get(video_id, refresh=True)
+            self.get(video_id, refresh=True, peek=True)
         raise YtError("E_UNKNOWN", f"อ่านข้อมูลคลิป {video_id} ที่เก็บไว้ไม่ได้")
 
     def recent(
-        self, limit: int, offset: int = 0, q: str | None = None
+        self,
+        limit: int,
+        offset: int = 0,
+        q: str | None = None,
+        scope: str = "opened",
     ) -> tuple[list[dict], int]:
-        # คลิปที่แค่ peek (ยังไม่เคยเปิดจริง) ไม่ขึ้นใน "ล่าสุด" ทั้งรายการและยอดรวม
-        where, params = " WHERE opened_at != ?", [PEEK_SENTINEL]
+        """ประวัติคลิป (C15) scope="opened" = คลิปที่เปิดจริงใน W2 (peek ไม่นับ) เรียงตามเวลาเปิด
+        scope="all" = คลิปที่เปิดจริง หรือมีงานโหลดที่เสร็จแล้วและมีไฟล์ เรียงตามเวลาล่าสุดของสองอย่างนั้น
+
+        outputs = ชนิดงานที่เสร็จและมีไฟล์ (ไม่ซ้ำ) เรียงตาม HISTORY_KIND_ORDER ทั้งสอง scope
+        """
+        if scope not in HISTORY_SCOPES:
+            raise ValueError(f"scope ไม่รู้จัก: {scope!r}")
+        # เวลาของงานโหลดล่าสุดที่เสร็จและมีไฟล์ (รูปแบบเวลาเดียวกับ opened_at จึงเทียบเป็นข้อความได้)
+        done_at = (
+            "(SELECT max(j.finished_at) FROM jobs j WHERE j.video_id = v.video_id "
+            "AND j.status = 'done' AND j.outputs_json IS NOT NULL)"
+        )
+        if scope == "opened":
+            last_at = "CASE WHEN v.opened_at = ? THEN NULL ELSE v.opened_at END"
+        else:
+            last_at = (
+                f"CASE WHEN v.opened_at = ? THEN {done_at} "
+                f"WHEN {done_at} IS NULL OR v.opened_at >= {done_at} THEN v.opened_at "
+                f"ELSE {done_at} END"
+            )
+        inner = (
+            f"SELECT v.video_id, v.title, v.thumbnail_url, v.duration_s, {last_at} AS last_at "
+            "FROM videos v"
+        )
+        params: list[Any] = [PEEK_SENTINEL]
+        where = " WHERE last_at IS NOT NULL"
         if q and q.strip():
             where += " AND title LIKE ? ESCAPE '\\'"
             params.append(f"%{_like_escape(q.strip())}%")
-        total = self._db.execute(f"SELECT count(*) AS n FROM videos{where}", params)[0][
-            "n"
-        ]
+        base = f"FROM ({inner}){where}"
+        total = self._db.execute(f"SELECT count(*) AS n {base}", params)[0]["n"]
         rows = self._db.execute(
-            "SELECT video_id, title, thumbnail_url, duration_s, opened_at FROM videos"
-            f"{where} ORDER BY opened_at DESC, video_id LIMIT ? OFFSET ?",
+            f"SELECT video_id, title, thumbnail_url, duration_s, last_at {base} "
+            "ORDER BY last_at DESC, video_id LIMIT ? OFFSET ?",
             [*params, max(limit, 0), max(offset, 0)],
         )
+        outputs = self._outputs_of([row["video_id"] for row in rows])
         items = [
             {
                 "videoId": row["video_id"],
                 "title": row["title"],
                 "thumbnailUrl": row["thumbnail_url"] or "",
                 "durationS": row["duration_s"] or 0,
-                "outputs": [],
-                "lastAt": row["opened_at"],
+                "outputs": outputs.get(row["video_id"], []),
+                "lastAt": row["last_at"],
             }
             for row in rows
         ]
         return items, total
+
+    def _outputs_of(self, video_ids: list[str]) -> dict[str, list[str]]:
+        """video_id -> ชนิดงานที่เสร็จและมีไฟล์ (ไม่ซ้ำ เรียงตาม HISTORY_KIND_ORDER)"""
+        if not video_ids:
+            return {}
+        marks = ",".join("?" for _ in video_ids)
+        rows = self._db.execute(
+            "SELECT DISTINCT video_id, kind FROM jobs "
+            f"WHERE status = 'done' AND outputs_json IS NOT NULL AND video_id IN ({marks})",
+            video_ids,
+        )
+        found: dict[str, set[str]] = {}
+        for row in rows:
+            found.setdefault(row["video_id"], set()).add(row["kind"])
+        rank = {kind: n for n, kind in enumerate(HISTORY_KIND_ORDER)}
+        return {
+            vid: sorted(kinds, key=lambda k: (rank.get(k, len(rank)), k)) for vid, kinds in found.items()
+        }
 
     def playlist(
         self,

@@ -348,6 +348,31 @@ def test_zero_comments_skips_the_network(env) -> None:
     assert not (cache / NO_COMMENTS / CACHE_FILE).exists()
 
 
+def test_pinned_comment_does_not_mark_the_clip_as_opened(tmp_path: Path) -> None:
+    db = Database(tmp_path / "peek.db")
+    db.migrate()
+    try:
+        ticks = [0]
+
+        def clock() -> datetime:
+            ticks[0] += 1
+            return datetime(2026, 10, 1, 9, tzinfo=UTC) + timedelta(seconds=ticks[0])
+
+        ext = Counting(FIXTURES)
+        videos = VideoService(db, ext, now=clock)
+        svc = PinnedCommentService(videos, ext.pinned_comment, tmp_path / "cache", now=clock)
+        ext.result = {"text": "x", "byUploader": True}
+        svc.get(THAI)
+        assert videos.recent(10, scope="opened") == ([], 0)
+        opened_at = lambda: db.execute("SELECT opened_at FROM videos WHERE video_id = ?", (THAI,))[0]["opened_at"]  # noqa: E731
+        videos.get(THAI)  # เปิดจริง
+        before = opened_at()
+        svc.get(THAI)
+        assert opened_at() == before
+    finally:
+        db.close()
+
+
 def test_errors_are_remembered_for_five_minutes(env) -> None:
     svc, ext, clock, cache = env
     ext.error = YtError("E_BOT_CHECK", "HTTP Error 429")

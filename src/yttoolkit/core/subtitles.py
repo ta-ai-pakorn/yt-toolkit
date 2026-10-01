@@ -101,7 +101,7 @@ class SubtitleService:
         ครั้งหน้าจึงไม่ probe ซ้ำ) error ทุกตัวโยนต่อ"""
         trimmed = self._videos.raw(video_id)
         if "captions" not in trimmed:
-            self._videos.get(video_id, refresh=True)
+            self._videos.get(video_id, refresh=True, peek=True)
             trimmed = self._videos.raw(video_id)
         return trimmed
 
@@ -143,7 +143,7 @@ class SubtitleService:
                     raise
                 # ลิงก์ที่เซ็นไว้หมดอายุ: probe ใหม่แล้วลองอีกรอบเดียว รอบสองพลาดก็โยนต่อ
                 log.info("โหลดซับ %s/%s ไม่สำเร็จ (%s) probe ใหม่แล้วลองอีกครั้ง", video_id, track.id, exc.detail)
-                self._videos.get(video_id, refresh=True)
+                self._videos.get(video_id, refresh=True, peek=True)
                 track = self._track(video_id, track.id)
                 parsed, data = self._fetch_and_parse(track)
             _write_cache(folder, video_id, track.id, parsed, data)
@@ -186,7 +186,7 @@ class SubtitleService:
                 # เพิ่ง probe แล้วไม่ได้เซสชัน: ไม่ probe ซ้ำทุกครั้งที่ขอซับแปล โหลดเลยตามปกติ
                 return False
             log.info("ยังไม่มีเซสชันผู้ชมของยูทูป probe %s ใหม่เพื่อรับเซสชันก่อนโหลดซับแปล", video_id)
-            self._videos.get(video_id, refresh=True)
+            self._videos.get(video_id, refresh=True, peek=True)
             reprobed = True
             wait = self._session.wait_seconds()
             if wait is None:
@@ -227,7 +227,7 @@ class SubtitleService:
         """
         if fmt not in FORMATS:
             raise ValueError(f"format must be one of {FORMATS}")
-        info = self._videos.get(video_id)
+        info = self._videos.get(video_id, peek=True)
         track = self._track(video_id, track_id)
         tokens: list[Token] = list(self._parsed(video_id, track).tokens)
         title = str(info.get("title") or "")
@@ -252,7 +252,7 @@ class SubtitleService:
         pinned = ตัวดึงคอมเมนต์ปักหมุด (บริการคอมเมนต์ใช้ cache และดึงเมื่อพลาด) YtError ทุกชนิดหรือ None = ไม่ใส่หัวข้อ
         โน้ตไม่พลาดเพราะคอมเมนต์ปักหมุด
         """
-        info = self._videos.get(video_id)
+        info = self._videos.get(video_id, peek=True)
         if track_id is None:
             trimmed = self._trimmed(video_id)
             default = default_track_id(list_tracks(trimmed), original_language(trimmed))
