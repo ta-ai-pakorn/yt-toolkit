@@ -210,6 +210,14 @@ _ALLOWED_TOP = {
     "description",
     "subtitles",
     "automatic_captions",
+    # owner round 2 (C-A1): ข้อมูลคลิป
+    "view_count",
+    "like_count",
+    "comment_count",
+    "channel_follower_count",
+    "tags",
+    "categories",
+    "heatmap",
 }
 _ALLOWED_FORMAT = {
     "format_id",

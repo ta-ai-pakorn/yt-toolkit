@@ -141,6 +141,7 @@ def test_output_has_exactly_the_prd_keys() -> None:
     assert set(info) == {
         "videoId", "title", "channel", "durationS", "publishedAt", "thumbnailUrl",
         "chapters", "video", "audio", "hasStoryboard", "isLive", "description",
+        "stats", "tags", "categories", "mostReplayed",
     }  # fmt: skip
     assert set(info["video"][0]) <= {
         "formatId",
@@ -765,8 +766,8 @@ def test_trim_drops_urls_and_unused_fields_but_keeps_storyboard(db: Database) ->
 
 def test_trim_probe_adds_probe_version_description_and_captions() -> None:
     data = trim_probe(load("88o5Sk8_m1Y"))
-    assert PROBE_VERSION == 2
-    assert data["probeVersion"] == 2
+    assert PROBE_VERSION == 3
+    assert data["probeVersion"] == 3
     assert data["description"] == load("88o5Sk8_m1Y")["description"]
     assert set(data["captions"]) == {"owner", "original", "translated", "translateFrom"}
     assert [o["key"] for o in data["captions"]["original"]] == ["th-orig"]
