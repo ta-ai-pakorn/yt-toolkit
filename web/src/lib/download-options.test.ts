@@ -7,6 +7,7 @@ import {
   buildAudioParams,
   buildVideoParams,
   codecLabel,
+  compatCap,
   paramsFromSettings,
   qualityOptions,
   resolution,
@@ -199,6 +200,70 @@ describe("qualityOptions", () => {
     expect(qualityOptions(shuffled, false).map((o) => o.height)).toEqual([
       1080, 720, 480, 144,
     ])
+  })
+})
+
+describe("เพดานโหมดเปิดได้ทุกที่ตามการตั้งค่า (compat-720)", () => {
+  it("compatCap: compat-720 = 720 · อย่างอื่นหรือยังไม่โหลดการตั้งค่า = 1080", () => {
+    expect(compatCap({ videoDefault: "compat-720" })).toBe(720)
+    expect(compatCap({ videoDefault: "compat-1080" })).toBe(1080)
+    expect(compatCap({ videoDefault: "max" })).toBe(1080)
+    expect(compatCap(undefined)).toBe(1080)
+  })
+
+  it("เพดาน 720 = ไม่มีตัวเลือกเกิน 720p ยังเรียงสูงไปต่ำ", () => {
+    const options = qualityOptions(clip(), false, 720)
+    expect(options.map((o) => o.value)).toEqual(["298", "135", "134", "133", "160"])
+    expect(options.every((o) => o.compat && o.height <= 720)).toBe(true)
+  })
+
+  it("เพดาน 1080 (หรือไม่ส่ง) = เหมือนเดิม", () => {
+    expect(qualityOptions(clip(), false, 1080)).toEqual(qualityOptions(clip(), false))
+    expect(qualityOptions(clip(), false)[0].value).toBe("299")
+  })
+
+  it("ความละเอียดสูงสุดไม่สนเพดาน", () => {
+    expect(qualityOptions(clip(), true, 720)).toEqual(qualityOptions(clip(), true))
+    expect(qualityOptions(clip(), true, 720)[0].value).toBe("315")
+  })
+
+  it("อัตโนมัติประมาณขนาดจาก H.264 ที่ดีที่สุดไม่เกิน 720p", () => {
+    expect(videoSizeEstimate(clip(), AUTO_QUALITY, true, false, 720)).toBe(150524867)
+    expect(videoSizeEstimate(clip(), AUTO_QUALITY, true, false, 1080)).toBe(257619653)
+    expect(videoSizeEstimate(clip(), AUTO_QUALITY, true, false)).toBe(257619653)
+  })
+
+  it("ความละเอียดสูงสุด: อัตโนมัติประมาณจากภาพที่ดีที่สุดแม้เพดาน 720", () => {
+    expect(videoSizeEstimate(clip(), AUTO_QUALITY, true, true, 720)).toBe(1362269481)
+  })
+
+  it("เลือกแบบเองยังประมาณขนาดตามแบบนั้น", () => {
+    expect(videoSizeEstimate(clip(), "298", true, false, 720)).toBe(150524867)
+  })
+
+  it("คลิปแนวตั้งนับด้านสั้น: เพดาน 720 ตัด 1080x1920 ทิ้ง แต่เก็บ 720x1280", () => {
+    const shorts = clip({
+      durationS: 30,
+      video: [
+        ["137", 1080, 1920, 12_000_000],
+        ["136", 720, 1280, 6_000_000],
+        ["135", 480, 854, 3_000_000],
+      ].map(([formatId, width, height, sizeBytes]) => ({
+        formatId: String(formatId),
+        width: Number(width),
+        height: Number(height),
+        fps: 30,
+        vcodec: "avc1.4d401f",
+        compat: true,
+        sizeBytes: Number(sizeBytes),
+      })),
+    })
+    expect(qualityOptions(shorts, false, 720).map((o) => [o.value, o.height])).toEqual([
+      ["136", 720],
+      ["135", 480],
+    ])
+    expect(videoSizeEstimate(shorts, AUTO_QUALITY, true, false, 720)).toBe(6_000_000)
+    expect(videoSizeEstimate(shorts, AUTO_QUALITY, true, false, 1080)).toBe(12_000_000)
   })
 })
 
@@ -411,6 +476,25 @@ describe("buildVideoParams", () => {
       audioLanguage: "original",
       splitChapters: false,
     })
+  })
+
+  it("อัตโนมัติภายใต้เพดาน 720 = ส่ง maxHeight 720", () => {
+    expect(buildVideoParams({ ...base, compatCap: 720 })).toEqual({
+      maxQuality: false,
+      maxHeight: 720,
+      noAudio: false,
+      audioLanguage: "original",
+      splitChapters: false,
+    })
+  })
+
+  it("เพดาน 1080 หรือไม่ส่งเพดาน = ไม่ส่ง maxHeight (ค่าเริ่มต้นของ backend)", () => {
+    expect(buildVideoParams({ ...base, compatCap: 1080 })).not.toHaveProperty("maxHeight")
+    expect(buildVideoParams(base)).not.toHaveProperty("maxHeight")
+  })
+
+  it("ความละเอียดสูงสุดไม่สนเพดาน = ไม่ส่ง maxHeight", () => {
+    expect(buildVideoParams({ ...base, maxQuality: true, compatCap: 720 })).not.toHaveProperty("maxHeight")
   })
 
   it("เลือกคุณภาพเอง = ส่ง formatId", () => {
