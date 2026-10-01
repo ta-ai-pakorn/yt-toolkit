@@ -68,10 +68,14 @@ export type VideoInfo = {
   mostReplayed?: ReplaySegment[]
 }
 
-/** คอมเมนต์ปักหมุดที่เจ้าของช่องเขียนเอง (ไม่มีชื่อหรือรหัสผู้เขียน ตาม PDPA) */
-export type PinnedComment = { text: string; likes?: number; publishedText?: string }
+/**
+ * คอมเมนต์ที่ปักหมุดไว้ (สัญญา C-A2 v2): เจ้าของช่องปักหมุดคอมเมนต์ของใครก็ได้
+ * byUploader = เจ้าของช่องเขียนเอง (true) หรือผู้ชมเขียน (false) · ไม่มีชื่อ รหัส หรือรูปผู้เขียน ตาม PDPA
+ * backend รุ่นก่อน (v1) ไม่มี byUploader (ตอนนั้นมีแต่คอมเมนต์ของเจ้าของช่อง) หน้าเว็บจึงไม่แสดงป้ายเมื่อไม่มีคีย์นี้
+ */
+export type PinnedComment = { text: string; likes?: number; publishedText?: string; byUploader: boolean }
 
-/** ผลของ GET /videos/{id}/pinned-comment · null = ไม่มีคอมเมนต์ปักหมุดจากเจ้าของช่อง */
+/** ผลของ GET /videos/{id}/pinned-comment · null = คลิปนี้ไม่มีคอมเมนต์ปักหมุด */
 export type PinnedCommentResult = { comment: PinnedComment | null }
 
 export type ResolveKind = "video" | "playlist" | "ambiguous" | "invalid"
