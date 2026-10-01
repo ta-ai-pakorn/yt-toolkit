@@ -105,6 +105,16 @@ function setQueue(
   else client.setQueryData<QueueState>(QUEUE_KEY, { ...queue, ...patch })
 }
 
+/**
+ * โหลดใหม่ด้วยคำขอที่ส่งหลัง SSE ต่อติด: คำขอแรกที่ยังไม่ตอบ (ยังไม่มีข้อมูล) react-query จะไม่ยิงซ้ำแต่รอคำตอบเดิม
+ * ซึ่ง backend คำนวณก่อนต่อติด เหตุการณ์ในช่วงนั้นจึงหายไป · ยกเลิกคำขอค้างก่อน แล้วจึงโหลดใหม่
+ */
+function reload(client: QueryClient, queryKey: readonly string[]): void {
+  void client
+    .cancelQueries({ queryKey })
+    .then(() => client.invalidateQueries({ queryKey }))
+}
+
 export type ConnectOptions = {
   /** backend กำลังปิดตัว (หน้าเว็บแสดงหน้าปิดโปรแกรมแล้ว) */
   onShutdown: () => void
@@ -156,8 +166,8 @@ export function connectEvents(
   const onOpen = () => {
     if (!lostConnection) return
     lostConnection = false
-    void client.invalidateQueries({ queryKey: JOBS_KEY })
-    void client.invalidateQueries({ queryKey: QUEUE_KEY })
+    reload(client, JOBS_KEY)
+    reload(client, QUEUE_KEY)
   }
 
   for (const [name, handler] of handlers) source.addEventListener(name, handler)

@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query"
+import { QueryClient, QueryObserver } from "@tanstack/react-query"
 import { describe, expect, it, vi } from "vitest"
 
 import {
@@ -10,6 +10,9 @@ import {
 } from "./events"
 import { JOBS_KEY, QUEUE_KEY } from "./jobs"
 import type { Job, QueueState } from "./types"
+
+/** ปล่อยให้ promise ที่ค้าง (ยกเลิกคำขอ แล้วโหลดใหม่) ทำงานจนจบ */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 const JOB: Job = {
   id: "11111111-2222-3333-4444-555555555555",
@@ -259,31 +262,54 @@ describe("connectEvents", () => {
     unsubscribe()
   })
 
-  it("open ครั้งแรกโหลดรายการงานและสถานะคิวใหม่หนึ่งครั้ง (เหตุการณ์ที่มาก่อนแคชพร้อมถูกข้ามไป)", () => {
+  it("open ครั้งแรกโหลดรายการงานและสถานะคิวใหม่หนึ่งครั้ง (เหตุการณ์ที่มาก่อนแคชพร้อมถูกข้ามไป)", async () => {
     const client = new QueryClient()
     const invalidate = vi.spyOn(client, "invalidateQueries")
     const { source } = connect(client)
     source.emit("open")
+    await flush()
     expect(invalidate).toHaveBeenCalledWith({ queryKey: JOBS_KEY })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: QUEUE_KEY })
     expect(invalidate).toHaveBeenCalledTimes(2)
     source.emit("open")
+    await flush()
     expect(invalidate).toHaveBeenCalledTimes(2)
   })
 
-  it("ต่อใหม่หลังหลุด (error แล้ว open) โหลดใหม่อีกครั้ง · open ซ้ำโดยไม่หลุดไม่โหลด", () => {
+  it("open ระหว่างที่คำขอรายการงานแรกยังไม่ตอบ: ยกเลิกคำขอนั้นแล้วโหลดใหม่ (คำตอบเดิมคำนวณก่อนต่อติด)", async () => {
+    const client = new QueryClient()
+    const answers: Array<(jobs: Job[]) => void> = []
+    const observer = new QueryObserver(client, {
+      queryKey: JOBS_KEY,
+      queryFn: () => new Promise<Job[]>((resolve) => answers.push(resolve)),
+    })
+    const unsubscribeObserver = observer.subscribe(() => {})
+    await flush()
+    expect(answers).toHaveLength(1)
+    const { source } = connect(client)
+    source.emit("open")
+    await flush()
+    expect(answers).toHaveLength(2)
+    unsubscribeObserver()
+  })
+
+  it("ต่อใหม่หลังหลุด (error แล้ว open) โหลดใหม่อีกครั้ง · open ซ้ำโดยไม่หลุดไม่โหลด", async () => {
     const client = new QueryClient()
     const { source } = connect(client)
     source.emit("open")
+    await flush()
     const invalidate = vi.spyOn(client, "invalidateQueries")
     source.emit("open")
+    await flush()
     expect(invalidate).not.toHaveBeenCalled()
     source.emit("error")
     source.emit("open")
+    await flush()
     expect(invalidate).toHaveBeenCalledWith({ queryKey: JOBS_KEY })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: QUEUE_KEY })
     expect(invalidate).toHaveBeenCalledTimes(2)
     source.emit("open")
+    await flush()
     expect(invalidate).toHaveBeenCalledTimes(2)
   })
 

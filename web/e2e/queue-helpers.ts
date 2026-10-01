@@ -150,6 +150,16 @@ export async function openQueueSheet(page: Page): Promise<Locator> {
   await bar.locator("button[aria-expanded]").first().click()
   const sheet = page.getByRole("dialog", { name: "คิวงาน" })
   await expect(sheet).toBeVisible()
+  // รอแอนิเมชันเปิด (จางเข้า 200ms) จบก่อน: axe วัดสีตัวอักษรระหว่างโปร่งแสงแล้วได้ค่าต่ำเกินจริง
+  // (ข้ามแอนิเมชันวนไม่รู้จบ เช่นแถบความคืบหน้าที่ยังไม่รู้ %)
+  await sheet.evaluate((el) =>
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+        .map((a) => a.finished),
+    ),
+  )
   return sheet
 }
 

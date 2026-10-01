@@ -107,6 +107,14 @@ async function seriousViolations(page: Page) {
 }
 
 /** ลากด้วยเมาส์ทีละนิด (dnd-kit เริ่มลากเมื่อขยับเกิน 4 px) จากที่จับของงานหนึ่งไปเหนือแถวของอีกงาน */
+/**
+ * หลังยกด้วยคีย์บอร์ด dnd-kit ยังต้องวัดตำแหน่งแถวและเริ่มฟังปุ่มลูกศรอีกเล็กน้อย (หลังประกาศ "ยก…" ขึ้นแล้ว)
+ * กดลูกศรเร็วกว่านั้นปุ่มหาย · รอสองเฟรมให้ขั้นนั้นจบก่อน
+ */
+async function dndReady(page: Page) {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)))))
+}
+
 async function mouseDrag(page: Page, handle: Locator, target: Locator) {
   const from = (await handle.boundingBox())!
   const to = (await target.boundingBox())!
@@ -172,6 +180,7 @@ test.describe("W4 คิวงาน", () => {
       await handle("SLOWDOWNLD4").focus()
       await page.keyboard.press("Space")
       await expect(sheet.getByText(`ยก ${TITLE.SLOWDOWNLD4} ขึ้นแล้ว`, { exact: false })).toBeAttached()
+      await dndReady(page)
       await page.keyboard.press("ArrowDown")
       await expect(sheet.getByText(new RegExp(`^${TITLE.SLOWDOWNLD4} อยู่ลำดับที่ \\d+$`))).toBeAttached()
       await page.keyboard.press("Space")
@@ -180,7 +189,9 @@ test.describe("W4 คิวงาน", () => {
       await handle("SLOWDOWNLD4").focus()
       await page.keyboard.press("Space")
       await expect(sheet.getByText(`ยก ${TITLE.SLOWDOWNLD4} ขึ้นแล้ว`, { exact: false })).toBeAttached()
+      await dndReady(page)
       await page.keyboard.press("ArrowUp")
+      await expect(sheet.getByText(new RegExp(`^${TITLE.SLOWDOWNLD4} อยู่ลำดับที่ \\d+$`))).toBeAttached()
       await page.keyboard.press("Space")
       await expect(sheet.getByText(new RegExp(`^วาง ${TITLE.SLOWDOWNLD4} ไว้ลำดับที่ \\d+$`))).toBeAttached()
       await expect.poll(() => order34(request)).toEqual(["SLOWDOWNLD4", "SLOWDOWNLD3"])
