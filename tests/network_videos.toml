@@ -7,3 +7,7 @@ multi_audio_orig = "8lpOfyoxcvU"  # th original + en-US dub, two -orig tracks, C
 owner_subs_chapters = "jNQXAC9IVRw"  # owner en/de, 3 chapters
 owner_thai = "iG9CE55wbtY"    # owner th (TED)
 no_subs = "aqz-KE-bpKQ"
+
+[comments]
+# คลิปที่เจ้าของช่องปักหมุดคอมเมนต์ของตัวเองไว้ (เทสเก็บแค่ใน temp ไม่มีข้อความคอมเมนต์ในรีโป)
+uploader_pinned = "dQw4w9WgXcQ"  # Rick Astley - Never Gonna Give You Up (Official Video)
