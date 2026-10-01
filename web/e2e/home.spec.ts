@@ -27,7 +27,7 @@ test("กดปุ่ม d ไม่สลับธีม (ไม่มีปุ
 
 test("ปุ่มตั้งค่าที่หัวหน้าเป็นลิงก์จริง ไม่ใช่ปุ่ม", async ({ page }) => {
   await page.goto("/")
-  await expect(page.getByRole("link", { name: "ตั้งค่า" })).toHaveAttribute("href", "/settings/health")
+  await expect(page.getByRole("link", { name: "ตั้งค่า" })).toHaveAttribute("href", "/settings")
   await expect(page.getByRole("button", { name: "ตั้งค่า" })).toHaveCount(0)
   await page.getByRole("link", { name: "ตั้งค่า" }).click()
   await expect(page.getByRole("link", { name: "ตั้งค่า" })).toHaveAttribute("aria-current", "page")

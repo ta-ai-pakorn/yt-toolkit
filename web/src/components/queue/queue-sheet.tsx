@@ -96,6 +96,9 @@ export function QueueSheet() {
               <Skeleton className="h-12 w-full" />
             </div>
           )}
+          {loaded && Object.values(groups).every((group) => group.length === 0) && (
+            <p className="py-6 text-center text-sm text-muted-foreground">{th.queue.empty}</p>
+          )}
           {groups.running.length > 0 && (
             <Group id="queue-group-running" title={th.queue.groups.running}>
               <ul className="divide-y">
