@@ -29,7 +29,7 @@ from yttoolkit.core.extractor import FakeExtractor
 from yttoolkit.core.handlers import HandlerDeps, build_handlers
 from yttoolkit.core.jobs import Job, JobResult
 from yttoolkit.core.media import FakeMediaTools, FfmpegTools
-from yttoolkit.core.srt_builder import PRESETS
+from yttoolkit.core.srt_builder import PRESETS, options_from_dict
 from yttoolkit.core.subtitles import SubtitleService
 from yttoolkit.core.videos import VideoService
 from yttoolkit.core.yterrors import YtError
@@ -612,6 +612,16 @@ def test_subtitle_job(env, fmt):
     assert result.outputs[0].kind == "subtitle"
     assert ctx.stages == ["probing", "writing"]
     assert (path.parent / files.SOURCE_NOTE_NAME).is_file()
+
+
+def test_subtitle_job_word_preset_matches_the_golden(env):
+    """preset "ทีละคำ" ผ่านเส้นทางของงานซับ (handlers → SubtitleService.export → srt_builder) ตรง golden ทุกไบต์"""
+    word = {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1}
+    assert options_from_dict(word) == PRESETS["word"]  # ค่าเดียวกับที่หน้าเว็บส่งเมื่อเลือก "ทีละคำ"
+    result, _ = env.run("subtitle", THAI, {"trackId": "a.th-orig", "format": "srt", "options": word})
+
+    golden = FIXTURES / "subs" / "golden" / "th-asr.word.srt"  # 88o5Sk8_m1Y th-orig.json3 (test_srt_golden CASES)
+    assert output_path(result).read_bytes() == golden.read_bytes()
 
 
 def test_subtitle_job_uses_default_track(env):
