@@ -9,6 +9,7 @@ import {
   codecLabel,
   paramsFromSettings,
   qualityOptions,
+  resolution,
   resolveAudioLanguage,
   videoSizeEstimate,
   wavBytes,
@@ -198,6 +199,65 @@ describe("qualityOptions", () => {
     expect(qualityOptions(shuffled, false).map((o) => o.height)).toEqual([
       1080, 720, 480, 144,
     ])
+  })
+})
+
+describe("คลิปแนวตั้ง (Shorts): ความละเอียด = ด้านสั้นของภาพ", () => {
+  // Shorts แบบสังเคราะห์: H.264 1080x1920, 720x1280, 480x854 และ VP9 1080x1920
+  const portrait = (withWidth = true): VideoInfo =>
+    clip({
+      durationS: 30,
+      video: (
+        [
+          ["137", 1080, 1920, "avc1.640028", 12_000_000],
+          ["248", 1080, 1920, "vp09.00.40.08", 9_000_000],
+          ["136", 720, 1280, "avc1.4d401f", 6_000_000],
+          ["135", 480, 854, "avc1.4d401e", 3_000_000],
+        ] as const
+      ).map(([formatId, width, height, vcodec, sizeBytes]) => ({
+        formatId,
+        ...(withWidth ? { width } : {}),
+        height,
+        fps: 30,
+        vcodec,
+        compat: vcodec.startsWith("avc1"),
+        sizeBytes,
+      })),
+    })
+
+  it("resolution = min(width, height) · ไม่รู้ width = height", () => {
+    expect(resolution({ width: 1080, height: 1920 })).toBe(1080)
+    expect(resolution({ width: 1920, height: 1080 })).toBe(1080)
+    expect(resolution({ width: 2560, height: 1080 })).toBe(1080)
+    expect(resolution({ height: 1920 })).toBe(1920)
+  })
+
+  it("โหมดเปิดได้ทุกที่ไม่ตัด 1080x1920 ทิ้ง ป้ายเป็นด้านสั้น เรียงตามด้านสั้น", () => {
+    expect(
+      qualityOptions(portrait(), false).map((o) => [o.value, o.height])
+    ).toEqual([
+      ["137", 1080],
+      ["136", 720],
+      ["135", 480],
+    ])
+    expect(
+      qualityOptions(portrait(), true).map((o) => [o.value, o.height, o.codec])
+    ).toEqual([
+      ["137", 1080, "H.264"],
+      ["248", 1080, "VP9"],
+      ["136", 720, "H.264"],
+      ["135", 480, "H.264"],
+    ])
+  })
+
+  it("อัตโนมัติประมาณขนาดจาก 1080x1920 ตรงกับที่ backend เลือก", () => {
+    expect(videoSizeEstimate(portrait(), AUTO_QUALITY, true)).toBe(12_000_000)
+  })
+
+  it("ข้อมูลเก่าที่ไม่มี width = ใช้ height แบบเดิม", () => {
+    expect(
+      qualityOptions(portrait(false), false).map((o) => [o.value, o.height])
+    ).toEqual([["135", 854]])
   })
 })
 

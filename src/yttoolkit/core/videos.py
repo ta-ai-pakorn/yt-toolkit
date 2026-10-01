@@ -68,6 +68,7 @@ _STORYBOARD = "storyboard"
 _MEDIA_FIELDS = (
     "format_id",
     "format_note",
+    "width",
     "height",
     "fps",
     "vcodec",
@@ -325,6 +326,10 @@ def _video_formats(formats: list[dict]) -> list[dict]:
             "vcodec": str(vcodec),
             "compat": str(vcodec).startswith("avc1"),
         }
+        width = fmt.get("width")
+        # width ใช้หาความละเอียดแบบด้านสั้น (คลิปแนวตั้ง 1080x1920 = 1080p) ไม่รู้ = ไม่ใส่ หน้าเว็บใช้ height แทน
+        if isinstance(width, int | float) and not isinstance(width, bool) and width > 0:
+            entry["width"] = round(width)
         size = _size(fmt)
         if size is not None:
             entry["sizeBytes"] = size

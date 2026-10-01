@@ -29,7 +29,7 @@ from yttoolkit.core.extractor import FakeExtractor
 from yttoolkit.core.handlers import HandlerDeps, build_handlers
 from yttoolkit.core.jobs import Job, JobResult
 from yttoolkit.core.media import FakeMediaTools, FfmpegTools
-from yttoolkit.core.srt_builder import PRESETS
+from yttoolkit.core.srt_builder import PRESETS, options_from_dict
 from yttoolkit.core.subtitles import SubtitleService
 from yttoolkit.core.videos import VideoService
 from yttoolkit.core.yterrors import YtError
@@ -614,6 +614,16 @@ def test_subtitle_job(env, fmt):
     assert (path.parent / files.SOURCE_NOTE_NAME).is_file()
 
 
+def test_subtitle_job_word_preset_matches_the_golden(env):
+    """preset "ทีละคำ" ผ่านเส้นทางของงานซับ (handlers → SubtitleService.export → srt_builder) ตรง golden ทุกไบต์"""
+    word = {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1}
+    assert options_from_dict(word) == PRESETS["word"]  # ค่าเดียวกับที่หน้าเว็บส่งเมื่อเลือก "ทีละคำ"
+    result, _ = env.run("subtitle", THAI, {"trackId": "a.th-orig", "format": "srt", "options": word})
+
+    golden = FIXTURES / "subs" / "golden" / "th-asr.word.srt"  # 88o5Sk8_m1Y th-orig.json3 (test_srt_golden CASES)
+    assert output_path(result).read_bytes() == golden.read_bytes()
+
+
 def test_subtitle_job_uses_default_track(env):
     result, _ = env.run("subtitle", THAI, {"format": "srt", "options": MEDIUM})
 
@@ -739,20 +749,23 @@ def test_build_handlers_keys(env):
 
 
 @pytest.mark.parametrize(
-    ("kind", "params"),
+    ("kind", "video_id", "title", "params"),
     [
-        ("video", video_params()),
-        ("audio", audio_params("mp3")),
-        ("contact_sheet", {"source": "fast", "columns": 5}),
-        ("frames_zip", {"source": "fast"}),
+        ("video", BBB, BBB_TITLE, video_params()),
+        ("audio", BBB, BBB_TITLE, audio_params("mp3")),
+        ("subtitle", THAI, THAI_TITLE, {"trackId": "a.th-orig", "format": "srt", "options": MEDIUM}),
+        ("contact_sheet", BBB, BBB_TITLE, {"source": "fast", "columns": 5}),
+        ("frames_zip", BBB, BBB_TITLE, {"source": "fast"}),
     ],
 )
-def test_jobs_do_not_mark_clip_opened(env, kind, params):
-    env.run(kind, BBB, params)
+def test_jobs_do_not_mark_clip_opened(env, kind, video_id, title, params):
+    env.run(kind, video_id, params)
 
+    # งานโหลดเก็บข้อมูลคลิปแบบ peek: ไม่ขึ้นในประวัติ "เปิดแล้ว" (C15 scope="opened" = ค่าเริ่มต้นของ recent)
     assert env.videos.recent(10) == ([], 0)
-    rows = env.db.execute("SELECT title FROM videos WHERE video_id = ?", (BBB,))
-    assert [row["title"] for row in rows] == [BBB_TITLE]
+    assert env.videos.recent(10, scope="opened") == ([], 0)
+    rows = env.db.execute("SELECT title FROM videos WHERE video_id = ?", (video_id,))
+    assert [row["title"] for row in rows] == [title]
 
 
 def test_storyboard_refresh_does_not_mark_clip_opened(env):
@@ -771,6 +784,7 @@ def test_storyboard_refresh_does_not_mark_clip_opened(env):
     assert flaky.failed
     assert output_path(result).is_file()
     assert env.videos.recent(10) == ([], 0)
+    assert env.videos.recent(10, scope="opened") == ([], 0)
 
 
 @pytest.mark.parametrize(

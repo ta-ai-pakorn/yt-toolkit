@@ -103,15 +103,37 @@ def _is_video(fmt: dict) -> bool:
     return not _is_storyboard(fmt) and bool(vcodec) and vcodec != "none"
 
 
-def _height(fmt: Mapping[str, Any]) -> float:
-    return _number(fmt.get("height")) or 0.0
+def _resolution(fmt: Mapping[str, Any]) -> float:
+    """ความละเอียดของ format = ด้านสั้นของภาพ min(width, height) แบบเดียวกับ "res" ของ yt-dlp
+
+    คลิปแนวตั้ง (Shorts) 1080x1920 จึงเป็น 1080p ไม่ใช่ 1920p · ไม่รู้ width = ใช้ height · ไม่รู้ height = 0
+    """
+    height = _number(fmt.get("height"))
+    if height is None:
+        return 0.0
+    width = _number(fmt.get("width"))
+    return height if width is None else min(width, height)
+
+
+def _is_portrait(videos: list[dict]) -> bool:
+    """คลิปแนวตั้ง: format ภาพใหญ่สุด (พื้นที่ภาพ) กว้างน้อยกว่าสูง · ไม่รู้ขนาดเลย = แนวนอน (ใช้ height เหมือนเดิม)"""
+    sizes = [
+        (width, height)
+        for f in videos
+        if (width := _number(f.get("width"))) is not None
+        and (height := _number(f.get("height"))) is not None
+    ]
+    if not sizes:
+        return False
+    width, height = max(sizes, key=lambda size: size[0] * size[1])
+    return width < height
 
 
 def _video_bytes(pool: list[dict]) -> int | None:
-    """ขนาดของ format ที่ดีที่สุดในกลุ่ม (สูงสุดก่อน แล้วไฟล์ใหญ่สุด) None = ไม่มีหรือไม่รู้ขนาด"""
+    """ขนาดของ format ที่ดีที่สุดในกลุ่ม (ละเอียดสุดก่อน แล้วไฟล์ใหญ่สุด) None = ไม่มีหรือไม่รู้ขนาด"""
     if not pool:
         return None
-    best = max(pool, key=lambda f: (_height(f), _filesize(f) or -1))
+    best = max(pool, key=lambda f: (_resolution(f), _filesize(f) or -1))
     return _filesize(best)
 
 
@@ -172,6 +194,7 @@ def video_choice(info: dict, params: Mapping[str, Any]) -> DownloadChoice:
 
     - formatId ของ format ที่มีภาพและยังมีอยู่ = ใช้ตัวนั้น ไม่มีแล้ว/เสียงล้วน/storyboard = เลือกอัตโนมัติ + QUALITY_FALLBACK
     - maxQuality = วิดีโอดีที่สุดทุก codec (bv*) ไม่งั้น = H.264 ไม่เกิน maxHeight (เปิดได้ทุกที่)
+      เพดานนับที่ด้านสั้นของภาพ: คลิปแนวนอนกรอง [height<=H] (เหมือนเดิม) คลิปแนวตั้ง (Shorts) กรอง [width<=H]
     - noAudio = วิดีโออย่างเดียว ไม่มี "+" ไม่มีตัวสำรอง (AC-VID-08)
     """
     formats = _formats(info)
@@ -194,11 +217,13 @@ def video_choice(info: dict, params: Mapping[str, Any]) -> DownloadChoice:
         pool = videos
         tail = "/b"
     else:
-        video = f"bv*[vcodec^=avc1][height<={height_cap}]"
+        # เพดานนับที่ด้านสั้น: Shorts 1080x1920 ได้ 1080p ไม่ถูกตัดลงเหลือ 608x1080
+        short_side = "width" if _is_portrait(videos) else "height"
+        video = f"bv*[vcodec^=avc1][{short_side}<={height_cap}]"
         pool = [
             f
             for f in videos
-            if str(f.get("vcodec")).startswith("avc1") and 0 < _height(f) <= height_cap
+            if str(f.get("vcodec")).startswith("avc1") and 0 < _resolution(f) <= height_cap
         ]
         tail = "/b[ext=mp4]"
     video_bytes = _video_bytes(pool)

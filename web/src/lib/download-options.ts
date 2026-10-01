@@ -15,11 +15,20 @@ import type {
 /** ค่าของตัวเลือก "อัตโนมัติ" ในรายการคุณภาพ (ให้ backend เลือกเอง) */
 export const AUTO_QUALITY = "auto"
 
-/** เพดานความละเอียดของโหมดเปิดได้ทุกที่ (H.264) */
+/** เพดานความละเอียดของโหมดเปิดได้ทุกที่ (H.264) นับที่ด้านสั้นของภาพ */
 const COMPAT_MAX_HEIGHT = 1080
+
+/**
+ * ความละเอียดของ format = ด้านสั้นของภาพ min(width, height) แบบเดียวกับ backend (C8) และ "res" ของ yt-dlp
+ * คลิปแนวตั้ง (Shorts) 1080x1920 จึงเป็น 1080p · ไม่รู้ width = ใช้ height
+ */
+export function resolution(f: Pick<VideoFormat, "width" | "height">): number {
+  return f.width === undefined ? f.height : Math.min(f.width, f.height)
+}
 
 export type QualityOption = {
   value: string
+  /** ความละเอียด (ด้านสั้นของภาพ) ที่ใช้ทำป้าย "{h}p" เรียงลำดับ และจำค่าที่เลือกไว้ */
   height: number
   fps: number
   codec: string
@@ -39,17 +48,20 @@ export function codecLabel(vcodec: string): string {
 /**
  * ตัวเลือกคุณภาพของแท็บวิดีโอ (ไม่รวม "อัตโนมัติ"): ปกติ = เฉพาะ H.264 ไม่เกิน 1080p (เปิดได้ทุกที่)
  * · ความละเอียดสูงสุด = ทุกแบบ · เรียงสูงไปต่ำ แล้ว fps มากไปน้อย · value = formatId
+ * · ความละเอียดนับที่ด้านสั้น (resolution): Shorts 1080x1920 = 1080p ผ่านเพดานโหมดเปิดได้ทุกที่
  */
 export function qualityOptions(
   video: VideoInfo,
   maxQuality: boolean
 ): QualityOption[] {
   return video.video
-    .filter((f) => maxQuality || (f.compat && f.height <= COMPAT_MAX_HEIGHT))
+    .filter(
+      (f) => maxQuality || (f.compat && resolution(f) <= COMPAT_MAX_HEIGHT)
+    )
     .map((f) => {
       const option: QualityOption = {
         value: f.formatId,
-        height: f.height,
+        height: resolution(f),
         fps: f.fps,
         codec: codecLabel(f.vcodec),
         compat: f.compat,
