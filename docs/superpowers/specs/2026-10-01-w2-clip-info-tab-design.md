@@ -23,10 +23,10 @@ Approved by the owner (Pete) on 2026-10-01, after the M3 round 2-3 preview.
   - Layout: 6 in one row on wide screens; 3 per row below 640 px.
   - A tile whose value is missing is not rendered.
   - Number formatting stays as now: Thai compact "long" (for example "5.8 แสน"). The full number goes in `title` and `aria-label`.
-- **Cover:**
-  - It becomes a link to `https://www.youtube.com/watch?v={id}`, opening in a new tab (`target="_blank" rel="noopener noreferrer"`).
-  - A play-icon overlay appears on hover and focus.
-  - Accessible name: "เปิดในยูทูป: {title}".
+- **Cover:** clicking it, or pressing Enter/Space on it, opens the cover full-size in the same floating lightbox used for frames.
+  - A zoom icon overlay appears on hover and focus.
+  - Accessible name: "ดูภาพปกขนาดใหญ่".
+  - The owner changed this on 2026-10-01: the cover does not link to YouTube.
 - **"เปิดในยูทูป" button:** a secondary button styled link with an external-link icon, opening the same URL in a new tab.
 - **Removed from the header:** description, chapters, pinned comment, tags and the most-replayed summary line. All of them move to the new tab.
 - **Phone layout:** the round-2 layout stays (128 px cover beside the title, title clamped to 3 lines). The tab bar must still start within the first 800 px at 360 px wide, with long titles.
@@ -90,7 +90,8 @@ Approved by the owner (Pete) on 2026-10-01, after the M3 round 2-3 preview.
   - the info tab via URL and keyboard;
   - lazy pinned fetch;
   - the byUploader badge for both values;
-  - the cover link and the header link, checking href, target and rel;
+  - the cover lightbox (Esc closes it, focus returns to the cover);
+  - the header link, checking href, target and rel;
   - the context-menu item URL with `&t=`;
   - the note front-matter keys and the pinned section, both variants plus the omitted case;
   - the pinned-cache schema bump;
