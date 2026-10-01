@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -25,7 +26,13 @@ from .core import files, thai_fallback, tools
 from .core.db import Database, purge_stale_cache
 from .core.events import CLOSED, Event, EventBus
 from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, visitor_session
-from .core.handlers import HandlerDeps, build_handlers
+from .core.handlers import (
+    CONTACT_SHEET_SUFFIX,
+    FRAMES_ZIP_SUFFIX,
+    NO_AUDIO_SUFFIX,
+    HandlerDeps,
+    build_handlers,
+)
 from .core.jobs import JobStore
 from .core.media import FakeMediaTools, FfmpegTools, MediaTools
 from .core.queue import QueueRunner
@@ -50,6 +57,13 @@ GRACEFUL_SHUTDOWN_S = 3  # uvicorn รอ request ที่ค้าง (เช�
 TRAY_REFRESH_INTERVAL_S = 1.0  # อัปเดตตัวเลขงานในเมนู tray ไม่เกิน 1 ครั้งต่อวินาที
 # ตอนเปิดโปรแกรม ล้างไฟล์ค้างในโฟลเดอร์ของงานที่หยุดกลางคันล่าสุดไม่เกินเท่านี้งาน (รวมงานที่เพิ่งกู้คืนเสมอ)
 SWEEP_RECENT_INTERRUPTED = 20
+# ชื่อไฟล์ที่ core/handlers.py เขียนจริง (ล้างไฟล์ค้างเฉพาะชื่อแบบนี้ ไม่แตะไฟล์อื่นของผู้ใช้)
+_SWEEP_SUFFIXES = (NO_AUDIO_SUFFIX, CONTACT_SHEET_SUFFIX, FRAMES_ZIP_SUFFIX)
+_SWEEP_MEDIA_EXTS = ("mp4", "m4a", "mp3", "wav", "jpg", "zip")  # video, audio, contact_sheet, frames_zip
+_SWEEP_SUB_EXTS = ("srt", "txt", "md")  # subtitle (api/jobs.py SubtitleParams.format)
+# stop รอแอพปิดเองไม่เกินเท่านี้ก่อน kill ต้องนานกว่า หยุดคิว + uvicorn รอ request ค้าง (มีเทสคุม)
+STOP_WAIT_S = 10.0
+STOP_POLL_S = 0.1
 
 
 def default_output_dir(plat: Platform) -> Path:
@@ -110,11 +124,16 @@ def _app_log_handlers(paths: Paths) -> list[logging.Handler]:
     ]
 
 
-def setup_file_logging(paths: Paths) -> None:
-    setup_file_log(paths)  # เรียกซ้ำได้ (__main__ ตั้งไว้ก่อน import lifecycle แล้ว) ไม่เกิด handler ซ้ำ
+def install_home_filter(paths: Paths) -> None:
+    """ใส่ HomePathFilter ให้ handler ของ app.log ที่ตั้งไว้แล้ว (เรียกซ้ำได้ ไม่ใส่ซ้ำ)"""
     for handler in _app_log_handlers(paths):
         if not any(isinstance(f, HomePathFilter) for f in handler.filters):
             handler.addFilter(HomePathFilter())
+
+
+def setup_file_logging(paths: Paths) -> None:
+    setup_file_log(paths)  # เรียกซ้ำได้ (__main__ ตั้งไว้ก่อน import lifecycle แล้ว) ไม่เกิด handler ซ้ำ
+    install_home_filter(paths)
     if sys.stdout is None or sys.stderr is None:  # แอพที่เปิดแบบไม่มีหน้าต่างดำจะไม่มี console
         stream = open(paths.logs / "console.log", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
         sys.stdout = sys.stdout or stream
@@ -317,7 +336,8 @@ def sweep_interrupted_outputs(store: JobStore, output_root: Path, job_ids: Itera
     ไฟล์ค้างมาจาก files.move_into_place ที่ถูกตัดกลางทาง (โปรแกรมดับ): ไฟล์ว่าง 0 ไบต์ที่จองชื่อไว้
     และ <ชื่อ>.part ตอนคัดลอกข้ามไดรฟ์ ถ้าไม่ลบ งานถัดไปของคลิปเดียวกันจะได้ชื่อ " (2)" โดยไม่จำเป็น
     งานที่ดู = job_ids (งานที่เพิ่งกู้คืน) + งานที่หยุดกลางคันล่าสุด (เผื่อปิดโปรแกรมตอนกำลังย้ายไฟล์ใหญ่ข้ามไดรฟ์)
-    ลบเฉพาะไฟล์ที่ชื่อขึ้นต้นด้วยชื่อคลิปของโฟลเดอร์นั้น และไม่ใช่ไฟล์ผลลัพธ์ของงานที่เสร็จแล้ว
+    ลบเฉพาะไฟล์ที่ชื่อเป็นแบบที่โปรแกรมสร้างได้ (toolkit_name_pattern) และไม่ใช่ไฟล์ผลลัพธ์ของงานที่เสร็จแล้ว
+    การดูงานที่หยุดกลางคันล่าสุดซ้ำทุกครั้งที่เปิดจึงไม่แตะไฟล์ของผู้ใช้
     """
     jobs = {job.id: job for job in store.list_status("interrupted", SWEEP_RECENT_INTERRUPTED)}
     for job_id in job_ids:
@@ -343,6 +363,20 @@ def sweep_interrupted_outputs(store: JobStore, output_root: Path, job_ids: Itera
     return removed
 
 
+def toolkit_name_pattern(prefix: str) -> re.Pattern[str]:
+    """ชื่อไฟล์ที่ตัวทำงานในคิวสร้างได้จริงในโฟลเดอร์ของคลิป (ใช้ fullmatch) ต่อท้าย .part ได้
+
+    สื่อ/ภาพ/zip: <ชื่อ>[ส่วนต่อท้ายของชนิดงาน][ (N)].<นามสกุล>  เช่น "ชื่อ (ไม่มีเสียง) (2).mp4"
+    ซับ: <ชื่อ>[ (N)].<ภาษา>.<รูปแบบ>  (files วางเลขกันซ้ำไว้หน้ารหัสภาษา)
+    ชื่ออื่น (เช่นไฟล์ของผู้ใช้ "<ชื่อ> notes.docx") ไม่ตรง จึงไม่ถูกลบ"""
+    name = re.escape(prefix)
+    suffixes = "|".join(re.escape(s) for s in _SWEEP_SUFFIXES)
+    unique = r"(?: \((?:[2-9]|[1-9][0-9])\))?"  # " (2)" ... " (99)" จาก files._candidates
+    media = rf"{name}(?:{suffixes})?{unique}\.(?:{'|'.join(_SWEEP_MEDIA_EXTS)})"
+    subtitle = rf"{name}{unique}\.[A-Za-z0-9-]+\.(?:{'|'.join(_SWEEP_SUB_EXTS)})"
+    return re.compile(rf"(?:{media}|{subtitle})(?:\.part)?")
+
+
 def _sweep_folder(folder: Path, prefix: str, keep: set[str]) -> int:
     try:
         children = list(folder.iterdir())
@@ -351,9 +385,10 @@ def _sweep_folder(folder: Path, prefix: str, keep: set[str]) -> int:
     except OSError as exc:
         log.warning("อ่านโฟลเดอร์ผลลัพธ์ไม่ได้ตอนล้างไฟล์ค้าง: %s", type(exc).__name__)
         return 0
+    ours = toolkit_name_pattern(prefix)
     removed = 0
     for child in children:
-        if not child.name.startswith(prefix) or os.path.normcase(str(child)) in keep:
+        if not ours.fullmatch(child.name) or os.path.normcase(str(child)) in keep:
             continue
         try:
             if child.is_symlink() or not child.is_file():
@@ -389,39 +424,70 @@ def running_count(services: Services) -> Callable[[], int]:
     return count
 
 
-def start_tray_refresher(
-    bus: EventBus,
-    icon,
-    *,
-    interval: float = TRAY_REFRESH_INTERVAL_S,
-    monotonic: Callable[[], float] = time.monotonic,
-) -> threading.Thread:
-    """ฟังข่าวงานใน daemon thread แล้วสั่ง icon.update_menu() (ตัวเลข "กำลังทำ n งาน") ไม่เกิน 1 ครั้งต่อ interval
+class TrayRefresher:
+    """ฟังข่าวงานแล้วสั่ง icon.update_menu() (ตัวเลข "กำลังทำ n งาน") ไม่เกิน 1 ครั้งต่อ interval
 
     นับเฉพาะ job.created และ job.updated ที่มีสถานะใหม่ (ข่าวความคืบหน้าไม่ทำให้จำนวนงานเปลี่ยน)
-    จบเองเมื่อ bus ปิด (ตอนปิดโปรแกรม)"""
-    sub = bus.subscribe()
+    กล่องข่าวของตัวเองถูกปิด (อ่านไม่ทันจนล้น) = สมัครใหม่แล้วอัปเดตเมนูหนึ่งครั้ง (อาจพลาดข่าวไป)
+    จบเมื่อ bus ปิดจริง (ตอนปิดโปรแกรม) คือสมัครใหม่แล้วยังได้ CLOSED"""
 
-    def loop() -> None:
-        last = -float("inf")
-        dirty = False
-        while True:
-            item = sub.get(max(last + interval - monotonic(), 0.0) if dirty else interval)
+    def __init__(
+        self,
+        bus: EventBus,
+        icon,
+        *,
+        interval: float = TRAY_REFRESH_INTERVAL_S,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._bus = bus
+        self._icon = icon
+        self._interval = interval
+        self._monotonic = monotonic
+        self._sub = bus.subscribe()
+        self._last = -float("inf")
+        self._dirty = False
+
+    def next_wait(self) -> float:
+        """เวลาที่รอข่าวรอบถัดไป: มีอัปเดตค้างอยู่ = รอแค่จนครบช่วง"""
+        if self._dirty:
+            return max(self._last + self._interval - self._monotonic(), 0.0)
+        return self._interval
+
+    def handle(self, item: Event | None) -> None:
+        """รับข่าวหนึ่งชิ้น (None = รอครบเวลาแล้วไม่มีข่าว) แล้วอัปเดตเมนูถ้าถึงเวลา"""
+        if isinstance(item, Event) and (
+            item.name == "job.created" or (item.name == "job.updated" and "status" in item.data)
+        ):
+            self._dirty = True
+        if self._dirty and self._monotonic() - self._last >= self._interval:
+            self._last = self._monotonic()
+            self._dirty = False
+            try:
+                self._icon.update_menu()
+            except Exception:
+                log.warning("อัปเดตเมนู tray ไม่สำเร็จ", exc_info=True)
+
+    def poll(self, timeout: float) -> bool:
+        """รอข่าวหนึ่งรอบแล้วจัดการ คืน False เมื่อ bus ปิดแล้ว (เลิกฟัง)"""
+        item = self._sub.get(timeout)
+        if item is CLOSED:
+            self._sub = self._bus.subscribe()
+            item = self._sub.get(0)
             if item is CLOSED:
-                return
-            if isinstance(item, Event) and (
-                item.name == "job.created" or (item.name == "job.updated" and "status" in item.data)
-            ):
-                dirty = True
-            if dirty and monotonic() - last >= interval:
-                last = monotonic()
-                dirty = False
-                try:
-                    icon.update_menu()
-                except Exception:
-                    log.warning("อัปเดตเมนู tray ไม่สำเร็จ", exc_info=True)
+                return False
+            self._dirty = True  # กล่องเดิมล้น อาจพลาดข่าวเปลี่ยนสถานะไป
+        self.handle(item)  # type: ignore[arg-type]
+        return True
 
-    thread = threading.Thread(target=loop, name="tray-refresh", daemon=True)
+    def run(self) -> None:
+        while self.poll(self.next_wait()):
+            pass
+
+
+def start_tray_refresher(bus: EventBus, icon, **kwargs) -> threading.Thread:
+    """เริ่ม TrayRefresher ใน daemon thread (จบเองเมื่อ bus ปิด)"""
+    refresher = TrayRefresher(bus, icon, **kwargs)
+    thread = threading.Thread(target=refresher.run, name="tray-refresh", daemon=True)
     thread.start()
     return thread
 
@@ -559,18 +625,7 @@ def _run_server(
         server.join(timeout=5)
         runstate.clear(paths.app_json)  # lock ปล่อยโดยผู้เรียก (start/serve) ใน finally
         return 1
-    runstate.write(
-        paths.app_json, runstate.RunInfo(port=port, pid=os.getpid(), token=token, started_at=runstate.now_iso())
-    )
-    queue.start()  # หลังเซิร์ฟเวอร์พร้อม: ข่าวของงานแรกไปถึงหน้าเว็บที่เปิดอยู่ได้
-    warm_up_in_background(services.extractor)
-    purge_stop = threading.Event()
-    purge_thread = start_periodic_purge(services.db, paths.cache, purge_stop)
-    if auto_ffmpeg:
-        threading.Thread(target=ensure_ffmpeg, args=(paths, plat), name="ffmpeg-setup", daemon=True).start()
     url = base_url(port)
-    if open_browser:
-        webbrowser.open(url)
 
     def open_output() -> None:
         folder = services.settings.output_dir()
@@ -583,7 +638,20 @@ def _run_server(
         else:
             request_shutdown()
 
+    purge_stop = threading.Event()
+    purge_thread: threading.Thread | None = None
+    # ทุกอย่างหลังเซิร์ฟเวอร์พร้อมอยู่ใน try: พังกลางทางเมื่อไรก็ยังหยุดคิว ปิด bus และหยุดเซิร์ฟเวอร์ใน finally
     try:
+        runstate.write(
+            paths.app_json, runstate.RunInfo(port=port, pid=os.getpid(), token=token, started_at=runstate.now_iso())
+        )
+        queue.start()  # หลังเซิร์ฟเวอร์พร้อม: ข่าวของงานแรกไปถึงหน้าเว็บที่เปิดอยู่ได้
+        warm_up_in_background(services.extractor)
+        purge_thread = start_periodic_purge(services.db, paths.cache, purge_stop)
+        if auto_ffmpeg:
+            threading.Thread(target=ensure_ffmpeg, args=(paths, plat), name="ffmpeg-setup", daemon=True).start()
+        if open_browser:
+            webbrowser.open(url)
         if with_tray:
             from .tray import build_tray
 
@@ -602,7 +670,8 @@ def _run_server(
         server.stop()
         purge_stop.set()  # หยุด timer ก่อนผู้เรียกปิดฐานข้อมูล
         server.join(timeout=10)
-        purge_thread.join(timeout=5)
+        if purge_thread is not None:
+            purge_thread.join(timeout=5)
         runstate.clear(paths.app_json)
     return 0
 
@@ -722,6 +791,7 @@ def stop(
 ) -> int:
     paths = paths or default_paths()
     plat = plat or current()
+    install_home_filter(paths)  # __main__ ตั้ง app.log ให้ stop แล้ว log ของ stop ก็ต้องไม่มีโฟลเดอร์ผู้ใช้
     try:
         return _stop(paths, plat, post=post, ask=ask, sleep=sleep, out=out)
     except LockFileError as error:
@@ -761,10 +831,10 @@ def _stop(
             post(url, json={"force": True}, headers=headers, timeout=5)
     except httpx.HTTPError:
         pass
-    for _ in range(100):  # รอสูงสุด 10 วินาที (FR-LIFE-5)
+    for _ in range(round(STOP_WAIT_S / STOP_POLL_S)):  # รอสูงสุด STOP_WAIT_S วินาที (FR-LIFE-5)
         if not plat.pid_alive(info.pid):
             break
-        sleep(0.1)
+        sleep(STOP_POLL_S)
     else:
         # อ่าน app.json ซ้ำก่อน kill ถ้าไฟล์หายหรือเป็นของอินสแตนซ์อื่นแล้ว pid นี้ไม่ใช่แอพที่เราจะปิดอีกต่อไป
         # ตอนเริ่ม stop แอพเปิดอยู่จริง แอพเดิมปิดตัวไปแล้ว จึงบอกว่าปิดแล้ว ไม่ใช่ "ไม่ได้เปิดอยู่"
