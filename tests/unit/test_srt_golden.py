@@ -21,6 +21,7 @@ from yttoolkit.core.srt_builder import (
     SubOptions,
     Token,
     build_cues,
+    cue_text,
     to_md,
     to_srt,
     to_txt,
@@ -49,6 +50,8 @@ CASES: dict[str, tuple[str, str, str, list[dict]]] = {
     # iG9CE55wbtY (ซับ TED) ถูกแทนด้วย fixture ที่เขียนเอง OWNERTHSUB1 ตามคำตอบ Q9 = ข
     "th-owner": ("OWNERTHSUB1", "th.json3", "json3", []),
 }
+# preset "ทีละคำ" (word, เพิ่ม 2026-10-01) มี golden เฉพาะซับอัตโนมัติที่มีเวลาระดับคำ ไทยและอังกฤษ
+WORD_NAMES = ("th-asr", "en-asr")
 CUSTOM_NAME = "th-asr.custom-tokens.srt"
 CUSTOM_OPTS = SubOptions(max_chars=30, lines=2, min_ms=1000, max_ms=6000, mode="tokens", tokens_per_cue=4)
 
@@ -83,6 +86,8 @@ def outputs(name: str, tokens: list[Token], md: dict) -> dict[str, str]:
     """ชื่อไฟล์ golden -> ข้อความที่ต้องได้ (ครบทุกไฟล์ของ name นี้)"""
     out: dict[str, str] = {}
     for preset, opts in PRESETS.items():
+        if preset == "word" and name not in WORD_NAMES:
+            continue
         out[f"{name}.{preset}.srt"] = to_srt(build_cues(tokens, opts))
     out[f"{name}.txt"] = to_txt(tokens)
     chapters = [(c["startMs"], c["title"]) for c in md["chapters"]]
@@ -157,6 +162,25 @@ def test_custom_options_differ_from_presets():
     tokens = list(parse_case("th-asr").tokens)
     custom = to_srt(build_cues(tokens, CUSTOM_OPTS))
     assert all(custom != to_srt(build_cues(tokens, opts)) for opts in PRESETS.values())
+
+
+def test_golden_dir_holds_exactly_the_expected_files():
+    # 5 ชื่อ x (short/medium/long + txt + md) + word ของ th-asr, en-asr + custom-tokens = 28 ไฟล์
+    expected = {CUSTOM_NAME}
+    for name in CASES:
+        expected |= {f"{name}.{p}.srt" for p in ("short", "medium", "long")} | {f"{name}.txt", f"{name}.md"}
+    expected |= {f"{name}.word.srt" for name in WORD_NAMES}
+    assert len(expected) == 28
+    assert {p.name for p in GOLDEN_DIR.iterdir()} == expected
+
+
+def test_word_goldens_have_one_token_per_cue():
+    for name in WORD_NAMES:
+        stored = json.loads(_token_file(name).read_bytes().decode("utf-8"))
+        tokens = [Token(**t) for t in stored["tokens"]]
+        cues = build_cues(tokens, PRESETS["word"])
+        assert len(cues) == len(tokens)
+        assert [c.lines for c in cues] == [(cue_text([t]),) for t in tokens]
 
 
 def test_zz_goldens_were_not_regenerated():

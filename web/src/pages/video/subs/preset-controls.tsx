@@ -10,12 +10,10 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { fill, th } from "@/i18n/th"
-import { clampOptions, DEFAULT_TOKENS_PER_CUE, LIMITS, presetOf } from "@/lib/sub-options"
+import { clampOptions, DEFAULT_TOKENS_PER_CUE, LIMITS, PRESET_NAMES, presetOf } from "@/lib/sub-options"
 import type { SubOptions, SubPreset } from "@/lib/types"
 
 const t = th.subs
-
-const PRESET_NAMES: readonly SubPreset[] = ["short", "medium", "long"]
 
 // จอแคบ (มือถือ) ปุ่มสูง 44 px ให้นิ้วกดได้ง่าย
 const TOUCH = "max-sm:h-11"
@@ -82,7 +80,7 @@ type Props = {
 }
 
 /**
- * ความยาวซับ: ปุ่มสำเร็จรูป สั้น/กลาง/ยาว + กล่องพับ "ปรับเอง" (ตัวอักษร บรรทัด เวลา นับเป็นคำ)
+ * ความยาวซับ: ปุ่มสำเร็จรูป สั้น/กลาง/ยาว/ทีละคำ + กล่องพับ "ปรับเอง" (ตัวอักษร บรรทัด เวลา นับเป็นคำ)
  * ค่าที่ปรับเองทุกค่าผ่าน clampOptions ก่อนเก็บ · ค่าไม่ตรงสำเร็จรูปแบบไหนเลย = ไม่มีปุ่มไหนถูกเลือก + ป้าย "ใช้ค่าที่ปรับเอง"
  */
 export function PresetControls({ options, onPreset, onCustom }: Props) {

@@ -31,8 +31,8 @@ type BuilderCase = {
 const { cases } = JSON.parse(casesRaw) as { cases: BuilderCase[] }
 
 describe("shared builder cases", () => {
-  it("มีครบ 21 เคส", () => {
-    expect(cases).toHaveLength(21)
+  it("มีครบ 23 เคส", () => {
+    expect(cases).toHaveLength(23)
   })
 })
 

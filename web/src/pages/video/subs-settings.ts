@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
 
-import { clampOptions, DEFAULT_PRESET, PRESETS } from "@/lib/sub-options"
+import { clampOptions, DEFAULT_PRESET, isPresetName, PRESETS } from "@/lib/sub-options"
 import type { SubOptions, SubPreset } from "@/lib/types"
 
 export const SUB_SETTINGS_KEY = "yt-toolkit.subs"
@@ -8,10 +8,6 @@ export const SUB_SETTINGS_KEY = "yt-toolkit.subs"
 export type SubSettings = { preset: SubPreset | "custom"; options: SubOptions }
 
 const DEFAULTS: SubSettings = { preset: DEFAULT_PRESET, options: PRESETS[DEFAULT_PRESET] }
-
-function isPreset(value: unknown): value is SubPreset {
-  return value === "short" || value === "medium" || value === "long"
-}
 
 const isNum = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value)
 
@@ -46,7 +42,7 @@ export function loadSubSettings(storage: Pick<Storage, "getItem"> | null): SubSe
     if (typeof data !== "object" || data === null) return DEFAULTS
     const stored = data as { v?: unknown; preset?: unknown; custom?: unknown }
     if (stored.v !== 1) return DEFAULTS
-    if (isPreset(stored.preset)) return { preset: stored.preset, options: PRESETS[stored.preset] }
+    if (isPresetName(stored.preset)) return { preset: stored.preset, options: PRESETS[stored.preset] }
     if (stored.preset === "custom" && isSubOptions(stored.custom)) {
       return { preset: "custom", options: clampOptions(stored.custom) }
     }

@@ -125,7 +125,7 @@ export type SubOptions = {
   tokensPerCue?: number
 }
 
-export type SubPreset = "short" | "medium" | "long"
+export type SubPreset = "short" | "medium" | "long" | "word"
 
 export type Cue = { startMs: number; endMs: number; lines: string[] }
 
