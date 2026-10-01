@@ -7,7 +7,7 @@
    error ที่ลองใหม่แล้วช่วยได้ (E_NETWORK, E_UNKNOWN ฯลฯ) ไม่จำ ปุ่ม "ลองใหม่" จึงดึงใหม่จริง (review I-1)
 4. ดึงใหม่ผ่าน Extractor.pinned_comment แล้วเก็บลง cache
 
-ส่งออกได้แค่ text / likes / publishedText เท่านั้น ไม่มีชื่อหรือ id ของผู้เขียน (PDPA)
+ส่งออกได้แค่ text / likes / publishedText / byUploader เท่านั้น ไม่มีชื่อหรือ id ของผู้เขียน (PDPA)
 ไม่ import yt_dlp เอง และไม่ import api/platform
 """
 
@@ -35,18 +35,18 @@ ERROR_TTL = timedelta(minutes=5)
 # จำเฉพาะ error ที่หน้าเว็บไม่มีปุ่มลองใหม่ (ตรงกับ FINAL_CODES ฝั่งเว็บ) ยิงซ้ำมีแต่ทำให้ถูกบล็อกนานขึ้น
 CACHED_ERRORS = frozenset({"E_BOT_CHECK"})
 CACHE_FILE = "pinned.json"
-CACHE_VERSION = 1
+CACHE_VERSION = 2  # v2 (owner round 4): นับคอมเมนต์ปักหมุดของผู้ชมด้วย + byUploader ไฟล์ v1 กรองเฉพาะเจ้าของช่อง จึงไม่เชื่อ
 _MISS = object()
 
 
 def clean_comment(value: Any) -> dict | None:
-    """เหลือเฉพาะฟิลด์ที่ส่งออกได้: text (ต้องมีข้อความ), likes (จำนวนเต็ม >= 0), publishedText"""
+    """เหลือเฉพาะฟิลด์ที่ส่งออกได้: text (ต้องมีข้อความ), likes (จำนวนเต็ม >= 0), publishedText, byUploader (bool)"""
     if not isinstance(value, dict):
         return None
     text = value.get("text")
     if not isinstance(text, str) or not text.strip():
         return None
-    out: dict[str, Any] = {"text": text}
+    out: dict[str, Any] = {"text": text, "byUploader": value.get("byUploader") is True}
     likes = value.get("likes")
     if isinstance(likes, int) and not isinstance(likes, bool) and likes >= 0:
         out["likes"] = likes
@@ -77,7 +77,7 @@ class PinnedCommentService:
             return self._locks.setdefault(video_id, threading.Lock())
 
     def get(self, video_id: str) -> dict | None:
-        """{"text", "likes"?, "publishedText"?} หรือ None (ไม่มีคอมเมนต์ปักหมุดจากเจ้าของช่อง)
+        """{"text", "likes"?, "publishedText"?, "byUploader"} หรือ None (ไม่มีคอมเมนต์ปักหมุด)
 
         error ของข้อมูลคลิป (คลิปไม่มี, ส่วนตัว ฯลฯ) และของการดึง (E_BOT_CHECK, E_NETWORK ฯลฯ) โยนต่อ
         """

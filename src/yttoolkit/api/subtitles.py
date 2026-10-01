@@ -129,7 +129,7 @@ def build_subtitles_router(ctx: AppContext) -> APIRouter:
             options_from_dict(query.model_dump(exclude={"trackId"}))
         except ValueError as exc:
             return error_response(422, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, str(exc))
-        result = subtitles.note(video_id, query.trackId)
+        result = subtitles.note(video_id, query.trackId, pinned=ctx.pinned.get if ctx.pinned is not None else None)
         filename, fallback = note_filenames(result.title, video_id)
         return Response(
             result.data,

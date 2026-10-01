@@ -1,4 +1,4 @@
-"""คอมเมนต์ปักหมุดของเจ้าของช่องจากยูทูปจริง (C-A2, owner round 2)
+"""คอมเมนต์ปักหมุดจากยูทูปจริง (byUploader = true สำหรับคลิปที่เจ้าของช่องปักหมุดเอง) (C-A2, owner round 2)
 
 รันเองด้วย: uv run pytest -m network -q tests/network/test_comments_network.py -s
 id ของคลิปอยู่ใน tests/network_videos.toml ([comments]) ยิงยูทูปครั้งเดียว (~2 คำขอ innertube "next")
@@ -53,10 +53,12 @@ def test_uploader_pinned_comment_via_the_cheap_path(monkeypatch: pytest.MonkeyPa
     elapsed = time.monotonic() - start
     print(
         f"pinned comment {PINNED}: {elapsed:.2f}s, fallback={bool(fallback_used)}, "
+        f"found={comment is not None}, byUploader={comment.get('byUploader') if comment else None}, "
         f"keys={sorted(comment) if comment else None}, chars={len(comment['text']) if comment else 0}, "
         f"first={first_flags}"
     )
     assert not fallback_used, "ทางหลัก (API ภายในของ yt-dlp) ใช้ไม่ได้แล้ว ต้องถอยไป probe"
     assert comment is not None, "ไม่พบคอมเมนต์ปักหมุดของเจ้าของช่อง (คลิปอาจเลิกปักหมุดแล้ว เลือกคลิปใหม่)"
-    assert set(comment) <= {"text", "likes", "publishedText"}
+    assert set(comment) <= {"text", "likes", "publishedText", "byUploader"}
+    assert comment["byUploader"] is True, "คลิป uploader_pinned ต้องเป็นปักหมุดของเจ้าของช่อง"
     assert comment["text"].strip()

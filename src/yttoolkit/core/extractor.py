@@ -121,19 +121,19 @@ def ytdlp_version() -> str:
 
 
 def pinned_from_comment(comment: object) -> dict | None:
-    """คอมเมนต์หนึ่งอันของ yt-dlp -> {"text", "likes"?, "publishedText"?} หรือ None
+    """คอมเมนต์หนึ่งอันของ yt-dlp -> {"text", "likes"?, "publishedText"?, "byUploader"} หรือ None
 
-    นับเฉพาะคอมเมนต์ที่ปักหมุด (is_pinned) และเจ้าของช่องเขียนเอง (author_is_uploader) เท่านั้น
-    ไม่เก็บชื่อ, id, ลิงก์ หรือรูปของผู้เขียน (PDPA: ไม่ส่งข้อมูลของคนอื่นออกไป)
+    นับทุกคอมเมนต์ที่ปักหมุด (is_pinned) ไม่ว่าใครเขียน (C-A2 v2) byUploader = เจ้าของช่องเขียนเอง (author_is_uploader)
+    ไม่เก็บชื่อ, id, ลิงก์ หรือรูปของผู้เขียน (PDPA: ส่งออกแค่ true/false ว่าเป็นเจ้าของช่องหรือไม่)
     """
     if not isinstance(comment, dict):
         return None
-    if comment.get("is_pinned") is not True or comment.get("author_is_uploader") is not True:
+    if comment.get("is_pinned") is not True:
         return None
     text = comment.get("text")
     if not isinstance(text, str) or not text.strip():
         return None
-    out: dict = {"text": text}
+    out: dict = {"text": text, "byUploader": comment.get("author_is_uploader") is True}
     likes = comment.get("like_count")
     if isinstance(likes, int) and not isinstance(likes, bool) and likes >= 0:
         out["likes"] = likes

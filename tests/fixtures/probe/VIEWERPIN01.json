@@ -1,0 +1,34 @@
+{
+ "id": "VIEWERPIN01",
+ "title": "คลิปที่คอมเมนต์ปักหมุดเป็นของผู้ชม",
+ "channel": "ชุดทดสอบ",
+ "uploader": "ชุดทดสอบ",
+ "duration": 372,
+ "upload_date": "20260930",
+ "timestamp": 1790740800,
+ "live_status": "not_live",
+ "availability": "public",
+ "thumbnail": "https://fake.invalid/thumb/VIEWERPIN01.jpg",
+ "chapters": null,
+ "view_count": 1800,
+ "like_count": 95,
+ "comment_count": 7,
+ "tags": [
+  "ทดสอบ"
+ ],
+ "categories": [
+  "People & Blogs"
+ ],
+ "description": "คลิปทดสอบ: คอมเมนต์ที่ปักหมุดเขียนโดยผู้ชม ไม่ใช่เจ้าของช่อง",
+ "subtitles": {},
+ "automatic_captions": {},
+ "formats": [
+  {
+   "format_id": "140",
+   "format_note": "medium",
+   "ext": "m4a",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2"
+  }
+ ]
+}

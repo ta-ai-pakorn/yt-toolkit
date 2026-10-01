@@ -2,7 +2,7 @@
 
 ฟังก์ชันล้วน: รับ VideoInfo (คีย์ camelCase) + บรรทัดทรานสคริปต์ที่ทำไว้แล้ว คืนข้อความโน้ต
 - front matter แบบ YAML (ข้อความทุกช่องเป็น double-quoted ที่ escape แล้ว)
-- หัวข้อ คำอธิบาย / Chapter / ทรานสคริปต์ หัวข้อที่ไม่มีข้อมูลไม่ใส่
+- หัวข้อ คำอธิบาย / Chapter / คอมเมนต์ปักหมุด / ทรานสคริปต์ หัวข้อที่ไม่มีข้อมูลไม่ใส่
 - ขึ้นบรรทัดแบบ LF (Obsidian ชอบ LF) ต่างจากไฟล์ซับที่ใช้ CRLF
 """
 
@@ -125,17 +125,25 @@ def _front_matter(info: dict[str, Any], video_id: str) -> list[str]:
     tags = note_tags(info.get("tags"))
     if tags:
         out.append("tags: [" + ", ".join(yaml_str(t) for t in tags) + "]")
-    views = (info.get("stats") or {}).get("views")
-    if isinstance(views, int) and not isinstance(views, bool):
-        out.append(f"views: {views}")
+    stats = info.get("stats") or {}
+    for key, name in (("views", "views"), ("likes", "likes"), ("comments", "comments"), ("channelFollowers", "channel_followers")):
+        value = stats.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            out.append(f"{name}: {value}")
     out += [f"source: {SOURCE}", "---"]
     return out
 
 
-def build_note(info: dict[str, Any], video_id: str, transcript: Sequence[str] | None) -> str:
+def build_note(
+    info: dict[str, Any],
+    video_id: str,
+    transcript: Sequence[str] | None,
+    pinned: dict[str, Any] | None = None,
+) -> str:
     """ข้อความโน้ตทั้งไฟล์ (LF ปิดท้ายด้วย LF)
 
     transcript = บรรทัดจาก srt_builder.md_sections(level=3) หรือ None/ว่าง = ไม่มีหัวข้อทรานสคริปต์
+    pinned = คอมเมนต์ปักหมุด {"text", "byUploader"} หรือ None/ไม่มีข้อความ = ไม่มีหัวข้อ (อยู่หลัง Chapter ก่อนทรานสคริปต์)
     """
     out = _front_matter(info, video_id)
     out += ["", "# " + (md_title(str(info.get("title") or "")) or video_id)]
@@ -148,6 +156,10 @@ def build_note(info: dict[str, Any], video_id: str, transcript: Sequence[str] | 
         for chapter in sorted(chapters, key=lambda c: c.get("startS") or 0):
             start_ms = round((chapter.get("startS") or 0) * 1000)
             out.append(f"- [{md_time(start_ms)}] {md_title(str(chapter.get('title') or ''))}".rstrip(" "))
+    text = pinned.get("text") if isinstance(pinned, dict) else None
+    if isinstance(text, str) and text.strip():
+        who = "เจ้าของช่อง" if pinned.get("byUploader") is True else "ผู้ชม"
+        out += ["", f"## คอมเมนต์ปักหมุด ({who})", *_lines(text)]
     if transcript:
         out += ["", "## ทรานสคริปต์", *transcript]
     return LF.join(out) + LF

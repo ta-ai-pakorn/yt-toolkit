@@ -25,6 +25,7 @@ BBB = "aqz-KE-bpKQ"
 OWNER = "OWNERTHSUB1"
 NO_COMMENTS = "NOORIGSUB01"
 NO_STATS = "VTTFALLBAK1"
+VIEWER = "VIEWERPIN01"
 WORD = "maxChars=15&lines=1&minMs=800&maxMs=3000&mode=tokens&tokensPerCue=1"
 
 
@@ -92,7 +93,8 @@ def test_pinned_comment_found(env):
     assert resp.status_code == 200
     body = resp.json()
     assert set(body) == {"comment"}
-    assert set(body["comment"]) == {"text", "likes", "publishedText"}
+    assert set(body["comment"]) == {"text", "likes", "publishedText", "byUploader"}
+    assert body["comment"]["byUploader"] is True
     assert body["comment"]["text"].startswith("ขอบคุณที่ดูคลิปนี้")
     assert client.get(f"/api/videos/{THAI}/pinned-comment").json() == body
     assert fake.pinned_calls == 1  # ครั้งที่สองมาจาก cache
@@ -173,12 +175,18 @@ def test_note_of_the_thai_clip_with_the_default_track(client):
         "duration": "0:06:12",
         "tags": front["tags"],
         "views": 38764,
+        "likes": 1970,
+        "comments": 120,
+        "channel_followers": 11700,
         "source": "YT Toolkit",
     }
     assert len(front["tags"]) == 10
     assert "\n# Thai Listening Practice | EP.1 | Beginner\n" in text
     assert "\n## คำอธิบาย\nIf you enjoy the videos" in text
     assert "## Chapter" not in text  # คลิปนี้ไม่มี chapter
+    # C-A3 v2: ปักหมุดของเจ้าของช่องอยู่ก่อนทรานสคริปต์
+    assert "\n## คอมเมนต์ปักหมุด (เจ้าของช่อง)\nขอบคุณที่ดูคลิปนี้นะครับ\n" in text
+    assert text.index("## คอมเมนต์ปักหมุด") < text.index("## ทรานสคริปต์")
     assert "\n## ทรานสคริปต์\n\n### [00:00]\n\n" in text
     assert "\n### [02:00]\n" in text
 
@@ -207,7 +215,7 @@ def test_note_yaml_survives_tricky_tags(client):
 
 def test_note_omits_unknown_front_matter(client):
     front = _front(_note(client, NO_STATS).text)
-    assert "views" not in front and "tags" not in front
+    assert not {"views", "likes", "comments", "channel_followers", "tags"} & set(front)
 
 
 @pytest.mark.parametrize(
@@ -259,3 +267,57 @@ def test_note_with_an_empty_default_track_still_works(make_client, tmp_path):
         assert "## ทรานสคริปต์" not in resp.text
     finally:
         db.close()
+
+
+def test_pinned_comment_of_a_viewer_has_by_uploader_false(env):
+    client, _ = env
+    body = client.get(f"/api/videos/{VIEWER}/pinned-comment").json()
+    assert body["comment"]["byUploader"] is False
+    assert set(body["comment"]) == {"text", "likes", "publishedText", "byUploader"}  # ไม่มีชื่อ/id ผู้เขียน
+    assert body["comment"]["text"].startswith("ลิงก์เอกสาร")
+    assert client.get(f"/api/videos/{VIEWER}").status_code == 200  # หน้า W2 โหลดคลิปนี้ได้
+
+
+def test_note_with_a_viewer_pin_says_viewer(client):
+    text = _note(client, VIEWER).text
+    assert "\n## คอมเมนต์ปักหมุด (ผู้ชม)\nลิงก์เอกสารประกอบอยู่ที่นี่ค่ะ https://example.com/viewer-pin\nแวะมาถามได้เลยนะคะ\n" in text
+    assert "(เจ้าของช่อง)" not in text
+    front = _front(text)
+    assert front["likes"] == 95 and front["comments"] == 7 and "channel_followers" not in front
+
+
+def test_note_omits_the_pinned_section_when_there_is_none(client):
+    assert "คอมเมนต์ปักหมุด" not in _note(client, BBB).text  # ไม่มีคอมเมนต์ปักหมุด
+    assert "คอมเมนต์ปักหมุด" not in _note(client, NO_COMMENTS).text  # คอมเมนต์ = 0
+
+
+def test_note_still_succeeds_when_the_pinned_comment_errors(env):
+    client, fake = env
+    resp = _note(client, OWNER)  # ตัวปลอมตั้งให้ E_NETWORK
+    assert resp.status_code == 200
+    assert "คอมเมนต์ปักหมุด" not in resp.text
+    assert fake.pinned_calls == 1
+
+
+@pytest.mark.parametrize("code", ["E_BOT_CHECK", "E_UNKNOWN", "E_NETWORK"])
+def test_note_survives_any_pinned_error(make_client, tmp_path, code):
+    client, fake, db = _client(make_client, tmp_path)
+
+    def failing(video_id: str) -> dict | None:
+        raise YtError(code, "x")
+
+    fake.pinned_comment = failing
+    try:
+        resp = _note(client, THAI)
+        assert resp.status_code == 200
+        assert "คอมเมนต์ปักหมุด" not in resp.text
+        assert "## ทรานสคริปต์" in resp.text
+    finally:
+        db.close()
+
+
+def test_note_and_the_pinned_route_share_the_cache(env):
+    client, fake = env
+    assert _note(client, THAI).status_code == 200
+    assert client.get(f"/api/videos/{THAI}/pinned-comment").json()["comment"]["byUploader"] is True
+    assert fake.pinned_calls == 1

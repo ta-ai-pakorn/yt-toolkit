@@ -12,7 +12,7 @@ import yt_dlp
 from yt_dlp.utils import DownloadError, ExtractorError
 
 from yttoolkit.core import comments as comments_mod
-from yttoolkit.core.comments import CACHE_FILE, PinnedCommentService, clean_comment
+from yttoolkit.core.comments import CACHE_FILE, CACHE_VERSION, PinnedCommentService, clean_comment
 from yttoolkit.core.db import Database
 from yttoolkit.core.extractor import FakeExtractor, YtDlpExtractor, pinned_from_comment
 from yttoolkit.core.videos import VideoService
@@ -24,7 +24,8 @@ BBB = "aqz-KE-bpKQ"
 ERRORED = "OWNERTHSUB1"
 NO_COMMENTS = "NOORIGSUB01"
 ZOO = "jNQXAC9IVRw"
-ALLOWED = {"text", "likes", "publishedText"}
+VIEWER = "VIEWERPIN01"
+ALLOWED = {"text", "likes", "publishedText", "byUploader"}
 
 UPLOADER_PIN = {
     "id": "Ugx1",
@@ -52,16 +53,26 @@ def test_uploader_pin_keeps_only_text_likes_and_time() -> None:
         "text": "สวัสดีครับ\nลิงก์อยู่ในคำอธิบาย",
         "likes": 12,
         "publishedText": "2 weeks ago",
+        "byUploader": True,
     }
+
+
+def test_viewer_pin_is_kept_with_by_uploader_false() -> None:
+    """C-A2 v2: ปักหมุดของผู้ชมก็นับ ส่งออกแค่ byUploader (ไม่มีชื่อ/id ของผู้เขียน)"""
+    for change in ({"author_is_uploader": False}, {"author_is_uploader": None}, {"author_is_uploader": "yes"}):
+        out = pinned_from_comment({**UPLOADER_PIN, **change})
+        assert out is not None and out["byUploader"] is False
+        assert set(out) <= ALLOWED
+        assert "author" not in out and "UC123" not in str(out)
+    out = pinned_from_comment({k: v for k, v in UPLOADER_PIN.items() if k != "author_is_uploader"})
+    assert out is not None and out["byUploader"] is False
 
 
 @pytest.mark.parametrize(
     "change",
     [
-        {"author_is_uploader": False},  # เจ้าของช่องปักหมุดคอมเมนต์ของผู้ชม
         {"is_pinned": False},  # เจ้าของช่องเขียนแต่ไม่ได้ปักหมุด
         {"is_pinned": None},
-        {"author_is_uploader": "yes"},
         {"text": "   "},
         {"text": None},
     ],
@@ -77,7 +88,7 @@ def test_non_dict_is_none(value: object) -> None:
 
 def test_optional_fields_are_dropped_when_unusable() -> None:
     out = pinned_from_comment({**UPLOADER_PIN, "like_count": True, "_time_text": ""})
-    assert out == {"text": UPLOADER_PIN["text"]}
+    assert out == {"text": UPLOADER_PIN["text"], "byUploader": True}
     assert "likes" not in pinned_from_comment({**UPLOADER_PIN, "like_count": -1})
 
 
@@ -157,10 +168,16 @@ def test_direct_path_asks_for_one_top_comment(ydl: type[FakeYDL]) -> None:
     assert inst.urls == []  # ไม่ probe ซ้ำ
 
 
-@pytest.mark.parametrize("first", [[], [None], [{**UPLOADER_PIN, "author_is_uploader": False}]])
-def test_direct_path_without_uploader_pin_is_none(ydl: type[FakeYDL], first: list) -> None:
+@pytest.mark.parametrize("first", [[], [None], [{**UPLOADER_PIN, "is_pinned": False}]])
+def test_direct_path_without_a_pinned_comment_is_none(ydl: type[FakeYDL], first: list) -> None:
     FakeIE.comments = first
     assert YtDlpExtractor().pinned_comment(THAI) is None
+
+
+def test_direct_path_returns_a_viewer_pin_with_by_uploader_false(ydl: type[FakeYDL]) -> None:
+    FakeIE.comments = [{**UPLOADER_PIN, "author_is_uploader": False}]
+    out = YtDlpExtractor().pinned_comment(THAI)
+    assert out is not None and out["byUploader"] is False
 
 
 @pytest.mark.parametrize("error", [AttributeError("no _get_comments"), TypeError("signature changed")])
@@ -238,6 +255,9 @@ def test_fake_reads_fixtures() -> None:
     fake = FakeExtractor(FIXTURES)
     found = fake.pinned_comment(THAI)
     assert found is not None and set(found) <= ALLOWED and "\n" in found["text"]
+    assert found["byUploader"] is True
+    viewer = fake.pinned_comment(VIEWER)
+    assert viewer is not None and viewer["byUploader"] is False
     assert fake.pinned_comment(BBB) is None
     assert fake.pinned_comment(ZOO) is None  # ไม่มีไฟล์ = ไม่มีคอมเมนต์ปักหมุด
     with pytest.raises(YtError) as exc:
@@ -297,16 +317,17 @@ def env(tmp_path: Path):
 
 def test_found_comment_is_cached_on_disk_for_24_hours(env) -> None:
     svc, ext, clock, cache = env
-    ext.result = {**UPLOADER_PIN, "text": "หนึ่ง", "likes": 3, "author": "x", "authorId": "UC1"}
-    assert svc.get(THAI) == {"text": "หนึ่ง", "likes": 3}  # ฟิลด์อื่นถูกทิ้ง
+    ext.result = {**UPLOADER_PIN, "text": "หนึ่ง", "likes": 3, "byUploader": True, "author": "x", "authorId": "UC1"}
+    assert svc.get(THAI) == {"text": "หนึ่ง", "likes": 3, "byUploader": True}  # ฟิลด์อื่นถูกทิ้ง
     doc = json.loads((cache / THAI / CACHE_FILE).read_text(encoding="utf-8"))
-    assert doc["comment"] == {"text": "หนึ่ง", "likes": 3} and doc["videoId"] == THAI
+    assert doc["comment"] == {"text": "หนึ่ง", "likes": 3, "byUploader": True} and doc["videoId"] == THAI
+    assert doc["v"] == CACHE_VERSION == 2
     ext.result = {"text": "สอง"}
     clock.now += timedelta(hours=23)
-    assert svc.get(THAI) == {"text": "หนึ่ง", "likes": 3}
+    assert svc.get(THAI) == {"text": "หนึ่ง", "likes": 3, "byUploader": True}
     assert ext.count == 1
     clock.now += timedelta(hours=1)
-    assert svc.get(THAI) == {"text": "สอง"}
+    assert svc.get(THAI) == {"text": "สอง", "byUploader": False}
     assert ext.count == 2
 
 
@@ -337,7 +358,7 @@ def test_errors_are_remembered_for_five_minutes(env) -> None:
     clock.now += timedelta(minutes=5)
     ext.error = None
     ext.result = {"text": "กลับมาแล้ว"}
-    assert svc.get(THAI) == {"text": "กลับมาแล้ว"}
+    assert svc.get(THAI) == {"text": "กลับมาแล้ว", "byUploader": False}
     assert ext.count == 2
 
 
@@ -353,7 +374,7 @@ def test_retryable_errors_are_not_remembered(env, code: str) -> None:
     assert ext.count == 2
     ext.error = None
     ext.result = {"text": "ได้แล้ว"}
-    assert svc.get(THAI) == {"text": "ได้แล้ว"}
+    assert svc.get(THAI) == {"text": "ได้แล้ว", "byUploader": False}
     assert ext.count == 3
 
 
@@ -395,12 +416,13 @@ def test_video_errors_are_not_cached_and_do_not_fetch(env) -> None:
     "content",
     [
         "not json",
-        json.dumps({"v": 1, "videoId": "aqz-ke-bpkq", "fetchedAt": "2026-10-01T09:00:00+00:00", "comment": None}),
+        json.dumps({"v": 2, "videoId": "aqz-ke-bpkq", "fetchedAt": "2026-10-01T09:00:00+00:00", "comment": None}),
+        json.dumps({"v": 1, "videoId": BBB, "fetchedAt": "2026-10-01T09:00:00+00:00", "comment": None}),  # รุ่นเก่า (กรองเฉพาะเจ้าของช่อง)
         json.dumps({"v": 99, "videoId": BBB, "fetchedAt": "2026-10-01T09:00:00+00:00", "comment": None}),
-        json.dumps({"v": 1, "videoId": BBB, "fetchedAt": "yesterday", "comment": None}),
-        json.dumps({"v": 1, "videoId": BBB, "comment": None}),
-        json.dumps({"v": 1, "videoId": BBB, "fetchedAt": "2026-10-01T09:30:00+00:00", "comment": None}),
-        json.dumps({"v": 1, "videoId": BBB, "fetchedAt": "2026-10-01T09:00:00+00:00", "comment": {"text": ""}}),
+        json.dumps({"v": 2, "videoId": BBB, "fetchedAt": "yesterday", "comment": None}),
+        json.dumps({"v": 2, "videoId": BBB, "comment": None}),
+        json.dumps({"v": 2, "videoId": BBB, "fetchedAt": "2026-10-01T09:30:00+00:00", "comment": None}),
+        json.dumps({"v": 2, "videoId": BBB, "fetchedAt": "2026-10-01T09:00:00+00:00", "comment": {"text": ""}}),
         json.dumps([1, 2]),
     ],
 )
@@ -409,16 +431,39 @@ def test_bad_or_foreign_cache_files_are_refetched(env, content: str) -> None:
     (cache / BBB).mkdir(parents=True)
     (cache / BBB / CACHE_FILE).write_text(content, encoding="utf-8")
     ext.result = {"text": "ใหม่"}
-    assert svc.get(BBB) == {"text": "ใหม่"}
+    assert svc.get(BBB) == {"text": "ใหม่", "byUploader": False}
+    assert ext.count == 1
+
+
+def test_v1_cache_with_a_comment_is_a_miss_and_refetched_as_v2(env) -> None:
+    """ไฟล์ที่เขียนด้วยกฎเก่า (เฉพาะเจ้าของช่อง) ห้ามเชื่อ: คลิปแบบ WUKONG ดึงใหม่หนึ่งครั้งแล้วได้ปักหมุดของผู้ชม"""
+    svc, ext, _, cache = env
+    (cache / THAI).mkdir(parents=True)
+    old = {"v": 1, "videoId": THAI, "fetchedAt": "2026-10-01T09:00:00+00:00", "comment": None}
+    (cache / THAI / CACHE_FILE).write_text(json.dumps(old), encoding="utf-8")
+    ext.result = {"text": "ผู้ชมปักหมุด", "byUploader": False}
+    assert svc.get(THAI) == {"text": "ผู้ชมปักหมุด", "byUploader": False}
+    assert ext.count == 1
+    assert json.loads((cache / THAI / CACHE_FILE).read_text(encoding="utf-8"))["v"] == 2
+    assert svc.get(THAI) == {"text": "ผู้ชมปักหมุด", "byUploader": False}
+    assert ext.count == 1  # v2 อ่านจาก cache ได้
+
+
+def test_by_uploader_survives_a_cache_read(env) -> None:
+    svc, ext, _, _ = env
+    ext.result = {"text": "ของเจ้าของ", "byUploader": True}
+    assert svc.get(THAI) == {"text": "ของเจ้าของ", "byUploader": True}
+    ext.result = None
+    assert svc.get(THAI) == {"text": "ของเจ้าของ", "byUploader": True}  # จาก cache
     assert ext.count == 1
 
 
 def test_naive_timestamp_in_cache_counts_as_utc(env) -> None:
     svc, ext, _, cache = env
     (cache / BBB).mkdir(parents=True)
-    doc = {"v": 1, "videoId": BBB, "fetchedAt": "2026-10-01T08:00:00", "comment": {"text": "เก่า", "x": 1}}
+    doc = {"v": 2, "videoId": BBB, "fetchedAt": "2026-10-01T08:00:00", "comment": {"text": "เก่า", "x": 1}}
     (cache / BBB / CACHE_FILE).write_text(json.dumps(doc), encoding="utf-8")
-    assert svc.get(BBB) == {"text": "เก่า"}
+    assert svc.get(BBB) == {"text": "เก่า", "byUploader": False}
     assert ext.count == 0
 
 
@@ -430,15 +475,19 @@ def test_cache_write_failure_still_answers(env, monkeypatch: pytest.MonkeyPatch,
 
     monkeypatch.setattr(comments_mod, "_atomic_write", broken)
     ext.result = {"text": "ยังได้"}
-    assert svc.get(THAI) == {"text": "ยังได้"}
+    assert svc.get(THAI) == {"text": "ยังได้", "byUploader": False}
     assert "cache" in caplog.text
 
 
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ({"text": "a", "likes": 0, "publishedText": " now "}, {"text": "a", "likes": 0, "publishedText": "now"}),
-        ({"text": "a", "likes": "3", "publishedText": 5}, {"text": "a"}),
+        (
+            {"text": "a", "likes": 0, "publishedText": " now ", "byUploader": True},
+            {"text": "a", "likes": 0, "publishedText": "now", "byUploader": True},
+        ),
+        ({"text": "a", "likes": "3", "publishedText": 5}, {"text": "a", "byUploader": False}),
+        ({"text": "a", "byUploader": "yes", "author": "x"}, {"text": "a", "byUploader": False}),
         ({"text": " "}, None),
         ("text", None),
     ],

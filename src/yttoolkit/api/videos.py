@@ -172,6 +172,7 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
     router = APIRouter()
     # เรียกผ่าน lambda: extractor ทดสอบบางตัวไม่มี pinned_comment และไม่ต้องมีถ้าไม่ได้เรียก route นี้
     pinned = PinnedCommentService(videos, lambda vid: extractor.pinned_comment(vid), cache_root)
+    ctx.pinned = pinned
 
     def storyboard_index(video_id: str) -> dict:
         return get_storyboard(video_id, videos, cache_root, extractor.fetch)

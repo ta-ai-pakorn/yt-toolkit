@@ -13,6 +13,7 @@ from .api.static import mount_web
 from .api.subtitles import build_subtitles_router
 from .api.videos import build_videos_router
 from .config import APP_NAME, Paths
+from .core.comments import PinnedCommentService
 from .core.db import Database
 from .core.extractor import Extractor
 from .core.subtitles import SubtitleService
@@ -45,6 +46,8 @@ class AppContext:
     fake: bool = False  # โหมดข้อมูลปลอม (serve + YT_TOOLKIT_FAKE=1) หน้าตรวจสุขภาพจะบอกไว้
     # บริการซับของ M3 (run_app สร้างให้) ไม่มี = ไม่เปิด API ซับ
     subtitles: SubtitleService | None = None
+    # บริการคอมเมนต์ปักหมุด: router ข้อมูลคลิปสร้างให้ แล้ว router โน้ตใช้ตัวเดียวกัน (ใช้ cache ร่วมกัน)
+    pinned: PinnedCommentService | None = None
 
 
 def create_app(ctx: AppContext) -> FastAPI:
