@@ -773,3 +773,46 @@ def test_network_retry_limit_counts_even_when_attempt_is_cleared(runner_factory,
     spawn.run_all()
     assert len(calls) == 4
     assert r.store.get(job.id).error_code == "E_NETWORK"
+
+
+def test_one_spawn_failure_does_not_fail_the_whole_queue(runner_factory):
+    tries: list[int] = []
+
+    def flaky_spawn(fn):
+        tries.append(1)
+        if len(tries) == 1:
+            raise RuntimeError("can't start new thread")
+        fn()
+
+    r, spawn, h = runner_factory(concurrency=3, spawn=flaky_spawn)
+    a, b, c = r.enqueue(jobs_of("frames_zip", 3))
+    assert r.tick() == []  # stops after the first failure
+    assert r.store.get(a.id).status == "failed"
+    assert [r.store.get(j.id).status for j in (b, c)] == ["queued", "queued"]
+    assert r.tick() == [b.id, c.id]
+
+
+@pytest.mark.parametrize("stages", [["probing"], ["downloading_video", "downloading_video"]])
+def test_stage_after_a_network_retry_clears_attempt(runner_factory, monkeypatch, stages):
+    monkeypatch.setattr(queue_module._JobContext, "wait", lambda self, s: None)
+    seen_attempts: list[int] = []
+
+    def handler(job, ctx):
+        stage = stages[min(len(seen_attempts), len(stages) - 1)]
+        ctx.stage(stage)  # no progress at all in this handler
+        seen_attempts.append(r.store.get(job.id).attempt)
+        if len(seen_attempts) == 1:
+            ctx.stage("downloading_video")
+            raise YtError("E_NETWORK", "reset")
+        return JobResult()
+
+    r, spawn, _ = runner_factory(handler=handler)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    r.tick()
+    spawn.run_all()
+    assert seen_attempts == [0, 0]
+    patches = [u for u in r.bus.updates(job.id) if "status" not in u]
+    attempt_index = patches.index({"id": job.id, "attempt": 1})
+    after = patches[attempt_index + 1]
+    assert after["attempt"] is None and after["stage"] == stages[-1]
+    assert r.store.get(job.id).status == "done"

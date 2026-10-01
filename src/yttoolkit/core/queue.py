@@ -42,6 +42,8 @@ _OPTIONAL_KEYS = (
     "startedAt", "finishedAt", "cancelling",
 )
 _USER = "user"
+# ผลของ _start
+_STARTED, _SKIPPED, _SPAWN_FAILED = "started", "skipped", "spawn_failed"
 _SHUTDOWN = "shutdown"
 
 
@@ -95,14 +97,22 @@ class _JobContext:
     def stage(self, stage: str) -> None:
         if stage not in STAGES:
             raise ValueError(f"stage ไม่รู้จัก: {stage!r}")
-        if stage == self._stage:
+        clear_attempt = self._attempt_shown  # รอบใหม่หลังรอลองใหม่เริ่มเดินแล้ว (เหมือนใน progress)
+        if stage == self._stage and not clear_attempt:
             return
         self._stage = stage
         self._last = None
         # ขั้นใหม่เริ่มนับใหม่: ไม่ให้แถบเต็มจากขั้นโหลดค้างไว้ระหว่างรวมไฟล์
-        if self._write(stage=stage, progress=None, speed_bps=None, eta_s=None):
+        fields: dict[str, Any] = {"stage": stage, "progress": None, "speed_bps": None, "eta_s": None}
+        patch: dict[str, Any] = {"stage": stage, "progress": None, "speedBps": None, "etaS": None}
+        if clear_attempt:
+            fields["attempt"] = 0
+            patch["attempt"] = None
+        if self._write(**fields):
             self._db_at = self._runner._monotonic()
-            self._publish({"stage": stage, "progress": None, "speedBps": None, "etaS": None})
+            if clear_attempt:
+                self._attempt_shown = False
+            self._publish(patch)
 
     def progress(self, fraction: float | None, speed_bps: int | None = None, eta_s: int | None = None) -> None:
         values = (
@@ -262,19 +272,22 @@ class QueueRunner:
                 youtube = job.kind in YOUTUBE_KINDS
                 if youtube and self._monotonic() < self._next_youtube_at:
                     continue  # รอเว้นช่วง งานที่ไม่ต้องคุยกับยูทูปข้างหลังยังเริ่มได้
-                if self._start(job):
+                outcome = self._start(job)
+                if outcome == _SPAWN_FAILED:
+                    break  # เปิดเธรดไม่ได้ อย่าลากงานที่เหลือในคิวให้ล้มตามกันหมดในรอบเดียว รอรอบหน้า
+                if outcome == _STARTED:
                     started.append(job.id)
                     slots -= 1
                     if youtube:
                         self._next_youtube_at = self._monotonic() + self._rng.uniform(*self._delay_range)
         return started
 
-    def _start(self, job: Job) -> bool:
+    def _start(self, job: Job) -> str:
         try:
             output_root = self._settings.output_dir()
             job = self.store.transition(job.id, "running")
         except (KeyError, InvalidTransition):
-            return False
+            return _SKIPPED
         workdir = self._work_root / job.id
         ctx = _JobContext(self, job, workdir, output_root)
         self._active[job.id] = ctx
@@ -297,10 +310,10 @@ class QueueRunner:
                                                error_message=MESSAGES["E_UNKNOWN"],
                                                error_detail=f"{type(exc).__name__}: {exc}")
             except (KeyError, InvalidTransition):
-                return False
+                return _SPAWN_FAILED
             self._publish_job(failed)
-            return False
-        return True
+            return _SPAWN_FAILED
+        return _STARTED
 
     # ---------- เธรดงาน ----------
 
