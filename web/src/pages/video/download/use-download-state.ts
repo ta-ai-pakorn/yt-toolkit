@@ -1,0 +1,180 @@
+import { useQuery } from "@tanstack/react-query"
+import { useCallback, useState } from "react"
+
+import { th } from "@/i18n/th"
+import {
+  AUTO_QUALITY,
+  audioLanguageOptions,
+  qualityOptions,
+  resolveAudioLanguage,
+  type LanguageOption,
+  type QualityOption,
+} from "@/lib/download-options"
+import { prefsFromSettings, useDownloadPrefs, type DownloadPrefs } from "@/lib/download-prefs"
+import { settingsQuery } from "@/lib/settings-api"
+import type { AudioFormat, SubtitleTrack, VideoInfo } from "@/lib/types"
+
+import { buildTrackGroups } from "../subs/track-groups"
+
+export type AudioFormatChoice = DownloadPrefs["audioFormat"]
+export type Mp3Kbps = DownloadPrefs["mp3Kbps"]
+
+/** ตัวเลือกของแท็บวิดีโอและเสียงที่ใช้กับคลิปที่เปิดอยู่ (ค่าที่จะส่งเข้าคิว) */
+export type DownloadState = {
+  /** formatId ของภาพ หรือ "auto" */
+  quality: string
+  maxQuality: boolean
+  noAudio: boolean
+  /** "original" หรือรหัสภาษาของเสียงพากย์ (ค่าเดียวกันทั้งแท็บวิดีโอและแท็บเสียง) */
+  audioLanguage: string
+  audioFormat: AudioFormatChoice
+  mp3Kbps: Mp3Kbps
+}
+
+/** สิ่งที่ผู้ใช้เลือกเองกับคลิปนี้ (ยังไม่เลือก = ใช้ค่าที่จำไว้/ค่าจากการตั้งค่า) · embedSubs null = "ไม่ฝัง" */
+export type DownloadChoices = Partial<DownloadState> & { embedSubs?: string | null }
+
+/** ข้อความแจ้งผลการส่งเข้าคิวของแท็บวิดีโอ/เสียง (useEnqueue) */
+export const ENQUEUE_MESSAGES = {
+  added: th.queue.added,
+  addedMany: th.queue.addedMany,
+  failed: th.queue.addFailed,
+  goHealth: th.queue.goHealth,
+}
+
+export const MP3_BITRATES: readonly Mp3Kbps[] = [128, 192, 320]
+export const AUDIO_FORMATS: readonly AudioFormatChoice[] = ["m4a", "mp3", "wav"]
+
+/**
+ * คุณภาพเริ่มต้นจากค่าที่จำไว้ (จำเป็นความสูงของภาพ ไม่ใช่ formatId): ตัวเลือกแรกที่สูงเท่ากัน (fps มากสุดก่อน
+ * ตามลำดับของ qualityOptions) · ไม่มีความสูงนั้น หรือจำว่า "auto" = "auto"
+ */
+export function qualityForHeight(options: readonly QualityOption[], height: DownloadPrefs["quality"]): string {
+  if (height === AUTO_QUALITY) return AUTO_QUALITY
+  return options.find((option) => option.height === height)?.value ?? AUTO_QUALITY
+}
+
+/** ความสูงของคุณภาพที่เลือก สำหรับจำไว้ใช้กับคลิปอื่น ("auto" หรือ formatId ที่ไม่อยู่ในรายการ = "auto") */
+export function heightOf(options: readonly QualityOption[], quality: string): DownloadPrefs["quality"] {
+  return options.find((option) => option.value === quality)?.height ?? AUTO_QUALITY
+}
+
+/** ตัวเลือกภาษาเสียงของคลิป (เสียงภาษาเดียวหรือไม่บอกภาษา = null ซ่อนช่องเลือก) ชื่อภาษาแบบ "อังกฤษ (สหรัฐอเมริกา)" */
+export function languageOptions(video: VideoInfo): LanguageOption[] | null {
+  return audioLanguageOptions(video, undefined, { original: th.download.original, originalUnknown: th.download.originalUnknown })
+}
+
+/**
+ * ตัวเลือกที่ใช้จริงกับคลิปนี้ (ฟังก์ชันล้วน ทั้งสองแท็บเรียกด้วยค่าชุดเดียวกันจึงได้ภาษาเสียงตรงกันเสมอ):
+ * ที่ผู้ใช้เลือกเองก่อน ไม่ได้เลือก = ค่าที่จำไว้ (prefs) ที่ปรับให้เข้ากับคลิปนี้
+ * · คุณภาพที่เลือกไว้แต่ไม่อยู่ในรายการแล้ว (เช่น ปิดความละเอียดสูงสุดหลังเลือก 4K) = กลับไปใช้ความสูงที่จำไว้/อัตโนมัติ
+ * · ภาษาเสียงที่จำไว้ = ภาษาที่ตรงในคลิปนี้ ("en" ใช้ "en-US" ได้) ไม่มี = ต้นฉบับ
+ */
+export function resolveDownloadState(
+  prefs: DownloadPrefs,
+  video: VideoInfo,
+  languages: LanguageOption[] | null,
+  choices: DownloadChoices,
+): DownloadState {
+  const maxQuality = choices.maxQuality ?? prefs.maxQuality
+  const options = qualityOptions(video, maxQuality)
+  const chosen = choices.quality
+  const quality =
+    chosen !== undefined && (chosen === AUTO_QUALITY || options.some((option) => option.value === chosen))
+      ? chosen
+      : qualityForHeight(options, prefs.quality)
+  const chosenLanguage = choices.audioLanguage
+  const audioLanguage =
+    chosenLanguage !== undefined && languages?.some((option) => option.value === chosenLanguage)
+      ? chosenLanguage
+      : resolveAudioLanguage(languages, prefs.audioLanguage)
+  return {
+    quality,
+    maxQuality,
+    noAudio: choices.noAudio ?? prefs.noAudio,
+    audioLanguage,
+    audioFormat: choices.audioFormat ?? prefs.audioFormat,
+    mp3Kbps: choices.mp3Kbps ?? prefs.mp3Kbps,
+  }
+}
+
+/** "ไม่เอาเสียง" เปิดอยู่ = ช่องภาษาเสียงของแท็บวิดีโอกดไม่ได้ (ไม่มีเสียงให้เลือกภาษา) */
+export function languageLocked(state: Pick<DownloadState, "noAudio">): boolean {
+  return state.noAudio
+}
+
+/** ค่าที่จำไว้หลังส่งงานวิดีโอเข้าคิวสำเร็จ (คุณภาพเป็นความสูง) */
+export function videoPrefsPatch(state: DownloadState, video: VideoInfo): Partial<DownloadPrefs> {
+  return {
+    quality: heightOf(qualityOptions(video, state.maxQuality), state.quality),
+    maxQuality: state.maxQuality,
+    noAudio: state.noAudio,
+    audioLanguage: state.audioLanguage,
+  }
+}
+
+/** ค่าที่จำไว้หลังส่งงานเสียงเข้าคิวสำเร็จ */
+export function audioPrefsPatch(state: DownloadState): Partial<DownloadPrefs> {
+  return { audioFormat: state.audioFormat, mp3Kbps: state.mp3Kbps, audioLanguage: state.audioLanguage }
+}
+
+/**
+ * แทร็กซับที่ฝังในไฟล์ mp4 ได้: ซับจากเจ้าของคลิปและซับอัตโนมัติภาษาต้นฉบับ (ไม่รวมซับแปลอัตโนมัติ)
+ * เรียงแบบเดียวกับรายการในแท็บซับ (ภาษาต้นฉบับของคลิปขึ้นก่อน)
+ */
+export function embeddableTracks(tracks: readonly SubtitleTrack[], originalLang: string | null): SubtitleTrack[] {
+  return buildTrackGroups(tracks, originalLang).flatMap((group) => group.tracks)
+}
+
+/** ซับที่จะฝัง: ที่เลือกไว้ต้องยังอยู่ในรายการ ไม่งั้น = ไม่ฝัง (null) */
+export function resolveEmbed(choice: string | null | undefined, tracks: readonly SubtitleTrack[]): string | null {
+  return choice != null && tracks.some((track) => track.id === choice) ? choice : null
+}
+
+/**
+ * แทร็กเสียงต้นฉบับที่ใช้ประมาณขนาด wav (backend แปลงจากเสียง AAC): AAC ต้นฉบับก่อน ไม่มีค่อยใช้ AAC ตัวแรก
+ * ไม่มี AAC เลย = แทร็กต้นฉบับใด ๆ หรือแทร็กแรก
+ */
+export function wavSourceTrack(audio: readonly AudioFormat[]): AudioFormat | undefined {
+  const aac = audio.filter((track) => track.acodec.startsWith("mp4a"))
+  return aac.find((track) => track.isOriginal) ?? aac[0] ?? audio.find((track) => track.isOriginal) ?? audio[0]
+}
+
+/** ขนาดไฟล์แบบฐานสิบ (1 MB = 1,000,000 ไบต์): ต่ำกว่า 10 MB มีทศนิยม 1 ตำแหน่ง (อย่างน้อย 0.1) · ตั้งแต่ 1 GB เป็น GB ทศนิยม 1 ตำแหน่ง */
+export function formatSize(bytes: number): string {
+  const safe = Number.isFinite(bytes) && bytes > 0 ? bytes : 0
+  if (safe === 0) return "0 MB"
+  if (safe >= 1e9) return `${(safe / 1e9).toFixed(1)} GB`
+  const mb = safe / 1e6
+  return mb < 10 ? `${Math.max(0.1, Math.round(mb * 10) / 10).toFixed(1)} MB` : `${Math.round(mb)} MB`
+}
+
+/**
+ * ตัวเลือกที่ผู้ใช้เลือกเองของคลิปที่เปิดอยู่ (ก้อนเดียวของหน้า W2 แท็บวิดีโอและเสียงใช้ร่วมกัน เปลี่ยนที่หนึ่งอีกที่ตาม)
+ * เปลี่ยนคลิป = เริ่มใหม่จากค่าที่จำไว้ · แท็บที่ไม่ได้เปิดไม่ถูกเรนเดอร์ จึงเก็บไว้ที่แถบแท็บ ไม่ใช่ในแผง
+ */
+export function useDownloadChoices(videoId: string): [DownloadChoices, (patch: DownloadChoices) => void] {
+  const [held, setHeld] = useState<{ videoId: string; choices: DownloadChoices }>({ videoId, choices: {} })
+  const choices = held.videoId === videoId ? held.choices : {}
+  const choose = useCallback(
+    (patch: DownloadChoices) =>
+      setHeld((current) => ({
+        videoId,
+        choices: { ...(current.videoId === videoId ? current.choices : {}), ...patch },
+      })),
+    [videoId],
+  )
+  return [choices, choose]
+}
+
+/**
+ * ตัวเลือกที่ใช้จริงของแผงวิดีโอ/เสียง: ค่าที่จำไว้ในเบราว์เซอร์ (ยังไม่เคยจำ = ค่าเริ่มต้นจากการตั้งค่า)
+ * รวมกับที่ผู้ใช้เลือกเองกับคลิปนี้ · remember = จำค่าหลังส่งเข้าคิวสำเร็จ
+ */
+export function useDownloadState(video: VideoInfo, choices: DownloadChoices) {
+  const settings = useQuery(settingsQuery())
+  const [prefs, remember] = useDownloadPrefs(prefsFromSettings(settings.data))
+  const languages = languageOptions(video)
+  const state = resolveDownloadState(prefs, video, languages, choices)
+  return { state, languages, remember }
+}

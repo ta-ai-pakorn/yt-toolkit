@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { patchSearch, readVideoParams } from "./url-state"
+import { patchSearch, readVideoParams, VIDEO_TABS } from "./url-state"
 
 const params = (q: string) => new URLSearchParams(q)
 
@@ -37,6 +37,26 @@ describe("readVideoParams", () => {
     expect(readVideoParams(params("track=o.")).trackId).toBeNull()
     expect(readVideoParams(params("track=o.th/../x")).trackId).toBeNull()
     expect(readVideoParams(params("track=t.fr")).trackId).toBe("t.fr")
+  })
+})
+
+describe("แท็บวิดีโอและเสียง (M4)", () => {
+  it("ลำดับแท็บ: ภาพเฟรม · วิดีโอ · เสียง · ซับ · ทรานสคริปต์ · ข้อมูลคลิป", () => {
+    expect(VIDEO_TABS).toEqual(["frames", "video", "audio", "subs", "transcript", "info"])
+  })
+
+  it("อ่าน ?tab=video และ ?tab=audio ได้ · ตัวพิมพ์ใหญ่หรือค่าใกล้เคียงอ่านเป็นภาพเฟรม", () => {
+    expect(readVideoParams(params("tab=video")).tab).toBe("video")
+    expect(readVideoParams(params("tab=audio")).tab).toBe("audio")
+    for (const bad of ["VIDEO", "Audio", "videos", "mp4", "download"]) {
+      expect(readVideoParams(params(`tab=${bad}`)).tab).toBe("frames")
+    }
+  })
+
+  it("patch ไปแท็บวิดีโอ/เสียงขึ้นใน URL และเก็บแทร็กเดิมไว้ · กลับภาพเฟรมแล้ว tab หายจาก URL", () => {
+    expect(patchSearch(params(""), { tab: "video" })).toBe("?tab=video")
+    expect(patchSearch(params("tab=video&track=o.th"), { tab: "audio" })).toBe("?tab=audio&track=o.th")
+    expect(patchSearch(params("tab=audio"), { tab: "frames" })).toBe("")
   })
 })
 
