@@ -361,7 +361,7 @@ export const th = {
     openFolderOf: "เปิดโฟลเดอร์ของ {title}",
     download: "ดาวน์โหลด",
     downloadOf: "ดาวน์โหลด {file}",
-    details: "รายละเอียด",
+    details: "ดูรายละเอียด",
     errorCode: "รหัส {code}",
     copyDetails: "คัดลอกรายละเอียด",
     dragHandle: "ลากเพื่อเปลี่ยนลำดับ {title}",
