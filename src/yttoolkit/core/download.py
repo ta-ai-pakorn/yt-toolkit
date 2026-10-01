@@ -22,9 +22,6 @@ WAV_RATE = 44100
 WAV_CHANNELS = 2
 WAV_BYTES_PER_SAMPLE = 2
 
-_STORYBOARD = "storyboard"
-
-
 @dataclass(frozen=True)
 class DownloadChoice:
     format_spec: str  # สตริง format ของ yt-dlp
@@ -98,9 +95,12 @@ def _formats(info: Mapping[str, Any]) -> list[dict]:
     return [f for f in (info.get("formats") or []) if isinstance(f, dict)]
 
 
-def _is_video(fmt: Mapping[str, Any]) -> bool:
+def _is_video(fmt: dict) -> bool:
+    """format ที่มีภาพจริง (วิดีโอล้วนหรือวิดีโอ+เสียง) ไม่ใช่เสียงล้วนหรือ storyboard"""
+    from .videos import _is_storyboard  # import ในฟังก์ชัน เหตุผลเดียวกับ pick_audio
+
     vcodec = fmt.get("vcodec")
-    return fmt.get("format_note") != _STORYBOARD and bool(vcodec) and vcodec != "none"
+    return not _is_storyboard(fmt) and bool(vcodec) and vcodec != "none"
 
 
 def _height(fmt: Mapping[str, Any]) -> float:
@@ -170,7 +170,7 @@ def pick_audio(
 def video_choice(info: dict, params: Mapping[str, Any]) -> DownloadChoice:
     """งาน video: format ของวิดีโอ (+ เสียง) ตาม params ของงาน (C3)
 
-    - formatId ที่ยังมีอยู่ = ใช้ตัวนั้น ไม่มีแล้ว = เลือกอัตโนมัติ + QUALITY_FALLBACK
+    - formatId ของ format ที่มีภาพและยังมีอยู่ = ใช้ตัวนั้น ไม่มีแล้ว/เสียงล้วน/storyboard = เลือกอัตโนมัติ + QUALITY_FALLBACK
     - maxQuality = วิดีโอดีที่สุดทุก codec (bv*) ไม่งั้น = H.264 ไม่เกิน maxHeight (เปิดได้ทุกที่)
     - noAudio = วิดีโออย่างเดียว ไม่มี "+" ไม่มีตัวสำรอง (AC-VID-08)
     """
@@ -179,14 +179,15 @@ def video_choice(info: dict, params: Mapping[str, Any]) -> DownloadChoice:
     height_cap = params.get("maxHeight") or DEFAULT_MAX_HEIGHT
     max_quality = bool(params.get("maxQuality"))
     format_id = params.get("formatId")
-    if format_id and not any(str(f.get("format_id")) == str(format_id) for f in formats):
+    videos = [f for f in formats if _is_video(f)]
+    # formatId ต้องเป็น format ที่มีภาพ (ไม่มีแล้ว หรือเป็นเสียงล้วน/storyboard = เลือกอัตโนมัติ + QUALITY_FALLBACK)
+    if format_id and not any(str(f.get("format_id")) == str(format_id) for f in videos):
         format_id = None
         notes.append("QUALITY_FALLBACK")
 
-    videos = [f for f in formats if _is_video(f)]
     if format_id:
         video = str(format_id)
-        pool = [f for f in formats if str(f.get("format_id")) == video]
+        pool = [f for f in videos if str(f.get("format_id")) == video]
         tail = ""
     elif max_quality:
         video = "bv*"

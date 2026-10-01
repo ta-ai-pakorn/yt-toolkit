@@ -39,6 +39,12 @@ MESSAGES: dict[str, str] = {
     "E_UNKNOWN": "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล",
 }
 
+# ข้อความสำรองของข้อความที่มี {ชื่อ} เมื่อไม่มีค่าให้เติม (ผู้ใช้ต้องไม่เห็น "{size}")
+# เช่น files.py / media.py โยน E_DISK_FULL ตอนเขียนไฟล์ไม่ลงโดยไม่รู้ว่าต้องใช้พื้นที่เท่าไร
+MESSAGES_NO_PARAMS: dict[str, str] = {
+    "E_DISK_FULL": "พื้นที่ไม่พอ ลบไฟล์หรือเลือกโฟลเดอร์อื่นในหน้าตั้งค่า",
+}
+
 # ตรวจตามลำดับนี้ รหัสที่เจาะจงมาก่อนคำกว้าง ๆ เพราะข้อความจริงมักมีหลายวลีปนกัน เช่น
 # "Video unavailable. ... blocked it in your country" = ติดประเทศ ไม่ใช่คลิปหาย
 # และ "Unable to download API page: HTTP Error 429" = โดนจำกัดความถี่ ไม่ใช่เน็ตหลุด
@@ -147,12 +153,14 @@ class YtError(Exception):
     def message(self) -> str:
         """ข้อความภาษาไทยถึงผู้ใช้ รหัสที่ไม่รู้จักใช้ข้อความของ E_UNKNOWN
 
-        มี params = เติมค่าลงข้อความ ค่าไม่ครบหรือรูปแบบเสีย = ใช้ข้อความตามตาราง (error ห้ามพังซ้อน)
+        ข้อความที่มี {ชื่อ} เติมค่าจาก params ไม่มี params หรือค่าไม่ครบ = ข้อความสำรองใน MESSAGES_NO_PARAMS
+        (error ห้ามพังซ้อน และห้ามโชว์ {ชื่อ} ดิบ) ข้อความธรรมดาไม่สน params
         """
         template = MESSAGES.get(self.code, MESSAGES["E_UNKNOWN"])
-        if self.params is None:
+        fallback = MESSAGES_NO_PARAMS.get(self.code)
+        if fallback is None:
             return template
         try:
-            return template.format_map(self.params)
+            return template.format_map(self.params or {})
         except (KeyError, ValueError, IndexError):
-            return template
+            return fallback

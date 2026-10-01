@@ -48,8 +48,10 @@ _STAT_FIELDS = (
     ("comments", "comment_count"),
     ("channelFollowers", "channel_follower_count"),
 )
-# probe ใหม่พลาดด้วยรหัสเหล่านี้ (ไม่มีเน็ต / ยูทูปให้รอก่อน) แต่มีข้อมูลเดิมในเครื่อง = ใช้ข้อมูลเดิมไปก่อน
-STALE_OK_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK"})
+# probe ใหม่พลาดด้วยรหัสเหล่านี้ (ไม่มีเน็ต / ยูทูปให้รอก่อน / ยูทูปตอบ 4xx ชั่วคราว) แต่มีข้อมูลเดิมในเครื่อง
+# = ใช้ข้อมูลเดิมไปก่อน (ไม่ยิงคำขอเพิ่ม จึงไม่ขัดกับ Q2 ที่ห้ามลอง E_YT_REFUSED ซ้ำอัตโนมัติ)
+# M4: probe v5 ทำให้ทุกแถวเดิมต้อง probe ใหม่ 403/404/410 ตอนนั้นจึงต้องไม่ทำให้คลิปที่เคยเปิดได้เปิดไม่ได้
+STALE_OK_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK", "E_YT_REFUSED"})
 # นาฬิกาเครื่องเลื่อนถอยได้ไม่เกินนี้ยังถือว่า probe ล่าสุดยังใหม่
 CLOCK_SKEW = timedelta(minutes=5)
 PLAYLIST_LIMIT = 200
@@ -571,7 +573,8 @@ class VideoService:
         เรียกซ้อนกันด้วย id เดียวกัน (เช่น กดเปิดคลิปเดิมสองแท็บ) จะ probe ครั้งเดียว:
         คนที่มาทีหลังรอคิว แล้วอ่าน cache ที่คนแรกเพิ่งเขียนแทนการ probe ซ้ำ
 
-        cache หมดอายุแล้ว probe ใหม่พลาดด้วย E_NETWORK/E_BOT_CHECK แต่มีข้อมูลเดิม = คืนข้อมูลเดิม
+        cache หมดอายุ (หรือแถวรุ่นเก่า) แล้ว probe ใหม่พลาดด้วย E_NETWORK/E_BOT_CHECK/E_YT_REFUSED
+        แต่มีข้อมูลเดิม = คืนข้อมูลเดิม
         (บันทึก warning ไม่แตะ probed_at) ยกเว้น refresh=True ที่โยน error ต่อเสมอ
         """
         self._check_video_id(video_id)
@@ -592,7 +595,7 @@ class VideoService:
             try:
                 return self._probe_and_store(video_id, peek)
             except YtError as exc:
-                # cache หมดอายุแต่ไม่มีเน็ต: คืนข้อมูลเดิม (หน้า W2, contact sheet, zip ใช้ต่อได้)
+                # cache หมดอายุแต่ไม่มีเน็ต (หรือยูทูปไม่ตอบชั่วคราว): คืนข้อมูลเดิม (หน้า W2, contact sheet, zip ใช้ต่อได้)
                 # ไม่แตะ probed_at รอบหน้าจึง probe ใหม่เมื่อเน็ตกลับมา
                 # refresh=True = ผู้เรียกรู้ว่าของเดิมใช้ไม่ได้แล้ว (ลิงก์ storyboard หมดอายุ) จึงโยนต่อ
                 if refresh or exc.code not in STALE_OK_CODES:

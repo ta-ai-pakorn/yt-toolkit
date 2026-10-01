@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from yttoolkit.core.yterrors import MESSAGES, YtError, classify
+from yttoolkit.core.yterrors import MESSAGES, MESSAGES_NO_PARAMS, YtError, classify
 
 ERRORS_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "errors"
 FIXTURES = sorted(ERRORS_DIR.glob("*.txt"))
@@ -20,7 +20,9 @@ CLASSIFIER_CODES = {
     "E_UNKNOWN",
 }
 # M4 (C11): รหัสใหม่ที่ PRD ข้อ 7 ยังไม่มีแถว T20 เพิ่มแถวในตารางแล้วลบชุดนี้ออก
+# (มีแถวแล้วจะถูกตรวจทันที และ test_prd_pending_codes_have_no_prd_row เตือนให้ลบออกจากชุด)
 PRD_PENDING = {"E_JOB_STATE", "E_YT_REFUSED"}
+PRD = Path(__file__).resolve().parents[2] / "PRD.md"
 
 
 def _expected_code(path: Path) -> str:
@@ -130,11 +132,11 @@ def _prd_row(prd: str, code: str) -> str | None:
 
 
 def test_messages_match_prd_table() -> None:
-    prd = (Path(__file__).resolve().parents[2] / "PRD.md").read_text(encoding="utf-8")
+    prd = PRD.read_text(encoding="utf-8")
     for code, message in MESSAGES.items():
         if code == "E_NETWORK":
             continue  # รุ่นไม่มีตัวนับครั้ง ดูหมายเหตุใต้ตารางใน PRD ข้อ 7
-        if code in PRD_PENDING:
+        if code in PRD_PENDING and _prd_row(prd, code) is None:
             continue
         row = _prd_row(prd, code)
         assert row is not None, code
@@ -146,6 +148,34 @@ def test_messages_match_prd_table() -> None:
 
 def test_prd_pending_codes_are_known_messages() -> None:
     assert PRD_PENDING <= MESSAGES.keys()
+
+
+def test_prd_pending_codes_have_no_prd_row() -> None:
+    # PRD มีแถวของรหัสนี้แล้ว = ลบรหัสออกจาก PRD_PENDING (แถวถูกตรวจใน test_messages_match_prd_table แล้ว)
+    prd = PRD.read_text(encoding="utf-8")
+    for code in sorted(PRD_PENDING):
+        assert _prd_row(prd, code) is None, f"{code} มีแถวใน PRD แล้ว ลบออกจาก PRD_PENDING"
+
+
+def test_disk_full_without_size_never_shows_the_placeholder() -> None:
+    # files.py / media.py โยน E_DISK_FULL โดยไม่รู้ขนาด: ใช้ข้อความที่ไม่มีขนาด ห้ามโชว์ "{size}"
+    expected = "พื้นที่ไม่พอ ลบไฟล์หรือเลือกโฟลเดอร์อื่นในหน้าตั้งค่า"
+    assert MESSAGES_NO_PARAMS["E_DISK_FULL"] == expected
+    for err in (
+        YtError("E_DISK_FULL"),
+        YtError("E_DISK_FULL", "No space left on device"),
+        YtError("E_DISK_FULL", params={}),
+        YtError("E_DISK_FULL", params={"other": "x"}),
+    ):
+        assert err.message == expected
+        assert "{" not in str(err)
+    assert YtError("E_DISK_FULL", params={"size": "120 MB"}).message == "พื้นที่ไม่พอ ต้องมีว่างอย่างน้อย 120 MB"
+
+
+def test_every_template_has_a_no_params_message() -> None:
+    templated = {code for code, text in MESSAGES.items() if "{" in text}
+    assert templated == MESSAGES_NO_PARAMS.keys()
+    assert all("{" not in text for text in MESSAGES_NO_PARAMS.values())
 
 
 def test_yterror_fields() -> None:
@@ -170,11 +200,11 @@ def test_yterror_params_fill_the_message() -> None:
     assert "3.2 GB" in str(YtError("E_DISK_FULL", params={"size": "3.2 GB"}))
 
 
-def test_yterror_without_params_keeps_the_template() -> None:
+def test_yterror_params_on_a_plain_message_are_ignored() -> None:
     assert YtError("E_DISK_FULL").params is None
-    assert YtError("E_DISK_FULL").message == MESSAGES["E_DISK_FULL"]
-    # พารามิเตอร์ไม่ครบไม่ทำให้ error พังซ้อน
-    assert YtError("E_DISK_FULL", params={}).message == MESSAGES["E_DISK_FULL"]
+    assert YtError("E_NETWORK", params={"size": "1 MB"}).message == MESSAGES["E_NETWORK"]
+    # รูปแบบเสียไม่ทำให้ error พังซ้อน
+    assert YtError("E_SOMETHING_NEW", params={"size": "1"}).message == MESSAGES["E_UNKNOWN"]
 
 
 def test_yterror_unknown_code_falls_back_to_unknown_message() -> None:

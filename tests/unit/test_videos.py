@@ -1337,6 +1337,57 @@ def test_stale_fallback_with_peek_keeps_opened_at(
     assert row["opened_at"] == stamp(T0)
 
 
+def _refused(ext: CountingExtractor) -> None:
+    def refuse(video_id: str) -> dict:
+        ext.count["probe"] += 1
+        raise YtError("E_YT_REFUSED", "HTTP Error 403")
+
+    ext.probe = refuse  # type: ignore[method-assign]
+
+
+def test_refused_reprobe_serves_the_stored_row(
+    svc: VideoService, ext: CountingExtractor, clock: Clock, db: Database
+) -> None:
+    # review I-1 (M4): 403/404/410 ตอน probe ใหม่ = ใช้แถวเดิม (ไม่ยิงคำขอเพิ่ม) ทั้งแถวหมดอายุและแถวรุ่นเก่า
+    first = svc.get(BBB)
+    clock.advance(hours=30)
+    _refused(ext)
+    assert svc.get(BBB) == first
+    assert ext.count["probe"] == 2
+    row = db.execute("SELECT probed_at FROM videos WHERE video_id = ?", (BBB,))[0]
+    assert row["probed_at"] == stamp(T0)
+
+
+def test_refused_reprobe_of_a_version_4_row_serves_it(
+    svc: VideoService, ext: CountingExtractor, db: Database
+) -> None:
+    first = svc.get(BBB)
+    data = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
+    data["probeVersion"] = 4
+    db.execute("UPDATE videos SET probe_json = ?", (json.dumps(data),))
+    _refused(ext)
+    assert svc.get(BBB) == first
+    assert ext.count["probe"] == 2
+
+
+def test_refused_with_refresh_still_raises(
+    svc: VideoService, ext: CountingExtractor, clock: Clock
+) -> None:
+    svc.get(BBB)
+    clock.advance(hours=30)
+    _refused(ext)
+    with pytest.raises(YtError) as exc:
+        svc.get(BBB, refresh=True)
+    assert exc.value.code == "E_YT_REFUSED"
+
+
+def test_refused_without_stored_row_raises(svc: VideoService, ext: CountingExtractor) -> None:
+    _refused(ext)
+    with pytest.raises(YtError) as exc:
+        svc.get(BBB)
+    assert exc.value.code == "E_YT_REFUSED"
+
+
 @pytest.mark.parametrize("code", ["E_VIDEO_UNAVAILABLE", "E_VIDEO_PRIVATE", "E_UNKNOWN"])
 def test_other_errors_are_not_hidden_by_stale_cache(
     svc: VideoService, ext: CountingExtractor, clock: Clock, code: str
