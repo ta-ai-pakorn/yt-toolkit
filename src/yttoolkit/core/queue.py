@@ -60,10 +60,6 @@ def _thread_spawn(fn: Callable[[], None]) -> None:
     threading.Thread(target=fn, daemon=True, name="yt-job").start()
 
 
-def _no_redact(text: str) -> str:
-    return text
-
-
 class _JobContext:
     """JobContext (C1) ของงานหนึ่งรอบ: handler รายงานความคืบหน้าและเช็กการยกเลิกผ่านตัวนี้"""
 
@@ -80,6 +76,7 @@ class _JobContext:
         self._stage: str | None = None
         self._last: tuple[float | None, int | None, int | None] | None = None
         self._db_at = -math.inf
+        self._attempt_shown = False      # หน้าเว็บกำลังโชว์ "กำลังลองใหม่ (ครั้งที่ n/3)" อยู่
 
     # ---------- ฝั่งตัวรันคิว ----------
 
@@ -117,13 +114,26 @@ class _JobContext:
             return  # ffmpeg ส่งค่าเดิมซ้ำได้ ไม่ต้องส่งข่าวซ้ำ
         self._last = values
         now = self._runner._monotonic()
-        if now - self._db_at >= PROGRESS_DB_INTERVAL_S:
-            if not self._write(progress=values[0], speed_bps=values[1], eta_s=values[2]):
+        fields: dict[str, Any] = {}
+        due = now - self._db_at >= PROGRESS_DB_INTERVAL_S
+        if due:
+            fields.update(progress=values[0], speed_bps=values[1], eta_s=values[2])
+        # ความคืบหน้าแรกหลังรอลองใหม่ = รอบใหม่เดินแล้ว เลิกโชว์ข้อความลองใหม่ (ตัวนับจำกัดครั้งอยู่ในตัวรันคิว ไม่รีเซ็ต)
+        clear_attempt = self._attempt_shown
+        if clear_attempt:
+            fields["attempt"] = 0
+        if fields:
+            if not self._write(**fields):
                 return
-            self._db_at = now
+            if due:
+                self._db_at = now
         elif self._is_closed():
             return
-        self._publish({"progress": values[0], "speedBps": values[1], "etaS": values[2]})
+        patch: dict[str, Any] = {"progress": values[0], "speedBps": values[1], "etaS": values[2]}
+        if clear_attempt:
+            self._attempt_shown = False
+            patch["attempt"] = None
+        self._publish(patch)
 
     def set_title(self, title: str) -> None:
         if not title:
@@ -146,6 +156,8 @@ class _JobContext:
 
     def _set_attempt(self, attempt: int) -> None:
         if self._write(attempt=attempt):
+            self._attempt_shown = True
+            self._last = None  # ความคืบหน้าแรกของรอบใหม่ต้องส่งเสมอ แม้ค่าจะเท่ารอบก่อน
             self._publish({"attempt": attempt})
 
     def _is_closed(self) -> bool:
@@ -183,10 +195,11 @@ class QueueRunner:
         wall: Callable[[], datetime] = lambda: datetime.now(UTC),
         rng: random.Random | None = None,
         spawn: Callable[[Callable[[], None]], None] | None = None,
-        redact: Callable[[str], str] | None = None,
+        redact: Callable[[str], str],
     ) -> None:
         """spawn(fn) รันงานหนึ่งงาน ค่าเริ่มต้นเปิดเธรด daemon (เทสส่งตัวเก็บ fn มาเองได้)
-        redact(text) ซ่อนโฟลเดอร์ผู้ใช้ใน error.detail ก่อนส่งข่าว SSE (lifecycle ส่ง api.errors.redact_home)"""
+        redact(text) ซ่อนโฟลเดอร์ผู้ใช้ใน error.detail ก่อนส่งข่าว SSE (lifecycle ส่ง api.errors.redact_home)
+        บังคับส่งเสมอ จะได้ไม่มีใครลืมต่อสาย"""
         self.store = store
         self._bus = bus
         self._handlers = dict(handlers)
@@ -199,7 +212,7 @@ class QueueRunner:
         self._wall = wall
         self._rng = rng or random.Random()
         self._spawn = spawn or _thread_spawn
-        self._redact = redact or _no_redact
+        self._redact = redact
         # RLock: tick / cancel / reorder ถือ lock ระหว่างเช็กสถานะกับเปลี่ยนสถานะ จึงไม่มีงานไหนถูกเริ่มกับยกเลิกพร้อมกัน
         self._lock = threading.RLock()
         self._pause: PauseState | None = None
@@ -270,7 +283,23 @@ class QueueRunner:
         except OSError as exc:
             log.warning("สร้างโฟลเดอร์ทำงานของงาน %s ไม่ได้: %s", job.id, type(exc).__name__)
         self._publish_job(job)
-        self._spawn(lambda: self._work(job, ctx))
+        try:
+            self._spawn(lambda: self._work(job, ctx))
+        except Exception as exc:
+            # เปิดเธรดไม่ได้ (เช่นเครื่องทรัพยากรหมด): งานต้องไม่ค้าง running โดยไม่มีใครทำ
+            log.exception("เริ่มงาน %s ไม่ได้", job.id)
+            ctx.close()
+            self._forget(job.id, ctx)
+            shutil.rmtree(workdir, ignore_errors=True)
+            ctx.done.set()
+            try:
+                failed = self.store.transition(job.id, "failed", error_code="E_UNKNOWN",
+                                               error_message=MESSAGES["E_UNKNOWN"],
+                                               error_detail=f"{type(exc).__name__}: {exc}")
+            except (KeyError, InvalidTransition):
+                return False
+            self._publish_job(failed)
+            return False
         return True
 
     # ---------- เธรดงาน ----------
@@ -283,9 +312,13 @@ class QueueRunner:
             log.exception("สรุปผลงาน %s ไม่สำเร็จ", job.id)
         finally:
             ctx.close()
-            shutil.rmtree(ctx.workdir, ignore_errors=True)  # เผื่อทางที่สรุปผลไม่สำเร็จ
             with self._lock:
-                if self._active.get(job.id) is ctx:
+                current = self._active.get(job.id)
+                # เผื่อทางที่สรุปผลไม่สำเร็จ แต่ถ้างานนี้ถูกลองใหม่และเริ่มรอบใหม่ไปแล้ว ห้ามลบโฟลเดอร์ของรอบใหม่
+                # (ถือ lock อยู่ tick จึงสร้างโฟลเดอร์รอบใหม่แทรกกลางไม่ได้)
+                if current is None or current is ctx:
+                    shutil.rmtree(ctx.workdir, ignore_errors=True)
+                if current is ctx:
                     del self._active[job.id]
             ctx.done.set()
             self._wake.set()
@@ -351,16 +384,21 @@ class QueueRunner:
         # เบรกก่อนส่งงานกลับเข้าคิว ไม่งั้นตัวจัดคิวอาจหยิบงานนี้ไปรันซ้ำก่อนคิวพัก
         self.brake("E_BOT_CHECK")
         self._clear_workdir(ctx)
-        current = self.store.get(job.id)
-        if current is not None and current.bot_checks == 0:
-            ctx.close()
-            try:
-                requeued = self.store.requeue(job.id, front=True, bot_checks=1)  # Q1: ครั้งแรกกลับหัวคิว
-            except (KeyError, InvalidTransition):
-                return "E_BOT_CHECK (สถานะเปลี่ยนไปแล้ว)"
-            self._forget(job.id, ctx)
-            self._publish_job(requeued)
-            return "E_BOT_CHECK (กลับหัวคิว)"
+        with self._lock:
+            # เช็กการยกเลิกกับส่งกลับเข้าคิวใน lock เดียวกับ cancel(): คำสั่งยกเลิกที่มาระหว่างนี้จึงไม่หาย
+            if ctx.reason is None:
+                current = self.store.get(job.id)
+                if current is not None and current.bot_checks == 0:
+                    ctx.close()
+                    try:
+                        requeued = self.store.requeue(job.id, front=True, bot_checks=1)  # Q1: ครั้งแรกกลับหัวคิว
+                    except (KeyError, InvalidTransition):
+                        return "E_BOT_CHECK (สถานะเปลี่ยนไปแล้ว)"
+                    self._forget(job.id, ctx)
+                    self._publish_job(requeued)
+                    return "E_BOT_CHECK (กลับหัวคิว)"
+        if ctx.reason is not None:
+            return self._stopped(job, ctx)
         return self._fail(job, ctx, "E_BOT_CHECK", exc.message, exc.detail)
 
     def _end(self, job: Job, ctx: _JobContext, status: str, **fields: Any) -> bool:
@@ -414,7 +452,7 @@ class QueueRunner:
                 self._publish_job(job)
                 return job
             ctx.request_stop(_USER)
-        self._bus.job_updated(job_id, {"cancelling": True})
+            self._bus.job_updated(job_id, {"cancelling": True})
         return job
 
     def retry(self, job_id: str) -> Job:
@@ -426,7 +464,7 @@ class QueueRunner:
             if job.status not in ("failed", "interrupted"):
                 raise InvalidTransition(f"{job.status} -> queued")
             job = self.store.requeue(job_id, reset_bot_checks=True)
-        self._publish_job(job)
+            self._publish_job(job)
         self._wake.set()
         return job
 

@@ -7,6 +7,7 @@ from urllib.parse import quote
 
 import pytest
 
+from yttoolkit.api.errors import redact_home
 from yttoolkit.core.db import Database
 from yttoolkit.core.events import Event, EventBus
 from yttoolkit.core.jobs import JobResult, JobStore, NewJob, OutputFile
@@ -68,7 +69,7 @@ class Env:
         self.revealed: list[Path] = []
         handlers = dict.fromkeys(("video", "audio", "subtitle", "contact_sheet", "frames_zip"), finished_handler)
         self.runner = QueueRunner(self.store, self.bus, handlers, settings=self.settings, work_root=tmp_path / "work",
-                                  rng=random.Random(1), spawn=self.spawn)
+                                  rng=random.Random(1), spawn=self.spawn, redact=redact_home)
         self._make = make_client
 
     def client(self, **overrides):
@@ -330,6 +331,29 @@ def test_get_output_is_an_attachment_with_the_thai_name(env):
     )
     listed = env.client().get("/api/jobs").json()["jobs"][0]["outputs"]
     assert listed == [{"index": 0, "name": "คลิปทดสอบ.mp4", "sizeBytes": 9}]
+
+
+@pytest.mark.parametrize(
+    ("name", "media_type"),
+    [
+        ("frames.zip", "application/zip"),
+        ("sheet.jpg", "image/jpeg"),
+        ("clip.mp4", "video/mp4"),
+        ("song.m4a", "audio/mp4"),
+        ("song.mp3", "audio/mpeg"),
+        ("song.wav", "audio/wav"),
+        ("subs.th.srt", "application/x-subrip"),
+        ("subs.th.vtt", "text/vtt; charset=utf-8"),
+        ("subs.th.txt", "text/plain; charset=utf-8"),
+        ("subs.th.md", "text/markdown; charset=utf-8"),
+        ("odd.bin", "application/octet-stream"),
+    ],
+)
+def test_get_output_media_type_by_extension(env, name, media_type):
+    job, _ = _done_with_file(env, name=name)
+    resp = env.client().get(f"/api/jobs/{job.id}/outputs/0")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == media_type
 
 
 def test_get_output_404s(env):

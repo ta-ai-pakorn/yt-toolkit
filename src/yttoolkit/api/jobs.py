@@ -33,6 +33,20 @@ LIST_LIMIT_DEFAULT = 50
 LIST_LIMIT_MAX = 200
 TITLE_MAX_CHARS = 500
 MP3_KBPS_DEFAULT = 192
+# ชนิดไฟล์ผลลัพธ์ตามนามสกุล (ไม่พึ่ง mimetypes: บน Windows เดา zip เป็น application/x-zip-compressed)
+OUTPUT_MEDIA_TYPES = {
+    ".zip": "application/zip",
+    ".jpg": "image/jpeg",
+    ".mp4": "video/mp4",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".srt": "application/x-subrip",
+    ".vtt": "text/vtt; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+}
+OUTPUT_MEDIA_TYPE_DEFAULT = "application/octet-stream"
 
 JOB_ID = re.compile(r"[0-9a-f-]{36}")
 _VIDEO_ID = r"^[A-Za-z0-9_-]{11}$"
@@ -279,9 +293,11 @@ def build_jobs_router(ctx: AppContext) -> APIRouter:
     @router.get("/jobs/{job_id}/outputs/{index}", response_model=None)
     def get_output(job_id: str, index: int) -> FileResponse:
         target = output_of(job_id, index)
-        fallback = f"download{PurePosixPath(target.name).suffix.lower()}"
+        suffix = PurePosixPath(target.name).suffix.lower()
         return FileResponse(
-            target, headers={"Content-Disposition": attachment_header(fallback, target.name)}
+            target,
+            media_type=OUTPUT_MEDIA_TYPES.get(suffix, OUTPUT_MEDIA_TYPE_DEFAULT),
+            headers={"Content-Disposition": attachment_header(f"download{suffix}", target.name)},
         )
 
     @router.post("/jobs/{job_id}/outputs/{index}/reveal")

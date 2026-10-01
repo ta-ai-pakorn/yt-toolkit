@@ -45,6 +45,7 @@ class RecordingBus:
 
     def __init__(self) -> None:
         self.events: list[Event] = []
+        self.on_update = None  # เทสเสียบโค้ดแทรกตอนมีข่าว job.updated ได้ (จำลองจังหวะชนกันของเธรด)
         self._lock = threading.Lock()
 
     def publish(self, name: str, data: dict) -> None:
@@ -54,6 +55,8 @@ class RecordingBus:
     def job_updated(self, job_id: str, fields: dict) -> None:
         with self._lock:
             self.events.append(Event("job.updated", {"id": job_id, **fields}))
+        if self.on_update is not None:
+            self.on_update(job_id, fields)
 
     def updates(self, job_id: str) -> list[dict]:
         with self._lock:
@@ -172,6 +175,7 @@ def runner_factory(tmp_path):
         bus = RecordingBus()
         clock, wall = Clock(), Wall()
         settings = StubSettings(concurrency, tmp_path / "out")
+        kwargs.setdefault("redact", lambda text: text)
         runner = QueueRunner(
             store, bus, dict.fromkeys(KINDS, handler), settings=settings, work_root=tmp_path / "work",
             monotonic=clock, wall=wall, rng=random.Random(1), spawn=spawner, **kwargs,
@@ -659,3 +663,113 @@ def test_dispatcher_thread_runs_jobs(runner_factory):
     assert wait_for(lambda: r.store.get(job.id).status == "done")
     assert r.pending_count() == 0
     r.shutdown(timeout=1.0)
+
+
+# ---------- fix round 1 ----------
+
+
+def test_redact_is_required(tmp_path):
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    with pytest.raises(TypeError):
+        QueueRunner(JobStore(db), RecordingBus(), {}, settings=StubSettings(1, tmp_path), work_root=tmp_path)  # type: ignore[call-arg]
+    db.close()
+
+
+def test_fast_retry_keeps_the_new_runs_workdir(runner_factory, tmp_path):
+    r, spawn, h = runner_factory(fail={"vid00000001": ["E_YT_REFUSED", None]})
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    restarted: list[str] = []
+
+    def retry_at_once(job_id, fields):
+        # the old worker has written "failed" but has not reached its finally block yet
+        if fields.get("status") == "failed" and not restarted:
+            r.retry(job_id)
+            restarted.extend(r.tick())
+
+    r.bus.on_update = retry_at_once
+    r.tick()
+    spawn.run_one()
+    assert restarted == [job.id]
+    assert (tmp_path / "work" / job.id).is_dir()  # the second run's workdir survived the first run's cleanup
+    assert r.store.get(job.id).status == "running"
+    spawn.run_one()
+    assert r.store.get(job.id).status == "done"
+
+
+def test_cancel_during_bot_check_is_not_lost(runner_factory, monkeypatch):
+    r, spawn, h = runner_factory(fail={"vid00000001": "E_BOT_CHECK"})
+    (job,) = r.enqueue(jobs_of("video", 1))
+    original_brake = r.brake
+
+    def brake_then_cancel(reason="E_BOT_CHECK"):
+        original_brake(reason)
+        r.cancel(job.id)  # arrives after the worker checked ctx.reason, before the requeue
+
+    monkeypatch.setattr(r, "brake", brake_then_cancel)
+    r.tick()
+    spawn.run_all()
+    got = r.store.get(job.id)
+    assert got.status == "cancelled" and got.bot_checks == 0
+    assert not r.is_cancelling(job.id)
+
+
+def test_spawn_failure_fails_the_job(runner_factory, tmp_path):
+    def broken_spawn(fn):
+        raise RuntimeError("can't start new thread")
+
+    r, spawn, h = runner_factory(spawn=broken_spawn)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    assert r.tick() == []
+    got = r.store.get(job.id)
+    assert (got.status, got.error_code) == ("failed", "E_UNKNOWN")
+    assert "RuntimeError: can't start new thread" in got.error_detail
+    assert not r.is_cancelling(job.id) and r.store.running() == []
+    assert not (tmp_path / "work" / job.id).exists()
+    assert r.bus.updates(job.id)[-1]["status"] == "failed"
+
+
+def test_first_progress_after_a_network_retry_clears_attempt(runner_factory, monkeypatch):
+    monkeypatch.setattr(queue_module._JobContext, "wait", lambda self, s: None)
+    seen_attempts: list[int] = []
+
+    def handler(job, ctx):
+        ctx.progress(0.25, 100, 5)
+        seen_attempts.append(r.store.get(job.id).attempt)
+        if len(seen_attempts) < 3:
+            raise YtError("E_NETWORK", "reset")
+        ctx.progress(0.5, 100, 4)
+        return JobResult()
+
+    r, spawn, _ = runner_factory(handler=handler)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    r.tick()
+    spawn.run_all()
+    assert seen_attempts == [0, 0, 0]  # cleared in the DB by the first progress of each retry run
+    patches = [u for u in r.bus.updates(job.id) if "status" not in u]
+    assert patches == [
+        {"id": job.id, "progress": 0.25, "speedBps": 100, "etaS": 5},
+        {"id": job.id, "attempt": 1},
+        {"id": job.id, "progress": 0.25, "speedBps": 100, "etaS": 5, "attempt": None},  # same values, still sent
+        {"id": job.id, "attempt": 2},  # the retry limit keeps counting
+        {"id": job.id, "progress": 0.25, "speedBps": 100, "etaS": 5, "attempt": None},
+        {"id": job.id, "progress": 0.5, "speedBps": 100, "etaS": 4},
+    ]
+    assert r.store.get(job.id).status == "done"
+
+
+def test_network_retry_limit_counts_even_when_attempt_is_cleared(runner_factory, monkeypatch):
+    monkeypatch.setattr(queue_module._JobContext, "wait", lambda self, s: None)
+    calls: list[int] = []
+
+    def handler(job, ctx):
+        calls.append(1)
+        ctx.progress(len(calls) / 10)
+        raise YtError("E_NETWORK", "reset")
+
+    r, spawn, _ = runner_factory(handler=handler)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    r.tick()
+    spawn.run_all()
+    assert len(calls) == 4
+    assert r.store.get(job.id).error_code == "E_NETWORK"
