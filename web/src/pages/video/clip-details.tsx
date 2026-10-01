@@ -264,8 +264,9 @@ export function ClipInfoPanel({ video }: { video: VideoInfo | undefined }) {
 
   const left: ReactNode[] = []
   if (has.description) left.push(<DescriptionSection key="description" description={video.description ?? ""} />)
-  if (has.chapters) left.push(<ChapterSection key="chapters" chapters={video.chapters} />)
   const right: ReactNode[] = []
+  // owner round 6: Chapter อยู่คอลัมน์ขวา เหนือช่วงที่คนดูซ้ำบ่อย (คอลัมน์เดียว: คำอธิบาย, Chapter, ดูซ้ำบ่อย, ...)
+  if (has.chapters) right.push(<ChapterSection key="chapters" chapters={video.chapters} />)
   if (has.replayed && video.mostReplayed) {
     right.push(<ReplayedSection key="replayed" segments={video.mostReplayed} />)
   }

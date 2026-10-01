@@ -807,7 +807,7 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     }
   }
 
-  test("จอกว้าง 1280 px แท็บข้อมูลคลิป: ซ้าย คำอธิบาย → Chapter · ขวา ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก (owner round 5)", async ({
+  test("จอกว้าง 1280 px แท็บข้อมูลคลิป: ซ้าย คำอธิบาย · ขวา Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก (owner round 6)", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -822,16 +822,14 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     )
     const x = (box: typeof description) => box?.x ?? -1
     const y = (box: typeof description) => box?.y ?? -1
-    expect(Math.abs(x(chapters) - x(description))).toBeLessThan(2)
-    expect(y(description)).toBeLessThan(y(chapters))
-    // คอลัมน์ขวา: ช่วงดูซ้ำอยู่บนสุด เหนือคอมเมนต์ปักหมุด แล้วแท็ก
-    expect(Math.abs(x(replayed) - x(pinned))).toBeLessThan(2)
-    expect(Math.abs(x(tags) - x(pinned))).toBeLessThan(2)
+    // คอลัมน์ขวา: Chapter บนสุด แล้วช่วงดูซ้ำ คอมเมนต์ปักหมุด แท็ก
+    for (const box of [replayed, pinned, tags]) expect(Math.abs(x(box) - x(chapters))).toBeLessThan(2)
+    expect(y(chapters)).toBeLessThan(y(replayed))
     expect(y(replayed)).toBeLessThan(y(pinned))
     expect(y(pinned)).toBeLessThan(y(tags))
-    expect(x(replayed)).toBeGreaterThan(x(description) + (description?.width ?? 0))
+    expect(x(chapters)).toBeGreaterThan(x(description) + (description?.width ?? 0))
     // คอลัมน์ขวาเริ่มบรรทัดเดียวกับคอลัมน์ซ้าย
-    expect(Math.abs(y(replayed) - y(description))).toBeLessThan(2)
+    expect(Math.abs(y(chapters) - y(description))).toBeLessThan(2)
     // ลำดับใน DOM (= ลำดับ Tab) ตรงกับลำดับที่อ่าน: คอลัมน์ซ้ายก่อน แล้วคอลัมน์ขวา
     expect(await infoSectionOrder(page)).toEqual(INFO_ORDER)
   })
