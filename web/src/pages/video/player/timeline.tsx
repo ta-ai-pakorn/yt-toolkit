@@ -99,6 +99,10 @@ function TimelineBar({ durationMs, chapters, replayed, className }: Omit<Props, 
       onPointerCancel={() => {
         press.current = null
       }}
+      // ลากออกนอกแถบแล้วปล่อยข้างนอก = ไม่นับเป็นการแตะ (กันการกดค้างเก่าไปจับคู่กับการปล่อยครั้งหลัง)
+      onPointerLeave={() => {
+        press.current = null
+      }}
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
       onFocus={() => {
