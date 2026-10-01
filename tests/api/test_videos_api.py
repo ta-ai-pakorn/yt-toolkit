@@ -987,7 +987,14 @@ def test_failing_brake_is_logged_and_response_unchanged(brake_api, caplog):
 
 @pytest.mark.parametrize(
     ("code", "status"),
-    [("E_NETWORK", 502), ("E_YT_REFUSED", 502), ("E_VIDEO_PRIVATE", 404), ("E_UNKNOWN", 500)],
+    [
+        ("E_NETWORK", 502),
+        ("E_YT_REFUSED", 502),
+        ("E_VIDEO_PRIVATE", 404),
+        ("E_UNKNOWN", 500),
+        ("E_SESSION_WARMING", 503),
+        ("E_TRANSLATION_BLOCKED", 503),
+    ],
 )
 def test_other_errors_do_not_call_brake(brake_api, code, status):
     calls: list[int] = []

@@ -639,3 +639,30 @@ def test_open_services_fake_mode_has_no_session(paths, fake_platform, clean_thai
         assert not hasattr(extractor, "session")
     finally:
         db.close()
+
+
+# ---------- งานในคิวไม่นับว่าเปิดคลิป (ไม่ขึ้น "ล่าสุด") ----------
+
+
+def test_export_never_marks_a_clip_as_opened(make):
+    service, _, _, _, videos = make()
+    service.export(THAI, TRACK, "srt", PRESETS["medium"])
+    assert videos.recent(10, scope="opened") == ([], 0)  # โหลดซับแล้วแต่ไม่เคยเปิดคลิปใน W2
+    videos.get(THAI)  # เปิดจริงแล้วจึงขึ้น
+    assert [i["videoId"] for i in videos.recent(10, scope="opened")[0]] == [THAI]
+
+
+def test_tracks_tokens_and_note_do_not_stamp_opened_at_either(make):
+    service, _, _, _, videos = make()
+    service.tracks(THAI)
+    service.tokens(THAI, TRACK)
+    service.note(THAI, TRACK)
+    assert videos.recent(10, scope="opened") == ([], 0)
+
+
+def test_export_reprobe_keeps_existing_opened_at(make):
+    service, _, _, db, videos = make()
+    videos.get(THAI)
+    before = db.execute("SELECT opened_at FROM videos WHERE video_id = ?", (THAI,))[0]["opened_at"]
+    service.export(THAI, TRACK, "srt", PRESETS["medium"])
+    assert db.execute("SELECT opened_at FROM videos WHERE video_id = ?", (THAI,))[0]["opened_at"] == before

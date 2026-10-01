@@ -712,7 +712,7 @@ class VideoService:
                     data = None
                 if isinstance(data, dict):
                     return data
-            self.get(video_id, refresh=True)
+            self.get(video_id, refresh=True, peek=True)
         raise YtError("E_UNKNOWN", f"อ่านข้อมูลคลิป {video_id} ที่เก็บไว้ไม่ได้")
 
     def recent(
