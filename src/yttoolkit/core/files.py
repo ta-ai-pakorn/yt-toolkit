@@ -34,17 +34,24 @@ _WHITESPACE = re.compile(r"\s+")
 _BANGKOK = timezone(timedelta(hours=7))
 _CRLF = "\r\n"
 
-# ชื่อไฟล์ที่กำลังย้ายเข้าที่พร้อมกันหลายงานต้องไม่ได้ชื่อเดียวกัน จึงเลือกชื่อและย้ายภายใต้ล็อกเดียว
-_move_lock = threading.Lock()
 _note_locks: dict[str, threading.Lock] = {}
 _note_locks_guard = threading.Lock()
+# ".<lang>.<fmt>" ของไฟล์ซับถือเป็นนามสกุลก้อนเดียว เลขกันซ้ำจะได้อยู่หน้ารหัสภาษา ("t (2).th.srt") player ยังเห็นภาษา
+_SUB_EXT = re.compile(r"^(?P<stem>.+?)(?P<ext>\.[A-Za-z0-9-]+\.(?:srt|txt|md|vtt))$", re.IGNORECASE)
+_WINERROR_NOT_SAME_DEVICE = 17
+
+
+def _u16(text: str) -> int:
+    """ความยาวเป็น UTF-16 code unit (Windows นับ path แบบนี้ อีโมจิหนึ่งตัวนับ 2)"""
+    return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
 def safe_component(text: str, fallback: str) -> str:
     """ชื่อที่ใช้เป็นส่วนหนึ่งของ path บน Windows ได้: ตัดอักขระต้องห้ามและตัวควบคุม ช่องว่างติดกันเหลือช่องเดียว"""
     spaced = _WHITESPACE.sub(" ", text)
-    kept = "".join(ch for ch in spaced if ch not in _FORBIDDEN and unicodedata.category(ch) not in ("Cc", "Cf"))
-    name = kept.strip().rstrip(". ")
+    kept = "".join(ch for ch in spaced if ch not in _FORBIDDEN and unicodedata.category(ch) not in ("Cc", "Cf", "Cs"))
+    # ตัดตัวอักษรที่อยู่ระหว่างช่องว่างสองตัว ("Why | How") ทำให้เหลือช่องว่างติดกัน ต้องรวมอีกรอบ
+    name = _WHITESPACE.sub(" ", kept).strip().rstrip(". ")
     if not name:
         return fallback
     if name.split(".", 1)[0].strip().upper() in _RESERVED:
@@ -53,10 +60,16 @@ def safe_component(text: str, fallback: str) -> str:
 
 
 def truncate_title(text: str, limit: int) -> str:
-    """ตัดให้ไม่เกิน limit ตัวอักษร โดยไม่ทิ้งสระ/วรรณยุกต์ (หมวด M) ไว้ตัวแรกหลังรอยตัด"""
-    if len(text) <= limit:
+    """ตัดให้ยาวไม่เกิน limit (UTF-16 code unit) โดยไม่ทิ้งสระ/วรรณยุกต์ (หมวด M) ไว้ตัวแรกหลังรอยตัด"""
+    if _u16(text) <= limit:
         return text.rstrip(". ")
-    cut = max(limit, 0)
+    cut = 0
+    used = 0
+    for ch in text:
+        used += _u16(ch)
+        if used > limit:
+            break
+        cut += 1
     while cut > 0 and unicodedata.category(text[cut]).startswith("M"):
         cut -= 1
     return text[:cut].rstrip(". ")
@@ -65,44 +78,81 @@ def truncate_title(text: str, limit: int) -> str:
 def plan_output(root: Path, title: str, video_id: str, suffix: str, ext: str) -> Path:
     """path ปลายทางที่วางแผนไว้ (ยังไม่สร้างอะไร) ชื่อยาวเกินให้ตัดชื่อคลิป ถ้าไม่พอแม้แต่ 8 ตัวใช้ videoId แทน"""
     tail = f"{suffix}.{ext}"
-    assert len(tail) <= TAIL_RESERVE, "suffix + extension longer than TAIL_RESERVE"
+    assert _u16(tail) <= TAIL_RESERVE, "suffix + extension longer than TAIL_RESERVE"
     t = safe_component(title, video_id)
-    budget = PATH_LIMIT - (len(str(root)) + 1) - len(f" [{video_id}]") - 1 - TAIL_RESERVE - UNIQUE_RESERVE
+    budget = PATH_LIMIT - (_u16(str(root)) + 1) - _u16(f" [{video_id}]") - 1 - TAIL_RESERVE - UNIQUE_RESERVE
     cap = budget // 2
     short = ""
     if cap >= _MIN_TITLE:
-        short = truncate_title(t, min(TITLE_MAX, len(t), cap))
+        short = truncate_title(t, min(TITLE_MAX, cap))
     if short:
         planned = root / f"{short} [{video_id}]" / f"{short}{tail}"
     else:
         planned = root / video_id / f"{video_id}{tail}"
-    if len(str(planned)) > PATH_LIMIT - UNIQUE_RESERVE:
+    if _u16(str(planned)) > PATH_LIMIT - UNIQUE_RESERVE:
         raise YtError("E_OUTPUT_NOT_WRITABLE", "path too long")
     return planned
 
 
-def unique_path(path: Path) -> Path:
-    """path เดิมถ้ายังว่าง ไม่งั้น "<ชื่อ> (2)<นามสกุล>" ... "(99)" เต็มหมดให้ error"""
-    if not path.exists():
-        return path
+def _candidates(path: Path):
+    """path เดิม แล้ว "<ชื่อ> (2)<นามสกุล>" ... "(99)" (ไฟล์ซับ: "<ชื่อ> (2).<lang>.<fmt>")"""
+    yield path
+    match = _SUB_EXT.match(path.name)
+    stem, ext = (match["stem"], match["ext"]) if match else (path.stem, path.suffix)
     for n in range(2, 100):
-        candidate = path.with_name(f"{path.stem} ({n}){path.suffix}")
+        yield path.with_name(f"{stem} ({n}){ext}")
+
+
+def unique_path(path: Path) -> Path:
+    """path เดิมถ้ายังว่าง ไม่งั้นต่อ (2) ... (99) เต็มหมดให้ error"""
+    for candidate in _candidates(path):
         if not candidate.exists():
             return candidate
     raise YtError("E_OUTPUT_NOT_WRITABLE", f"no free name for {path.name}")
 
 
+def _reserve(planned: Path) -> Path:
+    """จองชื่อที่ว่างโดยสร้างไฟล์ว่างแบบ exclusive (atomic) หลายงานพร้อมกันจึงไม่ได้ชื่อซ้ำกัน"""
+    for candidate in _candidates(planned):
+        try:
+            with candidate.open("xb"):
+                pass
+        except FileExistsError:
+            continue
+        return candidate
+    raise YtError("E_OUTPUT_NOT_WRITABLE", f"no free name for {planned.name}")
+
+
+def _is_cross_device(err: OSError) -> bool:
+    return err.errno == errno.EXDEV or getattr(err, "winerror", None) == _WINERROR_NOT_SAME_DEVICE
+
+
+def _copy_across_devices(src: Path, final: Path) -> None:
+    """ข้ามไดรฟ์: คัดลอกเป็น <ชื่อ>.part แล้ว os.replace เป็นชื่อจริง ล้มเหลวตรงไหนก็ลบ .part ทิ้ง"""
+    part = final.with_name(final.name + ".part")
+    try:
+        shutil.copy2(src, part)
+        os.replace(part, final)
+    finally:
+        part.unlink(missing_ok=True)
+    src.unlink(missing_ok=True)
+
+
 def move_into_place(src: Path, planned: Path) -> Path:
     """ย้ายไฟล์จากโฟลเดอร์ทำงานเข้าที่หมาย (สร้างโฟลเดอร์ให้ ชื่อซ้ำต่อ (2)) คืน path สุดท้าย"""
+    final: Path | None = None
     try:
         planned.parent.mkdir(parents=True, exist_ok=True)
-        with _move_lock:
-            final = unique_path(planned)
-            try:
-                os.replace(src, final)
-            except OSError:
-                shutil.move(str(src), str(final))  # ข้ามไดรฟ์
+        final = _reserve(planned)
+        try:
+            os.replace(src, final)
+        except OSError as err:
+            if not _is_cross_device(err):
+                raise
+            _copy_across_devices(src, final)
     except OSError as err:
+        if final is not None:
+            final.unlink(missing_ok=True)  # คืนชื่อที่จองไว้
         if err.errno == errno.ENOSPC:
             raise YtError("E_DISK_FULL", str(err)) from err
         raise YtError("E_OUTPUT_NOT_WRITABLE", str(err)) from err

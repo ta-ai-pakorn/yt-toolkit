@@ -1,3 +1,7 @@
+import errno
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -44,7 +48,7 @@ def test_truncate_keeps_short_text_and_strips_tail():
 def test_reserved_and_trailing(tmp_path):
     assert files.safe_component("CON", ID) == "_CON"
     assert files.safe_component("  ชื่อ...  ", ID) == "ชื่อ"
-    assert files.safe_component("‮\x00", ID) == ID
+    assert files.safe_component("\u202e\x00", ID) == ID
 
 
 def test_safe_component_reserved_with_extension_and_whitespace():
@@ -160,3 +164,135 @@ def test_credit_line():
 
 def test_plan_output_returns_path_under_root(tmp_path):
     assert isinstance(files.plan_output(tmp_path, "x", ID, "", "mp4"), Path)
+
+
+def u16(text: str) -> int:
+    return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
+
+
+def test_safe_component_no_double_space_after_dropped_character():
+    assert files.safe_component("Why | How", ID) == "Why How"
+    assert files.safe_component("Part 1 : A", ID) == "Part 1 A"
+    assert files.safe_component("a / ? b", ID) == "a b"
+
+
+def test_safe_component_drops_lone_surrogates():
+    assert files.safe_component("a\ud800b", ID) == "ab"
+
+
+def test_emoji_title_is_counted_in_utf16_units(tmp_path):
+    p = files.plan_output(tmp_path, "😀" * 300, ID, " (ไม่มีเสียง)", "mp4")
+    assert u16(str(p)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
+    assert p.parent.name.endswith(f" [{ID}]") and "😀" in p.parent.name
+
+
+def test_truncate_title_counts_utf16_units():
+    assert files.truncate_title("😀😀😀", 4) == "😀😀"
+    assert files.truncate_title("😀😀😀", 5) == "😀😀"
+
+
+def test_empty_truncation_falls_back_to_id(tmp_path):
+    p = files.plan_output(tmp_path, "\u0e31" * 300, ID, "", "mp4")  # marks only: nothing left after the cut
+    assert p.parent.name == ID and p.name == f"{ID}.mp4"
+
+
+def test_unique_counter_goes_before_language_code(tmp_path):
+    first = tmp_path / "t.th.srt"
+    first.write_bytes(b"1")
+    assert files.unique_path(first).name == "t (2).th.srt"
+    (tmp_path / "t (2).th.srt").write_bytes(b"2")
+    assert files.unique_path(first).name == "t (3).th.srt"
+    zip_ = tmp_path / "t - frames.zip"
+    zip_.write_bytes(b"1")
+    assert files.unique_path(zip_).name == "t - frames (2).zip"
+
+
+def test_concurrent_moves_get_distinct_names(tmp_path):
+    planned = tmp_path / "out" / "a [id]" / "a.mp4"
+    srcs = []
+    for n in range(8):
+        src = tmp_path / "w" / f"{n}.mp4"
+        src.parent.mkdir(exist_ok=True)
+        src.write_bytes(str(n).encode())
+        srcs.append(src)
+    barrier = threading.Barrier(8)
+
+    def run(src: Path) -> Path:
+        barrier.wait()
+        return files.move_into_place(src, planned)
+
+    with ThreadPoolExecutor(8) as pool:
+        results = list(pool.map(run, srcs))
+    assert len(set(results)) == 8
+    assert sorted(p.read_bytes() for p in results) == [str(n).encode() for n in range(8)]
+    assert sorted(p.name for p in planned.parent.iterdir()) == sorted(p.name for p in results)
+
+
+def test_move_enospc_maps_to_disk_full_and_releases_name(tmp_path, monkeypatch):
+    src = tmp_path / "final.mp4"
+    src.write_bytes(b"x")
+    planned = tmp_path / "out" / "a [id]" / "a.mp4"
+
+    def full(*_args):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(files.os, "replace", full)
+    with pytest.raises(YtError) as err:
+        files.move_into_place(src, planned)
+    assert err.value.code == "E_DISK_FULL"
+    assert list(planned.parent.iterdir()) == [] and src.exists()
+
+
+def test_move_other_oserror_is_not_writable_without_copy_fallback(tmp_path, monkeypatch):
+    src = tmp_path / "final.mp4"
+    src.write_bytes(b"x")
+    planned = tmp_path / "out" / "a [id]" / "a.mp4"
+
+    def denied(*_args):
+        raise PermissionError(errno.EACCES, "denied")
+
+    def no_copy(*_args):
+        raise AssertionError("must not copy for a non cross-device error")
+
+    monkeypatch.setattr(files.os, "replace", denied)
+    monkeypatch.setattr(files.shutil, "copy2", no_copy)
+    with pytest.raises(YtError) as err:
+        files.move_into_place(src, planned)
+    assert err.value.code == "E_OUTPUT_NOT_WRITABLE"
+
+
+def _cross_device_replace(real_replace, src):
+    def replace(a, b):
+        if Path(a) == src:
+            raise OSError(errno.EXDEV, "cross-device")
+        return real_replace(a, b)
+
+    return replace
+
+
+def test_move_across_devices_copies_via_part_file(tmp_path, monkeypatch):
+    src = tmp_path / "final.mp4"
+    src.write_bytes(b"payload")
+    planned = tmp_path / "out" / "a [id]" / "a.mp4"
+    monkeypatch.setattr(files.os, "replace", _cross_device_replace(os.replace, src))
+    final = files.move_into_place(src, planned)
+    assert final == planned and final.read_bytes() == b"payload" and not src.exists()
+    assert [p.name for p in planned.parent.iterdir()] == ["a.mp4"]  # no .part left
+
+
+def test_move_across_devices_failed_copy_cleans_up(tmp_path, monkeypatch):
+    src = tmp_path / "final.mp4"
+    src.write_bytes(b"payload")
+    planned = tmp_path / "out" / "a [id]" / "a.mp4"
+    real_copy = files.shutil.copy2
+
+    def half_copy(a, b):
+        real_copy(a, b)
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(files.os, "replace", _cross_device_replace(os.replace, src))
+    monkeypatch.setattr(files.shutil, "copy2", half_copy)
+    with pytest.raises(YtError) as err:
+        files.move_into_place(src, planned)
+    assert err.value.code == "E_DISK_FULL"
+    assert list(planned.parent.iterdir()) == [] and src.read_bytes() == b"payload"
