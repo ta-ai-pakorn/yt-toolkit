@@ -36,10 +36,13 @@ test.describe("W2 หัวคลิป", () => {
     await expect(page).toHaveTitle("Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film · YT Toolkit")
   })
 
-  test("คลิปที่มี chapter แสดงป้าย '3 ตอน' และโลโก้พากลับหน้าแรก", async ({ page }) => {
+  test("คลิปที่มี chapter: จำนวนตอนอยู่ที่หัวข้อ 'Chapter (3 ตอน)' ไม่มีป้าย '3 ตอน' ซ้ำในแถวข้อมูล · โลโก้พากลับหน้าแรก", async ({
+    page,
+  }) => {
     await page.goto(`/v/${ZOO}`)
-    // exact: หัวข้อกล่อง "Chapter (3 ตอน)" ก็มีคำนี้
-    await expect(page.getByText("3 ตอน", { exact: true })).toBeVisible()
+    await expect(page.getByRole("heading", { level: 2, name: "Chapter (3 ตอน)" })).toBeVisible()
+    // owner round 2: ป้าย "{n} ตอน" ในแถวข้อมูลถูกเอาออก (ซ้ำกับหัวข้อกล่อง chapter)
+    await expect(page.getByText("3 ตอน", { exact: true })).toHaveCount(0)
     await expect(page.getByRole("banner").getByRole("link", { name: "YT Toolkit" })).toHaveAttribute("href", "/")
   })
 

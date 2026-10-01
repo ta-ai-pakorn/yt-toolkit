@@ -407,13 +407,24 @@ test.describe("W2 คำอธิบายและ chapter ที่หัว�
     await expect(page.getByText("คัดลอกไม่สำเร็จ ลองอีกครั้ง")).toBeVisible()
   })
 
-  test("คีย์บอร์ด: จากชื่อคลิป Tab ไป คัดลอกคำอธิบาย → ดูทั้งหมด → คัดลอก chapter → แท็บภาพเฟรม", async ({ page }) => {
+  test("คีย์บอร์ด: จากชื่อคลิป Tab ไป โน้ต → คัดลอกคำอธิบาย → ดูทั้งหมด → คอมเมนต์ปักหมุด → Chapter → คัดลอก chapter → แท็บภาพเฟรม", async ({
+    page,
+  }) => {
+    // ไม่มีแท็ก (กล่องแท็กเพิ่มจุด Tab อีกสองจุด ทดสอบไว้ใน clip-info.spec) และไม่รู้จำนวนคอมเมนต์ (มีแถวคอมเมนต์ปักหมุด)
+    await withVideo(page, ZOO, { tags: [], stats: undefined })
     await page.goto(`/v/${ZOO}`)
     const heading = page.getByRole("heading", { level: 1 })
     await expect(heading).toContainText("Me at the zoo")
     await expect(page.getByRole("button", { name: "ดูทั้งหมด" })).toBeVisible()
     await heading.focus()
-    for (const name of ["คัดลอกคำอธิบาย", "ดูทั้งหมด", "คัดลอก chapter"]) {
+    for (const name of [
+      "บันทึกเป็นโน้ต (.md)",
+      "คัดลอกคำอธิบาย",
+      "ดูทั้งหมด",
+      "คอมเมนต์ปักหมุดจากเจ้าของช่อง",
+      "Chapter (3 ตอน)",
+      "คัดลอก chapter",
+    ]) {
       await page.keyboard.press("Tab")
       await expect(page.getByRole("button", { name, exact: true })).toBeFocused()
     }

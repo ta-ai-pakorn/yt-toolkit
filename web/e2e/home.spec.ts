@@ -914,6 +914,14 @@ test.describe("ปรับจากการเดินตามเส้น�
   })
 
   test("เปิดหน้าคลิปด้วยคีย์บอร์ด (Enter ที่ 'เปิดดู') → โฟกัสไปที่ชื่อคลิป ไม่หลุดไปที่ body", async ({ page }) => {
+    // ไม่มีแท็กและไม่รู้จำนวนคอมเมนต์ (แถวคอมเมนต์ปักหมุดอยู่): ลำดับ Tab ข้างล่างไม่ขึ้นกับข้อมูลในชุดทดสอบของ backend
+    await page.route(
+      (url) => url.pathname === `/api/videos/${BBB}`,
+      async (route) => {
+        const response = await route.fetch()
+        await route.fulfill({ response, json: { ...((await response.json()) as object), tags: [], stats: undefined } })
+      },
+    )
     await page.goto("/")
     await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, NOT_YOUTUBE].join("\n"))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
@@ -922,12 +930,13 @@ test.describe("ปรับจากการเดินตามเส้น�
     const heading = page.getByRole("heading", { level: 1 })
     await expect(heading).toContainText("Big Buck Bunny")
     await expect(heading).toBeFocused()
-    // Tab ต่อไปเดินหน้าจากชื่อคลิป ไม่ต้องย้อนผ่านเมนูบนหัว: กล่องคำอธิบาย (คัดลอก → ดูทั้งหมด) → แท็บภาพเฟรม → ปุ่มในส่วนภาพเฟรม
+    // Tab ต่อไปเดินหน้าจากชื่อคลิป ไม่ต้องย้อนผ่านเมนูบนหัว: บันทึกเป็นโน้ต → กล่องคำอธิบาย (คัดลอก → ดูทั้งหมด)
+    // → แถวคอมเมนต์ปักหมุด → แท็บภาพเฟรม → ปุ่มในส่วนภาพเฟรม
     await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(128)
-    await page.keyboard.press("Tab")
-    await expect(page.getByRole("button", { name: "คัดลอกคำอธิบาย" })).toBeFocused()
-    await page.keyboard.press("Tab")
-    await expect(page.getByRole("button", { name: "ดูทั้งหมด" })).toBeFocused()
+    for (const name of ["บันทึกเป็นโน้ต (.md)", "คัดลอกคำอธิบาย", "ดูทั้งหมด", "คอมเมนต์ปักหมุดจากเจ้าของช่อง"]) {
+      await page.keyboard.press("Tab")
+      await expect(page.getByRole("button", { name, exact: true })).toBeFocused()
+    }
     await page.keyboard.press("Tab")
     await expect(page.getByRole("tab", { name: "ภาพเฟรม", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
