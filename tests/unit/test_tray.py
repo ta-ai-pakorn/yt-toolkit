@@ -1,6 +1,6 @@
 import pystray
 
-from yttoolkit.tray import ACCENT, MENU_LABELS, WINDOW, build_menu, make_icon_image
+from yttoolkit.tray import ACCENT, MENU_LABELS, RUNNING_LABEL, WINDOW, build_menu, build_tray, make_icon_image
 
 
 def test_icon_image_is_amber_square():
@@ -39,10 +39,28 @@ def test_icon_image_small_variant():
 
 def test_menu_labels_and_actions():
     calls = []
-    menu = build_menu(lambda: calls.append("open"), lambda: calls.append("folder"), lambda: calls.append("quit"))
+    menu = build_menu(
+        lambda: calls.append("open"), lambda: calls.append("folder"), lambda: calls.append("quit"), lambda: 0
+    )
     items = [item for item in menu.items if item is not pystray.Menu.SEPARATOR]
-    assert tuple(item.text for item in items) == MENU_LABELS
-    assert items[0].default is True
-    for item in items:
+    assert tuple(item.text for item in items[1:]) == MENU_LABELS
+    assert items[1].default is True
+    for item in items[1:]:
         item(None)
     assert calls == ["open", "folder", "quit"]
+
+
+def test_menu_first_row_shows_running_count_and_is_disabled():  # FR-LIFE-6
+    count = {"n": 0}
+    menu = build_menu(lambda: None, lambda: None, lambda: None, lambda: count["n"])
+    first = menu.items[0]
+    assert RUNNING_LABEL == "กำลังทำ {n} งาน"
+    assert first.text == "กำลังทำ 0 งาน"
+    assert first.enabled is False
+    count["n"] = 2
+    assert first.text == "กำลังทำ 2 งาน"  # อ่านตัวเลขใหม่ทุกครั้งที่สร้างเมนู
+
+
+def test_build_tray_wires_running_count():
+    icon = build_tray(lambda: None, lambda: None, lambda: None, lambda: 3)
+    assert icon.menu.items[0].text == "กำลังทำ 3 งาน"
