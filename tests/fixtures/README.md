@@ -145,6 +145,22 @@ ffmpeg -hide_banner -y -f lavfi -i testsrc=size=160x90 -frames:v 1 cover.jpg
 
 หมายเหตุ `license`: `probe/88o5Sk8_m1Y.json` มีฟิลด์ระดับบน `"license": "Creative Commons Attribution license (reuse allowed)"` ซึ่งใส่เข้าไปด้วยมือ (ตัวตัด probe `core/videos.trim_probe` ไม่เก็บฟิลด์นี้ และไฟล์ probe อื่นไม่มี) เพื่อให้เทสเครดิตของคลิป CC BY อ่านค่าจากไฟล์ได้ (`tests/unit/test_video_meta.py`) คลิปนี้เผยแพร่แบบ CC BY ตามหัวข้อ "ลิขสิทธิ์" ด้านล่าง
 
+## downloads/ (งานโหลดของตัวปลอม M4)
+`behaviors.json` (ตามสัญญา C14 ของแผน M4 ทุกตัวอักษร) บอก `FakeExtractor.download` ว่าแต่ละคลิปโหลดกี่ขั้น ขั้นละกี่มิลลิวินาที และพลาดตรงไหน ตัวปลอมไม่ต่อเน็ตและไม่ใช้ ffmpeg: เดินครบทุกขั้นแล้วคัดลอกไฟล์จาก `media/` (`video.mp4` เมื่อรวมภาพกับเสียง, `video-noaudio.mp4` เมื่อไม่มีเสียง, `audio.m4a` เมื่อโหลดเสียง) ไปเป็น `media.mp4` / `media.m4a` ใน workdir ของงาน
+
+- `default`: คลิปที่ไม่อยู่ใน `videos` โหลด 6 ขั้น ขั้นละ 120 ms (คลิปต้องมีไฟล์ใน `probe/` ไม่มี = `E_VIDEO_UNAVAILABLE` เหมือนเดิม)
+- `videos`: คลิปสังเคราะห์ ไม่มีไฟล์ใน `probe/` ของตัวเอง `probeAs` บอกว่าให้ใช้ข้อมูลของคลิปไหน (ทุกตัวใช้ Big Buck Bunny `aqz-KE-bpKQ`) แล้วตัวปลอมเปลี่ยน `id` เป็นของคลิปนั้นและเปลี่ยน `title` ตามที่ตั้งไว้
+- `failAtStep` / `error` / `failTimes`: พอถึงขั้นที่ `failAtStep` (นับจาก 0) ให้พลาดด้วยรหัส `error` ไม่เกิน `failTimes` ครั้งต่อคลิป นับตลอดอายุของตัวปลอมหนึ่งตัว (เปิดโปรแกรมใหม่ = เริ่มนับใหม่)
+
+| id | ชื่อคลิป | ทำอะไร | สเปก e2e ที่ใช้ |
+|---|---|---|---|
+| `SLOWDOWNLD1`..`SLOWDOWNLD4` | คลิปโหลดช้า 1..4 | 40 ขั้น ขั้นละ 250 ms (ราว 10 วินาที) ไว้เห็นงานที่กำลังโหลด งานรอคิว และการยกเลิก | `queue-flow.spec.ts` (T14) |
+| `BOTCHECKDL1` | คลิปติดบอท | พลาด `E_BOT_CHECK` ที่ขั้น 2 ครั้งเดียว แล้วรอบถัดไปผ่าน (Q1: คิวพัก งานกลับไปหัวคิวหนึ่งครั้ง แล้วโหลดได้) | `queue-flow.spec.ts` |
+| `NETRETRYDL1` | คลิปเน็ตหลุด | พลาด `E_NETWORK` ที่ขั้น 1 ครั้งเดียว แล้วรอบถัดไปผ่าน (ตัวนับ "ลองใหม่ครั้งที่ n/3") | `queue-flow.spec.ts` |
+| `REFUSEDDL01` | คลิปที่ยูทูปไม่ส่งไฟล์ | พลาด `E_YT_REFUSED` ตั้งแต่ขั้น 0 ทุกครั้ง (99 ครั้ง) งานจบเป็นสีแดง ไม่ลองซ้ำเอง (Q2) | `queue-flow.spec.ts` |
+
+เทสหน่วย (`tests/unit/test_extractor_download.py`) ส่งพารามิเตอร์ `behaviors` ชี้ไปที่สำเนาของไฟล์นี้ที่ตั้ง `stepMs` เป็น 0 จะได้ไม่ต้องรอ และเช็คว่าไฟล์นี้ตรงกับ C14 ทุกค่า แก้ไฟล์นี้ต้องแก้สัญญา C14 ในแผนก่อน
+
 ## ลิขสิทธิ์
 Big Buck Bunny © Blender Foundation | www.bigbuckbunny.org
 เผยแพร่ภายใต้ [Creative Commons Attribution 3.0](https://creativecommons.org/licenses/by/3.0/)

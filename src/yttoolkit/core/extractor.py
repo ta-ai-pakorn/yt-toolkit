@@ -12,9 +12,13 @@ import functools
 import importlib.metadata
 import json
 import logging
+import math
+import os
 import re
+import shutil
 import threading
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -22,6 +26,8 @@ from urllib.parse import parse_qs
 
 import httpx
 
+from .cancel import JobCancelled
+from .download import DownloadChoice, DownloadHooks, DownloadResult
 from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix_id
 from .visitor_session import VisitorSession
 from .yterrors import YtError, classify
@@ -147,7 +153,8 @@ def pinned_from_comment(comment: object) -> dict | None:
 # max_comments = max-comments, max-parents, max-replies, max-replies-per-thread, max-depth
 _COMMENT_ARGS = {"youtube": {"comment_sort": ["top"], "max_comments": ["1", "1", "0", "0", "1"]}}
 # error ของทางหลักที่ไม่ถอยไปทางสำรอง: ทางสำรองก็จะเจอแบบเดียวกัน (review M-1)
-_NO_FALLBACK = frozenset({"E_NETWORK", "E_BOT_CHECK"})
+# E_YT_REFUSED = ยูทูปตอบ 4xx (ไม่ใช่ 429) ยิงซ้ำทางสำรองก็ได้คำตอบเดิม (M4 T4 review M-1)
+_NO_FALLBACK = frozenset({"E_NETWORK", "E_BOT_CHECK", "E_YT_REFUSED"})
 
 
 def _first_comment_direct(ydl: Any, video_id: str) -> dict | None:
@@ -266,6 +273,171 @@ class _YtDlpLogger:
         log.debug("yt-dlp: %s", msg)
 
 
+class _PathHidingLogger(_YtDlpLogger):
+    """logger ของตัวโหลด: ข้อความของ yt-dlp มี path เต็มได้ (เช่น "Unable to delete file C:\\Users\\<ชื่อ>\\...")
+
+    แทน workdir ด้วย <workdir> และโฟลเดอร์ home ของผู้ใช้ด้วย ~ ก่อนลง log (ชื่อผู้ใช้ Windows ห้ามลง log)
+    เทียบแบบไม่สนตัวพิมพ์ และทั้งแบบ \\ กับ / (path อันยาวแทนก่อน)
+    """
+
+    def __init__(self, workdir: Path) -> None:
+        pairs: dict[str, str] = {}
+        for path, label in ((workdir, "<workdir>"), (workdir.resolve(), "<workdir>"), (Path.home(), "~")):
+            text = str(path)
+            if len(text) > 1:
+                for variant in (text, text.replace("\\", "/"), text.replace("/", "\\")):
+                    pairs.setdefault(variant.lower(), label)
+        ordered = sorted(pairs, key=len, reverse=True)
+        self._labels = pairs
+        self._pattern = re.compile("|".join(re.escape(p) for p in ordered), re.IGNORECASE)
+
+    def _hide(self, msg: str) -> str:
+        return self._pattern.sub(lambda m: self._labels[m.group(0).lower()], str(msg))
+
+    def debug(self, msg: str) -> None:
+        super().debug(self._hide(msg))
+
+    def info(self, msg: str) -> None:
+        super().info(self._hide(msg))
+
+    def warning(self, msg: str) -> None:
+        super().warning(self._hide(msg))
+
+    def error(self, msg: str) -> None:
+        super().error(self._hide(msg))
+
+
+# ---------- งานโหลดไฟล์ (C8) ----------
+
+# ไฟล์ที่ตัวโหลดเขียนใน workdir ขึ้นต้นด้วย "media." ทั้งหมด (ไฟล์สุดท้าย ไฟล์ format ย่อย .part .ytdl)
+_MEDIA_GLOB = "media.*"
+# Q2: ยูทูปไม่ส่งไฟล์ (4xx ที่ไม่ใช่ 429) ตอนโหลด -> ดึงข้อมูลใหม่ (ลิงก์ใหม่) แล้วโหลดอีกรอบเดียว
+_REFUSED_ATTEMPTS = 2
+
+
+def _yt_error(exc: BaseException) -> YtError:
+    """exception จาก yt-dlp -> YtError: YoutubeDLError จัดรหัสจากข้อความ ที่เหลือ (บั๊กภายใน) = E_UNKNOWN"""
+    from yt_dlp.utils import YoutubeDLError
+
+    if isinstance(exc, YoutubeDLError):
+        message = _ANSI.sub("", str(exc)) or type(exc).__name__
+        return YtError(classify(message), message)
+    return YtError("E_UNKNOWN", f"{type(exc).__name__}: {exc}")
+
+
+def _count(value: object) -> int | None:
+    """ตัวเลขจาก hook ของ yt-dlp (ไบต์ ความเร็ว วินาที) -> int ที่ไม่ติดลบ อย่างอื่น = ไม่รู้"""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return int(value)
+
+
+def _cancelled() -> BaseException:
+    """DownloadCancelled ของ yt-dlp: โยนจาก hook แล้ว yt-dlp หยุดโหลดทันที (download() แปลงเป็น JobCancelled)"""
+    from yt_dlp.utils import DownloadCancelled
+
+    return DownloadCancelled("cancelled by the user")
+
+
+def _progress_hook(hooks: DownloadHooks) -> Callable[[dict], None]:
+    """progress hook ของ yt-dlp -> on_stage / on_progress (ยกเลิกแล้ว = โยน DownloadCancelled)
+
+    แทร็กที่ไม่มีภาพ (vcodec "none") = กำลังโหลดเสียง เรียก on_stage เฉพาะตอนขั้นเปลี่ยน
+    สัดส่วนนับต่อแทร็ก (yt-dlp โหลดภาพกับเสียงแยกไฟล์กัน)
+    """
+    last: list[str] = []
+
+    def hook(d: dict) -> None:
+        if d.get("status") != "downloading":
+            return
+        if hooks.is_cancelled():
+            raise _cancelled()
+        info = d.get("info_dict") or {}
+        stage = "downloading_audio" if info.get("vcodec") == "none" else "downloading_video"
+        if last != [stage]:
+            last[:] = [stage]
+            hooks.on_stage(stage)
+        done = _count(d.get("downloaded_bytes"))
+        total = _count(d.get("total_bytes")) or _count(d.get("total_bytes_estimate"))
+        fraction = min(1.0, done / total) if done is not None and total else None
+        hooks.on_progress(fraction, _count(d.get("speed")), _count(d.get("eta")))
+
+    return hook
+
+
+def _pp_hook(hooks: DownloadHooks) -> Callable[[dict], None]:
+    """postprocessor hook: ตัวรวมภาพกับเสียง (FFmpegMergerPP ชื่อ "Merger") เริ่ม = ขั้น merging"""
+
+    def hook(d: dict) -> None:
+        if d.get("status") != "started":
+            return
+        if hooks.is_cancelled():
+            raise _cancelled()
+        if d.get("postprocessor") == "Merger":
+            hooks.on_stage("merging")
+
+    return hook
+
+
+def _download_opts(choice: DownloadChoice, workdir: Path, hooks: DownloadHooks) -> dict:
+    """ค่าตั้งของ YoutubeDL ตัวที่สอง (ตัวโหลด) ตาม C8 ไฟล์ออกเป็น workdir/media.<ext> ไฟล์ชั่วคราวก็อยู่ใน workdir"""
+    opts: dict[str, Any] = {
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "noplaylist": True,
+        "overwrites": True,
+        "socket_timeout": 20,
+        "retries": 3,
+        "fragment_retries": 3,
+        "format": choice.format_spec,
+        "outtmpl": {"default": "media.%(ext)s"},
+        "paths": {"home": str(workdir), "temp": str(workdir)},
+        "progress_hooks": [_progress_hook(hooks)],
+        "postprocessor_hooks": [_pp_hook(hooks)],
+        "logger": _PathHidingLogger(workdir),
+    }
+    if choice.merge_mp4:
+        opts["merge_output_format"] = "mp4"
+    if hooks.ffmpeg_location is not None:
+        opts["ffmpeg_location"] = str(hooks.ffmpeg_location)
+    return opts
+
+
+def _clear_media(workdir: Path) -> None:
+    """ลบไฟล์ media.* ที่โหลดค้างไว้ใน workdir (โหลดพลาดหรือถูกยกเลิก) ไม่แตะไฟล์อื่นของงาน
+
+    log บอกแค่ชื่อไฟล์ ไม่บอก path เต็ม (มีชื่อผู้ใช้ Windows)
+    """
+    for path in workdir.glob(_MEDIA_GLOB):
+        try:
+            if path.is_file():
+                path.unlink()
+        except OSError as exc:
+            log.warning("ลบไฟล์ที่โหลดค้าง %s ไม่ได้ (%s)", path.name, type(exc).__name__)
+
+
+def _is_partial(path: Path) -> bool:
+    return ".part" in path.name or path.name.endswith(".ytdl")
+
+
+def _media_path(result: object, workdir: Path) -> Path:
+    """ไฟล์ที่โหลดเสร็จ: requested_downloads[-1].filepath ถ้ามีและอยู่ใน workdir ไม่งั้นไฟล์ media.* ไฟล์เดียวที่ไม่ใช่ไฟล์ค้าง"""
+    downloads = result.get("requested_downloads") if isinstance(result, dict) else None
+    if isinstance(downloads, list) and downloads and isinstance(downloads[-1], dict):
+        filepath = downloads[-1].get("filepath")
+        if isinstance(filepath, str) and filepath:
+            path = Path(filepath)
+            if path.is_file() and path.resolve().is_relative_to(workdir.resolve()):
+                return path
+    found = [p for p in workdir.glob(_MEDIA_GLOB) if p.is_file() and not _is_partial(p)]
+    if len(found) == 1:
+        return found[0]
+    raise YtError("E_UNKNOWN", f"yt-dlp โหลดจบแต่หาไฟล์สื่อไม่ได้ (เจอ {len(found)} ไฟล์)")
+
+
 class YtDlpExtractor:
     """ตัวจริง: probe/playlist ผ่าน yt-dlp, fetch ผ่าน httpx.Client ตัวเดียวที่ใช้ร่วมกันทุก thread
 
@@ -287,7 +459,8 @@ class YtDlpExtractor:
         """YoutubeDL หนึ่งตัว with_session = ใช้เซสชันผู้ชม (ผ่าน cookiefile) แล้วบันทึกคืนตอนปิด"""
         import yt_dlp
 
-        params = {**opts, "logger": _YtDlpLogger()}
+        # opts ที่มี logger ของตัวเอง (ตัวโหลดใช้ตัวที่ซ่อน path) ใช้ตัวนั้น ไม่งั้นใช้ตัวปกติ
+        params = {"logger": _YtDlpLogger(), **opts}
         session = self.session if with_session else None
         if session is not None:
             params["cookiefile"] = str(session.path)
@@ -380,9 +553,9 @@ class YtDlpExtractor:
         ทางหลัก (ถูกสุด ~2 คำขอ innertube "next"): เรียกตัวดึงคอมเมนต์ของ yt-dlp ตรง ๆ
         ด้วย comment_sort=top และ max_comments=1 (คอมเมนต์ปักหมุดอยู่อันดับแรกเสมอ)
         เป็น API ภายในของ yt-dlp ที่อาจเปลี่ยนได้ทุกรุ่น ทางหลักพังด้วยเหตุอื่นที่ไม่ใช่เน็ตหรือยูทูปบล็อก
-        (exception ใดก็ได้ที่ไม่ใช่ YoutubeDLError หรือ YoutubeDLError ที่ไม่ใช่ E_NETWORK/E_BOT_CHECK)
+        (exception ใดก็ได้ที่ไม่ใช่ YoutubeDLError หรือ YoutubeDLError ที่ไม่อยู่ใน _NO_FALLBACK)
         ถอยไปใช้ getcomments ของ probe ปกติ (API สาธารณะ แพงกว่า: probe ทั้งคลิปอีกรอบ) จำกัดจำนวนเท่ากัน
-        เน็ตหลุดหรือยูทูปบล็อกโยนต่อทันที (ลองทางสำรองก็เจอแบบเดียวกัน แถมยิงยูทูปเพิ่ม)
+        เน็ตหลุด ยูทูปบล็อก หรือยูทูปปฏิเสธ (4xx) โยนต่อทันที (ลองทางสำรองก็เจอแบบเดียวกัน แถมยิงยูทูปเพิ่ม)
         """
         _check_video_id(video_id)
         import yt_dlp
@@ -414,6 +587,82 @@ class YtDlpExtractor:
             raise YtError("E_UNKNOWN", f"{type(exc).__name__}: {exc}") from exc
         return pinned_from_comment(first)
 
+    def download(
+        self,
+        video_id: str,
+        choose: Callable[[dict], DownloadChoice],
+        workdir: Path,
+        hooks: DownloadHooks,
+    ) -> DownloadResult:
+        """ดึงข้อมูลคลิปครั้งเดียว ให้ choose เลือก format แล้วโหลดลง workdir/media.<ext> (C8)
+
+        - YoutubeDL ตัวแรกดึงข้อมูล (เซสชันผู้ชมเดียวกับ probe) ตัวที่สองสร้างด้วย format ที่เลือก แล้วโหลดจาก
+          info ของรอบเดียวกัน (yt-dlp สร้างตัวเลือก format ตอนสร้าง YoutubeDL เปลี่ยนทีหลังไม่ได้) ไม่ดึงข้อมูลซ้ำ
+        - YtError จาก choose โยนต่อตามเดิม · ยกเลิก = JobCancelled · error ของ yt-dlp = YtError ตามข้อความ
+        - ยูทูปไม่ส่งไฟล์ (E_YT_REFUSED) ตอนโหลด: ดึงข้อมูล + เลือก + โหลดใหม่อีกรอบเดียว แล้วจึงโยน (Q2)
+        - พลาดหรือถูกยกเลิก: ลบไฟล์ media.* ที่ค้างใน workdir ไม่ทิ้งไฟล์ครึ่ง ๆ ไว้
+        """
+        _check_video_id(video_id)
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        attempt = 1
+        while True:
+            # ยกเลิกแล้วไม่ต้องรอดึงข้อมูลใหม่ (รอบแรกหรือรอบลองซ้ำของ Q2) หรือรอเริ่มโหลด
+            if hooks.is_cancelled():
+                raise JobCancelled()
+            source, info = self._extract_for_download(url)
+            choice = choose(info)
+            if hooks.is_cancelled():
+                raise JobCancelled()
+            try:
+                path = self._download_media(source, choice, workdir, hooks)
+            except YtError as exc:
+                _clear_media(workdir)
+                if exc.code != "E_YT_REFUSED" or attempt >= _REFUSED_ATTEMPTS:
+                    raise
+                attempt += 1
+                log.warning("ยูทูปไม่ส่งไฟล์ของ %s ดึงข้อมูลใหม่แล้วโหลดอีกครั้ง", video_id)
+                continue
+            except JobCancelled:
+                _clear_media(workdir)
+                raise
+            return DownloadResult(path=path, info=info, choice=choice)
+
+    def _extract_for_download(self, url: str) -> tuple[dict, dict]:
+        """(info สำหรับ process_ie_result, info ที่ sanitize แล้วสำหรับ choose และ DownloadResult)
+
+        ตอนดึงข้อมูล yt-dlp เลือก format ตามค่าตั้งต้นไปแล้ว (requested_formats ฯลฯ ค้างอยู่ระดับบน)
+        ถ้าส่ง info ดิบให้ตัวโหลด งานเสียงอย่างเดียวจะโหลด format เก่าที่ค้างอยู่ จึงล้างแบบเดียวกับที่ yt-dlp
+        ทำกับ --load-info-json (sanitize_info แบบ remove_private_keys) ก่อนส่งต่อ
+        """
+        try:
+            with self._ydl(_PROBE_OPTS, with_session=True) as ydl:
+                raw = ydl.extract_info(url, download=False)
+                if raw is None:
+                    raise YtError("E_UNKNOWN", f"yt-dlp ไม่คืนข้อมูลสำหรับ {url}")
+                info = check_live(ydl.sanitize_info(raw))
+                return ydl.sanitize_info(raw, remove_private_keys=True), info
+        except YtError:
+            raise
+        except Exception as exc:
+            raise _yt_error(exc) from exc
+
+    def _download_media(
+        self, source: dict, choice: DownloadChoice, workdir: Path, hooks: DownloadHooks
+    ) -> Path:
+        """YoutubeDL ตัวที่สองโหลดตาม choice แล้วคืนไฟล์ใน workdir"""
+        from yt_dlp.utils import DownloadCancelled
+
+        try:
+            with self._ydl(_download_opts(choice, workdir, hooks), with_session=True) as ydl:
+                result = ydl.process_ie_result(source, download=True)
+            return _media_path(result, workdir)
+        except (YtError, JobCancelled):
+            raise
+        except DownloadCancelled as exc:
+            raise JobCancelled() from exc
+        except Exception as exc:
+            raise _yt_error(exc) from exc
+
     def _extract(self, url: str, opts: dict, *, with_session: bool = False) -> dict:
         """เรียก yt-dlp แล้วแปลงทุกความผิดพลาดเป็น YtError (ห้ามมี exception ดิบหลุดออกไป)"""
         from yt_dlp.utils import YoutubeDLError
@@ -441,6 +690,9 @@ class FakeExtractor:
     ใช้กฎ id เดียวกับ YtDlpExtractor (ผิดรูปแบบ = E_INVALID_INPUT)
     หาไฟล์จากชื่อไฟล์ก่อน ถ้าไม่เจอจึงหาไฟล์ที่ฟิลด์ "id" ตรงกัน (เช่น live_upcoming.json มี id UPCOMINGLV1)
     calls บันทึกทุกการเรียกเป็น (ชื่อเมธอด, อาร์กิวเมนต์) ให้เทสนับได้
+
+    งานโหลด (download) ทำตาม behaviors (C14 ค่าตั้งต้น <fixtures_root>/downloads/behaviors.json):
+    จำนวนขั้น เวลาต่อขั้น และ error ที่ตั้งไว้ต่อคลิป แล้วคัดลอกไฟล์จาก media/ ไม่ใช้ ffmpeg ไม่ต่อเน็ต
     """
 
     PRIVATE_ID = "PRIVATEVID1"
@@ -448,25 +700,122 @@ class FakeExtractor:
     SUBS_PREFIX = "https://fake.invalid/subs/"
     _SAFE_NAME = re.compile(r"[A-Za-z0-9_-]+")
     _REPEAT_RANGE = range(1, 51)
+    _DEFAULT_BEHAVIOR = {"steps": 6, "stepMs": 120}
+    _FAKE_SPEED_BPS = 2_000_000  # ความเร็วสมมติที่รายงานทุกขั้น
 
-    def __init__(self, fixtures_root: Path) -> None:
+    def __init__(self, fixtures_root: Path, *, behaviors: Path | None = None) -> None:
         self.root = Path(fixtures_root)
         self.calls: list[tuple[str, str]] = []
+        self.behaviors_path = (
+            Path(behaviors) if behaviors is not None else self.root / "downloads" / "behaviors.json"
+        )
+        self._behaviors: dict | None = None
+        # จำนวนครั้งที่พลาดไปแล้วต่อคลิป นับตลอดอายุของตัวปลอมตัวนี้ (คิวรันหลายงานพร้อมกันได้ จึงมีล็อก)
+        self._failures: dict[str, int] = {}
+        self._lock = threading.Lock()
 
     def probe(self, video_id: str) -> dict:
+        """คลิปที่อยู่ใน behaviors และมี probeAs: อ่าน fixture ของ probeAs แล้วเปลี่ยน id (และ title ถ้ามี)"""
         self.calls.append(("probe", video_id))
         _check_video_id(video_id)
         if video_id == self.PRIVATE_ID:
             raise YtError(
                 "E_VIDEO_PRIVATE", f"ERROR: [youtube] {video_id}: Private video"
             )
-        info = self._load("probe", video_id)
+        entry = self._behavior_doc()["videos"].get(video_id) or {}
+        probe_as = entry.get("probeAs")
+        info = self._load("probe", probe_as if probe_as else video_id)
         if info is None:
             raise YtError(
                 "E_VIDEO_UNAVAILABLE",
                 f"ERROR: [youtube] {video_id}: This video is unavailable",
             )
+        if probe_as:
+            info["id"] = video_id
+            if entry.get("title"):
+                info["title"] = entry["title"]
         return check_live(info)
+
+    def download(
+        self,
+        video_id: str,
+        choose: Callable[[dict], DownloadChoice],
+        workdir: Path,
+        hooks: DownloadHooks,
+    ) -> DownloadResult:
+        """C8 ตัวปลอม: probe -> choose -> เดินทีละขั้น (เช็คยกเลิกก่อนทุกขั้น) -> คัดลอกไฟล์สื่อจาก media/
+
+        ขั้นครึ่งแรกเป็น downloading_video ครึ่งหลัง downloading_audio เมื่อรวมภาพกับเสียง (merge_mp4 และมี "+")
+        ไม่งั้นมีขั้นเดียว (วิดีโอไม่มีเสียง = downloading_video, เสียง = downloading_audio)
+        failAtStep/error/failTimes: พลาดที่ขั้นนั้นด้วยรหัสนั้น ไม่เกิน failTimes ครั้งต่อคลิป
+        ไฟล์เขียนเป็น .part ก่อนแล้วจึงเปลี่ยนชื่อ พลาดหรือยกเลิก = ลบ media.* ที่ค้างใน workdir
+        """
+        self.calls.append(("download", video_id))
+        info = self.probe(video_id)
+        choice = choose(info)
+        conf = self._behavior(video_id)
+        steps = max(1, int(conf["steps"]))
+        delay = max(0, conf["stepMs"]) / 1000
+        two_tracks = choice.merge_mp4 and "+" in choice.format_spec
+        if choice.merge_mp4:
+            source, target = ("video.mp4" if two_tracks else "video-noaudio.mp4"), "media.mp4"
+        else:
+            source, target = "audio.m4a", "media.m4a"
+        workdir.mkdir(parents=True, exist_ok=True)
+        stage = ""
+        try:
+            for step in range(steps):
+                if hooks.is_cancelled():
+                    raise JobCancelled()
+                self._maybe_fail(video_id, conf, step)
+                audio = not choice.merge_mp4 or (two_tracks and step >= steps / 2)
+                current = "downloading_audio" if audio else "downloading_video"
+                if current != stage:
+                    stage = current
+                    hooks.on_stage(current)
+                if delay:
+                    time.sleep(delay)
+                eta = math.ceil((steps - step - 1) * delay)
+                hooks.on_progress((step + 1) / steps, self._FAKE_SPEED_BPS, eta)
+            if hooks.is_cancelled():
+                raise JobCancelled()
+            if choice.merge_mp4:
+                hooks.on_stage("merging")
+            part = workdir / f"{target}.part"
+            shutil.copyfile(self.root / "media" / source, part)
+            os.replace(part, workdir / target)
+        except Exception:
+            _clear_media(workdir)
+            raise
+        return DownloadResult(path=workdir / target, info=info, choice=choice)
+
+    def _behavior_doc(self) -> dict:
+        """behaviors.json (อ่านครั้งเดียว) ไม่มีไฟล์ = ไม่มีคลิปพิเศษ ใช้ค่าตั้งต้น"""
+        with self._lock:
+            if self._behaviors is None:
+                doc: dict = {}
+                if self.behaviors_path.is_file():
+                    doc = json.loads(self.behaviors_path.read_text(encoding="utf-8"))
+                self._behaviors = {
+                    "default": dict(doc.get("default") or {}),
+                    "videos": dict(doc.get("videos") or {}),
+                }
+            return self._behaviors
+
+    def _behavior(self, video_id: str) -> dict:
+        doc = self._behavior_doc()
+        return {**self._DEFAULT_BEHAVIOR, **doc["default"], **(doc["videos"].get(video_id) or {})}
+
+    def _maybe_fail(self, video_id: str, conf: dict, step: int) -> None:
+        error = conf.get("error")
+        if not error or conf.get("failAtStep") != step:
+            return
+        with self._lock:
+            count = self._failures.get(video_id, 0)
+            if count >= int(conf.get("failTimes", 1)):
+                return
+            self._failures[video_id] = count + 1
+        raise YtError(str(error), f"fake: {video_id} ตั้งให้พลาดที่ขั้น {step} (ครั้งที่ {count + 1})")
 
     def playlist(self, playlist_id: str, limit: int, video_id: str | None = None) -> dict:
         self.calls.append(("playlist", playlist_id))
