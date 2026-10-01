@@ -15,8 +15,15 @@ import type {
 /** ค่าของตัวเลือก "อัตโนมัติ" ในรายการคุณภาพ (ให้ backend เลือกเอง) */
 export const AUTO_QUALITY = "auto"
 
-/** เพดานความละเอียดของโหมดเปิดได้ทุกที่ (H.264) นับที่ด้านสั้นของภาพ */
-const COMPAT_MAX_HEIGHT = 1080
+/** เพดานความละเอียดของโหมดเปิดได้ทุกที่ (H.264) นับที่ด้านสั้นของภาพ: 1080 (ค่าเริ่มต้น) หรือ 720 (การตั้งค่า compat-720) */
+export type CompatCap = 720 | 1080
+
+const DEFAULT_COMPAT_CAP: CompatCap = 1080
+
+/** เพดานจากการตั้งค่า: คุณภาพเริ่มต้น "เปิดได้ทุกที่ 720p" = 720 · อย่างอื่นหรือยังไม่โหลดการตั้งค่า = 1080 */
+export function compatCap(s: Pick<Settings, "videoDefault"> | undefined): CompatCap {
+  return s?.videoDefault === "compat-720" ? 720 : DEFAULT_COMPAT_CAP
+}
 
 /**
  * ความละเอียดของ format = ด้านสั้นของภาพ min(width, height) แบบเดียวกับ backend (C8) และ "res" ของ yt-dlp
@@ -46,18 +53,18 @@ export function codecLabel(vcodec: string): string {
 }
 
 /**
- * ตัวเลือกคุณภาพของแท็บวิดีโอ (ไม่รวม "อัตโนมัติ"): ปกติ = เฉพาะ H.264 ไม่เกิน 1080p (เปิดได้ทุกที่)
+ * ตัวเลือกคุณภาพของแท็บวิดีโอ (ไม่รวม "อัตโนมัติ"): ปกติ = เฉพาะ H.264 ไม่เกินเพดาน cap (1080p หรือ 720p ตามการตั้งค่า)
  * · ความละเอียดสูงสุด = ทุกแบบ · เรียงสูงไปต่ำ แล้ว fps มากไปน้อย · value = formatId
- * · ความละเอียดนับที่ด้านสั้น (resolution): Shorts 1080x1920 = 1080p ผ่านเพดานโหมดเปิดได้ทุกที่
+ * · ความละเอียดนับที่ด้านสั้น (resolution): Shorts 1080x1920 = 1080p ผ่านเพดาน 1080 (แต่ไม่ผ่านเพดาน 720)
+ * · ความละเอียดสูงสุด = ไม่สนเพดาน
  */
 export function qualityOptions(
   video: VideoInfo,
-  maxQuality: boolean
+  maxQuality: boolean,
+  cap: CompatCap = DEFAULT_COMPAT_CAP
 ): QualityOption[] {
   return video.video
-    .filter(
-      (f) => maxQuality || (f.compat && resolution(f) <= COMPAT_MAX_HEIGHT)
-    )
+    .filter((f) => maxQuality || (f.compat && resolution(f) <= cap))
     .map((f) => {
       const option: QualityOption = {
         value: f.formatId,
@@ -176,11 +183,12 @@ export function videoSizeEstimate(
   video: VideoInfo,
   quality: string,
   noAudio: boolean,
-  maxQuality = false
+  maxQuality = false,
+  cap: CompatCap = DEFAULT_COMPAT_CAP
 ): number | undefined {
   const picked: Pick<VideoFormat, "sizeBytes"> | undefined =
     quality === AUTO_QUALITY
-      ? qualityOptions(video, maxQuality)[0]
+      ? qualityOptions(video, maxQuality, cap)[0]
       : video.video.find((f) => f.formatId === quality)
   if (picked?.sizeBytes === undefined) return undefined
   if (noAudio) return picked.sizeBytes
@@ -193,10 +201,14 @@ export function batchMinutes(count: number, concurrency: number): number {
   return Math.max(1, Math.ceil((count * 35) / concurrency / 60))
 }
 
-/** ค่าของงานวิดีโอจากตัวเลือกในแท็บวิดีโอ: "auto" = ไม่ส่ง formatId · ฝังซับ = ส่งรหัสแทร็กพร้อมค่าความยาวซับ */
+/**
+ * ค่าของงานวิดีโอจากตัวเลือกในแท็บวิดีโอ: "auto" = ไม่ส่ง formatId · ฝังซับ = ส่งรหัสแทร็กพร้อมค่าความยาวซับ
+ * · เพดาน 720 (compatCap) และไม่เปิดความละเอียดสูงสุด = ส่ง maxHeight 720 ให้ backend (เพดาน 1080 = ไม่ส่ง เป็นค่าเริ่มต้นของ backend)
+ */
 export function buildVideoParams(input: {
   quality: string
   maxQuality: boolean
+  compatCap?: CompatCap
   noAudio: boolean
   audioLanguage: string
   embedSubs: string | null
@@ -208,6 +220,7 @@ export function buildVideoParams(input: {
     noAudio: input.noAudio,
     audioLanguage: input.audioLanguage,
   }
+  if (input.compatCap === 720 && !input.maxQuality) params.maxHeight = 720
   if (input.quality !== AUTO_QUALITY) params.formatId = input.quality
   if (input.embedSubs !== null) {
     params.embedSubs = input.embedSubs

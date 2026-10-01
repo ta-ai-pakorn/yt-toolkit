@@ -137,20 +137,20 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
   const qualityLabelId = useId()
   const embedLabelId = useId()
   const embedHintId = useId()
-  const { state, languages, remember } = useDownloadState(video, choices)
+  const { state, languages, remember, cap } = useDownloadState(video, choices)
   const subSettings = useSubSettings()
   const subtitles = useQuery(subtitlesQuery(video.videoId, enabled))
   const { enqueue, pending } = useEnqueue(ENQUEUE_MESSAGES)
 
-  const options = qualityOptions(video, state.maxQuality)
+  const options = qualityOptions(video, state.maxQuality, cap)
   // ความละเอียดสูงสุดเปิดอยู่: "อัตโนมัติ" = ภาพดีที่สุดของคลิป (อาจเป็น VP9/AV1) ไม่ใช่ "เปิดได้ทุกที่ 1080p"
   const autoLabel = state.maxQuality ? t.autoMax : t.auto
   const autoNotCompat = state.maxQuality && options.length > 0 && !options[0].compat
   const labels = new Map<string, string>([[AUTO_QUALITY, autoLabel]])
   for (const option of options) {
-    labels.set(option.value, optionLabel(option, videoSizeEstimate(video, option.value, state.noAudio, state.maxQuality)))
+    labels.set(option.value, optionLabel(option, videoSizeEstimate(video, option.value, state.noAudio, state.maxQuality, cap)))
   }
-  const size = videoSizeEstimate(video, state.quality, state.noAudio, state.maxQuality)
+  const size = videoSizeEstimate(video, state.quality, state.noAudio, state.maxQuality, cap)
 
   const tracks = subtitles.data ? embeddableTracks(subtitles.data.tracks, originalLanguage(subtitles.data.tracks, video.audio)) : []
   const embedSubs = resolveEmbed(choices.embedSubs, tracks)
@@ -163,13 +163,14 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
     const params = buildVideoParams({
       quality: state.quality,
       maxQuality: state.maxQuality,
+      compatCap: cap,
       noAudio: state.noAudio,
       audioLanguage: state.audioLanguage,
       embedSubs,
       subOptions: subSettings.options,
     })
     const ok = await enqueue([{ videoId: video.videoId, kind: "video", params, title: video.title }])
-    if (ok) remember(videoPrefsPatch(state, video, languages))
+    if (ok) remember(videoPrefsPatch(state, video, languages, cap))
   }
 
   return (

@@ -5,8 +5,10 @@ import { th } from "@/i18n/th"
 import {
   AUTO_QUALITY,
   audioLanguageOptions,
+  compatCap,
   qualityOptions,
   resolveAudioLanguage,
+  type CompatCap,
   type LanguageOption,
   type QualityOption,
 } from "@/lib/download-options"
@@ -71,15 +73,17 @@ export function languageOptions(video: VideoInfo): LanguageOption[] | null {
  * · คุณภาพที่เลือกไว้แต่ไม่อยู่ในรายการแล้ว (เช่น ปิดความละเอียดสูงสุดหลังเลือก 4K) = กลับไปใช้ความสูงที่จำไว้/อัตโนมัติ
  * · ภาษาเสียงที่จำไว้ = ภาษาที่ตรงในคลิปนี้ ("en" ใช้ "en-US" ได้) ไม่มี = ต้นฉบับ · คลิปไม่มีตัวเลือกภาษา = ต้นฉบับเสมอ
  * · "ไม่เอาเสียง" ไม่จำข้ามคลิป (เริ่มปิดทุกคลิป ผู้ใช้จะได้ไม่ได้ไฟล์เงียบโดยไม่รู้ตัว) · คลิปไม่มีเสียงเลย = เปิดเสมอ
+ * · cap = เพดานความละเอียดของโหมดเปิดได้ทุกที่ตามการตั้งค่า (720 หรือ 1080) ตัวเลือกเกินเพดานไม่อยู่ในรายการ
  */
 export function resolveDownloadState(
   prefs: DownloadPrefs,
   video: VideoInfo,
   languages: LanguageOption[] | null,
   choices: DownloadChoices,
+  cap: CompatCap = 1080,
 ): DownloadState {
   const maxQuality = choices.maxQuality ?? prefs.maxQuality
-  const options = qualityOptions(video, maxQuality)
+  const options = qualityOptions(video, maxQuality, cap)
   const chosen = choices.quality
   const quality =
     chosen !== undefined && (chosen === AUTO_QUALITY || options.some((option) => option.value === chosen))
@@ -117,9 +121,10 @@ export function videoPrefsPatch(
   state: DownloadState,
   video: VideoInfo,
   languages: LanguageOption[] | null,
+  cap: CompatCap = 1080,
 ): Partial<DownloadPrefs> {
   return {
-    quality: heightOf(qualityOptions(video, state.maxQuality), state.quality),
+    quality: heightOf(qualityOptions(video, state.maxQuality, cap), state.quality),
     maxQuality: state.maxQuality,
     ...languagePatch(state, languages),
   }
@@ -188,6 +193,8 @@ export function useDownloadState(video: VideoInfo, choices: DownloadChoices) {
   const settings = useQuery(settingsQuery())
   const [prefs, remember] = useDownloadPrefs(prefsFromSettings(settings.data))
   const languages = languageOptions(video)
-  const state = resolveDownloadState(prefs, video, languages, choices)
-  return { state, languages, remember }
+  // ยังไม่โหลดการตั้งค่า = เพดาน 1080
+  const cap = compatCap(settings.data)
+  const state = resolveDownloadState(prefs, video, languages, choices, cap)
+  return { state, languages, remember, cap }
 }

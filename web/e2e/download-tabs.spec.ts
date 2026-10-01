@@ -245,6 +245,36 @@ test.describe("W2 แท็บวิดีโอ", () => {
     await expect(selectedValue(page, "คุณภาพ")).toHaveText(/^720p · 60 fps · H\.264/)
   })
 
+  test("ตั้งค่า 'เปิดได้ทุกที่ 720p' → ไม่มีตัวเลือกเกิน 720p · เริ่มที่ 720p · อัตโนมัติส่ง maxHeight 720", async ({ page }) => {
+    // แทนเฉพาะ GET /api/settings ด้วยค่าปลอมในหน้า (ไม่เขียนการตั้งค่าจริง) · ไม่มีงานจริง (mockEnqueue ดัก POST /api/jobs)
+    await page.route("**/api/settings", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback()
+      const response = await route.fetch()
+      await route.fulfill({
+        response,
+        json: { ...((await response.json()) as object), videoDefault: "compat-720" },
+      })
+    })
+    const { bodies } = await mockEnqueue(page)
+    await openTab(page, BBB, "video")
+
+    // ไม่เคยจำค่าไว้ = เริ่มที่ 720p ตามการตั้งค่า · ไม่มีตัวเลือกเกิน 720p
+    await expect(selectedValue(page, "คุณภาพ")).toHaveText(/^720p · 60 fps · H\.264/)
+    await combobox(page, "คุณภาพ").click()
+    await expect(page.getByRole("option", { name: /^(1080|1440|2160)p/ })).toHaveCount(0)
+    await expect(page.getByRole("option", { name: /^720p · 60 fps · H\.264/ })).toHaveCount(1)
+    await page.keyboard.press("Escape")
+
+    // เลือก "อัตโนมัติ" (ตัวแรกของรายการ) แล้วส่ง: คำขอมี maxHeight 720 และไม่มี formatId
+    await choose(page, "คุณภาพ", /^เปิดได้ทุกที่ สูงสุด 1080p/)
+    await downloadMp4(page).click()
+    await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
+    expect(bodies).toHaveLength(1)
+    const params = bodies[0][0].params as VideoJobParams
+    expect(params).toMatchObject({ maxQuality: false, maxHeight: 720 })
+    expect(params).not.toHaveProperty("formatId")
+  })
+
   test("ฝังซับ: BBB ไม่มีซับ → กดไม่ได้ พร้อมเหตุผล 'คลิปนี้ไม่มีซับให้ฝัง' ใต้ช่องและใน Tooltip", async ({ page }) => {
     await openTab(page, BBB, "video")
     await expect(selectedValue(page, EMBED)).toHaveText("ไม่ฝัง")
