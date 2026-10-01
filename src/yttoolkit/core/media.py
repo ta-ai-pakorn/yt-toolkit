@@ -11,7 +11,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -236,29 +236,38 @@ def run_ffmpeg(
     popen_flags: int = 0,
 ) -> None:
     """รัน ffmpeg แล้วรายงานความคืบหน้า (0..1) จาก `-progress pipe:1` ยกเลิกได้ภายใน ~0.1 วินาที"""
-    proc = subprocess.Popen(
-        args,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        creationflags=popen_flags,
-    )
+    try:
+        proc = subprocess.Popen(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=popen_flags,
+        )
+    except (FileNotFoundError, PermissionError) as exc:
+        # ffmpeg ถูกลบ ย้าย หรือโดนโปรแกรมแอนตี้ไวรัสกักกันหลังจากหาเจอแล้ว
+        raise YtError("E_FFMPEG_MISSING", type(exc).__name__) from exc
     stderr_tail: list[str] = []
 
     def read_stdout() -> None:
         assert proc.stdout is not None
         for raw in proc.stdout:
             line = raw.decode("utf-8", errors="replace").strip()
-            if not line.startswith("out_time_us="):
+            # out_time_ms ของ ffmpeg เป็นไมโครวินาทีเหมือน out_time_us (ชื่อผิดมาตั้งแต่ต้น) รับไว้เป็นตัวสำรอง
+            if not line.startswith(("out_time_us=", "out_time_ms=")):
                 continue
             try:
                 micros = int(line.split("=", 1)[1])
             except ValueError:
                 continue
             if duration_s and duration_s > 0:
-                on_progress(min(1.0, max(0.0, micros / (duration_s * 1_000_000))))
+                value: float | None = min(1.0, max(0.0, micros / (duration_s * 1_000_000)))
             else:
-                on_progress(None)
+                value = None
+            try:
+                on_progress(value)
+            except Exception:
+                continue  # callback พัง ต้องไม่ทำให้ตัวอ่านหยุด ไม่งั้น ffmpeg จะค้างเพราะ pipe เต็ม
 
     def read_stderr() -> None:
         assert proc.stderr is not None
@@ -315,6 +324,11 @@ class FfmpegTools:
             raise YtError("E_FFMPEG_MISSING")
         return str(path)
 
+    @staticmethod
+    def _abs(path: Path | None) -> Path | None:
+        # path แบบสัมพัทธ์ที่ขึ้นต้นด้วย "-" จะถูก ffmpeg อ่านเป็นตัวเลือก
+        return path.resolve() if path is not None else None
+
     def _run(
         self,
         args: list[str],
@@ -342,7 +356,12 @@ class FfmpegTools:
         cancel: Callable[[], bool],
         on_progress: Callable[[float | None], None],
     ) -> None:
-        args = mp4_args(self._require(), src, dst, meta, cover=cover, subtitle=subtitle, audio_language=audio_language)
+        if subtitle is not None:
+            subtitle = replace(subtitle, path=subtitle.path.resolve())
+        args = mp4_args(
+            self._require(), src.resolve(), dst.resolve(), meta,
+            cover=self._abs(cover), subtitle=subtitle, audio_language=audio_language,
+        )  # fmt: skip
         self._run(args, meta, cancel, on_progress)
 
     def finalize_m4a(
@@ -356,7 +375,9 @@ class FfmpegTools:
         cancel: Callable[[], bool],
         on_progress: Callable[[float | None], None],
     ) -> None:
-        args = m4a_args(self._require(), src, dst, meta, cover=cover, audio_language=audio_language)
+        args = m4a_args(
+            self._require(), src.resolve(), dst.resolve(), meta, cover=self._abs(cover), audio_language=audio_language
+        )
         self._run(args, meta, cancel, on_progress)
 
     def to_mp3(
@@ -371,7 +392,10 @@ class FfmpegTools:
         cancel: Callable[[], bool],
         on_progress: Callable[[float | None], None],
     ) -> None:
-        args = mp3_args(self._require(), src, dst, meta, kbps=kbps, cover=cover, audio_language=audio_language)
+        args = mp3_args(
+            self._require(), src.resolve(), dst.resolve(), meta,
+            kbps=kbps, cover=self._abs(cover), audio_language=audio_language,
+        )  # fmt: skip
         self._run(args, meta, cancel, on_progress)
 
     def to_wav(
@@ -384,7 +408,7 @@ class FfmpegTools:
         cancel: Callable[[], bool],
         on_progress: Callable[[float | None], None],
     ) -> None:
-        args = wav_args(self._require(), src, dst, meta, audio_language=audio_language)
+        args = wav_args(self._require(), src.resolve(), dst.resolve(), meta, audio_language=audio_language)
         self._run(args, meta, cancel, on_progress)
 
 

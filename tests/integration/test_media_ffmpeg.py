@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -140,11 +142,36 @@ def test_bad_input_raises_unknown(tmp_path: Path) -> None:
     assert info.value.code == "E_UNKNOWN"
 
 
-def test_cancel_kills_process_quickly() -> None:
+def test_cancel_kills_process_quickly(monkeypatch: pytest.MonkeyPatch) -> None:
     ffmpeg = find_test_ffmpeg()
     assert ffmpeg is not None
+    started: list[subprocess.Popen[bytes]] = []
+    real_popen = subprocess.Popen
+
+    def recording_popen(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+        proc = real_popen(*args, **kwargs)
+        started.append(proc)
+        return proc
+
+    monkeypatch.setattr(subprocess, "Popen", recording_popen)
     start = time.monotonic()
     args = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-re", "-f", "lavfi", "-i", "sine=duration=30", "-f", "null", "-"]
     with pytest.raises(JobCancelled):
         run_ffmpeg(args, duration_s=30, cancel=lambda: time.monotonic() - start > 0.3, on_progress=_ignore)
     assert time.monotonic() - start < 1.5
+    assert len(started) == 1
+    assert started[0].poll() is not None
+
+
+def test_relative_name_starting_with_dash_is_not_an_option(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    shutil.copyfile(MEDIA / "audio.m4a", tmp_path / "-in.m4a")
+    monkeypatch.chdir(tmp_path)
+    _tools().to_wav(Path("-in.m4a"), Path("-out.wav"), META, audio_language=None, cancel=_never, on_progress=_ignore)
+    assert (tmp_path / "-out.wav").stat().st_size > 0
+
+
+def test_ffmpeg_removed_after_lookup_is_missing_error(tmp_path: Path) -> None:
+    tools = FfmpegTools(lambda: tmp_path / "gone" / "ffmpeg.exe")
+    with pytest.raises(YtError) as info:
+        tools.to_wav(MEDIA / "audio.m4a", tmp_path / "o.wav", META, audio_language=None, cancel=_never, on_progress=_ignore)
+    assert info.value.code == "E_FFMPEG_MISSING"
