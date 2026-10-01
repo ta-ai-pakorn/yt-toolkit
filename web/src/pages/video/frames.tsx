@@ -35,6 +35,8 @@ const t = th.frames
 /** grid 6 คอลัมน์ (จอแคบ 3 คอลัมน์) แสดงทุกภาพตั้งแต่แรก ไม่ต้องกด "ดูทั้งหมด" */
 const SKELETON_CELLS = 6
 const GRID = "grid grid-cols-3 gap-2 sm:grid-cols-6"
+// จอแคบ (มือถือ) ปุ่มในแถวเครื่องมือสูง 44 px ให้นิ้วกดได้ง่าย (แบบเดียวกับแท็บข้อมูลคลิป)
+const TOUCH = "max-sm:h-11"
 
 /** โหลดไฟล์ผ่านเบราว์เซอร์ พร้อม toast บอกสถานะ: error ขึ้นข้อความไทยจาก backend แทนที่จะได้ไฟล์ JSON */
 async function downloadWithToast(url: string, fallbackName: string): Promise<void> {
@@ -267,7 +269,8 @@ function FrameGrid({ frames, videoId, at, marked, filtered, onUnfilter, onViewSu
   const hiddenTarget = target >= 0 && highlighted < 0
   const revealed = useRef<number | null>(null)
 
-  // ภาพของเวลาใน URL ถูกตัวกรองซ่อนอยู่ (เช่นมาจาก chapter หรือบรรทัดทรานสคริปต์นอกช่วง): ปิดตัวกรองให้เห็นภาพนั้น
+  // ภาพของเวลาใน URL ถูกตัวกรองซ่อนอยู่ (เวลาใหม่จาก chapter หรือบรรทัดทรานสคริปต์นอกช่วงระหว่างที่กรองอยู่ หรือเปิดหน้า
+  // ด้วย ?at=…&replayed=1): ปิดตัวกรองให้เห็นภาพนั้น · การกดเปิดตัวกรองเองล้าง at ไปพร้อมกัน จึงไม่เข้าเงื่อนไขนี้
   useEffect(() => {
     if (hiddenTarget) onUnfilter()
   }, [hiddenTarget, onUnfilter])
@@ -341,7 +344,7 @@ function ReplayedFilterButton({ count, pressed, onToggle }: { count: number; pre
             size="sm"
             aria-pressed={pressed}
             onClick={onToggle}
-            className="aria-pressed:border-accent-text aria-pressed:bg-primary/15 dark:aria-pressed:border-accent-text dark:aria-pressed:bg-primary/15"
+            className="max-sm:h-11 aria-pressed:border-accent-text aria-pressed:bg-primary/15 dark:aria-pressed:border-accent-text dark:aria-pressed:bg-primary/15"
           />
         }
       >
@@ -409,6 +412,7 @@ function BulkDownloads({ videoId }: { videoId: string }) {
             <Button
               variant="secondary"
               size="sm"
+              className={TOUCH}
               disabled={busy !== null}
               focusableWhenDisabled
               onClick={() => void run("sheet", "contact-sheet.jpg", "contact-sheet.jpg")}
@@ -423,6 +427,7 @@ function BulkDownloads({ videoId }: { videoId: string }) {
       <Button
         variant="secondary"
         size="sm"
+        className={TOUCH}
         disabled={busy !== null}
         focusableWhenDisabled
         onClick={() => void run("zip", "frames.zip", "frames.zip")}
@@ -502,7 +507,9 @@ export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionP
                   <ReplayedFilterButton
                     count={marked.length}
                     pressed={filtered}
-                    onToggle={() => update({ replayed: !filtered })}
+                    // เปิดตัวกรอง = ล้างเวลาที่ไฮไลต์ไว้ (?at=) ในก้าวเดียวกัน ไม่งั้นภาพของเวลานั้นที่อยู่นอกช่วง
+                    // จะทำให้ตัวกรองปิดตัวเองทันที (ปุ่มดูเหมือนกดไม่ติด) · ปิดตัวกรองไม่แตะเวลา
+                    onToggle={() => update(filtered ? { replayed: false } : { replayed: true, at: null })}
                   />
                 )}
                 <BulkDownloads videoId={videoId} />

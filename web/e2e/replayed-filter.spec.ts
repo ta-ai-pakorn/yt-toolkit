@@ -173,6 +173,43 @@ test.describe("แท็บภาพเฟรม: ตัวกรอง 'ดู�
     await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=9790$`))
   })
 
+  test("ไปภาพของ chapter (?at= นอกช่วง) แล้วกดเปิดตัวกรอง: เปิดติด (ล้างเวลา) เห็นเฉพาะภาพที่มีป้าย (fix round 1)", async ({ page }) => {
+    // chapter เริ่ม 10 วินาที (?at=10000) → ภาพที่ใกล้ที่สุด 9790 ms (00:00:09) อยู่นอกช่วงดูซ้ำ
+    await withVideo(page, THAI, { mostReplayed: SEGMENTS, chapters: [{ startS: 10, endS: 50, title: "ตอนแรก" }] })
+    await page.goto(`/v/${THAI}?tab=info`)
+    await page.getByRole("button", { name: "ไปภาพเฟรมช่วง 00:00:10" }).click()
+    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=10000$`))
+    await expect(frameList(page).locator("[data-highlighted] img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:00:09")
+
+    await filterButton(page).click()
+    await expect(filterButton(page)).toHaveAttribute("aria-pressed", "true")
+    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?replayed=1$`))
+    await expect(frameList(page).getByRole("listitem")).toHaveCount(3)
+    expect(await frameAlts(page)).toEqual(IN_SEGMENTS)
+    // ไม่ปิดตัวเองตามมาทีหลัง
+    await page.waitForTimeout(300)
+    await expect(filterButton(page)).toHaveAttribute("aria-pressed", "true")
+    await expect(frameList(page).locator("[data-replayed]")).toHaveCount(3)
+
+    // กรองอยู่แล้วไป chapter อีกครั้ง (เวลาใหม่ชี้ภาพที่ถูกกรองออก): ตัวกรองปิดให้เห็นภาพนั้น
+    await tab(page, "ข้อมูลคลิป").click()
+    await page.getByRole("button", { name: "ไปภาพเฟรมช่วง 00:00:10" }).click()
+    await expect(frameList(page).locator("[data-highlighted] img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:00:09")
+    await expect(filterButton(page)).toHaveAttribute("aria-pressed", "false")
+    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=10000$`))
+  })
+
+  test("จอ 360 px: ปุ่มตัวกรองและปุ่มโหลดทั้งสองสูงอย่างน้อย 44 px และหน้าไม่ล้นจอ (fix round 1)", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 })
+    await withVideo(page, THAI, { mostReplayed: SEGMENTS })
+    await page.goto(`/v/${THAI}`)
+    for (const button of [filterButton(page), page.getByRole("button", { name: "โหลดภาพรวมเฟรม" }), page.getByRole("button", { name: ZIP, exact: true })]) {
+      await expect(button).toBeVisible()
+      expect((await button.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
+  })
+
   for (const scheme of ["dark", "light"] as const) {
     test(`เปิดตัวกรองแล้วไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
       await withVideo(page, THAI, { mostReplayed: SEGMENTS })
