@@ -12,6 +12,10 @@ import { HealthPanel } from "./settings/health-panel"
 const TABS = ["general", "health", "about"] as const
 type Tab = (typeof TABS)[number]
 
+// แท็บที่ไม่ได้เลือก: สี muted ผ่านเกณฑ์ contrast บนพื้น bg-muted ทั้งธีมสว่างและมืด (ค่าเริ่มต้น text-foreground/60 ได้ 4.32:1
+// ในธีมสว่าง ไม่ถึง 4.5:1) แบบเดียวกับแถบแท็บของหน้าคลิป
+const TRIGGER = "text-muted-foreground"
+
 export function SettingsPage() {
   const { tab } = useParams()
   const navigate = useNavigate()
@@ -25,9 +29,9 @@ export function SettingsPage() {
       <h1 className="text-2xl font-semibold">{th.settings.title}</h1>
       <Tabs value={current} onValueChange={(value) => navigate(`/settings/${value}`)}>
         <TabsList>
-          <TabsTrigger value="general">{th.settings.tabs.general}</TabsTrigger>
-          <TabsTrigger value="health">{th.settings.tabs.health}</TabsTrigger>
-          <TabsTrigger value="about">{th.settings.tabs.about}</TabsTrigger>
+          <TabsTrigger value="general" className={TRIGGER}>{th.settings.tabs.general}</TabsTrigger>
+          <TabsTrigger value="health" className={TRIGGER}>{th.settings.tabs.health}</TabsTrigger>
+          <TabsTrigger value="about" className={TRIGGER}>{th.settings.tabs.about}</TabsTrigger>
         </TabsList>
         <TabsContent value="general" className="pt-4">
           <GeneralPanel />
