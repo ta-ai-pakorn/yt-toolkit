@@ -922,10 +922,12 @@ test.describe("ปรับจากการเดินตามเส้น�
     const heading = page.getByRole("heading", { level: 1 })
     await expect(heading).toContainText("Big Buck Bunny")
     await expect(heading).toBeFocused()
-    // Tab ต่อไปเดินหน้าจากชื่อคลิป ไม่ต้องย้อนผ่านเมนูบนหัว: ปุ่มคัดลอกที่หัวคลิป → แท็บภาพเฟรม → ปุ่มในส่วนภาพเฟรม
+    // Tab ต่อไปเดินหน้าจากชื่อคลิป ไม่ต้องย้อนผ่านเมนูบนหัว: กล่องคำอธิบาย (คัดลอก → ดูทั้งหมด) → แท็บภาพเฟรม → ปุ่มในส่วนภาพเฟรม
     await expect(page.getByRole("list", { name: "รายการภาพเฟรม" }).getByRole("listitem")).toHaveCount(128)
     await page.keyboard.press("Tab")
     await expect(page.getByRole("button", { name: "คัดลอกคำอธิบาย" })).toBeFocused()
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "ดูทั้งหมด" })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(page.getByRole("tab", { name: "ภาพเฟรม", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")

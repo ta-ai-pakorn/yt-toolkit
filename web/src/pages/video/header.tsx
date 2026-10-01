@@ -8,7 +8,7 @@ import { formatDuration, formatPublished } from "@/lib/format"
 import type { VideoInfo } from "@/lib/types"
 import { Thumbnail } from "@/pages/home/thumbnail"
 
-import { CopyInfo } from "./copy-info"
+import { ClipDetails } from "./clip-details"
 import { LoadError } from "./load-error"
 import { subtitlesQuery } from "./subs-queries"
 import { trackInEffect, trackLabel } from "./track-label"
@@ -17,7 +17,8 @@ import { useVideoParams } from "./url-state"
 const t = th.video
 
 // ปกกับข้อมูลวางข้างกัน จอแคบวางซ้อน (ทั้งตอนโหลดและตอนมีข้อมูลใช้ขนาดเดียวกัน ภาพไม่กระโดด)
-const LAYOUT = "flex flex-col gap-4 sm:flex-row"
+// items-start: กางคำอธิบายแล้วฝั่งข้อมูลสูงขึ้น ปกยังเป็น 16:9 เท่าเดิม ไม่ถูกยืดตามความสูงของแถว
+const LAYOUT = "flex flex-col gap-4 sm:flex-row sm:items-start"
 const COVER = "w-full sm:w-72"
 
 function HeaderSkeleton() {
@@ -78,7 +79,7 @@ function Meta({ video, trackName }: { video: VideoInfo; trackName: string | null
 const focusLost = () => document.activeElement === null || document.activeElement === document.body
 
 /**
- * หัวคลิปของ W2: ปก ชื่อ ช่อง ความยาว จำนวนตอน วันที่เผยแพร่ แทร็กซับที่ใช้อยู่ และปุ่มคัดลอก chapter/คำอธิบาย
+ * หัวคลิปของ W2: ปก ชื่อ ช่อง ความยาว จำนวนตอน วันที่เผยแพร่ แทร็กซับที่ใช้อยู่ และกล่องคำอธิบาย/chapter พร้อมปุ่มคัดลอก
  * (โหลดอยู่ = Skeleton รูปเดียวกัน, ผิดพลาด = Alert)
  */
 export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error> }) {
@@ -120,7 +121,8 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
           {data.title}
         </h1>
         <Meta video={data} trackName={trackName} />
-        <CopyInfo video={data} />
+        {/* key: เปิดคลิปถัดไปแล้วกล่องคำอธิบาย/chapter กลับมาพับเหมือนเดิม */}
+        <ClipDetails key={data.videoId} video={data} />
       </div>
     </div>
   )

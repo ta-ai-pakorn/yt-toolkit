@@ -1,4 +1,7 @@
 /// <reference lib="dom" />
+import fs from "node:fs"
+import path from "node:path"
+
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page } from "@playwright/test"
 
@@ -77,6 +80,42 @@ test.describe("แท็บซับ", () => {
     expect(await firstCueLines(page).allTextContents()).toEqual(after)
   })
 
+  test("กด 'ทีละคำ' → ทุกซับในตัวอย่างมีคำเดียว จำนวนซับเท่ากับจำนวนคำ · ไฟล์ .srt ตรงกับ golden ทีละคำ", async ({
+    page,
+  }) => {
+    const tokensResponse = page.waitForResponse((r) => /\/subtitles\/[^/]+\/tokens$/.test(new URL(r.url()).pathname))
+    await openSubs(page, THAI)
+    const { tokens } = (await (await tokensResponse).json()) as { tokens: { t: string }[] }
+    expect(tokens.length).toBeGreaterThan(5)
+
+    await presetButton(page, "ทีละคำ").hover()
+    await expect(page.getByText("ซับละ 1 คำ แบบซับคลิปสั้น")).toBeVisible()
+    await presetButton(page, "ทีละคำ").click()
+    await expect(presetButton(page, "ทีละคำ")).toHaveAttribute("aria-pressed", "true")
+    // ซับทั้งแทร็กมีเท่าจำนวนคำ = ทุกซับมีคำเดียว (ไม่ใช่แค่ 5 ซับแรก)
+    await expect(stats(page)).toHaveText(new RegExp(`^${tokens.length} ซับ`))
+    await expect(cues(page)).toHaveCount(5)
+    for (let i = 0; i < 5; i++) {
+      const word = tokens[i].t.replace(/ {2,}/g, " ").replace(/^ +| +$/g, "")
+      await expect(cues(page).nth(i).locator('[data-slot="cue-line"]')).toHaveText([word])
+    }
+
+    // ไฟล์ที่ backend สร้างด้วยค่าของ "ทีละคำ" ตรงกับ golden ที่ฝั่ง Python และ TS ตรวจไว้ทุกไบต์
+    const downloading = page.waitForEvent("download")
+    await page.getByRole("group", { name: "โหลดซับ" }).getByRole("button", { name: "โหลด .srt" }).click()
+    const bytes = await (await downloading).createReadStream().then(async (stream) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of stream) chunks.push(chunk as Buffer)
+      return Buffer.concat(chunks)
+    })
+    const golden = fs.readFileSync(path.join(import.meta.dirname, "../../tests/fixtures/subs/golden/th-asr.word.srt"))
+    expect(bytes.equals(golden)).toBe(true)
+
+    await page.reload()
+    await expect(cues(page)).toHaveCount(5)
+    await expect(presetButton(page, "ทีละคำ")).toHaveAttribute("aria-pressed", "true")
+  })
+
   test("ปรับเอง: เลื่อนค่าแล้วขึ้นป้าย 'ใช้ค่าที่ปรับเอง' และไม่มีปุ่มสำเร็จรูปไหนถูกเลือก", async ({ page }) => {
     await openSubs(page, THAI)
     await page.getByRole("button", { name: "ปรับเอง" }).click()
@@ -85,7 +124,7 @@ test.describe("แท็บซับ", () => {
     await page.keyboard.press("ArrowRight")
     await expect(slider).toHaveAttribute("aria-valuenow", "26")
     await expect(page.getByText("ใช้ค่าที่ปรับเอง")).toBeVisible()
-    for (const name of ["สั้น", "กลาง", "ยาว"]) {
+    for (const name of ["สั้น", "กลาง", "ยาว", "ทีละคำ"]) {
       await expect(presetButton(page, name)).toHaveAttribute("aria-pressed", "false")
     }
   })

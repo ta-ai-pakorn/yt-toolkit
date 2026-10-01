@@ -16,6 +16,7 @@ const FRAME_COUNT = 128
 const NOT_YOUTUBE = "https://vimeo.com/123"
 const MENU_ITEMS = ["คัดลอกภาพ", "โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้"]
 
+const frameSection = (page: Page) => page.getByRole("region", { name: "ภาพเฟรม" })
 const frameItems = (page: Page) => page.getByRole("list", { name: FRAME_LIST }).getByRole("listitem")
 const frameButton = (page: Page, time: string) => page.getByRole("button", { name: `ภาพเฟรมที่ ${time}` })
 
@@ -37,7 +38,8 @@ test.describe("W2 หัวคลิป", () => {
 
   test("คลิปที่มี chapter แสดงป้าย '3 ตอน' และโลโก้พากลับหน้าแรก", async ({ page }) => {
     await page.goto(`/v/${ZOO}`)
-    await expect(page.getByText("3 ตอน")).toBeVisible()
+    // exact: หัวข้อกล่อง "Chapter (3 ตอน)" ก็มีคำนี้
+    await expect(page.getByText("3 ตอน", { exact: true })).toBeVisible()
     await expect(page.getByRole("banner").getByRole("link", { name: "YT Toolkit" })).toHaveAttribute("href", "/")
   })
 
@@ -170,8 +172,10 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(first).toHaveAttribute("loading", "lazy")
     await expect(first).toHaveAttribute("width", "320")
     await expect(first).toHaveAttribute("height", "180")
-    await expect(page.getByRole("button", { name: /ดูทั้งหมด/ })).toHaveCount(0)
-    await expect(page.getByRole("button", { name: "ย่อ" })).toHaveCount(0)
+    // เฉพาะส่วนภาพเฟรม (กล่องคำอธิบายที่หัวคลิปมีปุ่ม "ดูทั้งหมด" ของตัวเอง)
+    await expect(frameSection(page)).toBeVisible()
+    await expect(frameSection(page).getByRole("button", { name: /ดูทั้งหมด/ })).toHaveCount(0)
+    await expect(frameSection(page).getByRole("button", { name: "ย่อ" })).toHaveCount(0)
   })
 
   test("D7: ภาพสุดท้ายของคลิปยาว (00:10:3x) อยู่ในหน้าแล้วโดยไม่ต้องกดอะไร · ภาพที่อยู่ไกลจอใช้ content-visibility", async ({
@@ -461,7 +465,8 @@ test.describe("W2 จอแคบ", () => {
     expect(columns).toBe(3)
     await expect(frameItems(page).locator("visible=true")).toHaveCount(FRAME_COUNT)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    await expect(page.getByRole("button", { name: /ดูทั้งหมด/ })).toHaveCount(0)
+    await expect(frameSection(page)).toBeVisible()
+    await expect(frameSection(page).getByRole("button", { name: /ดูทั้งหมด/ })).toHaveCount(0)
   })
 })
 

@@ -1,13 +1,27 @@
 import { describe, expect, it } from "vitest"
 
 import type { SubOptions } from "./types"
-import { clampOptions, exportPath, LIMITS, presetOf, PRESETS } from "./sub-options"
+import { clampOptions, exportPath, isPresetName, LIMITS, PRESET_NAMES, presetOf, PRESETS } from "./sub-options"
 
 describe("presetOf", () => {
-  it("รู้จักค่าสำเร็จรูปทั้งสามแบบ", () => {
+  it("รู้จักค่าสำเร็จรูปทั้งสี่แบบ", () => {
     expect(presetOf(PRESETS.short)).toBe("short")
     expect(presetOf(PRESETS.medium)).toBe("medium")
     expect(presetOf(PRESETS.long)).toBe("long")
+    expect(presetOf(PRESETS.word)).toBe("word")
+  })
+
+  it("ทีละคำ = นับเป็นคำ 1 คำต่อซับ 1 บรรทัด ค่าอื่นเท่ากับสั้น (ตรงกับ core/srt_builder.py)", () => {
+    expect(PRESETS.word).toEqual({ maxChars: 15, lines: 1, minMs: 800, maxMs: 3000, mode: "tokens", tokensPerCue: 1 })
+    expect(PRESET_NAMES).toEqual(["short", "medium", "long", "word"])
+    // ปิด "นับเป็นคำ" จากทีละคำ = ค่าของสั้นพอดี · คำต่อซับ 2 = ปรับเอง
+    expect(presetOf({ ...PRESETS.word, mode: "chars" })).toBe("short")
+    expect(presetOf({ ...PRESETS.word, tokensPerCue: 2 })).toBeNull()
+  })
+
+  it("isPresetName รู้จักเฉพาะชื่อสำเร็จรูป", () => {
+    for (const name of PRESET_NAMES) expect(isPresetName(name)).toBe(true)
+    for (const value of ["custom", "huge", "", null, undefined, 1]) expect(isPresetName(value)).toBe(false)
   })
 
   it("ค่าที่แก้แล้วให้ null", () => {

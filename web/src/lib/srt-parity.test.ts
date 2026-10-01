@@ -34,6 +34,8 @@ const golden = new Map<string, string>(Object.entries(goldenFiles).map(([path, r
 const CUSTOM: SubOptions = { maxChars: 30, lines: 2, minMs: 1000, maxMs: 6000, mode: "tokens", tokensPerCue: 4 }
 const NAMES = ["th-asr", "th-vtt", "en-asr", "en-owner", "th-owner"] as const
 const PRESET_NAMES = ["short", "medium", "long"] as const
+// preset "ทีละคำ" มี golden เฉพาะซับอัตโนมัติที่มีเวลาระดับคำ ไทยและอังกฤษ (ตรงกับ WORD_NAMES ใน test_srt_golden.py)
+const WORD_NAMES = ["th-asr", "en-asr"] as const
 
 function expected(file: string): string {
   const text = golden.get(file)
@@ -43,14 +45,15 @@ function expected(file: string): string {
 
 describe("golden files found", () => {
   it("finds exactly the expected golden and token files", () => {
-    // 5 ชื่อ x (3 srt + txt + md) + custom-tokens = 26 ไฟล์ ขาดหรือเกินแม้ไฟล์เดียวต้องแดง
+    // 5 ชื่อ x (3 srt + txt + md) + ทีละคำ 2 ไฟล์ + custom-tokens = 28 ไฟล์ ขาดหรือเกินแม้ไฟล์เดียวต้องแดง
     const names: string[] = [`th-asr.custom-tokens.srt`]
     for (const name of NAMES) {
       for (const preset of PRESET_NAMES) names.push(`${name}.${preset}.srt`)
       names.push(`${name}.txt`, `${name}.md`)
     }
+    for (const name of WORD_NAMES) names.push(`${name}.word.srt`)
     expect([...golden.keys()].sort()).toEqual(names.sort())
-    expect(golden.size).toBe(26)
+    expect(golden.size).toBe(28)
     expect([...tokenDocs.keys()].sort()).toEqual([...NAMES].sort())
   })
 
@@ -77,6 +80,16 @@ describe.each(NAMES)("%s parity with the Python builder", (name) => {
 
   it(".md", () => {
     expect(toMd(doc.tokens, doc.md)).toBe(expected(`${name}.md`))
+  })
+})
+
+describe.each(WORD_NAMES)("%s word preset parity", (name) => {
+  it("word .srt", () => {
+    const doc = tokenDocs.get(name)
+    if (!doc) throw new Error(`tokens/${name}.json is missing`)
+    const cues = buildCues(doc.tokens, PRESETS.word)
+    expect(cues).toHaveLength(doc.tokens.length)
+    expect(toSrt(cues)).toBe(expected(`${name}.word.srt`))
   })
 })
 

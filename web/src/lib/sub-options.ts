@@ -1,10 +1,23 @@
 import type { SubExportFormat, SubOptions, SubPreset } from "@/lib/types"
 
-/** ค่าสำเร็จรูป 3 แบบ ต้องตรงกับ core/srt_builder.py ทุกตัวเลข (สัญญา C5) */
+/**
+ * ค่าสำเร็จรูป 4 แบบ ต้องตรงกับ core/srt_builder.py ทุกตัวเลข (สัญญา C5) ลำดับเดียวกับปุ่มในหน้าเว็บ
+ * "ทีละคำ" (word) = ซับละ 1 token แบบซับคลิปสั้น: token เดียวไม่ถูกตัดและยาวเกิน maxChars ได้
+ * ค่าตัวอักษรกับเวลาจึงเท่ากับ "สั้น" (คำแสดงค้างได้ถึง 0.8 วิ หรือจนคำถัดไปขึ้น)
+ */
 export const PRESETS: Record<SubPreset, SubOptions> = {
   short: { maxChars: 15, lines: 1, minMs: 800, maxMs: 3000, mode: "chars" },
   medium: { maxChars: 25, lines: 1, minMs: 1200, maxMs: 5000, mode: "chars" },
   long: { maxChars: 42, lines: 2, minMs: 1500, maxMs: 7000, mode: "chars" },
+  word: { maxChars: 15, lines: 1, minMs: 800, maxMs: 3000, mode: "tokens", tokensPerCue: 1 },
+}
+
+/** ชื่อสำเร็จรูปตามลำดับปุ่ม: สั้น · กลาง · ยาว · ทีละคำ */
+export const PRESET_NAMES = Object.keys(PRESETS) as SubPreset[]
+
+/** ชื่อสำเร็จรูปที่รู้จัก (ใช้ตรวจค่าที่จำไว้ในเบราว์เซอร์) */
+export function isPresetName(value: unknown): value is SubPreset {
+  return PRESET_NAMES.some((name) => name === value)
 }
 
 export const DEFAULT_PRESET: SubPreset = "medium"
@@ -59,7 +72,7 @@ function sameOptions(a: SubOptions, b: SubOptions): boolean {
 
 /** ชื่อสำเร็จรูปที่ตรงกับค่านี้ทุกช่อง ไม่ตรงสักแบบคือ null (= ปรับเอง) */
 export function presetOf(o: SubOptions): SubPreset | null {
-  for (const name of Object.keys(PRESETS) as SubPreset[]) {
+  for (const name of PRESET_NAMES) {
     if (sameOptions(o, PRESETS[name])) return name
   }
   return null

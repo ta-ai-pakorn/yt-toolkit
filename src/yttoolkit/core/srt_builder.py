@@ -52,6 +52,9 @@ PRESETS: dict[str, SubOptions] = {
     "short": SubOptions(max_chars=15, lines=1, min_ms=800, max_ms=3000),
     "medium": SubOptions(max_chars=25, lines=1, min_ms=1200, max_ms=5000),
     "long": SubOptions(max_chars=42, lines=2, min_ms=1500, max_ms=7000),
+    # "ทีละคำ" (พิธตัดสิน 2026-10-01): ซับละ 1 token แบบซับคลิปสั้น · token เดียวไม่ถูกตัดอยู่แล้ว
+    # และยาวเกิน max_chars ได้ ค่าตัวอักษรกับเวลาจึงเท่ากับ "สั้น" (คำแสดงค้างได้ถึง 0.8 วิ หรือจนคำถัดไปขึ้น)
+    "word": SubOptions(max_chars=15, lines=1, min_ms=800, max_ms=3000, mode="tokens", tokens_per_cue=1),
 }
 LIMITS: dict[str, tuple[int, int]] = {
     "maxChars": (10, 60),

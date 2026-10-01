@@ -21,6 +21,7 @@ describe("loadSubSettings", () => {
   it("อ่านชื่อสำเร็จรูปที่จำไว้", () => {
     expect(loadSubSettings(store('{"v":1,"preset":"short"}'))).toEqual({ preset: "short", options: PRESETS.short })
     expect(loadSubSettings(store('{"v":1,"preset":"long"}'))).toEqual({ preset: "long", options: PRESETS.long })
+    expect(loadSubSettings(store('{"v":1,"preset":"word"}'))).toEqual({ preset: "word", options: PRESETS.word })
   })
 
   it("ค่าที่ปรับเองได้ preset custom และถูกบีบให้อยู่ในช่วง", () => {

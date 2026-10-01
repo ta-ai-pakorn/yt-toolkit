@@ -50,11 +50,29 @@ def test_cases_file_shape() -> None:
         "two-lines-middle", "two-lines-fits-one", "whitespace-collapse", "over-one-hour", "empty",
         "txt-paragraphs", "md-chapters", "md-two-minute-sections",
         "two-lines-per-line-cap", "two-lines-thai-no-space", "two-lines-long-token-alone",
-        "two-lines-merge-refused-per-line",
+        "two-lines-merge-refused-per-line", "word-preset-english", "word-preset-thai",
     ):
         assert required in names
     raw = (FIXTURES / "subs" / "builder-cases.json").read_bytes()
     assert b"\r" not in raw  # CRLF only appears as JSON escapes
+
+
+@pytest.mark.parametrize("name", ["short", "medium", "long", "word"])
+def test_every_preset_passes_api_validation(name: str) -> None:
+    # หน้าเว็บส่งค่าของ preset ไปที่ /export ตรง ๆ ทุก preset จึงต้องผ่าน LIMITS
+    p = PRESETS[name]
+    d = {"maxChars": p.max_chars, "lines": p.lines, "minMs": p.min_ms, "maxMs": p.max_ms, "mode": p.mode}
+    if p.tokens_per_cue is not None:
+        d["tokensPerCue"] = p.tokens_per_cue
+    assert options_from_dict(d) == p
+
+
+def test_word_preset_gives_one_token_per_cue() -> None:
+    # ทุกซับมี token เดียว รวมถึงคำที่ยาวเกิน max_chars และคำที่สั้นกว่าเวลาขั้นต่ำ (ไม่ถูกรวมกับคำถัดไป)
+    toks = [Token("a", 0, 100), Token(" b", 100, 200), Token(" " + "x" * 40, 200, 300), Token(" c", 5000, 5100)]
+    cues = build_cues(toks, PRESETS["word"])
+    assert [c.lines for c in cues] == [("a",), ("b",), ("x" * 40,), ("c",)]
+    assert [(c.start_ms, c.end_ms) for c in cues] == [(0, 100), (100, 200), (200, 1000), (5000, 5800)]
 
 
 def _case_options(o: dict) -> SubOptions:
@@ -111,8 +129,11 @@ def test_constants() -> None:
         "short": SubOptions(max_chars=15, lines=1, min_ms=800, max_ms=3000),
         "medium": SubOptions(max_chars=25, lines=1, min_ms=1200, max_ms=5000),
         "long": SubOptions(max_chars=42, lines=2, min_ms=1500, max_ms=7000),
+        "word": SubOptions(max_chars=15, lines=1, min_ms=800, max_ms=3000, mode="tokens", tokens_per_cue=1),
     }
-    assert all(p.mode == "chars" and p.tokens_per_cue is None for p in PRESETS.values())
+    assert list(PRESETS) == ["short", "medium", "long", "word"]  # ลำดับเดียวกับปุ่มในหน้าเว็บ
+    chars = [p for name, p in PRESETS.items() if name != "word"]
+    assert all(p.mode == "chars" and p.tokens_per_cue is None for p in chars)
     assert LIMITS == {
         "maxChars": (10, 60),
         "lines": (1, 2),

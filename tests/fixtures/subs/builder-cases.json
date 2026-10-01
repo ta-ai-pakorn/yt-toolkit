@@ -410,6 +410,50 @@
         "chapters": [],
         "out": "# Two minute sections\r\n\r\nhttps://www.youtube.com/watch?v=88o5Sk8_m1Y\r\n\r\n## [00:00]\r\n\r\nStart\r\n\r\nagain\r\n\r\nstill\r\n\r\n## [02:00]\r\n\r\nnext\r\n\r\n## [06:00]\r\n\r\nlater\r\n\r\n## [1:00:00]\r\n\r\nhour\r\n"
       }
+    },
+    {
+      "name": "word-preset-english",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "Hello", "s": 0, "e": 400},
+        {"t": " world", "s": 400, "e": 900},
+        {"t": " this", "s": 900, "e": 1300},
+        {"t": " is", "s": 1300, "e": 1500},
+        {"t": " internationalization", "s": 3000, "e": 4200},
+        {"t": " ok", "s": 4200, "e": 4300}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 400, "lines": ["Hello"]},
+        {"startMs": 400, "endMs": 900, "lines": ["world"]},
+        {"startMs": 900, "endMs": 1300, "lines": ["this"]},
+        {"startMs": 1300, "endMs": 2100, "lines": ["is"]},
+        {"startMs": 3000, "endMs": 4200, "lines": ["internationalization"]},
+        {"startMs": 4200, "endMs": 5000, "lines": ["ok"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,400\r\nHello\r\n\r\n2\r\n00:00:00,400 --> 00:00:00,900\r\nworld\r\n\r\n3\r\n00:00:00,900 --> 00:00:01,300\r\nthis\r\n\r\n4\r\n00:00:01,300 --> 00:00:02,100\r\nis\r\n\r\n5\r\n00:00:03,000 --> 00:00:04,200\r\ninternationalization\r\n\r\n6\r\n00:00:04,200 --> 00:00:05,000\r\nok\r\n",
+      "txt": "Hello world this is internationalization ok\r\n"
+    },
+    {
+      "name": "word-preset-thai",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "สวัสดี", "s": 0, "e": 500},
+        {"t": "ครับ", "s": 500, "e": 800},
+        {"t": "วันนี้", "s": 800, "e": 1400},
+        {"t": "เรา", "s": 1400, "e": 1600},
+        {"t": "มาเรียนภาษาไทยกันอย่างสนุกสนาน", "s": 1600, "e": 3900},
+        {"t": "นะ", "s": 6000, "e": 6200}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 500, "lines": ["สวัสดี"]},
+        {"startMs": 500, "endMs": 800, "lines": ["ครับ"]},
+        {"startMs": 800, "endMs": 1400, "lines": ["วันนี้"]},
+        {"startMs": 1400, "endMs": 1600, "lines": ["เรา"]},
+        {"startMs": 1600, "endMs": 3900, "lines": ["มาเรียนภาษาไทยกันอย่างสนุกสนาน"]},
+        {"startMs": 6000, "endMs": 6800, "lines": ["นะ"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,500\r\nสวัสดี\r\n\r\n2\r\n00:00:00,500 --> 00:00:00,800\r\nครับ\r\n\r\n3\r\n00:00:00,800 --> 00:00:01,400\r\nวันนี้\r\n\r\n4\r\n00:00:01,400 --> 00:00:01,600\r\nเรา\r\n\r\n5\r\n00:00:01,600 --> 00:00:03,900\r\nมาเรียนภาษาไทยกันอย่างสนุกสนาน\r\n\r\n6\r\n00:00:06,000 --> 00:00:06,800\r\nนะ\r\n",
+      "txt": "สวัสดีครับวันนี้เรามาเรียนภาษาไทยกันอย่างสนุกสนาน\r\n\r\nนะ\r\n"
     }
   ]
 }
