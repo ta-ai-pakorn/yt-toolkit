@@ -29,7 +29,7 @@ from ..core.storyboard import FOLDER as STORYBOARD_FOLDER
 from ..core.storyboard import INDEX as STORYBOARD_INDEX
 from ..core.storyboard import get_storyboard
 from ..core.yterrors import MESSAGES, YtError
-from .errors import error_response
+from .errors import error_body, error_response
 from .safepath import safe_parts
 
 if TYPE_CHECKING:
@@ -57,6 +57,9 @@ STATUS_BY_CODE: dict[str, int] = {
     "E_BOT_CHECK": 429,
     # ซับแปลถูกยูทูปปิดชั่วคราว (ต้นทางตอบ 429) ใช้ 503 ให้ต่างจาก E_BOT_CHECK ที่หมายถึงพักทั้งคิว
     "E_TRANSLATION_BLOCKED": 503,
+    # เซสชันผู้ชมยังไม่พร้อมสำหรับซับแปล: 503 + Retry-After (มาตรฐาน HTTP ของ "กลับมาใหม่ในอีก N วินาที")
+    # ไม่ใช้ 425 Too Early เพราะรหัสนั้นหมายถึงคำขอแบบ TLS early data ไม่ใช่ทรัพยากรที่ยังไม่พร้อม
+    "E_SESSION_WARMING": 503,
     "E_NETWORK": 502,
 }
 
@@ -121,7 +124,13 @@ def yt_error_response(exc: YtError, subject: str) -> JSONResponse:
         exc.detail,
         exc_info=exc if unexpected else None,
     )
-    return error_response(status, code, exc.message, exc.detail or None)
+    if exc.retry_after is None:
+        return error_response(status, code, exc.message, exc.detail or None)
+    # ช่องเพิ่มใน envelope: error.retryAfterSeconds (วินาทีเต็ม >= 1) หน้าเว็บนับถอยหลังจากค่านี้
+    seconds = max(1, int(exc.retry_after))
+    body = error_body(code, exc.message, exc.detail or None)
+    body["error"]["retryAfterSeconds"] = seconds
+    return JSONResponse(status_code=status, content=body, headers={"Retry-After": str(seconds)})
 
 
 def _maps_yt_errors(func: Callable[..., Any]) -> Callable[..., Any]:

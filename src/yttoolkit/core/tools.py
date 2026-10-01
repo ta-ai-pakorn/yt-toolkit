@@ -184,6 +184,25 @@ def ytdlp_status(
     return ToolStatus("ok", name="yt-dlp", version=version, message=f"อัปเดตล่าสุด {age} วันก่อน")
 
 
+def impersonation_status(info: Callable[[], tuple[bool, str | None]] | None = None) -> ToolStatus:
+    """yt-dlp ทำตัวเป็นเบราว์เซอร์ได้ไหม (curl_cffi) ใช้ตอนโหลดซับ ไม่มีก็ยังโหลดซับได้แบบคำขอธรรมดา จึงแค่เตือน
+
+    ไม่ต่อเน็ต และไม่มีข้อมูลคุกกี้หรือเซสชันใด ๆ ในผลนี้
+    """
+    if info is None:
+        from .extractor import impersonation_info
+
+        info = impersonation_info
+    try:
+        available, version = info()
+    except Exception:
+        available, version = False, None
+    if available:
+        return ToolStatus("ok", name="curl_cffi", version=version)
+    message = "ไม่มี curl_cffi โหลดซับแบบคำขอธรรมดาแทน" if version is None else "curl_cffi รุ่นนี้ yt-dlp ใช้ไม่ได้ โหลดซับแบบคำขอธรรมดาแทน"
+    return ToolStatus("warn", name="curl_cffi", version=version, message=message)
+
+
 def disk_status(path: Path) -> ToolStatus:
     free = shutil.disk_usage(path).free
     message = f"เหลือ {free / 1024**3:.0f} GB"
@@ -231,6 +250,7 @@ def collect_health(
             "ffmpeg": asdict(ffmpeg_status(paths, plat)),
             "ytdlp": asdict(ytdlp_status()),
             "jsRuntime": asdict(find_js_runtime(plat)),
+            "impersonation": asdict(impersonation_status()),
         },
         "disk": asdict(disk_status(paths.data_root)),
         "output": asdict(output_status(output_dir)),

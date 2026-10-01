@@ -8,10 +8,14 @@
 
 from __future__ import annotations
 
+import functools
+import importlib.metadata
 import json
 import logging
 import re
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import parse_qs
@@ -19,6 +23,7 @@ from urllib.parse import parse_qs
 import httpx
 
 from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix_id
+from .visitor_session import VisitorSession
 from .yterrors import YtError, classify
 
 log = logging.getLogger("yttoolkit")
@@ -163,6 +168,82 @@ def _first_comment_public(ydl: Any, video_id: str) -> dict | None:
     return comments[0] if comments and isinstance(comments[0], dict) else None
 
 
+def _cookie_jar(filename: str) -> Any:
+    """jar เปล่าแบบเดียวกับที่ yt-dlp ใช้กับ cookiefile (อ่าน/เขียนไฟล์ Netscape และเข้าใจคุกกี้แบบ session ของ yt-dlp)"""
+    from yt_dlp.cookies import YoutubeDLCookieJar
+
+    return YoutubeDLCookieJar(filename)
+
+
+def visitor_session(folder: Path) -> VisitorSession:
+    """เซสชันผู้ชมแบบไม่ระบุตัวตนที่ probe และการโหลดซับใช้ร่วมกัน (ไฟล์ <folder>/visitor-session.txt)"""
+    return VisitorSession(folder, _cookie_jar)
+
+
+def _attach_session(ydl: Any, session: VisitorSession) -> None:
+    """ให้ YoutubeDL ตัวนี้ใช้ jar ก้อนเดียวของเซสชัน และบันทึกผ่านเซสชัน (ล็อก + เขียนไฟล์แบบ replace)
+
+    API ภายในของ yt-dlp: `cookiejar` เป็น cached_property จึงใส่ค่าไว้ล่วงหน้าใน __dict__ ได้ (ต้องทำก่อนคำขอแรก
+    ตัวส่งคำขอของ yt-dlp จะได้ถือ jar ก้อนนี้) ถ้า yt-dlp รุ่นหน้าเปลี่ยนจนใส่ไม่ได้ yt-dlp จะโหลดจาก cookiefile เอง
+    แล้ว save ด้านล่างรวมคุกกี้ของมันเข้าก้อนกลาง ผลเหมือนกัน แค่ไม่ได้ใช้ก้อนเดียวกันระหว่างทำงาน
+    save_cookies ของ yt-dlp (เรียกตอนปิด) เขียนไฟล์ตรง ๆ ไม่มีล็อก จึงแทนด้วยของเซสชัน
+    """
+    ydl.__dict__["cookiejar"] = session.jar()
+
+    def save_cookies() -> None:
+        try:
+            session.save(ydl.cookiejar)
+        except Exception as exc:  # ปิด YoutubeDL ต้องไม่พังเพราะบันทึกคุกกี้ไม่ได้ (ไม่มีค่าคุกกี้ใน log)
+            log.warning("บันทึกเซสชันผู้ชมของยูทูปไม่สำเร็จ (%s)", type(exc).__name__)
+
+    ydl.save_cookies = save_cookies
+
+
+_impersonation_warned = threading.Event()
+
+
+def _can_impersonate(ydl: Any) -> bool:
+    """มีตัวส่งคำขอที่ทำตัวเป็นเบราว์เซอร์ได้ (curl_cffi) หรือไม่ (API ภายในของ yt-dlp: พังเมื่อไรถือว่าไม่มี)"""
+    from yt_dlp.networking.impersonate import ImpersonateTarget
+
+    try:
+        return bool(ydl._impersonate_target_available(ImpersonateTarget()))
+    except Exception:
+        return False
+
+
+def _subtitle_request(ydl: Any, url: str) -> Any:
+    """คำขอโหลดซับแบบเดียวกับที่ตัวโหลดของ yt-dlp ทำ (ทุกลิงก์ซับของยูทูปขอ impersonate)
+
+    ไม่มี curl_cffi = คำขอธรรมดา และเตือนใน log ครั้งเดียวต่อการเปิดโปรแกรม
+    """
+    from yt_dlp.networking import Request
+    from yt_dlp.networking.impersonate import ImpersonateTarget
+
+    if _can_impersonate(ydl):
+        return Request(url, extensions={"impersonate": ImpersonateTarget()})
+    if not _impersonation_warned.is_set():
+        _impersonation_warned.set()
+        log.warning("ไม่มี curl_cffi (ทำงานแบบเบราว์เซอร์) โหลดซับด้วยคำขอธรรมดาแทน")
+    return Request(url)
+
+
+@functools.cache
+def impersonation_info() -> tuple[bool, str | None]:
+    """(yt-dlp ทำตัวเป็นเบราว์เซอร์ได้ไหม, เวอร์ชัน curl_cffi) สำหรับหน้าตรวจสุขภาพ ไม่ต่อเน็ต
+
+    ตรวจครั้งเดียวต่อการเปิดโปรแกรม (แพ็กเกจไม่เปลี่ยนระหว่างรัน)
+    """
+    import yt_dlp
+
+    try:
+        version: str | None = importlib.metadata.version("curl_cffi")
+    except importlib.metadata.PackageNotFoundError:
+        version = None
+    with yt_dlp.YoutubeDL({**_PROBE_OPTS, "logger": _YtDlpLogger()}) as ydl:
+        return _can_impersonate(ydl), version
+
+
 class _YtDlpLogger:
     """เก็บข้อความของ yt-dlp ลง log ของแอพแทนการพิมพ์ลงจอ (error ถูกโยนเป็น YtError อยู่แล้ว)"""
 
@@ -186,10 +267,28 @@ class YtDlpExtractor:
     transport มีไว้ให้เทสใส่ httpx.MockTransport แทนเน็ตจริง
     """
 
-    def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(
+        self, transport: httpx.BaseTransport | None = None, session: VisitorSession | None = None
+    ) -> None:
         self._transport = transport
         self._client: httpx.Client | None = None
         self._client_lock = threading.Lock()
+        # เซสชันผู้ชมที่ probe และ fetch_subtitle ใช้ร่วมกัน (None = ไม่เก็บคุกกี้ข้ามครั้ง แบบเดิม)
+        self.session = session
+
+    @contextmanager
+    def _ydl(self, opts: dict, *, with_session: bool = False) -> Iterator[Any]:
+        """YoutubeDL หนึ่งตัว with_session = ใช้เซสชันผู้ชม (ผ่าน cookiefile) แล้วบันทึกคืนตอนปิด"""
+        import yt_dlp
+
+        params = {**opts, "logger": _YtDlpLogger()}
+        session = self.session if with_session else None
+        if session is not None:
+            params["cookiefile"] = str(session.path)
+        with yt_dlp.YoutubeDL(params) as ydl:
+            if session is not None:
+                _attach_session(ydl, session)
+            yield ydl
 
     def _http(self) -> httpx.Client:
         with self._client_lock:
@@ -210,7 +309,8 @@ class YtDlpExtractor:
 
     def probe(self, video_id: str) -> dict:
         _check_video_id(video_id)
-        info = self._extract(f"https://www.youtube.com/watch?v={video_id}", _PROBE_OPTS)
+        # เก็บคุกกี้ผู้เข้าชมที่ยูทูปออกให้ระหว่าง probe ไว้ (ไม่มีคำขอเพิ่ม) ซับแปลต้องใช้เซสชันที่อายุถึง 75 วินาที
+        info = self._extract(f"https://www.youtube.com/watch?v={video_id}", _PROBE_OPTS, with_session=True)
         return check_live(info)
 
     def playlist(self, playlist_id: str, limit: int, video_id: str | None = None) -> dict:
@@ -240,14 +340,16 @@ class YtDlpExtractor:
         return response.content
 
     def fetch_subtitle(self, url: str) -> bytes:
-        """โหลดไฟล์ซับผ่าน urlopen ของ yt-dlp แล้วแปลงทุกความผิดพลาดเป็น YtError"""
-        import yt_dlp
+        """โหลดไฟล์ซับผ่าน urlopen ของ yt-dlp แล้วแปลงทุกความผิดพลาดเป็น YtError
+
+        ใช้เซสชันผู้ชมเดียวกับ probe และขอแบบทำตัวเป็นเบราว์เซอร์ (curl_cffi) เหมือนตัวโหลดซับของ yt-dlp เอง
+        """
         from yt_dlp.networking.exceptions import HTTPError, RequestError
         from yt_dlp.utils import YoutubeDLError
 
         try:
-            with yt_dlp.YoutubeDL({**_PROBE_OPTS, "logger": _YtDlpLogger()}) as ydl:
-                with ydl.urlopen(url) as resp:
+            with self._ydl(_PROBE_OPTS, with_session=True) as ydl:
+                with ydl.urlopen(_subtitle_request(ydl, url)) as resp:
                     return resp.read()
         except YtError:
             raise
@@ -299,14 +401,12 @@ class YtDlpExtractor:
             raise YtError("E_UNKNOWN", f"{type(exc).__name__}: {exc}") from exc
         return pinned_from_comment(first)
 
-    @staticmethod
-    def _extract(url: str, opts: dict) -> dict:
+    def _extract(self, url: str, opts: dict, *, with_session: bool = False) -> dict:
         """เรียก yt-dlp แล้วแปลงทุกความผิดพลาดเป็น YtError (ห้ามมี exception ดิบหลุดออกไป)"""
-        import yt_dlp
         from yt_dlp.utils import YoutubeDLError
 
         try:
-            with yt_dlp.YoutubeDL({**opts, "logger": _YtDlpLogger()}) as ydl:
+            with self._ydl(opts, with_session=with_session) as ydl:
                 info = ydl.extract_info(url, download=False)
                 if info is None:
                     raise YtError("E_UNKNOWN", f"yt-dlp ไม่คืนข้อมูลสำหรับ {url}")

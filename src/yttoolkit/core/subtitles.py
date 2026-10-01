@@ -7,6 +7,11 @@
    แล้วลองอีกรอบเดียว (แบบเดียวกับ storyboard ใน M2) E_BOT_CHECK โยนต่อทันที
 4. ซับแปล (t.*) ที่ยูทูปตอบ 429 / E_BOT_CHECK = E_TRANSLATION_BLOCKED ไม่ใช่การขอยืนยันว่าไม่ใช่บอท
    (ยูทูปปิดเฉพาะคำขอ tlang ซับอื่นยังโหลดได้) จึงไม่ใช้รหัสที่ M4 เอาไปพักทั้งคิว
+5. ประตูอายุเซสชัน (owner round 3) เฉพาะซับแปล: ยูทูปให้ซับแปลเมื่อเซสชันผู้ชมอายุ >= 75 วินาทีเท่านั้น
+   - ยังไม่มีเซสชันเลย (ติดตั้งใหม่, เพิ่งล้าง) = probe คลิปนี้ใหม่หนึ่งครั้งเพื่อรับเซสชัน แล้วนับเวลาเริ่มจากตอนนั้น
+   - อายุยังไม่ถึง = E_SESSION_WARMING พร้อม retry_after (วินาทีที่เหลือ) ไม่ยิงคำขอที่รู้อยู่แล้วว่าได้ 429
+   - อายุถึงแล้วแต่ได้ 429 = รอ 20 วินาทีแล้วลองอีกครั้งเดียว ยังได้ 429 = E_TRANSLATION_BLOCKED
+   ซับจากเจ้าของคลิปและซับภาษาต้นฉบับไม่ผ่านประตูนี้
 
 URL ที่โหลดมาจากผล probe เท่านั้น (fetch_subtitle ไม่มี allowlist) ห้ามรับ URL จากหน้าเว็บ
 ไม่ import yt_dlp เอง และไม่ import api/platform (PRD 6.6)
@@ -18,6 +23,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -31,6 +37,7 @@ from .yterrors import YtError
 
 if TYPE_CHECKING:
     from .videos import VideoService
+    from .visitor_session import VisitorSession
 
 log = logging.getLogger("yttoolkit")
 
@@ -38,6 +45,7 @@ FORMATS = ("srt", "txt", "md")
 SUBS_FOLDER = "subs"
 _SOURCES = frozenset({"json3", "vtt"})
 _ID_ECHO_MAX = 80  # track id จากหน้าเว็บที่ยกไปใส่ใน detail ของ error ตัดไว้ไม่ให้ยาว
+TRANSLATION_RETRY_DELAY_S = 20  # ซับแปลได้ 429 ทั้งที่เซสชันอายุถึงแล้ว: รอเท่านี้แล้วลองอีกครั้งเดียว
 
 
 class SubtitleExport(NamedTuple):
@@ -65,10 +73,18 @@ class SubtitleService:
         videos: VideoService,
         fetch_subtitle: Callable[[str], bytes],
         cache_root: Path,
+        *,
+        session: VisitorSession | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        retry_delay_s: float = TRANSLATION_RETRY_DELAY_S,
     ) -> None:
         self._videos = videos
         self._fetch = fetch_subtitle
         self._cache_root = Path(cache_root)
+        # เซสชันผู้ชมของ extractor ตัวจริง (None = โหมดข้อมูลปลอม/เทส: ไม่มีประตูอายุ)
+        self._session = session
+        self._sleep = sleep
+        self._retry_delay_s = retry_delay_s
         self._guard = threading.Lock()
         self._locks: dict[tuple[str, str], threading.Lock] = {}
 
@@ -112,6 +128,8 @@ class SubtitleService:
             cached = _read_cache(folder, video_id, track.id)
             if cached is not None:
                 return cached
+            if track.group == "translated" and self._session_gate(video_id):
+                track = self._track(video_id, track.id)  # probe ใหม่ไปแล้ว ใช้ลิงก์ชุดใหม่
             try:
                 parsed, data = self._fetch_and_parse(track)
             except YtError as exc:
@@ -145,12 +163,41 @@ class SubtitleService:
                 return parsed, data
         raise _no_subtitles(f"แทร็ก {track.id} ไม่มีข้อความที่ใช้ได้")
 
+    def _session_gate(self, video_id: str) -> bool:
+        """ข้อ 5 ด้านบน: เซสชันอายุไม่ถึง 75 วินาที = E_SESSION_WARMING (ไม่มีเซสชัน = probe รับเซสชันก่อน)
+
+        คืน True เมื่อ probe คลิปใหม่ไปแล้ว (ผู้เรียกต้องอ่านแทร็กใหม่)
+        """
+        if self._session is None:
+            return False
+        wait = self._session.wait_seconds()
+        reprobed = False
+        if wait is None:
+            log.info("ยังไม่มีเซสชันผู้ชมของยูทูป probe %s ใหม่เพื่อรับเซสชันก่อนโหลดซับแปล", video_id)
+            self._videos.get(video_id, refresh=True)
+            reprobed = True
+            wait = self._session.wait_seconds()
+            if wait is None:
+                # probe แล้วยูทูปก็ไม่ออกเซสชันให้: ลองโหลดเลย ได้ 429 ก็จบที่ E_TRANSLATION_BLOCKED ตามปกติ
+                log.warning("probe %s แล้วยังไม่ได้เซสชันผู้ชม โหลดซับแปลโดยไม่รอ", video_id)
+                return reprobed
+        if wait > 0:
+            raise YtError("E_SESSION_WARMING", f"เซสชันผู้ชมอายุยังไม่ถึง (รออีก {wait} วินาที)", retry_after=wait)
+        return reprobed
+
     def _fetch_track(self, track: Track, url: str) -> bytes:
-        """โหลดไฟล์ของแทร็ก ซับแปลที่โดน 429 / E_BOT_CHECK = E_TRANSLATION_BLOCKED (ข้อ 4 ด้านบน)"""
+        """โหลดไฟล์ของแทร็ก ซับแปลที่โดน 429 / E_BOT_CHECK: รอแล้วลองอีกครั้งเดียว ยังโดน = E_TRANSLATION_BLOCKED"""
         try:
             return self._fetch(url)
         except YtError as exc:
-            if exc.code == "E_BOT_CHECK" and track.group == "translated":
+            if exc.code != "E_BOT_CHECK" or track.group != "translated":
+                raise
+            log.info("ซับแปล %s ได้ 429 รอ %s วินาทีแล้วลองอีกครั้ง", track.id, self._retry_delay_s)
+        self._sleep(self._retry_delay_s)
+        try:
+            return self._fetch(url)
+        except YtError as exc:
+            if exc.code == "E_BOT_CHECK":
                 raise YtError("E_TRANSLATION_BLOCKED", exc.detail) from exc
             raise
 

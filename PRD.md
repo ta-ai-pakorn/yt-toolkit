@@ -515,7 +515,7 @@ queued ──► running ──► done
 
 - **contact sheet และ zip ใน M2** ทำตอนขอแล้วส่งให้เบราว์เซอร์โหลดทันที · M4 ย้ายเข้าคิวเป็นงานชนิด `contact_sheet` / `frames_zip` และบันทึกลงโฟลเดอร์ผลลัพธ์
 - **ไฟล์ซับใน M3** (`/subtitles/{trackId}/export`) และ**โน้ต** (`/videos/{id}/note`) ทำตอนขอแล้วส่งให้เบราว์เซอร์โหลดทันที ลงโฟลเดอร์ Downloads ของเบราว์เซอร์ (BRD #49) · M4 ย้ายการโหลดซับเข้า `/jobs` เป็นงานชนิด `subtitle` และบันทึกลงโฟลเดอร์ผลลัพธ์
-- **HTTP status ของ error จากยูทูป:** `E_INVALID_INPUT`, `E_SETTINGS_INVALID`, `E_COOKIES_INVALID` 422 · `E_VIDEO_UNAVAILABLE`, `E_VIDEO_PRIVATE`, `E_NO_STORYBOARD`, `E_NO_SUBTITLES` 404 · `E_LIVE_NOT_READY`, `E_AGE_RESTRICTED`, `E_GEO_BLOCKED`, `E_COOKIES_UNAVAILABLE` 409 · `E_BOT_CHECK` 429 · `E_NETWORK` 502 · `E_TRANSLATION_BLOCKED` 503 · รหัสอื่น (`E_UNKNOWN`) 500
+- **HTTP status ของ error จากยูทูป:** `E_INVALID_INPUT`, `E_SETTINGS_INVALID`, `E_COOKIES_INVALID` 422 · `E_VIDEO_UNAVAILABLE`, `E_VIDEO_PRIVATE`, `E_NO_STORYBOARD`, `E_NO_SUBTITLES` 404 · `E_LIVE_NOT_READY`, `E_AGE_RESTRICTED`, `E_GEO_BLOCKED`, `E_COOKIES_UNAVAILABLE` 409 · `E_BOT_CHECK` 429 · `E_NETWORK` 502 · `E_TRANSLATION_BLOCKED` 503 · `E_SESSION_WARMING` 503 (+ `Retry-After` และ `error.retryAfterSeconds`) · รหัสอื่น (`E_UNKNOWN`) 500
 
 #### 6.2.1 ชนิดข้อมูลหลัก
 ```ts
@@ -643,6 +643,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | `E_LIVE_NOT_READY` | คลิปนี้ยังถ่ายทอดสดอยู่หรือยังไม่เผยแพร่ ลองใหม่หลังจบไลฟ์ | งานล้มเหลว |
 | `E_NO_SUBTITLES` | คลิปนี้ไม่มีซับ | ไม่นับเป็น error ในหน้าจอ |
 | `E_TRANSLATION_BLOCKED` | ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน | (M3) ยูทูปตอบ 429 เฉพาะคำขอซับแปล (`t.*` ลิงก์ `tlang`) ไม่ใช่การขอยืนยันว่าไม่ใช่บอท จึง**ไม่**เบรกฉุกเฉินและไม่พักคิว · หน้าเว็บไม่มีปุ่มลองใหม่และไม่ยิงซ้ำเมื่อสลับแท็บ มีปุ่ม "ใช้ซับภาษาต้นฉบับ" (เมื่อคลิปมีแทร็กเริ่มต้น) · ซับของเจ้าของคลิปและซับภาษาต้นฉบับที่โดน 429 ยังเป็น `E_BOT_CHECK` |
+| `E_SESSION_WARMING` | กำลังเตรียมซับแปลจากยูทูป รอสักครู่แล้วโหลดใหม่ | (owner round 3) เฉพาะซับแปล (`t.*`) เมื่อเซสชันผู้ชมแบบไม่ระบุตัวตนอายุยังไม่ถึง 75 วินาที (ส่วนใหญ่เกิดครั้งแรกครั้งเดียวหลังติดตั้ง) · HTTP 503 พร้อม header `Retry-After: N` และช่องเพิ่มใน envelope `error.retryAfterSeconds` (จำนวนเต็ม ≥ 1 = วินาทีที่เหลือ) · ไม่ใช่การเบรกฉุกเฉิน ไม่พักคิว · หน้าเว็บไม่แสดงข้อความนี้ตรง ๆ แต่แสดงกล่องนับถอยหลัง "กำลังเตรียมซับแปลจากยูทูป รอ N วินาที แล้วโหลดให้เอง" แล้วโหลดใหม่เองหนึ่งครั้งเมื่อครบ (ดู FR-SUB) |
 | `E_NO_STORYBOARD` | คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว ภาพคมจะใช้ได้ในเวอร์ชันถัดไป | แสดงปุ่มโหมดคม · **ตั้งแต่ M5** เปลี่ยนข้อความเป็น "คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว กด "ขอภาพคม" แทนได้" |
 | `E_FFMPEG_MISSING` | ยังไม่มีโปรแกรมแปลงไฟล์ (ffmpeg) กด "โหลดใหม่" ในหน้าตรวจสุขภาพ | ปิดฟีเจอร์ที่ต้องใช้ |
 | `E_JS_RUNTIME_MISSING` | บางคุณภาพอาจไม่แสดง เพราะเครื่องยังไม่มีตัวช่วยที่ yt-dlp ต้องใช้ | เตือนในหน้าตรวจสุขภาพ |
