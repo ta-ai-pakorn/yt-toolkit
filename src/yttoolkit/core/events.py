@@ -115,7 +115,8 @@ class EventBus:
     def publish(self, name: str, data: dict) -> None:
         with self._lock:
             if not self._closed:
-                self._broadcast(Event(name, data))
+                # สำเนาตื้น: เธรดคิวแก้ dict ของตัวเองต่อได้โดยไม่กระทบข่าวที่ยังรอส่ง (format_event อ่านทีหลัง)
+                self._broadcast(Event(name, dict(data)))
 
     def job_updated(self, job_id: str, fields: dict) -> None:
         delay: float | None = None

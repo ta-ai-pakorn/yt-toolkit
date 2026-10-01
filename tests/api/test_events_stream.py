@@ -66,12 +66,11 @@ def test_sse_stream_does_not_ping_before_15_quiet_seconds():
         clock.t = 14.0
         with anyio.move_on_after(0.1):
             out.append(await gen.__anext__())
-        bus.close()
-        async for rest in gen:
-            out.append(rest)
         return out
 
     assert anyio.run(main) == ["retry: 3000\n\n"]
+    assert bus.subscriber_count == 0  # the cancelled stream closed its subscription
+    bus.close()
 
 
 def test_sse_stream_closes_its_subscription_when_the_client_leaves():
@@ -122,7 +121,14 @@ def test_get_events_streams_until_the_bus_closes(events_client):
     bus = EventBus()
     client = events_client(events=bus)
     _publish_when_subscribed(bus, "job.created", {"id": "j1", "title": "คลิป"})
-    response = client.get("/api/events")
+    result = {}
+    reader = threading.Thread(target=lambda: result.setdefault("response", client.get("/api/events")), daemon=True)
+    reader.start()
+    reader.join(10)
+    if reader.is_alive():
+        bus.close()  # let the stuck stream end so the daemon thread does not outlive the test
+    assert not reader.is_alive(), "the SSE stream did not end after bus.close()"
+    response = result["response"]
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
     assert response.headers["cache-control"] == "no-cache"

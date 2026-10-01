@@ -64,6 +64,16 @@ def test_publish_is_immediate_and_close_wakes():
     assert sub.get(1) is CLOSED
 
 
+def test_publish_keeps_its_own_copy_of_the_data():
+    bus = EventBus()
+    sub = bus.subscribe()
+    data = {"id": "j1", "title": "คลิป"}
+    bus.publish("job.created", data)
+    data["title"] = "changed"
+    data["extra"] = object()  # would break json.dumps in format_event if shared
+    assert sub.get(0).data == {"id": "j1", "title": "คลิป"}
+
+
 def test_pending_fields_merge_into_one_patch():
     clock = Clock()
     bus = EventBus(monotonic=clock, schedule=clock.schedule)
