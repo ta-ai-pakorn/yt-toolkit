@@ -217,6 +217,92 @@ def test_clip_without_audio_formats_uses_generic_audio(fake: FakeExtractor) -> N
     assert video_choice(info, {**AUTO, "maxQuality": True}).format_spec == "bv*+ba/b"
 
 
+# ---------- คลิปแนวตั้ง (Shorts): ความละเอียด = ด้านสั้นของภาพ ----------
+
+SHORT_AUDIO = {
+    "format_id": "140",
+    "vcodec": "none",
+    "acodec": "mp4a.40.2",
+    "abr": 129.0,
+    "filesize": 500_000,
+    "ext": "m4a",
+}
+
+
+def _short_info(*, widths: bool = True) -> dict:
+    """Shorts แบบสังเคราะห์: H.264 1080x1920, 720x1280, 480x854 + VP9 1080x1920 + เสียง AAC (เรียงแย่ไปดีแบบ yt-dlp)"""
+    rows = [
+        ("135", 480, 854, "avc1.4d401e", 3_000_000),
+        ("136", 720, 1280, "avc1.4d401f", 6_000_000),
+        ("137", 1080, 1920, "avc1.640028", 12_000_000),
+        ("248", 1080, 1920, "vp09.00.40.08", 9_000_000),
+    ]
+    formats = [
+        {
+            "format_id": format_id,
+            **({"width": width} if widths else {}),
+            "height": height,
+            "fps": 30,
+            "vcodec": vcodec,
+            "acodec": "none",
+            "filesize": size,
+            "ext": "mp4" if vcodec.startswith("avc1") else "webm",
+        }
+        for format_id, width, height, vcodec, size in rows
+    ]
+    return {"id": "SHORTS00001", "duration": 30, "formats": [SHORT_AUDIO, *formats]}
+
+
+def test_portrait_compat_cap_uses_the_short_side() -> None:
+    c = video_choice(_short_info(), AUTO)
+    assert c.format_spec == "bv*[vcodec^=avc1][width<=1080]+140/b[ext=mp4]"
+    assert c.expected_bytes == 12_000_000 + 500_000  # 137 (1080x1920) ไม่ใช่ถูกตัดเหลือ 480x854
+
+
+def test_portrait_compat_720() -> None:
+    c = video_choice(_short_info(), {**AUTO, "maxHeight": 720, "noAudio": True})
+    assert c.format_spec == "bv*[vcodec^=avc1][width<=720]"
+    assert c.expected_bytes == 6_000_000  # 136 (720x1280)
+
+
+def test_portrait_without_widths_falls_back_to_height() -> None:
+    c = video_choice(_short_info(widths=False), AUTO)
+    assert c.format_spec == "bv*[vcodec^=avc1][height<=1080]+140/b[ext=mp4]"
+    assert c.expected_bytes == 3_000_000 + 500_000  # ไม่รู้ width = นับ height แบบเดิม (854 ผ่านเพดาน)
+
+
+def test_landscape_with_widths_keeps_the_height_filter(fake: FakeExtractor) -> None:
+    info = fake.probe(BBB)
+    assert all("width" in f for f in info["formats"] if f.get("vcodec") not in (None, "none"))
+    assert video_choice(info, AUTO).format_spec == "bv*[vcodec^=avc1][height<=1080]+140/b[ext=mp4]"
+
+
+@pytest.mark.parametrize(
+    ("info", "picked"),
+    [
+        (_short_info(), "137"),  # แนวตั้ง 1080x1920 = 1080p
+        (
+            {
+                "formats": [
+                    {**f, "width": f["height"], "height": f["width"]} if f["vcodec"] != "none" else f
+                    for f in _short_info()["formats"]
+                ]
+            },
+            "137",  # แนวนอน 1920x1080 = 1080p (เพดานเดิม)
+        ),
+    ],
+)
+def test_yt_dlp_selects_the_short_side_cap(info: dict, picked: str) -> None:
+    """สตริง format ที่ส่งให้ yt-dlp เลือก format ที่ด้านสั้นไม่เกินเพดานจริง (ตัวเลือก format ของ yt-dlp เอง ไม่ต่อเน็ต)"""
+    import yt_dlp
+
+    spec = video_choice(info, {**AUTO, "noAudio": True}).format_spec
+    formats = [f for f in info["formats"] if f["vcodec"] != "none"]
+    with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
+        selected = ydl._select_formats(formats, ydl.build_format_selector(spec))
+    assert [f["format_id"] for f in selected] == [picked]
+
+
 def test_choice_is_frozen(fake: FakeExtractor) -> None:
     c = video_choice(fake.probe(DUB), AUTO)
     assert isinstance(c, DownloadChoice)

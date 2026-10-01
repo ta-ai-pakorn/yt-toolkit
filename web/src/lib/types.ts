@@ -21,6 +21,8 @@ export type Health = {
 
 export type VideoFormat = {
   formatId: string
+  /** ไม่มี = ไม่รู้ (ข้อมูลคลิปที่เก็บไว้ก่อน M4 gate 2) ใช้ height แทน */
+  width?: number
   height: number
   fps: number
   vcodec: string

@@ -145,6 +145,7 @@ def test_output_has_exactly_the_prd_keys() -> None:
     }  # fmt: skip
     assert set(info["video"][0]) <= {
         "formatId",
+        "width",  # M4 gate 2: หน้าเว็บนับความละเอียดที่ด้านสั้น (คลิปแนวตั้ง 1080x1920 = 1080p)
         "height",
         "fps",
         "vcodec",
@@ -211,6 +212,18 @@ def test_video_list_dedupes_same_height_fps_codec_family_keeping_largest() -> No
         "160"
     ]  # ตัวที่มีขนาดไฟล์ ชนะตัว 269 ที่ไม่มี
     assert at_144_30_avc[0]["sizeBytes"] == 4323893
+
+
+def test_video_width_is_kept_for_short_side_resolution() -> None:
+    """width ผ่าน trim_probe ถึง VideoInfo (หน้าเว็บนับความละเอียดที่ด้านสั้น) format ที่ไม่บอก width = ไม่มีคีย์"""
+    raw = load(BBB)
+    for info in (to_video_info(raw), to_video_info(trim_probe(raw))):
+        by_id = {e["formatId"]: e for e in info["video"]}
+        assert by_id["299"]["width"] == 1920 and by_id["299"]["height"] == 1080
+    raw = copy.deepcopy(raw)
+    for fmt in raw["formats"]:
+        fmt.pop("width", None)
+    assert all("width" not in e for e in to_video_info(raw)["video"])
 
 
 def test_compat_is_true_only_for_h264() -> None:
