@@ -212,6 +212,39 @@ test.describe("W2 แถบแท็บ ไม่มีแถบเลื่อ�
     })
     expect(inView).toBe(true)
   })
+
+  test("จอ 280 px: แถวแท็บล้นจริง (เลื่อนแนวนอนได้) · โฟกัสแท็บสุดท้ายแล้วแท็บเลื่อนมาอยู่ในกรอบแถว · หน้าไม่ล้น", async ({
+    page,
+  }) => {
+    // review owner fb1: เทสที่ 360 px อาจไม่ล้นเลย (แท็บพอดีจอ) จอ 280 px ล้นแน่นอน จึงพิสูจน์การเลื่อนแนวนอนได้จริง
+    await page.setViewportSize({ width: 280, height: 700 })
+    await page.goto(`/v/${BBB}`)
+    await expect(tabList(page).getByRole("tab")).toHaveCount(3)
+    const sizes = await tabList(page).evaluate((list) => ({ scroll: list.scrollWidth, client: list.clientWidth, left: list.scrollLeft }))
+    expect(sizes.scroll).toBeGreaterThan(sizes.client)
+    expect(sizes.left).toBe(0)
+    const last = tab(page, "ทรานสคริปต์")
+    // แท็บสุดท้ายเริ่มแรกอยู่นอกกรอบ (ล้นไปทางขวา)
+    const startsOutside = await tabList(page).evaluate((list) => {
+      const box = list.getBoundingClientRect()
+      return list.querySelector<HTMLElement>('[role="tab"]:last-child')!.getBoundingClientRect().right > box.right + 1
+    })
+    expect(startsOutside).toBe(true)
+    await tab(page, "ภาพเฟรม").focus()
+    await page.keyboard.press("End")
+    await expect(last).toBeFocused()
+    await expect
+      .poll(() =>
+        tabList(page).evaluate((list) => {
+          const box = list.getBoundingClientRect()
+          const item = list.querySelector<HTMLElement>('[role="tab"]:last-child')!.getBoundingClientRect()
+          return item.left >= box.left - 1 && item.right <= box.right + 1 && list.scrollLeft > 0
+        }),
+      )
+      .toBe(true)
+    expect(await tabListBox(page)).toEqual(NO_SCROLLBARS)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(280)
+  })
 })
 
 test.describe("W2 แถบแท็บ คีย์บอร์ด", () => {
@@ -331,7 +364,9 @@ test.describe("W2 คำอธิบายและ chapter ที่หัว�
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
     await expect(tab(page, "ภาพเฟรม")).toBeVisible()
     await expect(page.getByRole("heading", { level: 2, name: "คำอธิบาย" })).toHaveCount(0)
-    await expect(page.getByRole("button", { name: /^คัดลอก/ })).toHaveCount(0)
+    // ไม่มีปุ่มคัดลอกของสองกล่องนี้ (ปุ่ม "คัดลอกแท็ก" ของกล่องแท็กที่เพิ่มใน owner round 2 เป็นคนละเรื่อง ยังอยู่ได้)
+    await expect(page.getByRole("button", { name: /^คัดลอก(คำอธิบาย| chapter)/ })).toHaveCount(0)
+    await expect(page.getByRole("heading", { name: /^Chapter/ })).toHaveCount(0)
   })
 
   test("คำอธิบาย: แสดง 3 บรรทัดแรก กด 'ดูทั้งหมด' เห็นครบ กด 'ย่อ' กลับเป็น 3 บรรทัด · ลิงก์เป็นข้อความธรรมดา", async ({
