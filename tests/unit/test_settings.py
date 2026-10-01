@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
 from yttoolkit.core.db import Database
@@ -151,3 +154,139 @@ def test_get_exposes_only_cookie_status_fields(store):
 def test_corrupt_stored_row_falls_back_to_default(db, store):
     db.execute("INSERT INTO settings (key, value_json) VALUES ('concurrency', '{broken')")
     assert store.concurrency() == 2
+
+
+# ---------- fix round 1 ----------
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_last_used_rejects_non_finite_numbers(store, bad):
+    with pytest.raises(SettingsError) as info:
+        store.patch({"lastUsed": {"x": bad}})
+    assert info.value.code == "E_BAD_REQUEST"
+    assert store.get()["lastUsed"] == {}  # GET ยังทำงานปกติ
+
+
+def test_last_used_is_stored_as_plain_json(store):
+    assert store.patch({"lastUsed": {"a": (1, 2), "b": 1.5}})["lastUsed"] == {"a": [1, 2], "b": 1.5}
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"concurrency": 2.0},
+        {"mp3Kbps": 192.0},
+        {"mp3Kbps": True},
+        {"audioDefault": 1},
+        {"theme": ["dark"]},
+    ],
+)
+def test_floats_and_wrong_types_are_not_accepted_as_enum_values(store, bad):
+    with pytest.raises(SettingsError) as info:
+        store.patch(bad)
+    assert info.value.code == "E_BAD_REQUEST"
+
+
+def test_output_dir_with_a_nul_byte_is_a_bad_request(store, tmp_path):
+    with pytest.raises(SettingsError) as info:
+        store.patch({"outputDir": str(tmp_path / "a\x00b")})
+    assert info.value.code == "E_BAD_REQUEST"
+    assert info.value.key == "outputDir"
+
+
+def test_ensure_writable_turns_value_errors_into_not_writable(tmp_path):
+    from yttoolkit.core.settings import ensure_writable
+
+    with pytest.raises(SettingsError) as info:
+        ensure_writable(Path(str(tmp_path / "a\x00b")))
+    assert info.value.code == "E_OUTPUT_NOT_WRITABLE"
+
+
+def test_output_dir_is_stripped_and_normalised(store, tmp_path):
+    messy = f"  {tmp_path / 'a' / '..' / 'clean'}  "
+    assert store.patch({"outputDir": messy})["outputDir"] == str(tmp_path / "clean")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ชื่อ path แบบ Windows")
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "C:\\Users\\x\\Videos.",
+        "C:\\Users\\x \\Videos",
+        "C:\\Users\\CON\\Videos",
+        "C:\\Users\\nul.txt",
+        "C:\\Users\\Lpt1",
+        "D:\\com9",
+        "C:\\Users\\x\\..\\NUL",
+    ],
+)
+def test_windows_unsafe_output_dirs_are_rejected(store, bad):
+    with pytest.raises(SettingsError) as info:
+        store.patch({"outputDir": bad})
+    assert info.value.code == "E_BAD_REQUEST"
+    assert info.value.key == "outputDir"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ชื่อ path แบบ Windows")
+def test_windows_dotdot_and_unc_paths_normalise_and_pass_validation():
+    from yttoolkit.core.settings import _validate_output_dir
+
+    assert _validate_output_dir("C:\\Users\\x\\a\\..\\Videos") == "C:\\Users\\x\\Videos"
+    assert _validate_output_dir("\\\\server\\share\\Videos") == "\\\\server\\share\\Videos"
+    assert _validate_output_dir("C:/Users/x/Videos") == "C:\\Users\\x\\Videos"
+    assert _validate_output_dir("  C:\\Users\\x\\Videos  ") == "C:\\Users\\x\\Videos"
+
+
+def test_probe_file_names_are_unique_and_removed(tmp_path, monkeypatch):
+    from yttoolkit.core.settings import ensure_writable
+
+    seen: list[str] = []
+    original = Path.write_bytes
+
+    def spy(self, data):
+        seen.append(self.name)
+        return original(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", spy)
+    ensure_writable(tmp_path)
+    ensure_writable(tmp_path)
+    assert len(seen) == 2
+    assert seen[0] != seen[1]
+    assert all(name.startswith(".yt-toolkit-write-test-") for name in seen)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_patch_probes_the_folder_without_holding_the_lock(db, tmp_path, monkeypatch):
+    import yttoolkit.core.settings as module
+
+    store = SettingsStore(db, tmp_path / "out")
+    held: list[bool] = []
+
+    def probe(folder):
+        held.append(store._lock._is_owned())  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(module, "ensure_writable", probe)
+    store.patch({"outputDir": str(tmp_path / "x")})
+    assert held == [False]
+
+
+@pytest.mark.parametrize(
+    ("key", "stored"),
+    [
+        ("concurrency", "9"),
+        ("concurrency", "2.0"),
+        ("theme", '"purple"'),
+        ("outputDir", '"relative"'),
+        ("subCustom", '{"maxChars": 1}'),
+        ("lastUsed", "[]"),
+    ],
+)
+def test_stored_values_are_revalidated_on_read(db, store, key, stored):
+    default = store.get()[key]
+    db.execute("INSERT INTO settings (key, value_json) VALUES (?, ?)", (key, stored))
+    assert store.get()[key] == default
+
+
+def test_stored_valid_value_survives_revalidation(db, store):
+    db.execute("INSERT INTO settings (key, value_json) VALUES ('concurrency', '3')")
+    assert store.concurrency() == 3

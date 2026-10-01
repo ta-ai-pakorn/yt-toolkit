@@ -77,6 +77,34 @@ def test_invalid_patch_is_422_with_the_envelope(client, body):
     assert client.get("/api/settings").json()["theme"] == "system"
 
 
+def test_bad_output_dir_uses_the_full_path_hint(client):
+    resp = client.patch("/api/settings", json={"outputDir": "relative"}, headers=AUTH)
+    assert resp.status_code == 422
+    error = resp.json()["error"]
+    assert error["code"] == "E_BAD_REQUEST"
+    assert error["message"] == "ใส่ที่อยู่โฟลเดอร์แบบเต็ม เช่น C:\\Users\\ชื่อ\\Videos"
+
+
+def test_nul_in_output_dir_is_422_not_500(client):
+    resp = client.patch("/api/settings", json={"outputDir": "C:\\a\x00b"}, headers=AUTH)
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "E_BAD_REQUEST"
+
+
+def test_non_finite_last_used_does_not_poison_settings(client):
+    resp = client.patch(
+        "/api/settings", content='{"lastUsed": {"x": NaN}}', headers={**AUTH, "Content-Type": "application/json"}
+    )
+    assert resp.status_code == 422
+    assert client.get("/api/settings").status_code == 200
+
+
+def test_float_enum_values_are_422(client):
+    resp = client.patch("/api/settings", json={"concurrency": 2.0}, headers=AUTH)
+    assert resp.status_code == 422
+    assert client.get("/api/settings").json()["concurrency"] == 2
+
+
 def test_patch_with_a_non_object_body_is_422(client):
     resp = client.patch("/api/settings", json=[1, 2], headers=AUTH)
     assert resp.status_code == 422

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from ..app import AppContext
 
 OUTPUT_NOT_WRITABLE_MESSAGE = "บันทึกลงโฟลเดอร์นี้ไม่ได้ ลองเปลี่ยนโฟลเดอร์ในหน้าตั้งค่า"
+OUTPUT_DIR_BAD_MESSAGE = "ใส่ที่อยู่โฟลเดอร์แบบเต็ม เช่น C:\\Users\\ชื่อ\\Videos"
 _MESSAGES = {
     "E_BAD_REQUEST": BAD_REQUEST_MESSAGE,
     "E_OUTPUT_NOT_WRITABLE": MESSAGES.get("E_OUTPUT_NOT_WRITABLE", OUTPUT_NOT_WRITABLE_MESSAGE),
@@ -26,6 +27,8 @@ _MESSAGES = {
 
 
 def _settings_error(error: SettingsError) -> JSONResponse:
+    if error.code == "E_BAD_REQUEST" and error.key == "outputDir":
+        return error_response(422, error.code, OUTPUT_DIR_BAD_MESSAGE, error.detail)
     return error_response(422, error.code, _MESSAGES.get(error.code, BAD_REQUEST_MESSAGE), error.detail)
 
 
