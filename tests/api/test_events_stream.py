@@ -4,9 +4,8 @@ import threading
 import time
 
 import anyio
-import pytest
 
-from yttoolkit.api.events import build_events_router, format_event, sse_stream
+from yttoolkit.api.events import format_event, sse_stream
 from yttoolkit.core.events import Event, EventBus
 
 
@@ -102,24 +101,9 @@ def _publish_when_subscribed(bus: EventBus, name: str, data: dict) -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
-@pytest.fixture
-def events_client(make_client, monkeypatch):
-    """create_app รวม router นี้เองใน T11 ที่นี่จึงแทรก router ก่อน route หน้าเว็บที่รับทุก path"""
-    import yttoolkit.app as app_module
-
-    original = app_module.mount_web
-
-    def mount_with_events(app, dist, token):
-        app.include_router(build_events_router(app.state.ctx), prefix="/api")
-        original(app, dist, token)
-
-    monkeypatch.setattr(app_module, "mount_web", mount_with_events)
-    return make_client
-
-
-def test_get_events_streams_until_the_bus_closes(events_client):
+def test_get_events_streams_until_the_bus_closes(make_client):
     bus = EventBus()
-    client = events_client(events=bus)
+    client = make_client(events=bus)
     _publish_when_subscribed(bus, "job.created", {"id": "j1", "title": "คลิป"})
     result = {}
     reader = threading.Thread(target=lambda: result.setdefault("response", client.get("/api/events")), daemon=True)
@@ -137,9 +121,13 @@ def test_get_events_streams_until_the_bus_closes(events_client):
     assert 'event: job.created\ndata: {"id":"j1","title":"คลิป"}\n\n' in response.text
 
 
-def test_get_events_rejects_foreign_sites(events_client):
+def test_get_events_rejects_foreign_sites(make_client):
     bus = EventBus()
-    client = events_client(events=bus)
+    client = make_client(events=bus)
     response = client.get("/api/events", headers={"Sec-Fetch-Site": "cross-site"})
     assert response.status_code == 403
     bus.close()
+
+
+def test_events_route_absent_without_a_bus(make_client):
+    assert make_client().get("/api/events").status_code == 404
