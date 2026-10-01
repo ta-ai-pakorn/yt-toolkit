@@ -821,7 +821,7 @@ queue: {
   openFolderOf: "เปิดโฟลเดอร์ของ {title}",
   download: "ดาวน์โหลด",
   downloadOf: "ดาวน์โหลด {file}",
-  details: "รายละเอียด",
+  details: "ดูรายละเอียด",
   errorCode: "รหัส {code}",
   copyDetails: "คัดลอกรายละเอียด",
   dragHandle: "ลากเพื่อเปลี่ยนลำดับ {title}",
@@ -1564,7 +1564,7 @@ def yt_error_mapper(on_bot_check: Callable[[], None] | None) -> Callable[[F], F]
 
 **Requirements (PRD W4, W7, BRD 10.7):**
 - **Bar** (`role="region"` `aria-label` "คิวงาน"): fixed to the bottom of every page, hidden when `barSummary().visible` is false; one line: current job title (truncated) + `stage · %` + speed + ETA (or "รอคิว" / "เน็ตหลุด กำลังลองใหม่ (ครั้งที่ n/3)") + counters `th.queue.counts`; a 4 px amber progress line; the whole bar is one button "เปิดคิวงาน" (`aria-expanded`) that opens the Sheet. While paused it shows the pause alert (C13 `paused.*`) with a live countdown (`m:ss`) and "ลองต่อเลย". Sets `--dock-bottom-offset` on `:root` to its height (ResizeObserver) and back to `0px` when hidden/unmounted, so the M3.5 floating player and toasts stack above it. Wraps to two lines on narrow windows, never overflows.
-- **Sheet** (bottom, `max-height: 80vh`, scroll inside, title "คิวงาน", hint): pause alert on top, then groups from `groupForSheet` with headings: running rows (title, kind label, stage · % · speed · ETA, Progress, "ยกเลิก" with `aria-label` "ยกเลิกงาน {title}"; "กำลังยกเลิก" when `cancelling`); queued rows (drag handle "ลากเพื่อเปลี่ยนลำดับ {title}", dnd-kit keyboard sensor with C13 announcements, "ยกเลิก"); failed/interrupted rows (icon + `error.message`, "รายละเอียด" collapsible with "รหัส {code}" + detail + "คัดลอกรายละเอียด", "ลองใหม่"); done rows (check icon (one scale-in, none with `prefers-reduced-motion`), output name, notes in grey, "เปิดโฟลเดอร์" → `revealOutput`, "ดาวน์โหลด" = link `outputUrl(id, 0)` with `download`). Rows show `title || videoId`.
+- **Sheet** (bottom, `max-height: 80vh`, scroll inside, title "คิวงาน", hint): pause alert on top, then groups from `groupForSheet` with headings: running rows (title, kind label, stage · % · speed · ETA, Progress, "ยกเลิก" with `aria-label` "ยกเลิกงาน {title}"; "กำลังยกเลิก" when `cancelling`); queued rows (drag handle "ลากเพื่อเปลี่ยนลำดับ {title}", dnd-kit keyboard sensor with C13 announcements, "ยกเลิก"); failed/interrupted rows (icon + `error.message`, "ดูรายละเอียด" collapsible with "รหัส {code}" + detail + "คัดลอกรายละเอียด", "ลองใหม่"); done rows (check icon (one scale-in, none with `prefers-reduced-motion`), output name, notes in grey, "เปิดโฟลเดอร์" → `revealOutput`, "ดาวน์โหลด" = link `outputUrl(id, 0)` with `download`). Rows show `title || videoId`.
 - **Reorder:** on drop call `reorderJobs(newQueuedIds)` (optimistic, rollback + `th.queue.actionFailed` toast on error).
 - **Toasts** via `connectEvents(onJobChange)`: status becomes `done` → `toast.success(th.queue.finished)` with action "เปิดโฟลเดอร์"; `failed` → `toast.error(th.queue.failed + message)` with `duration: Infinity` and action "รายละเอียด" (opens the Sheet scrolled to the row). Only for transitions seen in this tab (no toasts for history loaded on refresh).
 - **Shutdown dialog** (Alert Dialog, C13 `shutdown.*`): count = `running + queued` from the jobs cache (or `pendingJobs` from the 409); "กลับไปก่อน" closes and removes `confirmShutdown` from the URL (replace); "ปิดเลย" → `POST /shutdown {force: true}` → shutdown screen.
