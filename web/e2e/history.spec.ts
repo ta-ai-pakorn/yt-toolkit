@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright"
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 
 import type { HistoryItem, HistoryPage, JobKind } from "../src/lib/types"
 
@@ -21,6 +21,14 @@ function item(videoId: string, title: string, outputs: JobKind[] = [], minutesAg
     outputs,
     lastAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
   }
+}
+
+async function clickCenter(page: Page, target: Locator, options: { button?: "left" | "middle"; modifiers?: "Control"[] } = {}) {
+  const box = await target.boundingBox()
+  if (!box) throw new Error("ไม่พบตำแหน่งขององค์ประกอบที่จะคลิก")
+  for (const key of options.modifiers ?? []) await page.keyboard.down(key)
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: options.button })
+  for (const key of options.modifiers ?? []) await page.keyboard.up(key)
 }
 
 const json = (route: Route, body: HistoryPage) => route.fulfill({ json: body })
@@ -160,6 +168,8 @@ test.describe("W5 ประวัติ", () => {
     await expect(page.getByText("แสดง 50 จาก 70 คลิป")).toBeVisible()
     await page.getByRole("button", { name: "แสดงเพิ่ม" }).click()
     await expect(page.locator("tbody tr")).toHaveCount(70)
+    // โฟกัสย้ายไปลิงก์ของแถวแรกที่เพิ่มมา (ปุ่มหายไปเมื่อครบ โฟกัสไม่หลุดไปที่ body)
+    await expect(page.getByRole("link", { name: "คลิปที่ 51", exact: true })).toBeFocused()
     await expect(page.getByText("แสดง 70 จาก 70 คลิป")).toBeVisible()
     await expect(page.getByRole("button", { name: "แสดงเพิ่ม" })).toHaveCount(0)
     expect(requests).toEqual(["?limit=50&scope=all", "?limit=50&offset=50&scope=all"])
@@ -179,10 +189,47 @@ test.describe("W5 ประวัติ", () => {
 
     await page.goBack()
     await expect(link).toBeVisible()
-    // กดที่ช่องเวลา (ไม่ใช่ลิงก์) ก็เปิดคลิป
-    await page.locator("tbody tr").first().locator("td").last().click()
+    // กดที่ช่องเวลา (ส่วนอื่นของแถว) ก็เปิดคลิป: ลิงก์ชื่อขยายคลุมทั้งแถว จึงคลิกด้วยพิกัดเมาส์ (ตัวช่วย click() ของ Playwright มองว่าลิงก์บังเซลล์)
+    await clickCenter(page, page.locator("tbody tr").first().locator("td").last())
     await expect(page).toHaveURL(new RegExp(`/v/${ZOO}$`))
     await expect(page.getByRole("heading", { level: 1 })).toContainText(ZOO_TITLE)
+  })
+
+  test("ค้นอยู่แล้วเปลี่ยนไป /history (ไม่มี q) ด้วยการนำทางในหน้า → ช่องค้นหาว่าง รายการเต็ม URL ไม่ถูกเขียน q กลับ", async ({ page }) => {
+    await page.route("**/api/history*", (route) => {
+      const q = new URL(route.request().url()).searchParams.get("q")
+      return json(route, q ? { items: [], total: 0 } : { items: [item(ZOO, ZOO_TITLE)], total: 1 })
+    })
+    await mockThumbnails(page)
+    await page.goto("/history")
+    const search = page.getByRole("textbox", { name: "ค้นหาจากชื่อคลิป" })
+    await search.fill("zoo")
+    await expect(page).toHaveURL(/\/history\?q=zoo$/)
+    await expect(page.getByText("ไม่พบคลิปที่ตรงกับ “zoo”")).toBeVisible()
+
+    // เหมือนกดเมนู "ประวัติ" ที่หัวหน้า (React Router นำทางฝั่งหน้าเว็บ ไม่โหลดหน้าใหม่)
+    await page.evaluate(() => {
+      window.history.pushState({}, "", "/history")
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    })
+    await expect(search).toHaveValue("")
+    await expect(page.getByRole("link", { name: ZOO_TITLE })).toBeVisible()
+    await page.waitForTimeout(600)
+    await expect(page).toHaveURL(/\/history$/)
+    await expect(search).toHaveValue("")
+  })
+
+  test("Ctrl-คลิปที่ส่วนอื่นของแถวเปิดคลิปในแท็บใหม่ และหน้าประวัติยังอยู่", async ({ page, context }) => {
+    await page.route("**/api/history*", (route) => json(route, { items: [item(ZOO, ZOO_TITLE, ["audio"])], total: 1 }))
+    await mockThumbnails(page)
+    await page.goto("/history")
+    await expect(page.getByRole("link", { name: ZOO_TITLE })).toBeVisible()
+    const opened = context.waitForEvent("page")
+    await clickCenter(page, page.locator("tbody tr").first().locator("td").nth(2), { modifiers: ["Control"] })
+    const tab = await opened
+    await tab.waitForLoadState("domcontentloaded")
+    expect(new URL(tab.url()).pathname).toBe(`/v/${ZOO}`)
+    await expect(page).toHaveURL(/\/history$/)
   })
 
   test("/settings พาไป /settings/general", async ({ page }) => {

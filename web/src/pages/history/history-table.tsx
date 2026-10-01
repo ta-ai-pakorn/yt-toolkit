@@ -1,5 +1,4 @@
-import type { MouseEvent } from "react"
-import { Link, useNavigate } from "react-router"
+import { Link } from "react-router"
 
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -29,28 +28,19 @@ function Header() {
 }
 
 function HistoryRow({ item }: { item: HistoryItem }) {
-  const navigate = useNavigate()
-  const href = `/v/${item.videoId}`
   const labels = outputLabels(item.outputs)
 
-  // ทั้งแถวกดได้เหมือนรายการล่าสุดของ W1 · คีย์บอร์ดใช้ลิงก์ชื่อคลิป (จุดหยุด Tab เดียวต่อแถว)
-  // คลิกที่ลิงก์เอง หรือกดร่วมกับ Ctrl/Shift/Alt/Cmd ปล่อยให้เบราว์เซอร์จัดการตามปกติ
-  function openRow(event: MouseEvent<HTMLTableRowElement>) {
-    if (event.defaultPrevented || event.button !== 0) return
-    if (event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return
-    if ((event.target as HTMLElement).closest("a")) return
-    void navigate(href)
-  }
-
+  // ทั้งแถวกดได้เหมือนรายการล่าสุดของ W1 ด้วยลิงก์ที่ขยายคลุมแถว (after:inset-0 อิง <tr> ที่เป็น relative)
+  // จึงยังเป็นลิงก์จริง: Ctrl/Cmd-คลิป คลิกกลาง และคลิกขวา "เปิดในแท็บใหม่" ใช้ได้ · Tab หยุดที่ชื่อคลิปจุดเดียวต่อแถว
   return (
-    <TableRow onClick={openRow} className="cursor-pointer">
+    <TableRow className="relative">
       <TableCell className="py-2">
         <Thumbnail src={item.thumbnailUrl} className="w-24" />
       </TableCell>
       <TableCell className="min-w-0 whitespace-normal">
         <Link
-          to={href}
-          className="line-clamp-2 rounded-sm font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+          to={`/v/${item.videoId}`}
+          className="line-clamp-2 rounded-sm font-medium [overflow-wrap:anywhere] outline-none after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {item.title}
         </Link>
@@ -76,7 +66,7 @@ function HistoryRow({ item }: { item: HistoryItem }) {
 /** ตารางประวัติ (หน้า W5): ปก · ชื่อคลิป · ไฟล์ที่ได้ · เวลา เรียงตามที่ backend ส่งมา (ใหม่สุดก่อน) */
 export function HistoryTable({ items }: { items: HistoryItem[] }) {
   return (
-    <Table className="table-fixed">
+    <Table className="table-fixed" aria-label={th.history.title}>
       <Header />
       <TableBody>
         {items.map((item) => (
