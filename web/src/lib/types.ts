@@ -71,7 +71,7 @@ export type VideoInfo = {
 /**
  * คอมเมนต์ที่ปักหมุดไว้ (สัญญา C-A2 v2): เจ้าของช่องปักหมุดคอมเมนต์ของใครก็ได้
  * byUploader = เจ้าของช่องเขียนเอง (true) หรือผู้ชมเขียน (false) · ไม่มีชื่อ รหัส หรือรูปผู้เขียน ตาม PDPA
- * backend รุ่นก่อน (v1) ไม่มี byUploader (ตอนนั้นมีแต่คอมเมนต์ของเจ้าของช่อง) หน้าเว็บจึงไม่แสดงป้ายเมื่อไม่มีคีย์นี้
+ * backend รุ่นก่อน (v1) อาจไม่ส่ง byUploader: หน้าเว็บถือว่าไม่ใช่เจ้าของช่อง (แสดงป้าย "ผู้ชม") เมื่อไม่มีคีย์นี้ (เป็น true เท่านั้นจึงเป็นเจ้าของ)
  */
 export type PinnedComment = { text: string; likes?: number; publishedText?: string; byUploader: boolean }
 

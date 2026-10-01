@@ -46,9 +46,23 @@ function HeaderSkeleton() {
         {t.loading}
       </span>
       <Skeleton className={`aspect-video ${COVER}`} />
-      <div className="flex flex-1 flex-col gap-3">
-        <Skeleton className="h-7 w-3/4" />
-        <Skeleton className="h-4 w-1/2" />
+      <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:contents">
+        <div className="flex flex-col gap-2 max-sm:self-center">
+          <Skeleton className="h-8 w-3/4 max-sm:h-7" />
+          <Skeleton className="h-7 w-1/2 sm:hidden" />
+        </div>
+        <Skeleton className={`h-6 w-2/3 ${FULL_ROW}`} />
+        <ul className={`grid grid-cols-3 gap-1.5 sm:grid-cols-6 ${FULL_ROW}`}>
+          {Array.from({ length: 6 }, (_, index) => (
+            <li key={index} className="min-w-0">
+              <Skeleton className="h-[3.25rem] w-full" />
+            </li>
+          ))}
+        </ul>
+        <div className={`flex flex-wrap items-center gap-2 ${FULL_ROW}`}>
+          <Skeleton className="h-8 w-40 max-sm:h-11" />
+          <Skeleton className="h-8 w-32 max-sm:h-11" />
+        </div>
       </div>
     </div>
   )
