@@ -18,6 +18,7 @@ import { Thumbnail } from "@/pages/home/thumbnail"
 import { ClipDetails } from "./clip-details"
 import { errorMessage } from "./errors"
 import { LoadError } from "./load-error"
+import { useTrackWarming } from "./session-warming"
 import { Stat } from "./stats"
 import { subtitlesQuery } from "./subs-queries"
 import { useSubSettings } from "./subs-settings"
@@ -141,9 +142,11 @@ function Meta({ video, trackName }: { video: VideoInfo; trackName: string | null
 function NoteButton({ videoId, trackId }: { videoId: string; trackId: string | null }) {
   const { options } = useSubSettings()
   const [busy, setBusy] = useState(false)
+  // ซับแปลของแทร็กนี้กำลังรอเซสชัน (นับถอยหลังอยู่): โน้ตจะได้ error เดียวกัน จึงกดไม่ได้จนโหลดซับเสร็จ
+  const warming = useTrackWarming(videoId, trackId)
 
   async function save() {
-    if (busy) return
+    if (busy || warming) return
     setBusy(true)
     const id = toast.loading(t.note.preparing)
     try {
@@ -164,7 +167,7 @@ function NoteButton({ videoId, trackId }: { videoId: string; trackId: string | n
             variant="secondary"
             size="sm"
             className={`w-fit max-sm:h-11 ${FULL_ROW}`}
-            disabled={busy}
+            disabled={busy || warming}
             focusableWhenDisabled
             onClick={() => void save()}
           />

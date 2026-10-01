@@ -14,6 +14,8 @@ import { hasCode } from "./errors"
 import { cueIndexAt } from "./frame-target"
 import { LoadError } from "./load-error"
 import { cueInReplayed } from "./most-replayed"
+import { isWarming } from "./session-warming"
+import { SessionWarming } from "./subs/session-warming"
 import { TranslationBlocked } from "./subs/translation-blocked"
 import { tokensQuery } from "./subs-queries"
 import { useSubSettings } from "./subs-settings"
@@ -171,6 +173,7 @@ function TrackTranscript({ videoId, track, at, segments, onPick, onUseOriginal }
   let body
   if (hasCode(tokens.error, "E_NO_SUBTITLES")) body = <NoLines />
   else if (hasCode(tokens.error, "E_TRANSLATION_BLOCKED")) body = <TranslationBlocked onUseOriginal={onUseOriginal} />
+  else if (isWarming(tokens.error)) body = <SessionWarming key={tokens.errorUpdatedAt} query={tokens} onUseOriginal={onUseOriginal} />
   else if (tokens.isError) {
     body = <LoadError title={th.subs.loadError} error={tokens.error} onRetry={() => void tokens.refetch()} />
   } else if (!tokens.isSuccess) body = <LinesSkeleton />

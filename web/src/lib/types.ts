@@ -11,7 +11,8 @@ export type ToolStatus = {
 export type Health = {
   version: string
   commit: string | null
-  tools: { ffmpeg: ToolStatus; ytdlp: ToolStatus; jsRuntime: ToolStatus }
+  // impersonation (owner round 3): yt-dlp ทำงานแบบเบราว์เซอร์ได้ไหม (curl_cffi) backend รุ่นก่อนไม่มีแถวนี้
+  tools: { ffmpeg: ToolStatus; ytdlp: ToolStatus; jsRuntime: ToolStatus; impersonation?: ToolStatus }
   disk: ToolStatus
   output: ToolStatus
   network: ToolStatus

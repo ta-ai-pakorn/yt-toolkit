@@ -20,14 +20,14 @@ const ICON: Record<ToolState, typeof CircleCheck> = { ok: CircleCheck, warn: Cir
 const TONE: Record<ToolState, string> = { ok: "text-success", warn: "text-warning", error: "text-destructive" }
 
 function rows(health: Health): [RowKey, ToolStatus][] {
-  return [
+  const list: [RowKey, ToolStatus][] = [
     ["ffmpeg", health.tools.ffmpeg],
     ["ytdlp", health.tools.ytdlp],
     ["jsRuntime", health.tools.jsRuntime],
-    ["disk", health.disk],
-    ["output", health.output],
-    ["network", health.network],
   ]
+  if (health.tools.impersonation) list.push(["impersonation", health.tools.impersonation])
+  list.push(["disk", health.disk], ["output", health.output], ["network", health.network])
+  return list
 }
 
 function detail(key: RowKey, tool: ToolStatus): string {
@@ -77,7 +77,7 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
   if (health.isPending) {
     return (
       <div className="flex flex-col gap-2" aria-busy="true">
-        {Array.from({ length: 6 }, (_, i) => (
+        {Array.from({ length: 7 }, (_, i) => (
           <Skeleton key={i} className="h-14 w-full" />
         ))}
       </div>

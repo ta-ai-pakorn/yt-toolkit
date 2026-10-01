@@ -183,6 +183,9 @@ export const th = {
     downloadFailed: "โหลดซับไม่สำเร็จ ลองอีกครั้ง",
     translationBlocked: "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน",
     useOriginal: "ใช้ซับภาษาต้นฉบับ",
+    warming: "กำลังเตรียมซับแปลจากยูทูป รอ {n} วินาที แล้วโหลดให้เอง",
+    warmingLoading: "กำลังโหลดซับแปลจากยูทูป",
+    warmingHint: "รอแค่ครั้งแรก ครั้งต่อไปซับแปลโหลดได้ทันที",
   },
   transcript: {
     title: "ทรานสคริปต์",
@@ -206,6 +209,7 @@ export const th = {
       ffmpeg: "โปรแกรมแปลงไฟล์ (ffmpeg)",
       ytdlp: "ตัวโหลด (yt-dlp)",
       jsRuntime: "ตัวช่วยของ yt-dlp",
+      impersonation: "ทำงานแบบเบราว์เซอร์ (curl_cffi)",
       disk: "พื้นที่ดิสก์",
       output: "โฟลเดอร์ผลลัพธ์",
       network: "การเชื่อมต่อยูทูป",
