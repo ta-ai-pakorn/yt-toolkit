@@ -221,6 +221,29 @@ test.describe("ซับแปลรอเซสชันของยูทู�
     expect(calls.n).toBe(2)
   })
 
+  test("เปลี่ยนแทร็กไปแล้วกลับมาระหว่างนับ: นับต่อจากเดิม (ราว 17 ไม่ใช่ 20) และไม่ยิงคำขอเพิ่ม (review #8)", async ({
+    page,
+  }) => {
+    const calls = await warmTranslated(page, 20)
+    await page.goto(URL)
+    await expect(countdown(page)).toBeVisible()
+    await page.getByRole("combobox", { name: "แทร็กซับ" }).click()
+    await page.getByRole("option", { name: "ไทย (อัตโนมัติ)" }).click()
+    await expect(cues(page)).toHaveCount(5)
+    await page.waitForTimeout(3_000)
+    await page.getByRole("combobox", { name: "แทร็กซับ" }).click()
+    await page.getByRole("option", { name: "เลือกซับแปลอัตโนมัติ…" }).click()
+    const dialog = page.getByRole("dialog", { name: "ซับแปลอัตโนมัติ" })
+    await dialog.getByRole("searchbox", { name: "ค้นหาภาษา" }).fill("อังกฤษ")
+    await dialog.getByRole("button", { name: /^อังกฤษ/ }).first().click()
+    await expect(page).toHaveURL(/[?&]track=t\.en(&|$)/)
+    await expect(countdown(page)).toBeVisible()
+    const shown = await secondsShown(page)
+    expect(shown).toBeLessThanOrEqual(17)
+    expect(shown).toBeGreaterThanOrEqual(14)
+    expect(calls.n).toBe(1)
+  })
+
   test("แท็บทรานสคริปต์ก็แสดงกล่องนับถอยหลังเดียวกัน และโหลดให้เองเมื่อครบ", async ({ page }) => {
     const calls = await warmTranslated(page, 2)
     await page.goto(`/v/${THAI}?tab=transcript&track=${TRACK}`)

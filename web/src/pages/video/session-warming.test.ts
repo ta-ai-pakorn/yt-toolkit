@@ -149,6 +149,20 @@ describe("watchWarming: โหลดใหม่ให้เองเมื่�
     unsubscribe()
   })
 
+  it("เปลี่ยนแทร็กไปแล้วกลับมา (observer เดิมเปลี่ยน key) ระหว่างนับไม่ยิงซ้ำ (fix round 3)", async () => {
+    const fetch = stubResponses(warming(30), tokens)
+    const client = new QueryClient()
+    const { observer, unsubscribe } = await firstFetch(client)
+    observer.setOptions(tokensQuery(VIDEO, "a.th-orig"))
+    await vi.waitFor(() => expect(observer.getCurrentResult().isFetching).toBe(false))
+    expect(fetch).toHaveBeenCalledTimes(2) // แทร็กไทยโหลดตามปกติ
+    observer.setOptions(tokensQuery(VIDEO, "t.en"))
+    await vi.advanceTimersByTimeAsync(100)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(isWarming(observer.getCurrentResult().error)).toBe(true)
+    unsubscribe()
+  })
+
   it("สลับแท็บกลับมา (mount ใหม่) ระหว่างนับไม่ยิงซ้ำ", async () => {
     const fetch = stubResponses(warming(30), tokens)
     const client = new QueryClient()

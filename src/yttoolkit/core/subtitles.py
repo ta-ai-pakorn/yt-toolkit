@@ -180,7 +180,9 @@ class SubtitleService:
         reprobed = False
         if wait is None:
             now = self._monotonic()
-            if self._no_visitor_at is not None and now - self._no_visitor_at < NO_VISITOR_RETRY_S:
+            with self._guard:
+                recent = self._no_visitor_at is not None and now - self._no_visitor_at < NO_VISITOR_RETRY_S
+            if recent:
                 # เพิ่ง probe แล้วไม่ได้เซสชัน: ไม่ probe ซ้ำทุกครั้งที่ขอซับแปล โหลดเลยตามปกติ
                 return False
             log.info("ยังไม่มีเซสชันผู้ชมของยูทูป probe %s ใหม่เพื่อรับเซสชันก่อนโหลดซับแปล", video_id)
@@ -190,10 +192,12 @@ class SubtitleService:
             if wait is None:
                 # probe แล้วยูทูปก็ไม่ออกเซสชันให้: ลองโหลดเลย ได้ 429 ก็จบที่ E_TRANSLATION_BLOCKED ตามปกติ
                 # และจำไว้ 5 นาที ไม่ probe ซ้ำในช่วงนั้น
-                self._no_visitor_at = self._monotonic()
+                with self._guard:
+                    self._no_visitor_at = self._monotonic()
                 log.warning("probe %s แล้วยังไม่ได้เซสชันผู้ชม โหลดซับแปลโดยไม่รอ", video_id)
                 return reprobed
-            self._no_visitor_at = None
+            with self._guard:
+                self._no_visitor_at = None
         if wait > 0:
             raise YtError("E_SESSION_WARMING", f"เซสชันผู้ชมอายุยังไม่ถึง (รออีก {wait} วินาที)", retry_after=wait)
         return reprobed

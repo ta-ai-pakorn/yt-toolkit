@@ -28,7 +28,9 @@ export function tokensQuery(videoId: string, trackId: string | null | undefined)
   return queryOptions({
     queryKey: ["subtokens", videoId, trackId ?? null],
     queryFn: ({ signal }) => api<SubTokens>(`/videos/${videoId}/subtitles/${trackId}/tokens`, { signal }),
-    enabled: Boolean(trackId),
+    // ระหว่างรอเซสชัน (E_SESSION_WARMING) observer ไม่ยิงเอง: เปลี่ยนแทร็กไปแล้วกลับมา (query เดิมที่ไม่มีข้อมูล
+    // react-query ถือว่า stale และยิงใหม่ทันที แม้ retryOnMount จะปิด) ต้องไม่ยิงซ้ำ ให้ watchWarming โหลดเมื่อครบเวลา
+    enabled: (query) => Boolean(trackId) && !isWarming(query.state.error),
     retry: false,
     retryOnMount: (query) => canRetry(query.state.error) && !isWarming(query.state.error),
     refetchOnReconnect: (query) => canRetry(query.state.error) && !isWarming(query.state.error),
