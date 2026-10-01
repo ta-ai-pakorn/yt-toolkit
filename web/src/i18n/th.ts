@@ -304,6 +304,8 @@ export const th = {
       title: "วิดีโอ",
       quality: "คุณภาพ",
       auto: "เปิดได้ทุกที่ สูงสุด 1080p (แนะนำ)",
+      // M4 T15 fix round 1 (controller I-1): ป้ายของตัวเลือกอัตโนมัติเมื่อเปิด "ความละเอียดสูงสุด"
+      autoMax: "สูงสุดที่คลิปนี้มี",
       option: "{height}p · {fps} fps · {codec}",
       optionSize: "{height}p · {fps} fps · {codec} · ประมาณ {size}",
       maxQuality: "ความละเอียดสูงสุด",

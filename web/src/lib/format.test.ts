@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  formatBytes,
   formatCompact,
   formatCount,
   formatDuration,
@@ -174,5 +175,23 @@ describe("formatTags", () => {
   it("ตัดช่องว่างหัวท้ายและข้ามแท็กว่าง · ไม่มีแท็ก = ข้อความว่าง", () => {
     expect(formatTags(["  a ", "", "   ", "b"])).toBe("a, b")
     expect(formatTags([])).toBe("")
+  })
+})
+
+describe("formatBytes", () => {
+  it("ฐานสิบ: MB จำนวนเต็ม · ต่ำกว่า 10 MB ทศนิยม 1 ตำแหน่ง · ตั้งแต่ 1 GB เป็น GB", () => {
+    expect(formatBytes(268_000_000)).toBe("268 MB")
+    expect(formatBytes(10_000_000)).toBe("10 MB")
+    expect(formatBytes(4_240_000)).toBe("4.2 MB")
+    expect(formatBytes(1_000_000_000)).toBe("1.0 GB")
+    expect(formatBytes(1_362_269_481)).toBe("1.4 GB")
+  })
+
+  it("ไฟล์เล็กมากอย่างน้อย 0.1 MB · 0 ติดลบ หรือไม่ใช่ตัวเลข = 0 MB", () => {
+    expect(formatBytes(1000)).toBe("0.1 MB")
+    expect(formatBytes(0)).toBe("0 MB")
+    expect(formatBytes(-5)).toBe("0 MB")
+    expect(formatBytes(Number.NaN)).toBe("0 MB")
+    expect(formatBytes(Number.POSITIVE_INFINITY)).toBe("0 MB")
   })
 })
