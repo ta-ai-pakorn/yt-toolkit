@@ -50,6 +50,8 @@ Watch the clip inside W2 using YouTube's official embedded player. Frames, trans
 
 ## 3. "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" (highlight reel)
 
+Amended in the integration round: the start button lives in the header action row, so the header height does not depend on mostReplayed before play. The status ("ช่วง {i} จาก {n}") and the stop button live in the timeline row, or on the docked player.
+
 - A secondary button under the player. It is shown only when the clip has `mostReplayed`.
 - It plays each range in order: seek to `startMs`, play, and when `currentMs >= endMs` seek to the next range.
 - While a reel runs, the player shows the status text "ช่วง {i} จาก {n}" and a button "หยุดเล่นช่วงไฮไลต์". After the last range it pauses.
