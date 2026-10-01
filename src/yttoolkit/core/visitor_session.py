@@ -38,6 +38,7 @@ SESSION_FILE = "visitor-session.txt"
 META_FILE = "visitor-session.json"
 VISITOR_COOKIE = "VISITOR_INFO1_LIVE"
 MAX_AGE_S = 30 * 24 * 3600  # เซสชันเก่ากว่านี้ทิ้งแล้วเริ่มใหม่
+CLOCK_SKEW_S = 60  # นาฬิกาคลาดได้เท่านี้ ก่อนถือว่าเวลาเกิดเชื่อไม่ได้
 MIN_TRANSLATION_AGE_S = 75  # ซับแปลโหลดได้เมื่อเซสชันอายุถึงเท่านี้ (spike: 75 วินาที 6/6, ไม่ถึง 8 วินาที 0/10)
 
 
@@ -97,12 +98,24 @@ class VisitorSession:
             return self._jar
 
     def age(self) -> float | None:
-        """อายุเซสชัน (วินาที) None = ยังไม่มีคุกกี้ผู้เข้าชม (ต้อง probe สักครั้งก่อน)"""
+        """อายุเซสชัน (วินาที) None = ยังไม่มีคุกกี้ผู้เข้าชม (ต้อง probe สักครั้งก่อน)
+
+        นาฬิกาเครื่องถูกย้อนไปก่อนเวลาเกิดเกิน 60 วินาที (review #2): เวลาเกิดเชื่อไม่ได้แล้ว
+        ตั้งเวลาเกิดเป็นตอนนี้ (นับ 75 วินาทีใหม่) ดีกว่ารอนานเท่าที่นาฬิกาถูกย้อน
+        """
         with self._lock:
             self.jar()
             if self._created_at is None:
                 return None
-            return max(0.0, self._clock() - self._created_at)
+            now = self._clock()
+            if now < self._created_at - CLOCK_SKEW_S:
+                log.info("นาฬิกาเครื่องถูกย้อนไปก่อนเวลาเกิดของเซสชันผู้ชม เริ่มนับอายุใหม่")
+                self._created_at = now
+                try:
+                    self._write_meta()
+                except OSError as exc:
+                    log.warning("บันทึกเวลาเกิดของเซสชันผู้ชมไม่สำเร็จ (%s)", type(exc).__name__)
+            return max(0.0, now - self._created_at)
 
     def wait_seconds(self, min_age_s: float = MIN_TRANSLATION_AGE_S) -> int | None:
         """อีกกี่วินาทีเซสชันจึงอายุถึง min_age_s (ปัดขึ้น อย่างน้อย 1) 0 = ถึงแล้ว None = ยังไม่มีเซสชัน"""
@@ -210,7 +223,7 @@ class VisitorSession:
         if isinstance(created, bool) or not isinstance(created, int | float) or not math.isfinite(created):
             return None
         # เวลาเกิดในอนาคต (นาฬิกาเครื่องถูกย้อน) เชื่อไม่ได้
-        if created > self._clock() + 60:
+        if created > self._clock() + CLOCK_SKEW_S:
             return None
         return float(created)
 

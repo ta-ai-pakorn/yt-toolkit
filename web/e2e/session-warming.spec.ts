@@ -89,8 +89,9 @@ test.describe("ซับแปลรอเซสชันของยูทู�
     await page.goto(URL)
     const live = box(page).getByRole("status")
     await expect(live).toHaveAttribute("aria-live", "polite")
+    // review #4: region ขึ้นแบบว่างแล้วได้ข้อความในอีกหนึ่งจังหวะ (ข้อความที่มีอยู่ตั้งแต่แรกมักไม่ถูกอ่าน)
+    await expect(live).toHaveText(/รอ (19|20) วินาที/)
     const firstSpoken = await live.textContent()
-    expect(firstSpoken).toMatch(/รอ (19|20) วินาที/)
     // ตัวเลขบนจอเดินไปแล้ว 2 วินาที แต่ข้อความที่ประกาศยังเป็นค่าเดิม
     const shownAtStart = await secondsShown(page)
     await expect.poll(() => secondsShown(page), { timeout: 4_000 }).toBeLessThanOrEqual(shownAtStart - 2)
@@ -166,6 +167,58 @@ test.describe("ซับแปลรอเซสชันของยูทู�
     await expect(cues(page)).toHaveCount(5)
     await expect(page.getByRole("combobox", { name: "แทร็กซับ" })).toBeFocused()
     await expect(page.getByTestId("session-warming")).toHaveCount(0)
+  })
+
+  test("live region ขึ้นมาแบบว่างก่อน แล้วจึงได้ข้อความ (review #4)", async ({ page }) => {
+    await warmTranslated(page, 30)
+    await page.addInitScript(() => {
+      const seen: string[] = []
+      Object.defineProperty(window, "__liveFirst", { value: seen })
+      new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (node instanceof HTMLElement) {
+              const region = node.matches('[data-slot="warming-live"]') ? node : node.querySelector('[data-slot="warming-live"]')
+              if (region) seen.push(region.textContent ?? "")
+            }
+          }
+        }
+      }).observe(document, { childList: true, subtree: true })
+    })
+    await page.goto(URL)
+    await expect(box(page).getByRole("status")).toHaveText(/รอ \d+ วินาที/)
+    const first = await page.evaluate(() => (window as unknown as { __liveFirst: string[] }).__liveFirst)
+    expect(first.length).toBeGreaterThan(0)
+    expect(first[0]).toBe("")
+  })
+
+  test("เปลี่ยนแทร็กระหว่างนับ: แทร็กใหม่โหลดทันที ซับแปลยังนับต่อเบื้องหลังและโหลดเองเมื่อครบ กลับมาเห็นซับเลย (review #8)", async ({
+    page,
+  }) => {
+    const calls = await warmTranslated(page, 3)
+    await page.goto(URL)
+    await expect(box(page)).toBeVisible()
+    // เปลี่ยนไปซับไทยจากช่องเลือกแทร็ก (ไม่ใช่ปุ่มในกล่อง)
+    await page.getByRole("combobox", { name: "แทร็กซับ" }).click()
+    await page.getByRole("option", { name: "ไทย (อัตโนมัติ)" }).click()
+    await expect(page).toHaveURL(/[?&]track=a\.th-orig(&|$)/)
+    await expect(cues(page)).toHaveCount(5)
+    await expect(page.getByTestId("session-warming")).toHaveCount(0)
+    for (const name of EXPORT_BUTTONS) {
+      await expect(panel(page, "ซับ").getByRole("button", { name })).toBeEnabled()
+    }
+    // ครบเวลาแล้ว ซับแปลที่ไม่ได้แสดงอยู่ก็ถูกโหลดเองหนึ่งครั้ง
+    await expect.poll(() => calls.n, { timeout: 8_000 }).toBe(2)
+    // กลับไปซับแปลอังกฤษ: เห็นซับทันที ไม่มีกล่องนับ และไม่ยิงคำขอเพิ่ม
+    await page.getByRole("combobox", { name: "แทร็กซับ" }).click()
+    await page.getByRole("option", { name: "เลือกซับแปลอัตโนมัติ…" }).click()
+    const dialog = page.getByRole("dialog", { name: "ซับแปลอัตโนมัติ" })
+    await dialog.getByRole("searchbox", { name: "ค้นหาภาษา" }).fill("อังกฤษ")
+    await dialog.getByRole("button", { name: /^อังกฤษ/ }).first().click()
+    await expect(page).toHaveURL(/[?&]track=t\.en(&|$)/)
+    await expect(cues(page)).toHaveCount(5)
+    await expect(page.getByTestId("session-warming")).toHaveCount(0)
+    expect(calls.n).toBe(2)
   })
 
   test("แท็บทรานสคริปต์ก็แสดงกล่องนับถอยหลังเดียวกัน และโหลดให้เองเมื่อครบ", async ({ page }) => {

@@ -1,6 +1,6 @@
 import type { UseQueryResult } from "@tanstack/react-query"
 import { Hourglass } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -30,6 +30,13 @@ export function SessionWarming({ query, onUseOriginal }: Props) {
   const [initial] = useState(left)
   const spoken = announcedSeconds(left, initial)
   const announced = spoken > 0 ? fill(t.warming, { n: spoken }) : t.warmingLoading
+  // live region ขึ้นมาแบบว่างก่อน แล้วใส่ข้อความในอีกหนึ่งจังหวะ (review #4): ข้อความที่มีอยู่ตั้งแต่ตอนใส่ region
+  // เข้าหน้า โปรแกรมอ่านหน้าจอหลายตัวไม่อ่าน
+  const [live, setLive] = useState(false)
+  useEffect(() => {
+    const id = setTimeout(() => setLive(true), 0)
+    return () => clearTimeout(id)
+  }, [])
 
   return (
     <Alert role={undefined} data-testid="session-warming">
@@ -40,8 +47,8 @@ export function SessionWarming({ query, onUseOriginal }: Props) {
           {text}
         </span>
       </AlertDescription>
-      <span role="status" aria-live="polite" className="sr-only">
-        {announced}
+      <span role="status" aria-live="polite" className="sr-only" data-slot="warming-live">
+        {live ? announced : ""}
       </span>
       <p className="col-start-2 text-sm text-muted-foreground">{t.warmingHint}</p>
       {onUseOriginal && (

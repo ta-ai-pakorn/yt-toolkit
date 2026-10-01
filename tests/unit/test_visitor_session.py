@@ -337,3 +337,26 @@ def test_logs_never_contain_cookie_values(tmp_path: Path, caplog: pytest.LogCapt
         session.age()
     assert caplog.records  # มี log จริง (เริ่มนาฬิกา, ออกเซสชันใหม่, เกิน 30 วัน)
     assert SECRET not in caplog.text
+
+
+def test_clock_moved_back_restarts_the_birth_time(tmp_path: Path) -> None:
+    # review #2: นาฬิกาถูกย้อนไปก่อนเวลาเกิดเกิน 60 วินาที = เริ่มนับใหม่จากตอนนี้ (ไม่รอนานเท่าที่ย้อน)
+    clock = Clock()
+    session = make(tmp_path, clock)
+    visit(session)
+    clock.now -= 3600
+    assert session.age() == 0
+    assert session.wait_seconds() == MIN_TRANSLATION_AGE_S
+    assert json.loads(session.meta_path.read_text(encoding="utf-8")) == {"createdAt": clock.now}
+    clock.now += 80
+    assert session.wait_seconds() == 0
+
+
+def test_small_clock_jitter_keeps_the_birth_time(tmp_path: Path) -> None:
+    clock = Clock()
+    session = make(tmp_path, clock)
+    visit(session)
+    clock.now -= 59
+    assert session.age() == 0  # ยังไม่ถึง 60 วินาที: ถือว่าคลาดเล็กน้อย ไม่เริ่มใหม่
+    clock.now += 59 + 75
+    assert session.wait_seconds() == 0

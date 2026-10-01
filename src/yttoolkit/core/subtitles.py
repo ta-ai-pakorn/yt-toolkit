@@ -46,6 +46,8 @@ SUBS_FOLDER = "subs"
 _SOURCES = frozenset({"json3", "vtt"})
 _ID_ECHO_MAX = 80  # track id จากหน้าเว็บที่ยกไปใส่ใน detail ของ error ตัดไว้ไม่ให้ยาว
 TRANSLATION_RETRY_DELAY_S = 20  # ซับแปลได้ 429 ทั้งที่เซสชันอายุถึงแล้ว: รอเท่านี้แล้วลองอีกครั้งเดียว
+# probe แล้วยูทูปไม่ออกคุกกี้ผู้เข้าชมให้: ไม่ probe เพื่อขอเซสชันซ้ำภายในเวลานี้ (review #3)
+NO_VISITOR_RETRY_S = 300
 
 
 class SubtitleExport(NamedTuple):
@@ -77,6 +79,7 @@ class SubtitleService:
         session: VisitorSession | None = None,
         sleep: Callable[[float], None] = time.sleep,
         retry_delay_s: float = TRANSLATION_RETRY_DELAY_S,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._videos = videos
         self._fetch = fetch_subtitle
@@ -85,6 +88,9 @@ class SubtitleService:
         self._session = session
         self._sleep = sleep
         self._retry_delay_s = retry_delay_s
+        self._monotonic = monotonic
+        # เวลา (monotonic) ที่ probe ครั้งล่าสุดไม่ได้คุกกี้ผู้เข้าชม (เก็บในหน่วยความจำเท่านั้น)
+        self._no_visitor_at: float | None = None
         self._guard = threading.Lock()
         self._locks: dict[tuple[str, str], threading.Lock] = {}
 
@@ -173,14 +179,21 @@ class SubtitleService:
         wait = self._session.wait_seconds()
         reprobed = False
         if wait is None:
+            now = self._monotonic()
+            if self._no_visitor_at is not None and now - self._no_visitor_at < NO_VISITOR_RETRY_S:
+                # เพิ่ง probe แล้วไม่ได้เซสชัน: ไม่ probe ซ้ำทุกครั้งที่ขอซับแปล โหลดเลยตามปกติ
+                return False
             log.info("ยังไม่มีเซสชันผู้ชมของยูทูป probe %s ใหม่เพื่อรับเซสชันก่อนโหลดซับแปล", video_id)
             self._videos.get(video_id, refresh=True)
             reprobed = True
             wait = self._session.wait_seconds()
             if wait is None:
                 # probe แล้วยูทูปก็ไม่ออกเซสชันให้: ลองโหลดเลย ได้ 429 ก็จบที่ E_TRANSLATION_BLOCKED ตามปกติ
+                # และจำไว้ 5 นาที ไม่ probe ซ้ำในช่วงนั้น
+                self._no_visitor_at = self._monotonic()
                 log.warning("probe %s แล้วยังไม่ได้เซสชันผู้ชม โหลดซับแปลโดยไม่รอ", video_id)
                 return reprobed
+            self._no_visitor_at = None
         if wait > 0:
             raise YtError("E_SESSION_WARMING", f"เซสชันผู้ชมอายุยังไม่ถึง (รออีก {wait} วินาที)", retry_after=wait)
         return reprobed

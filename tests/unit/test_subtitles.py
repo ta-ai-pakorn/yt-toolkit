@@ -548,6 +548,33 @@ def test_missing_session_is_minted_by_one_probe_then_waits(make):
     assert fetch.urls == []
 
 
+def test_no_visitor_after_probe_is_remembered_for_five_minutes(make):
+    # review #3: probe แล้วไม่ได้คุกกี้ผู้เข้าชม ไม่ probe ซ้ำทุกครั้งที่ขอซับแปลภายใน 5 นาที
+    service, fake, fetch, *_ = make(session=Session(None))
+    now = [1000.0]
+    service._monotonic = lambda: now[0]
+    service.tracks(THAI)
+    before = probes(fake)
+    calls = []
+
+    def count(url):
+        calls.append(url)
+        raise YtError("E_NETWORK", "x")
+
+    service._fetch = count
+    for _ in range(3):
+        with pytest.raises(YtError):
+            service.tokens(THAI, "t.en")
+        now[0] += 60
+    # ครั้งแรก probe ขอเซสชัน 1 ครั้ง (+ probe ใหม่จาก E_NETWORK ของลิงก์หมดอายุทุกครั้ง แบบเดิม)
+    session_probes = probes(fake) - before - 3
+    assert session_probes == 1
+    now[0] += 300
+    with pytest.raises(YtError):
+        service.tokens(THAI, "t.en")
+    assert probes(fake) - before - 4 == 2  # พ้น 5 นาทีแล้ว probe ขอเซสชันอีกครั้ง
+
+
 def test_session_still_missing_after_probe_fetches_anyway(make):
     service, fake, fetch, *_ = make(session=Session(None))
     service.tracks(THAI)
