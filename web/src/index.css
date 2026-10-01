@@ -166,3 +166,12 @@
     }
   }
 }
+
+/* ตัวเล่นคลิป (M3.5): ตัวเล่นลอยมุมจอยกขึ้นจากขอบล่างเท่านี้ (เผื่อแถบคิวของ M4) */
+:root {
+  --dock-bottom-offset: 0px;
+}
+/* ตอนตัวเล่นลอย เว้นที่ท้ายหน้าเท่าความสูงตัวเล่น เนื้อหาล่างสุดจึงไม่ถูกบัง (--player-dock-h ตั้งจาก player-slot.tsx) */
+html[data-player-docked] body {
+  padding-bottom: calc(var(--player-dock-h, 0px) + var(--dock-bottom-offset) + 1rem);
+}
