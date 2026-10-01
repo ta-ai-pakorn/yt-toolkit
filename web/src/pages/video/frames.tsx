@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Captions, Copy, Download, ImageIcon, ImageOff, Link2 } from "lucide-react"
+import { Captions, Copy, Download, Flame, ImageIcon, ImageOff, Link2 } from "lucide-react"
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { toast } from "sonner"
 
@@ -17,12 +17,14 @@ import { ApiError } from "@/lib/api"
 import { copyImage } from "@/lib/clipboard"
 import { downloadFile } from "@/lib/download"
 import { formatTimecode, youtubeLinkAt } from "@/lib/format"
-import type { StoryboardFrame } from "@/lib/types"
+import type { ReplaySegment, StoryboardFrame } from "@/lib/types"
 
 import { errorMessage } from "./errors"
 import { nearestFrameIndex, revealAndFocus } from "./frame-target"
 import { FrameLightbox } from "./lightbox"
 import { LoadError } from "./load-error"
+import { inReplayed } from "./most-replayed"
+import { ReplayedMark } from "./replayed-mark"
 import { storyboardQuery } from "./queries"
 import { subtitlesQuery } from "./subs-queries"
 import { trackInEffect } from "./track-label"
@@ -116,13 +118,15 @@ type FrameTileProps = {
   frame: StoryboardFrame
   videoId: string
   highlighted: boolean
+  /** ภาพอยู่ในช่วงที่คนดูซ้ำมากที่สุด (มีป้ายที่มุมขวาบน) */
+  replayed: boolean
   onOpen: () => void
   /** "ดูซับช่วงนี้" · undefined = คลิปไม่มีซับหรือยังไม่มีแทร็กที่ใช้อยู่ (ไม่มีรายการนี้ในเมนู เมนูเหมือน M2) */
   onViewSubs?: () => void
   buttonRef: (element: HTMLButtonElement | null) => void
 }
 
-function FrameTile({ frame, videoId, highlighted, onOpen, onViewSubs, buttonRef }: FrameTileProps) {
+function FrameTile({ frame, videoId, highlighted, replayed, onOpen, onViewSubs, buttonRef }: FrameTileProps) {
   const time = formatTimecode(frame.tMs)
   const [menuOpen, setMenuOpen] = useState(false)
   const keyboardOpenRef = useRef(false)
@@ -184,6 +188,9 @@ function FrameTile({ frame, videoId, highlighted, onOpen, onViewSubs, buttonRef 
             <span className="pointer-events-none absolute bottom-1 left-1 hidden rounded-sm bg-background/85 px-1 font-mono text-[11px] text-foreground group-hover:block group-has-[:focus-visible]:block">
               {time}
             </span>
+            {replayed && (
+              <ReplayedMark className="pointer-events-none absolute top-1 right-1 inline-flex rounded-sm bg-background/85 p-0.5" />
+            )}
           </AspectRatio>
         </button>
       </ContextMenuTrigger>
@@ -220,10 +227,12 @@ type FrameGridProps = {
   videoId: string
   /** เวลาใน URL (?at=) · null = ไม่มีภาพที่ไฮไลต์ */
   at: number | null
+  /** ช่วงที่คนดูซ้ำมากที่สุด (ภาพในช่วงมีป้าย) */
+  segments?: ReplaySegment[]
   onViewSubs?: (tMs: number) => void
 }
 
-function FrameGrid({ frames, videoId, at, onViewSubs }: FrameGridProps) {
+function FrameGrid({ frames, videoId, at, segments, onViewSubs }: FrameGridProps) {
   // ภาพที่เปิดดูใหญ่อยู่ (ตำแหน่งใน frames) · null = ปิด
   const [viewing, setViewing] = useState<number | null>(null)
   const openerRef = useRef<number>(0)
@@ -262,6 +271,7 @@ function FrameGrid({ frames, videoId, at, onViewSubs }: FrameGridProps) {
             frame={frame}
             videoId={videoId}
             highlighted={index === highlighted}
+            replayed={inReplayed(frame.tMs, segments)}
             onViewSubs={onViewSubs && (() => onViewSubs(frame.tMs))}
             onOpen={() => {
               openerRef.current = index
@@ -360,9 +370,47 @@ function BulkDownloads({ videoId }: { videoId: string }) {
   )
 }
 
+/**
+ * บรรทัด "ช่วงที่คนดูซ้ำมากที่สุด: 00:01:20, 00:05:10" ใต้หัวข้อภาพเฟรม (ไอคอนเดียวกับป้ายบนภาพ จึงอธิบายป้ายไปในตัว)
+ * กดเวลาแล้วไฮไลต์ภาพที่ใกล้เวลานั้นที่สุด เลื่อนมาให้เห็นและโฟกัส (กลไกเดียวกับ ?at= จากทรานสคริปต์)
+ */
+function ReplayedTimes({ segments, onPick }: { segments: ReplaySegment[]; onPick: (ms: number) => void }) {
+  return (
+    <p className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm text-muted-foreground">
+      <Flame aria-hidden className="size-4 shrink-0 text-accent-text" />
+      <span className="mr-1">{t.replayedTitle}</span>
+      {segments.map((segment, index) => {
+        const time = formatTimecode(segment.startMs)
+        return (
+          <span key={`${segment.startMs}-${index}`} className="inline-flex items-center">
+            <Button
+              variant="outline"
+              size="xs"
+              className="font-mono text-foreground tabular-nums max-sm:h-11 max-sm:px-3"
+              aria-label={fill(t.goToReplayed, { time })}
+              onClick={() => onPick(segment.startMs)}
+            >
+              {time}
+            </Button>
+            {index < segments.length - 1 && <span aria-hidden>,</span>}
+          </span>
+        )
+      })}
+    </p>
+  )
+}
+
+type FramesSectionProps = {
+  videoId: string
+  enabled: boolean
+  /** ช่วงที่คนดูซ้ำมากที่สุดจากข้อมูลคลิป · ไม่มี = ไม่มีบรรทัดนี้และไม่มีป้ายบนภาพ */
+  mostReplayed?: ReplaySegment[]
+}
+
 /** ส่วน "ภาพเฟรม" ของ W2 · เริ่มโหลด storyboard เมื่อ `enabled` (หลังข้อมูลคลิปมาแล้ว) */
-export function FramesSection({ videoId, enabled }: { videoId: string; enabled: boolean }) {
+export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionProps) {
   const storyboard = useQuery(storyboardQuery(videoId, enabled))
+  const sectionRef = useRef<HTMLElement>(null)
   // รายการแทร็กซับ (cache เดียวกับป้ายแทร็กที่หัวคลิป) ใช้ตัดสินว่าเมนูภาพเฟรมมี "ดูซับช่วงนี้" ไหม
   const subtitles = useQuery(subtitlesQuery(videoId, enabled))
   const { trackId, at, update } = useVideoParams()
@@ -379,11 +427,13 @@ export function FramesSection({ videoId, enabled }: { videoId: string; enabled: 
   if (noStoryboard) body = <NoStoryboard />
   else if (storyboard.isError) {
     body = <LoadError title={t.loadError} error={storyboard.error} onRetry={() => void storyboard.refetch()} />
-  } else if (storyboard.isSuccess) body = <FrameGrid frames={frames} videoId={videoId} at={at} onViewSubs={onViewSubs} />
-  else body = <FrameSkeleton />
+  } else if (storyboard.isSuccess) {
+    body = <FrameGrid frames={frames} videoId={videoId} at={at} segments={mostReplayed} onViewSubs={onViewSubs} />
+  } else body = <FrameSkeleton />
+  const showReplayed = storyboard.isSuccess && frames.length > 0 && (mostReplayed?.length ?? 0) > 0
 
   return (
-    <section aria-labelledby="frames-title">
+    <section ref={sectionRef} aria-labelledby="frames-title">
       <Card>
         {/* จอแคบ: หัวข้อ แถวปุ่มโหลด และคำแนะนำ เรียงกันคนละบรรทัด หัวข้อจะได้ไม่ถูกบีบจนขึ้นบรรทัดใหม่ */}
         <CardHeader className="max-sm:grid-cols-1!">
@@ -403,7 +453,22 @@ export function FramesSection({ videoId, enabled }: { videoId: string; enabled: 
             </CardAction>
           )}
         </CardHeader>
-        <CardContent>{body}</CardContent>
+        <CardContent className="flex flex-col gap-3">
+          {showReplayed && mostReplayed && (
+            <ReplayedTimes
+              segments={mostReplayed}
+              onPick={(ms) => {
+                // กดเวลาเดิมซ้ำ (at ไม่เปลี่ยน) ก็ยังพาไปที่ภาพที่ไฮไลต์อยู่
+                if (ms === at) {
+                  const current = sectionRef.current?.querySelector<HTMLElement>("button[data-highlighted]")
+                  current?.focus({ preventScroll: true })
+                  current?.scrollIntoView({ block: "center" })
+                } else update({ at: ms })
+              }}
+            />
+          )}
+          {body}
+        </CardContent>
       </Card>
     </section>
   )

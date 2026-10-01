@@ -6,6 +6,7 @@ import { formatTimecode } from "@/lib/format"
 import type { Cue } from "@/lib/types"
 
 import { centerInScrollArea, revealAndFocus } from "../frame-target"
+import { ReplayedMark } from "../replayed-mark"
 import { lineRanges, type PreparedLine } from "./search"
 
 const t = th.transcript
@@ -52,6 +53,8 @@ type Props = {
   needle: string
   /** บรรทัดของเวลาที่ส่งมาใน URL (at) · -1 = ไม่มี */
   current: number
+  /** บรรทัดไหนอยู่ในช่วงที่คนดูซ้ำมากที่สุด (ตำแหน่งเดียวกับ cues) ไม่มี = ไม่มีป้าย */
+  replayed?: readonly boolean[]
   /** เวลาใน URL: เปลี่ยนค่าเมื่อไร เลื่อนไปบรรทัด current และโฟกัสหนึ่งครั้ง · null = ไม่มี */
   revealKey: number | null
   onPick: (cue: Cue) => void
@@ -61,7 +64,7 @@ type Props = {
  * รายการบรรทัดทรานสคริปต์: แต่ละบรรทัดเป็นปุ่มเดียว เวลา HH:MM:SS + ข้อความ กดแล้วไปภาพเฟรมของช่วงนั้น
  * ต้องเรนเดอร์ไว้ตลอด (ผลค้นหาว่างก็คืน null) เพราะจำไว้ว่าเลื่อนไปหาบรรทัดของ at แล้วหรือยัง
  */
-export function LineList({ cues, lines, visible, needle, current, revealKey, onPick }: Props) {
+export function LineList({ cues, lines, visible, needle, current, replayed, revealKey, onPick }: Props) {
   const buttons = useRef(new Map<number, HTMLButtonElement>())
   const revealed = useRef<number | null>(null)
   // บรรทัดที่ไฮไลต์ถูกซ่อนด้วยคำค้นหลังเลื่อนไปหาแล้ว: กลับมาเห็นเมื่อไร เลื่อนกรอบไปหาอีกครั้ง
@@ -123,6 +126,7 @@ export function LineList({ cues, lines, visible, needle, current, revealKey, onP
                 <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
                   {formatTimecode(cue.startMs)}
                 </span>
+                {replayed?.[index] && <ReplayedMark className="inline-flex shrink-0 self-center" />}
                 <span className="min-w-0">
                   <Highlighted line={lines[index]} needle={needle} />
                 </span>
