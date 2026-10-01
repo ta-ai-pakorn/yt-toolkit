@@ -586,8 +586,10 @@ def truncate_title(text: str, limit: int) -> str
 def plan_output(root: Path, title: str, video_id: str, suffix: str, ext: str) -> Path
     # t = safe_component(title, video_id)
     # n = min(TITLE_MAX, len(t), (PATH_LIMIT - (len(str(root)) + 1) - len(f" [{video_id}]") - 1 - TAIL_RESERVE - UNIQUE_RESERVE) // 2)
-    # n >= 8: folder = f"{truncate_title(t, n)} [{video_id}]", file = f"{truncate_title(t, n)}{suffix}.{ext}"
-    # n < 8:  folder = video_id, file = f"{video_id}{suffix}.{ext}"
+    # (amended at gate 1) cap = the path-budget term above (lengths in UTF-16 code units);
+    # cap >= 8: folder = f"{truncate_title(t, min(TITLE_MAX, cap))} [{video_id}]", file likewise.
+    #           A short title such as "Hi" keeps its name; it does NOT fall back to the videoId.
+    # cap < 8, or truncation leaves "": folder = video_id, file = f"{video_id}{suffix}.{ext}"
     # still longer than PATH_LIMIT - UNIQUE_RESERVE -> YtError("E_OUTPUT_NOT_WRITABLE", "path too long")
     # The folder name depends only on (root, title, video_id), so every job of a clip shares one folder.
 def unique_path(path: Path) -> Path      # path, then "<stem> (2)<ext>" ... "(99)"; all taken -> YtError("E_OUTPUT_NOT_WRITABLE")
