@@ -78,3 +78,15 @@ M3 (ซับและทรานสคริปต์) ผ่านรีว�
   - fixture ที่ตั้งค่าตัวแปรสภาพแวดล้อมของเทสมีโค้ดซ้ำกันอยู่
   - `FakeExtractor` โยน exception ดิบเมื่อ json3 ปลอมเสีย (กระทบแค่ตัวปลอม)
 - **หน้าเว็บ:** ลูกศร ▼ ที่ซ่อนไว้ในช่องเลือกแทร็กติดมากับ textContent (เทส e2e อ่านเฉพาะส่วนค่าแทน)
+
+## Next milestone: M3.5 clip player (owner decision 2026-10-01)
+
+- On 2026-10-01 Pete decided to build the clip player as its own milestone, after M3 and before M4.
+- **What it is:** a YouTube player embedded in the clip page (W2). Pressing a frame, a chapter time or a most-replayed range plays the clip from that point.
+- **Design it together with:** a thin timeline bar above the frames that highlights the most-replayed ranges.
+- **Notes from the M3 discussion:**
+  - Use the `youtube-nocookie.com` domain.
+  - Load the player only when the user presses play.
+  - Set `referrerpolicy="strict-origin-when-cross-origin"`. Since late 2025, YouTube shows error 153 when a page sends no Referer.
+  - Some clips do not allow embedding. For those, show the "เปิดในยูทูป" button instead.
+- **Flaky test:** `web/e2e/health.spec.ts` sometimes fails when the full suite runs. The health page takes more than 15 s to load. It passes when run alone. A separate task has been set up for it.
