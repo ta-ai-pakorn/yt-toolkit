@@ -446,7 +446,8 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     expect(Math.abs((description?.x ?? 0) - (chapters?.x ?? 1))).toBeLessThan(2)
     expect(chapters?.y ?? 0).toBeGreaterThan((description?.y ?? 0) + (description?.height ?? 0) - 1)
     expect(pinned?.x ?? 0).toBeGreaterThan((description?.x ?? 0) + (description?.width ?? 0))
-    const cover = await page.getByRole("button", { name: "ดูภาพปกขนาดใหญ่" }).boundingBox()
+    // M3.5: ปกเป็นช่องตัวเล่น (ปุ่ม "เล่นคลิป")
+    const cover = await page.getByRole("button", { name: "เล่นคลิป" }).boundingBox()
     expect((cover?.width ?? 0) / (cover?.height ?? 1)).toBeCloseTo(16 / 9, 1)
   })
 
@@ -473,7 +474,7 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(page.getByText("คัดลอกไม่สำเร็จ ลองอีกครั้ง")).toBeVisible()
   })
 
-  test("คีย์บอร์ด: หัวคลิป ชื่อคลิป → โน้ต → เปิดในยูทูป → แท็บภาพเฟรม (ไม่มีจุด Tab ของคำอธิบาย/chapter แล้ว)", async ({ page }) => {
+  test("คีย์บอร์ด: หัวคลิป ชื่อคลิป → โน้ต → เปิดในยูทูป → ดูภาพปก → แท็บภาพเฟรม (ไม่มีจุด Tab ของคำอธิบาย/chapter แล้ว)", async ({ page }) => {
     await page.goto(`/v/${ZOO}`)
     const heading = page.getByRole("heading", { level: 1 })
     await expect(heading).toContainText("Me at the zoo")
@@ -482,6 +483,9 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(page.getByRole("button", { name: "บันทึกเป็นโน้ต (.md)", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(page.getByRole("link", { name: /^เปิดในยูทูป/ })).toBeFocused()
+    // M3.5: ปุ่ม "ดูภาพปก" ต่อท้ายแถวปุ่ม
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("button", { name: "ดูภาพปก", exact: true })).toBeFocused()
     await page.keyboard.press("Tab")
     await expect(tab(page, "ภาพเฟรม")).toBeFocused()
   })
