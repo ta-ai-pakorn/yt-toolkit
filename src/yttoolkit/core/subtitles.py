@@ -239,11 +239,18 @@ class SubtitleService:
             text = to_md(tokens, title=title, video_id=video_id, chapters=_chapter_ms(info))
         return SubtitleExport(title, track.lang, text.encode("utf-8"))
 
-    def note(self, video_id: str, track_id: str | None = None) -> NoteExport:
+    def note(
+        self,
+        video_id: str,
+        track_id: str | None = None,
+        pinned: Callable[[str], dict | None] | None = None,
+    ) -> NoteExport:
         """โน้ต .md ของคลิป (C-A3): front matter + คำอธิบาย + chapter + ทรานสคริปต์ของแทร็กที่เลือก
 
         ไม่ส่ง track_id = แทร็กที่เลือกให้เอง (C3) ไม่มีแทร็กเลย หรือแทร็กไม่มีข้อความ = ไม่มีหัวข้อทรานสคริปต์
         track_id ที่ไม่มีในคลิป = E_NO_SUBTITLES เหมือนไฟล์ซับ ซับแปลที่ยูทูปปิด = E_TRANSLATION_BLOCKED
+        pinned = ตัวดึงคอมเมนต์ปักหมุด (บริการคอมเมนต์ใช้ cache และดึงเมื่อพลาด) YtError ทุกชนิดหรือ None = ไม่ใส่หัวข้อ
+        โน้ตไม่พลาดเพราะคอมเมนต์ปักหมุด
         """
         info = self._videos.get(video_id)
         if track_id is None:
@@ -262,7 +269,13 @@ class SubtitleService:
                 tokens = []
             if tokens:
                 transcript = md_sections(tokens, _chapter_ms(info), level=3)
-        text = build_note(info, video_id, transcript)
+        comment = None
+        if pinned is not None:
+            try:
+                comment = pinned(video_id)
+            except YtError as exc:
+                log.info("โน้ตของ %s ไม่มีคอมเมนต์ปักหมุด (%s)", video_id, exc.code)
+        text = build_note(info, video_id, transcript, comment)
         return NoteExport(str(info.get("title") or ""), text.encode("utf-8"))
 
 

@@ -98,6 +98,7 @@ def test_full_note_layout() -> None:
         "duration": "0:06:12",
         "tags": ["a", "b-c"],  # แท็กแบบ Obsidian (review M-5)
         "views": 10,
+        "likes": 2,
         "source": "YT Toolkit",
     }
     body = text.split("\n---\n", 1)[1]
@@ -146,8 +147,7 @@ def test_minimal_note_omits_every_empty_section() -> None:
         {"publishedAt": "2025-5-1"},
         {"description": "  \n "},
         {"tags": []},
-        {"stats": {"likes": 3}},
-        {"stats": {"views": True}},
+        {"stats": {"views": True, "likes": True, "comments": "5", "channelFollowers": None}},
         {"durationS": True},
         {"channel": ""},
     ],
@@ -225,3 +225,48 @@ def test_note_front_matter_uses_obsidian_tags() -> None:
     assert _front(text)["tags"] == ["me-at-the-zoo"]
     only_bad = build_note({"videoId": VID, "title": "t", "tags": ["2026", "!!"]}, VID, [])
     assert "tags" not in _front(only_bad)
+
+
+# ---------- C-A3 v2: ฟิลด์ใหม่ + คอมเมนต์ปักหมุด ----------
+
+
+def test_front_matter_has_the_stats_in_order_before_source() -> None:
+    info = {"videoId": VID, "title": "t", "stats": {"views": 1, "likes": 2, "comments": 0, "channelFollowers": 4000}}
+    text = build_note(info, VID, None)
+    head = text.split("\n---\n", 1)[0].splitlines()
+    assert head[-5:] == ["views: 1", "likes: 2", "comments: 0", "channel_followers: 4000", "source: YT Toolkit"]
+    front = _front(text)
+    assert front["comments"] == 0 and type(front["channel_followers"]) is int
+
+
+def test_each_missing_stat_is_omitted_on_its_own() -> None:
+    info = {"videoId": VID, "title": "t", "stats": {"likes": 7, "channelFollowers": 12}}
+    front = _front(build_note(info, VID, None))
+    assert front["likes"] == 7 and front["channel_followers"] == 12
+    assert "views" not in front and "comments" not in front
+
+
+@pytest.mark.parametrize(("by_uploader", "who"), [(True, "เจ้าของช่อง"), (False, "ผู้ชม")])
+def test_pinned_section_sits_after_chapter_and_before_transcript(by_uploader: bool, who: str) -> None:
+    pinned = {"text": "บรรทัดหนึ่ง\r\nบรรทัดสอง\n\n", "likes": 3, "byUploader": by_uploader}
+    text = build_note(INFO, VID, ["### [00:00]", "", "hi"], pinned)
+    assert "\r" not in text and text.endswith("\n")
+    block = f"\n## คอมเมนต์ปักหมุด ({who})\nบรรทัดหนึ่ง\nบรรทัดสอง\n"
+    assert block in text
+    assert text.index("## Chapter") < text.index(block) < text.index("## ทรานสคริปต์\n")
+    other = "ผู้ชม" if by_uploader else "เจ้าของช่อง"
+    assert f"({other})" not in text
+
+
+@pytest.mark.parametrize("pinned", [None, {}, {"text": "  "}, {"text": None}, {"byUploader": True}])
+def test_pinned_section_is_omitted_without_text(pinned: dict | None) -> None:
+    assert "คอมเมนต์ปักหมุด" not in build_note(INFO, VID, None, pinned)
+
+
+def test_pinned_without_by_uploader_is_labelled_as_viewer() -> None:
+    assert "## คอมเมนต์ปักหมุด (ผู้ชม)\nสวัสดี\n" in build_note(INFO, VID, None, {"text": "สวัสดี"})
+
+
+def test_pinned_text_starting_with_a_heading_stays_inside_its_section() -> None:
+    text = build_note(INFO, VID, None, {"text": "## fake\nbody", "byUploader": True})
+    assert text.endswith("## คอมเมนต์ปักหมุด (เจ้าของช่อง)\n## fake\nbody\n")

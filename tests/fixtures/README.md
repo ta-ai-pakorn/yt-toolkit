@@ -58,10 +58,11 @@
 - `VTTFALLBAK1` และ `live_upcoming.json` ไม่มีฟิลด์เหล่านี้ (กรณี "ไม่รู้ค่า")
 
 ## comments/ (คอมเมนต์ปักหมุด C-A2)
-`FakeExtractor.pinned_comment` อ่าน `comments/<videoId>.json` รูปแบบ `{"comment": {text, likes?, publishedText?} | null}` ไม่มีไฟล์ = `null` · ไฟล์ `{"error": "<รหัส>"}` = โยน error รหัสนั้น
+`FakeExtractor.pinned_comment` อ่าน `comments/<videoId>.json` รูปแบบ `{"comment": {text, likes?, publishedText?, byUploader} | null}` ไม่มีไฟล์ = `null` · ไฟล์ `{"error": "<รหัส>"}` = โยน error รหัสนั้น
 
-- `88o5Sk8_m1Y.json`: **เขียนเอง** ข้อความไทยหลายบรรทัดที่โปรเจกต์แต่ง (ไม่ใช่คอมเมนต์จริงของช่อง) มีลิงก์ `example.com` ไว้ทดสอบว่าหน้าเว็บไม่ทำลิงก์
-- `aqz-KE-bpKQ.json`: `null` (ไม่มีคอมเมนต์ปักหมุดจากเจ้าของช่อง)
+- `88o5Sk8_m1Y.json`: `byUploader: true` · **เขียนเอง** ข้อความไทยหลายบรรทัดที่โปรเจกต์แต่ง (ไม่ใช่คอมเมนต์จริงของช่อง) มีลิงก์ `example.com` ไว้ทดสอบว่าหน้าเว็บไม่ทำลิงก์
+- `VIEWERPIN01.json`: **เขียนเอง** ปักหมุดของผู้ชม `byUploader: false` (คลิปสังเคราะห์ `probe/VIEWERPIN01.json` ชื่อ "คลิปที่คอมเมนต์ปักหมุดเป็นของผู้ชม" ไม่มีซับ)
+- `aqz-KE-bpKQ.json`: `null` (ไม่มีคอมเมนต์ปักหมุด)
 - `OWNERTHSUB1.json`: `E_NETWORK`
 - ไม่มีชื่อ id หรือรูปของผู้เขียนในทุกไฟล์ (PDPA)
 

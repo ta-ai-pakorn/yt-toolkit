@@ -2,6 +2,7 @@
  "comment": {
   "text": "ขอบคุณที่ดูคลิปนี้นะครับ\nคำศัพท์ทั้งหมดในตอนนี้สรุปไว้ในเอกสารประกอบ https://example.com/lesson-1\n\n00:45 เริ่มบทสนทนา\n04:10 ทบทวนคำศัพท์\nตอนต่อไปมาเร็ว ๆ นี้ ฝากติดตามด้วยนะครับ",
   "likes": 42,
-  "publishedText": "4 months ago"
+  "publishedText": "4 months ago",
+  "byUploader": true
  }
 }
