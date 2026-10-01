@@ -631,7 +631,7 @@ New or changed `MESSAGES` entries (verbatim):
 |---|---|---|
 | `E_BOT_CHECK` (changed, PRD 7 "ตั้งแต่ M4") | ยูทูปขอให้ยืนยันว่าไม่ใช่บอท พักคิวไว้ 10 นาทีก่อนนะ | 429 (unchanged) |
 | `E_FFMPEG_MISSING` | ยังไม่มีโปรแกรมแปลงไฟล์ (ffmpeg) กด "โหลดใหม่" ในหน้าตรวจสุขภาพ | 409 (`POST /jobs`) |
-| `E_DISK_FULL` | พื้นที่ไม่พอ ต้องมีว่างอย่างน้อย {size} | job only |
+| `E_DISK_FULL` | พื้นที่ไม่พอ ต้องมีว่างอย่างน้อย {size} (without a size: `MESSAGES_NO_PARAMS` "พื้นที่ไม่พอ ลบไฟล์หรือเลือกโฟลเดอร์อื่นในหน้าตั้งค่า", gate 1) | job only |
 | `E_OUTPUT_NOT_WRITABLE` | บันทึกลงโฟลเดอร์นี้ไม่ได้ ลองเปลี่ยนโฟลเดอร์ในหน้าตั้งค่า | 422 (settings) |
 | `E_INTERRUPTED` | งานหยุดกลางคันเพราะปิดโปรแกรม | job only |
 | `E_JOB_STATE` (new) | งานนี้เปลี่ยนสถานะไปแล้ว ลองรีเฟรชหน้าเว็บ | 409 |
@@ -1690,6 +1690,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services 
 - Create: `tests/network/test_download_network.py`
 - Modify: `tests/network_videos.toml` (section `[downloads]`)
 - Modify: `PRD.md`, `BRD.md`, `docs/acceptance.md`, `docs/m2-followups.md`, `docs/m3-followups.md`, `README.md`
+- Modify: `tests/unit/test_yterrors.py` (gate 1): once the PRD rows for `E_JOB_STATE` and `E_YT_REFUSED` exist, empty `PRD_PENDING` so the tripwire test passes
 - Create: `docs/m4-followups.md`
 - Rebuild: `web/dist/**`
 
