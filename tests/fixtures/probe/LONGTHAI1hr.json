@@ -10,6 +10,572 @@
  "availability": "public",
  "thumbnail": "https://fake.invalid/thumb/LONGTHAI1hr.jpg",
  "chapters": null,
+ "view_count": 120000,
+ "like_count": 5600,
+ "comment_count": 780,
+ "channel_follower_count": 45600,
+ "tags": [
+  "แท็กที่ 1",
+  "แท็กที่ 2",
+  "แท็กที่ 3",
+  "แท็กที่ 4",
+  "แท็กที่ 5",
+  "แท็กที่ 6",
+  "แท็กที่ 7",
+  "แท็กที่ 8",
+  "แท็กที่ 9",
+  "แท็กที่ 10",
+  "แท็กที่ 11",
+  "แท็กที่ 12",
+  "แท็กที่ 13",
+  "แท็กที่ 14",
+  "แท็กที่ 15",
+  "แท็กที่ 16",
+  "แท็กที่ 17",
+  "แท็กที่ 18",
+  "แท็กที่ 19",
+  "แท็กที่ 20",
+  "แท็กที่ 21",
+  "แท็กที่ 22",
+  "แท็กที่ 23",
+  "แท็กที่ 24",
+  "แท็กที่ 25",
+  "แท็กที่ 26",
+  "แท็กที่ 27",
+  "แท็กที่ 28",
+  "แท็กที่ 29",
+  "แท็กที่ 30",
+  "แท็กที่ 31",
+  "แท็กที่ 32",
+  "แท็กที่ 33",
+  "แท็กที่ 34",
+  "แท็กที่ 35",
+  "แท็กที่ 36",
+  "แท็กที่ 37",
+  "แท็กที่ 38",
+  "แท็กที่ 39",
+  "แท็กที่ 40",
+  "แท็กที่ 41",
+  "แท็กที่ 42",
+  "แท็กที่ 43",
+  "แท็กที่ 44",
+  "แท็กที่ 45",
+  "แท็กที่ 46",
+  "แท็กที่ 47",
+  "แท็กที่ 48",
+  "แท็กที่ 49",
+  "แท็กที่ 50",
+  "แท็กที่ 51",
+  "แท็กที่ 52",
+  "แท็กที่ 53",
+  "แท็กที่ 54",
+  "แท็กที่ 55"
+ ],
+ "categories": [
+  "Education"
+ ],
+ "heatmap": [
+  {
+   "start_time": 0.0,
+   "end_time": 37.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 37.2,
+   "end_time": 74.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 74.4,
+   "end_time": 111.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 111.6,
+   "end_time": 148.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 148.8,
+   "end_time": 186.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 186.0,
+   "end_time": 223.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 223.2,
+   "end_time": 260.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 260.4,
+   "end_time": 297.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 297.6,
+   "end_time": 334.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 334.8,
+   "end_time": 372.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 372.0,
+   "end_time": 409.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 409.2,
+   "end_time": 446.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 446.4,
+   "end_time": 483.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 483.6,
+   "end_time": 520.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 520.8,
+   "end_time": 558.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 558.0,
+   "end_time": 595.2,
+   "value": 0.7947
+  },
+  {
+   "start_time": 595.2,
+   "end_time": 632.4,
+   "value": 0.9934
+  },
+  {
+   "start_time": 632.4,
+   "end_time": 669.6,
+   "value": 0.2202
+  },
+  {
+   "start_time": 669.6,
+   "end_time": 706.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 706.8,
+   "end_time": 744.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 744.0,
+   "end_time": 781.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 781.2,
+   "end_time": 818.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 818.4,
+   "end_time": 855.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 855.6,
+   "end_time": 892.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 892.8,
+   "end_time": 930.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 930.0,
+   "end_time": 967.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 967.2,
+   "end_time": 1004.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1004.4,
+   "end_time": 1041.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1041.6,
+   "end_time": 1078.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1078.8,
+   "end_time": 1116.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1116.0,
+   "end_time": 1153.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1153.2,
+   "end_time": 1190.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1190.4,
+   "end_time": 1227.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1227.6,
+   "end_time": 1264.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1264.8,
+   "end_time": 1302.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1302.0,
+   "end_time": 1339.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1339.2,
+   "end_time": 1376.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1376.4,
+   "end_time": 1413.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1413.6,
+   "end_time": 1450.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1450.8,
+   "end_time": 1488.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1488.0,
+   "end_time": 1525.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1525.2,
+   "end_time": 1562.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1562.4,
+   "end_time": 1599.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1599.6,
+   "end_time": 1636.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1636.8,
+   "end_time": 1674.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1674.0,
+   "end_time": 1711.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1711.2,
+   "end_time": 1748.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1748.4,
+   "end_time": 1785.6,
+   "value": 0.6514
+  },
+  {
+   "start_time": 1785.6,
+   "end_time": 1822.8,
+   "value": 1.0
+  },
+  {
+   "start_time": 1822.8,
+   "end_time": 1860.0,
+   "value": 0.5073
+  },
+  {
+   "start_time": 1860.0,
+   "end_time": 1897.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1897.2,
+   "end_time": 1934.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1934.4,
+   "end_time": 1971.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 1971.6,
+   "end_time": 2008.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2008.8,
+   "end_time": 2046.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2046.0,
+   "end_time": 2083.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2083.2,
+   "end_time": 2120.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2120.4,
+   "end_time": 2157.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2157.6,
+   "end_time": 2194.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2194.8,
+   "end_time": 2232.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2232.0,
+   "end_time": 2269.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2269.2,
+   "end_time": 2306.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2306.4,
+   "end_time": 2343.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2343.6,
+   "end_time": 2380.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2380.8,
+   "end_time": 2418.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2418.0,
+   "end_time": 2455.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2455.2,
+   "end_time": 2492.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2492.4,
+   "end_time": 2529.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2529.6,
+   "end_time": 2566.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2566.8,
+   "end_time": 2604.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2604.0,
+   "end_time": 2641.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2641.2,
+   "end_time": 2678.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2678.4,
+   "end_time": 2715.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2715.6,
+   "end_time": 2752.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2752.8,
+   "end_time": 2790.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2790.0,
+   "end_time": 2827.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2827.2,
+   "end_time": 2864.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2864.4,
+   "end_time": 2901.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2901.6,
+   "end_time": 2938.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 2938.8,
+   "end_time": 2976.0,
+   "value": 0.2879
+  },
+  {
+   "start_time": 2976.0,
+   "end_time": 3013.2,
+   "value": 0.879
+  },
+  {
+   "start_time": 3013.2,
+   "end_time": 3050.4,
+   "value": 0.4758
+  },
+  {
+   "start_time": 3050.4,
+   "end_time": 3087.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3087.6,
+   "end_time": 3124.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3124.8,
+   "end_time": 3162.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3162.0,
+   "end_time": 3199.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3199.2,
+   "end_time": 3236.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3236.4,
+   "end_time": 3273.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3273.6,
+   "end_time": 3310.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3310.8,
+   "end_time": 3348.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3348.0,
+   "end_time": 3385.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3385.2,
+   "end_time": 3422.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3422.4,
+   "end_time": 3459.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3459.6,
+   "end_time": 3496.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3496.8,
+   "end_time": 3534.0,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3534.0,
+   "end_time": 3571.2,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3571.2,
+   "end_time": 3608.4,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3608.4,
+   "end_time": 3645.6,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3645.6,
+   "end_time": 3682.8,
+   "value": 0.1678
+  },
+  {
+   "start_time": 3682.8,
+   "end_time": 3720.0,
+   "value": 0.1678
+  }
+ ],
  "description": "คลิปสังเคราะห์สำหรับทดสอบซับยาว 1 ชั่วโมง (ไม่มีของจริง ไฟล์ซับถูกทำซ้ำจากคลิปตัวอย่าง)",
  "subtitles": {},
  "automatic_captions": {

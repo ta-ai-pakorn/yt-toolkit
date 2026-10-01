@@ -307,9 +307,30 @@ def _md_time(ms: int) -> str:
     return f"{h}:{m:02d}:{s:02d}" if ms >= 3_600_000 else f"{m:02d}:{s:02d}"
 
 
+def md_time(ms: int) -> str:
+    """เวลาในหัวข้อ .md: mm:ss หรือ h:mm:ss (ปัดวินาทีทิ้ง ชั่วโมงไม่เติมศูนย์)"""
+    return _md_time(ms)
+
+
+def md_title(text: str) -> str:
+    """ชื่อเรื่อง/ชื่อ chapter ในไฟล์ .md: รวมช่องว่างทุกแบบเป็นช่องเดียว ตัดหัวท้าย (collapse ของ C6)"""
+    return _collapse(text)
+
+
 def to_md(tokens: Sequence[Token], *, title: str, video_id: str, chapters: Sequence[tuple[int, str]]) -> str:
     """หัวเรื่อง + ลิงก์คลิป แล้วแบ่งหัวข้อตาม chapter (หรือทุก 2 นาทีถ้าไม่มี chapter) หัวข้อว่างถูกข้าม"""
     out = ["# " + _collapse(title), "", f"https://www.youtube.com/watch?v={video_id}"]
+    out += md_sections(tokens, chapters)
+    return CRLF.join(out) + CRLF
+
+
+def md_sections(tokens: Sequence[Token], chapters: Sequence[tuple[int, str]], level: int = 2) -> list[str]:
+    """ส่วนเนื้อหาของ to_md (ไม่มีหัวเรื่องและลิงก์) เป็นรายการบรรทัด แต่ละหัวข้อขึ้นต้นด้วยบรรทัดว่าง
+
+    level = จำนวน # ของหัวข้อเวลา (to_md ใช้ 2, โน้ตใช้ 3 ให้อยู่ใต้ "## ทรานสคริปต์")
+    """
+    out: list[str] = []
+    hashes = "#" * level
     ordered = sorted(chapters, key=lambda ch: ch[0])  # stable: start เท่ากันคงลำดับเดิม
 
     # section key -> (start ms, heading suffix, tokens)
@@ -328,9 +349,9 @@ def to_md(tokens: Sequence[Token], *, title: str, video_id: str, chapters: Seque
 
     for key in sorted(sections):
         start_ms, suffix, toks = sections[key]
-        out += ["", f"## [{_md_time(start_ms)}]{suffix}", ""]
+        out += ["", f"{hashes} [{_md_time(start_ms)}]{suffix}", ""]
         for n, para in enumerate(_paragraphs(toks)):
             if n:
                 out.append("")
             out.append(para)
-    return CRLF.join(out) + CRLF
+    return out

@@ -10,6 +10,13 @@
  "availability": "public",
  "thumbnail": "https://fake.invalid/thumb/NOORIGSUB01.jpg",
  "chapters": null,
+ "view_count": 50,
+ "like_count": 0,
+ "comment_count": 0,
+ "tags": [],
+ "categories": [
+  "People & Blogs"
+ ],
  "description": "คลิปสังเคราะห์: มีแต่ซับอัตโนมัติภาษา yue (แปลไม่ได้) กับซับแปล en, th",
  "subtitles": {},
  "automatic_captions": {

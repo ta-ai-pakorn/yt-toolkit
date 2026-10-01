@@ -1,4 +1,5 @@
-"""API ซับของ M3 (สัญญา C4): รายการแทร็ก, token ของแทร็ก และโหลดไฟล์ .srt / .txt / .md
+"""API ซับของ M3 (สัญญา C4): รายการแทร็ก, token ของแทร็ก, โหลดไฟล์ .srt / .txt / .md
+และโน้ตของคลิปแบบ .md สำหรับ Obsidian (C-A3, owner round 2)
 
 Q1 = ก: เบราว์เซอร์โหลดไฟล์ทันที (ยังไม่มีคิวงาน M4 ค่อยย้ายเข้าคิว)
 Q2 = ก: ชื่อไฟล์ `<ชื่อคลิป>.<ภาษา>.<นามสกุล>` เช่น `ชื่อคลิป.th.srt` ให้โปรแกรมเล่นเปิดซับให้เอง
@@ -31,10 +32,9 @@ MEDIA_TYPES = {
 _DEFAULT = PRESETS["medium"]  # ค่าที่ไม่ได้ส่งมา = preset กลาง (หน้าเว็บส่งครบทุกช่องอยู่แล้ว)
 
 
-class ExportQuery(BaseModel):
-    """ตัวเลือกไฟล์ซับ (C5) ผิดช่วง/ผิดเงื่อนไข = 422 E_BAD_REQUEST ผ่านตัวจัดการ validation เดิม"""
+class OptionsQuery(BaseModel):
+    """ตัวเลือกซับ (C5) ผิดช่วง/ผิดเงื่อนไข = 422 E_BAD_REQUEST ผ่านตัวจัดการ validation เดิม"""
 
-    format: Literal["srt", "txt", "md"]
     maxChars: int = Field(_DEFAULT.max_chars, ge=LIMITS["maxChars"][0], le=LIMITS["maxChars"][1])
     lines: int = Field(_DEFAULT.lines, ge=LIMITS["lines"][0], le=LIMITS["lines"][1])
     minMs: int = Field(_DEFAULT.min_ms, ge=LIMITS["minMs"][0], le=LIMITS["minMs"][1])
@@ -43,7 +43,7 @@ class ExportQuery(BaseModel):
     tokensPerCue: int | None = Field(None, ge=LIMITS["tokensPerCue"][0], le=LIMITS["tokensPerCue"][1])
 
     @model_validator(mode="after")
-    def _consistent(self) -> ExportQuery:
+    def _consistent(self) -> OptionsQuery:
         if self.minMs >= self.maxMs:
             raise ValueError("minMs must be less than maxMs")
         if self.mode == "tokens" and self.tokensPerCue is None:
@@ -51,9 +51,30 @@ class ExportQuery(BaseModel):
         return self
 
 
+class ExportQuery(OptionsQuery):
+    """ไฟล์ซับ: รูปแบบไฟล์ + ตัวเลือกซับ"""
+
+    format: Literal["srt", "txt", "md"]
+
+
+class NoteQuery(OptionsQuery):
+    """โน้ต .md (C-A3): แทร็ก (ไม่ส่ง = แทร็กที่เลือกให้เอง) + ตัวเลือกชุดเดียวกับไฟล์ซับ
+
+    ตัวเลือกตรวจแบบเดียวกับไฟล์ซับ (หน้าเว็บส่งชุดที่ใช้อยู่มาด้วย) แต่ทรานสคริปต์ในโน้ตแบ่งย่อหน้าตามเวลา
+    เหมือนไฟล์ .md จึงไม่ได้ใช้ค่าความยาวซับ
+    """
+
+    trackId: str | None = None
+
+
 def export_filenames(title: str, video_id: str, lang: str, fmt: str) -> tuple[str, str]:
     """(ชื่อไฟล์จริง, ชื่อ ASCII สำรอง) ตาม Q2 = ก: `<ชื่อคลิปที่ปลอดภัย หรือ id>.<lang>.<fmt>`"""
     return f"{safe_title(title) or video_id}.{lang}.{fmt}", f"subtitles.{lang}.{fmt}"
+
+
+def note_filenames(title: str, video_id: str) -> tuple[str, str]:
+    """(ชื่อไฟล์จริง, ชื่อ ASCII สำรอง) ของโน้ต: `<ชื่อคลิปที่ปลอดภัย หรือ id>.note.md`, `<id>.note.md`"""
+    return f"{safe_title(title) or video_id}.note.md", f"{video_id}.note.md"
 
 
 def _check_track_id(track_id: str) -> None:
@@ -96,6 +117,23 @@ def build_subtitles_router(ctx: AppContext) -> APIRouter:
         return Response(
             result.data,
             media_type=MEDIA_TYPES[query.format],
+            headers={"Content-Disposition": attachment_header(fallback, filename)},
+        )
+
+    @router.get("/videos/{video_id}/note", response_model=None)
+    @_maps_yt_errors
+    def video_note(video_id: str, query: Annotated[NoteQuery, Query()]) -> Response:
+        if query.trackId is not None:
+            _check_track_id(query.trackId)
+        try:
+            options_from_dict(query.model_dump(exclude={"trackId"}))
+        except ValueError as exc:
+            return error_response(422, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, str(exc))
+        result = subtitles.note(video_id, query.trackId)
+        filename, fallback = note_filenames(result.title, video_id)
+        return Response(
+            result.data,
+            media_type=MEDIA_TYPES["md"],
             headers={"Content-Disposition": attachment_header(fallback, filename)},
         )
 

@@ -13,7 +13,7 @@ import logging
 import re
 import threading
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from urllib.parse import parse_qs
 
 import httpx
@@ -71,6 +71,13 @@ class Extractor(Protocol):
         """
         ...
 
+    def pinned_comment(self, video_id: str) -> dict | None:
+        """คอมเมนต์ปักหมุดที่เจ้าของช่องเขียนเอง (C-A2): {"text", "likes"?, "publishedText"?} หรือ None
+
+        None = ไม่มีคอมเมนต์ปักหมุด, ปักหมุดคอมเมนต์ของผู้ชม หรือปิดคอมเมนต์ ไม่คืนชื่อ/id ของผู้เขียน (PDPA)
+        """
+        ...
+
 
 def check_live(info: dict) -> dict:
     """ไลฟ์ที่ยังออกอากาศหรือยังไม่เริ่ม -> E_LIVE_NOT_READY (AC-PROBE-02)"""
@@ -106,6 +113,54 @@ def ytdlp_version() -> str:
     from yt_dlp.version import __version__
 
     return __version__
+
+
+def pinned_from_comment(comment: object) -> dict | None:
+    """คอมเมนต์หนึ่งอันของ yt-dlp -> {"text", "likes"?, "publishedText"?} หรือ None
+
+    นับเฉพาะคอมเมนต์ที่ปักหมุด (is_pinned) และเจ้าของช่องเขียนเอง (author_is_uploader) เท่านั้น
+    ไม่เก็บชื่อ, id, ลิงก์ หรือรูปของผู้เขียน (PDPA: ไม่ส่งข้อมูลของคนอื่นออกไป)
+    """
+    if not isinstance(comment, dict):
+        return None
+    if comment.get("is_pinned") is not True or comment.get("author_is_uploader") is not True:
+        return None
+    text = comment.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return None
+    out: dict = {"text": text}
+    likes = comment.get("like_count")
+    if isinstance(likes, int) and not isinstance(likes, bool) and likes >= 0:
+        out["likes"] = likes
+    published = comment.get("_time_text")
+    if isinstance(published, str) and published.strip():
+        out["publishedText"] = published.strip()
+    return out
+
+
+# คอมเมนต์อันดับแรกของแบบ "ยอดนิยม" (= คอมเมนต์ปักหมุด ถ้ามี) ไม่เอาคำตอบ
+# max_comments = max-comments, max-parents, max-replies, max-replies-per-thread, max-depth
+_COMMENT_ARGS = {"youtube": {"comment_sort": ["top"], "max_comments": ["1", "1", "0", "0", "1"]}}
+
+
+def _first_comment_direct(ydl: Any, video_id: str) -> dict | None:
+    """ทางหลัก: ตัวดึงคอมเมนต์ของ YoutubeIE โดยตรง ไม่ probe คลิปซ้ำ (API ภายในของ yt-dlp)
+
+    contents ว่าง = yt-dlp สร้าง continuation จาก id เอง (ทางเดียวกับที่ yt-dlp ใช้เมื่อหน้าเว็บไม่มี)
+    """
+    ie = ydl.get_info_extractor("Youtube")
+    ie.initialize()
+    comments = ie._get_comments(ie._get_default_ytcfg("web"), video_id, [], None)
+    first = next(iter(comments), None)
+    return first if isinstance(first, dict) else None
+
+
+def _first_comment_public(ydl: Any, video_id: str) -> dict | None:
+    """ทางสำรอง: probe พร้อม getcomments (API สาธารณะ) จำกัดคอมเมนต์ด้วย extractor_args ชุดเดียวกัน"""
+    ydl.params["getcomments"] = True
+    info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+    comments = (info or {}).get("comments") or []
+    return comments[0] if comments and isinstance(comments[0], dict) else None
 
 
 class _YtDlpLogger:
@@ -210,6 +265,39 @@ class YtDlpExtractor:
             raise YtError(classify(message), message) from exc
         except Exception as exc:
             raise YtError("E_UNKNOWN", f"{type(exc).__name__}: {exc}") from exc
+
+    def pinned_comment(self, video_id: str) -> dict | None:
+        """คอมเมนต์ปักหมุดของเจ้าของช่อง (C-A2) ดึงเมื่อผู้ใช้เปิดดูเท่านั้น ไม่ดึงตอน probe
+
+        ทางหลัก (ถูกสุด ~2 คำขอ innertube "next"): เรียกตัวดึงคอมเมนต์ของ yt-dlp ตรง ๆ
+        ด้วย comment_sort=top และ max_comments=1 (คอมเมนต์ปักหมุดอยู่อันดับแรกเสมอ)
+        เป็น API ภายในของ yt-dlp ที่อาจเปลี่ยนได้ทุกรุ่น ถ้าเรียกไม่ได้ (AttributeError/TypeError)
+        ถอยไปใช้ getcomments ของ probe ปกติ (API สาธารณะ แพงกว่า: probe ทั้งคลิปอีกรอบ) จำกัดจำนวนเท่ากัน
+        """
+        _check_video_id(video_id)
+        import yt_dlp
+        from yt_dlp.utils import YoutubeDLError
+
+        opts = {**_PROBE_OPTS, "logger": _YtDlpLogger(), "extractor_args": _COMMENT_ARGS}
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                try:
+                    first = _first_comment_direct(ydl, video_id)
+                except (AttributeError, TypeError) as exc:
+                    log.warning(
+                        "ดึงคอมเมนต์ปักหมุดของ %s ทางหลักไม่ได้ (yt-dlp อาจเปลี่ยนภายใน) ใช้ probe แทน: %s",
+                        video_id,
+                        exc,
+                    )
+                    first = _first_comment_public(ydl, video_id)
+        except YtError:
+            raise
+        except YoutubeDLError as exc:
+            message = _ANSI.sub("", str(exc)) or type(exc).__name__
+            raise YtError(classify(message), message) from exc
+        except Exception as exc:
+            raise YtError("E_UNKNOWN", f"{type(exc).__name__}: {exc}") from exc
+        return pinned_from_comment(first)
 
     @staticmethod
     def _extract(url: str, opts: dict) -> dict:
@@ -321,6 +409,22 @@ class FakeExtractor:
             raise missing
         data = path.read_bytes()
         return data if repeat is None else self._tile_json3(data, repeat, missing)
+
+    def pinned_comment(self, video_id: str) -> dict | None:
+        """comments/<id>.json รูปแบบ {"comment": {...} | null} (ไม่มีไฟล์ = None)
+
+        ไฟล์แบบ {"error": "<รหัส>"} = โยน YtError รหัสนั้น (ใช้เทสหน้าจอ error)
+        """
+        self.calls.append(("pinned_comment", video_id))
+        _check_video_id(video_id)
+        path = self.root / "comments" / f"{video_id}.json"
+        if not path.is_file():
+            return None
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        if doc.get("error"):
+            raise YtError(str(doc["error"]), f"fake: คอมเมนต์ของ {video_id} ตั้งให้พลาด")
+        comment = doc.get("comment")
+        return dict(comment) if isinstance(comment, dict) else None
 
     def _parse_repeat(self, raw: str | None, ext: str, error: YtError) -> int | None:
         if raw is None:

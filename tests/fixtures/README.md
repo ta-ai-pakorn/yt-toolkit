@@ -50,6 +50,21 @@
 - `&repeat=<n>` ใช้กับ json3 เท่านั้น: ตัวปลอมเอาไฟล์มาต่อซ้ำ n รอบ (เฉพาะ `LONGTHAI1hr`)
 - ลิงก์ HLS เขียนเป็น `https://fake.invalid/hls/<videoId>/<key>.m3u8` (ไม่มีไฟล์ เพราะต้องถูกข้าม)
 
+## probe/ ของ owner round 2 (ข้อมูลคลิป C-A1)
+เพิ่มฟิลด์ `view_count, like_count, comment_count, channel_follower_count, tags, categories, heatmap` (ต่อจาก `chapters`)
+
+- `88o5Sk8_m1Y`, `jNQXAC9IVRw`: ค่าจริงจาก `YtDlpExtractor().probe` คลิปละครั้งเดียว เมื่อ 2026-10-01 (yt-dlp 2026.08.19) · `heatmap` ของ 88o5 เป็น `null` จริง (คลิปนี้ยูทูปไม่มีกราฟ) · ของ jNQ เป็นของจริง 100 รายการ
+- ที่เหลือเป็นค่าสังเคราะห์: `aqz-KE-bpKQ`, `8lpOfyoxcvU`, `OWNERTHSUB1`, `LONGTHAI1hr` มี heatmap 100 รายการที่สร้างจากเนินรูประฆัง (ยอดสูงสุดปรับเป็น 1.0 แบบยูทูป) · `OWNERTHSUB1` มีแท็กที่ทดสอบ YAML (`"`, `:`, `#`, `\`, ช่องว่างหัวท้าย, แท็กว่าง) · `LONGTHAI1hr` มี 55 แท็ก (แอพเก็บ 50) · `NOORIGSUB01` มี `comment_count: 0` (แถวคอมเมนต์ปักหมุดถูกซ่อน)
+- `VTTFALLBAK1` และ `live_upcoming.json` ไม่มีฟิลด์เหล่านี้ (กรณี "ไม่รู้ค่า")
+
+## comments/ (คอมเมนต์ปักหมุด C-A2)
+`FakeExtractor.pinned_comment` อ่าน `comments/<videoId>.json` รูปแบบ `{"comment": {text, likes?, publishedText?} | null}` ไม่มีไฟล์ = `null` · ไฟล์ `{"error": "<รหัส>"}` = โยน error รหัสนั้น
+
+- `88o5Sk8_m1Y.json`: **เขียนเอง** ข้อความไทยหลายบรรทัดที่โปรเจกต์แต่ง (ไม่ใช่คอมเมนต์จริงของช่อง) มีลิงก์ `example.com` ไว้ทดสอบว่าหน้าเว็บไม่ทำลิงก์
+- `aqz-KE-bpKQ.json`: `null` (ไม่มีคอมเมนต์ปักหมุดจากเจ้าของช่อง)
+- `OWNERTHSUB1.json`: `E_NETWORK`
+- ไม่มีชื่อ id หรือรูปของผู้เขียนในทุกไฟล์ (PDPA)
+
 ## subs/
 ไฟล์ซับที่โหลดจากลิงก์จริง (ก่อนเขียนลิงก์ใหม่) ตามไบต์ที่ได้มา ไม่แปลงปลายบรรทัด ไม่แก้เนื้อหา ยกเว้น `OWNERTHSUB1` ที่เขียนเอง
 

@@ -23,9 +23,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from .srt_builder import SubOptions, Token, build_cues, to_md, to_srt, to_txt
+from .note import build_note
+from .srt_builder import SubOptions, Token, build_cues, md_sections, to_md, to_srt, to_txt
 from .subparse import PARSER_VERSION, ParsedTrack, SubParseError, parse_json3, parse_vtt
-from .tracks import TRACK_ID, Track, find_track, tracks_payload
+from .tracks import TRACK_ID, Track, default_track_id, find_track, list_tracks, original_language, tracks_payload
 from .yterrors import YtError
 
 if TYPE_CHECKING:
@@ -44,6 +45,13 @@ class SubtitleExport(NamedTuple):
 
     title: str
     lang: str
+    data: bytes
+
+
+class NoteExport(NamedTuple):
+    """ผลของ note: ชื่อคลิป (ดิบ) ให้ router ตั้งชื่อไฟล์ และเนื้อโน้ต UTF-8 (LF) ไม่มี BOM"""
+
+    title: str
     data: bytes
 
 
@@ -164,10 +172,39 @@ class SubtitleService:
         elif fmt == "txt":
             text = to_txt(tokens)
         else:
-            # เวลา chapter เป็นวินาที (อาจมีทศนิยม) แปลงเป็น ms แบบจำนวนเต็ม
-            chapters = [(round(c["startS"] * 1000), str(c["title"])) for c in info.get("chapters") or []]
-            text = to_md(tokens, title=title, video_id=video_id, chapters=chapters)
+            text = to_md(tokens, title=title, video_id=video_id, chapters=_chapter_ms(info))
         return SubtitleExport(title, track.lang, text.encode("utf-8"))
+
+    def note(self, video_id: str, track_id: str | None = None) -> NoteExport:
+        """โน้ต .md ของคลิป (C-A3): front matter + คำอธิบาย + chapter + ทรานสคริปต์ของแทร็กที่เลือก
+
+        ไม่ส่ง track_id = แทร็กที่เลือกให้เอง (C3) ไม่มีแทร็กเลย หรือแทร็กไม่มีข้อความ = ไม่มีหัวข้อทรานสคริปต์
+        track_id ที่ไม่มีในคลิป = E_NO_SUBTITLES เหมือนไฟล์ซับ ซับแปลที่ยูทูปปิด = E_TRANSLATION_BLOCKED
+        """
+        info = self._videos.get(video_id)
+        if track_id is None:
+            trimmed = self._trimmed(video_id)
+            default = default_track_id(list_tracks(trimmed), original_language(trimmed))
+            track = find_track(trimmed, default) if default else None
+        else:
+            track = self._track(video_id, track_id)
+        transcript = None
+        if track is not None:
+            try:
+                tokens = list(self._parsed(video_id, track).tokens)
+            except YtError as exc:
+                if exc.code != "E_NO_SUBTITLES":
+                    raise
+                tokens = []
+            if tokens:
+                transcript = md_sections(tokens, _chapter_ms(info), level=3)
+        text = build_note(info, video_id, transcript)
+        return NoteExport(str(info.get("title") or ""), text.encode("utf-8"))
+
+
+def _chapter_ms(info: dict) -> list[tuple[int, str]]:
+    """chapter ของ VideoInfo (วินาที อาจมีทศนิยม) -> [(ms จำนวนเต็ม, ชื่อ)]"""
+    return [(round(c["startS"] * 1000), str(c["title"])) for c in info.get("chapters") or []]
 
 
 # ---------- cache ----------
