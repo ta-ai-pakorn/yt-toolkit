@@ -2,6 +2,8 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page } from "@playwright/test"
 
+import { mockEnqueue } from "./queue-helpers"
+
 const BBB = "aqz-KE-bpKQ"
 const ZOO = "jNQXAC9IVRw"
 const UPCOMING = "UPCOMINGLV1"
@@ -407,22 +409,22 @@ test.describe("W2 ภาพเฟรม", () => {
     expect(bytes.subarray(0, 3).toString("hex")).toBe("ffd8ff")
   })
 
-  test("โหลดภาพรวมเฟรม โหลดได้ไฟล์ .jpg และ zip โหลดได้ไฟล์ .zip", async ({ page }) => {
+  test("โหลดภาพรวมเฟรม / โหลดทั้งหมด (.zip) ส่งงานเข้าคิว (M4) ด้วย payload ที่ถูกต้อง · ไม่มีไฟล์โหลดผ่านเบราว์เซอร์", async ({
+    page,
+  }) => {
+    const queue = await mockEnqueue(page)
+    let downloads = 0
+    page.on("download", () => (downloads += 1))
     await openBbb(page)
-    const sheet = page.waitForEvent("download")
     await page.getByRole("button", { name: "โหลดภาพรวมเฟรม" }).click()
-    expect((await sheet).suggestedFilename()).toMatch(/\.jpg$/)
+    await expect.poll(() => queue.bodies.length).toBe(1)
+    expect(queue.bodies[0]).toEqual([{ videoId: BBB, kind: "contact_sheet", params: { source: "fast", columns: 5 } }])
+    await expect(page.getByText("เพิ่มเข้าคิวแล้ว").first()).toBeVisible()
 
-    const zip = page.waitForEvent("download")
     await page.getByRole("button", { name: "โหลดทั้งหมด (.zip)" }).click()
-    const download = await zip
-    expect(download.suggestedFilename()).toMatch(/\.zip$/)
-    const bytes = await download.createReadStream().then(async (stream) => {
-      const chunks: Buffer[] = []
-      for await (const chunk of stream) chunks.push(chunk as Buffer)
-      return Buffer.concat(chunks)
-    })
-    expect(bytes.subarray(0, 2).toString("latin1")).toBe("PK")
+    await expect.poll(() => queue.bodies.length).toBe(2)
+    expect(queue.bodies[1]).toEqual([{ videoId: BBB, kind: "frames_zip", params: { source: "fast" } }])
+    expect(downloads).toBe(0)
   })
 
   test("ภาพที่อยู่ไกลจอ (content-visibility) ยังโฟกัสด้วยคีย์บอร์ดและเปิดเมนูได้", async ({ page }) => {
@@ -443,13 +445,15 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(page.locator("main [data-slot=button].bg-primary")).toHaveCount(0)
   })
 
-  test("โหลดชุดใหญ่ล้มเหลว: toast ข้อความไทยจาก envelope และไม่ได้ไฟล์ JSON", async ({ page }) => {
+  test("ส่งโหลดชุดใหญ่เข้าคิวไม่สำเร็จ: toast ข้อความไทยจาก envelope · ปุ่มกลับมากดได้ ไม่มีไฟล์โหลด", async ({ page }) => {
     await openBbb(page)
-    await page.route("**/storyboard/frames.zip", (route) =>
-      route.fulfill({
-        status: 502,
-        json: { error: { code: "E_NETWORK", message: "เน็ตหลุด ลองใหม่อีกครั้ง", detail: null } },
-      }),
+    await page.route("**/api/jobs", (route) =>
+      route.request().method() === "POST"
+        ? route.fulfill({
+            status: 502,
+            json: { error: { code: "E_NETWORK", message: "เน็ตหลุด ลองใหม่อีกครั้ง", detail: null } },
+          })
+        : route.fallback(),
     )
     let downloads = 0
     page.on("download", () => (downloads += 1))
@@ -459,20 +463,23 @@ test.describe("W2 ภาพเฟรม", () => {
     expect(downloads).toBe(0)
   })
 
-  test("โหลดชุดใหญ่: ขึ้น toast 'กำลังเตรียมไฟล์…' ระหว่างรอ และปุ่มปิดใช้งานกันกดซ้ำ", async ({ page }) => {
+  test("ส่งโหลดชุดใหญ่เข้าคิว: ระหว่างส่งปุ่มมีวงหมุนและปิดใช้งานกันกดซ้ำ · ส่งเสร็จกดได้อีก (ส่งคำขอเดียว)", async ({ page }) => {
+    const queue = await mockEnqueue(page)
     await openBbb(page)
-    await page.route("**/storyboard/contact-sheet.jpg", async (route) => {
+    // route ที่ลงทะเบียนทีหลังทำงานก่อน: หน่วงคำขอ POST แล้วส่งต่อให้ mockEnqueue
+    await page.route("**/api/jobs", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback()
       await new Promise((resolve) => setTimeout(resolve, 600))
-      await route.continue()
+      return route.fallback()
     })
     const sheet = page.getByRole("button", { name: "โหลดภาพรวมเฟรม" })
-    const downloading = page.waitForEvent("download")
     await sheet.click()
-    await expect(page.getByText("กำลังเตรียมไฟล์…")).toBeVisible()
+    await expect(sheet.locator('[data-slot="spinner"]')).toBeVisible()
     await expect(sheet).toHaveAttribute("aria-disabled", "true")
     await expect(sheet).toHaveCSS("opacity", "0.5")
-    await downloading
+    await expect(page.getByRole("button", { name: "โหลดทั้งหมด (.zip)" })).toHaveAttribute("aria-disabled", "true")
     await expect(sheet).not.toHaveAttribute("aria-disabled", "true")
+    expect(queue.bodies).toHaveLength(1)
   })
 
   test("คลิปที่ไม่มี storyboard: Empty พร้อมปุ่ม 'ขอภาพคม' ที่ปิดอยู่ และ tooltip", async ({ page }) => {

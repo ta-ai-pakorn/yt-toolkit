@@ -20,6 +20,7 @@ const base: VideoInfo = {
 describe("infoSections", () => {
   it("ไม่มีข้อมูลเลยและปิดคอมเมนต์ = ไม่มีส่วนไหน (แท็บขึ้น 'คลิปนี้ไม่มีข้อมูลเพิ่มเติม')", () => {
     expect(infoSections({ ...base, description: " \n ", tags: ["", "  "], stats: { comments: 0 } })).toEqual({
+      credit: true,
       description: false,
       chapters: false,
       replayed: false,
@@ -37,7 +38,13 @@ describe("infoSections", () => {
         mostReplayed: [{ startMs: 0, endMs: 1000 }],
         tags: ["แท็ก"],
       }),
-    ).toEqual({ description: true, chapters: true, replayed: true, pinned: true, tags: true })
+    ).toEqual({ credit: true, description: true, chapters: true, replayed: true, pinned: true, tags: true })
+  })
+
+  it("เครดิตมีเมื่อคลิปมีชื่อ · ชื่อว่าง (หรือมีแต่ช่องว่าง) = ไม่มีส่วนเครดิต", () => {
+    expect(infoSections(base).credit).toBe(true)
+    expect(infoSections({ ...base, title: "" }).credit).toBe(false)
+    expect(infoSections({ ...base, title: "  " }).credit).toBe(false)
   })
 
   it("คลิปที่มีคอมเมนต์มีส่วนคอมเมนต์ปักหมุด", () => {

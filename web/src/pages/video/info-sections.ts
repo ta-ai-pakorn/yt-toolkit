@@ -4,10 +4,14 @@ import type { VideoInfo } from "@/lib/types"
 export const cleanTags = (tags: readonly string[] | undefined) =>
   (tags ?? []).map((tag) => tag.trim()).filter((tag) => tag !== "")
 
-/** ส่วนไหนของแท็บข้อมูลคลิปมีข้อมูล (ส่วนที่ไม่มีข้อมูลไม่แสดง) */
+/**
+ * ส่วนไหนของแท็บข้อมูลคลิปมีข้อมูล (ส่วนที่ไม่มีข้อมูลไม่แสดง)
+ * credit = มีชื่อคลิปก็มีเครดิตเสมอ (M4: ส่วน "เครดิต" อยู่บนสุดของแท็บ) · ส่วนอื่นว่างหมด = ขึ้น "คลิปนี้ไม่มีข้อมูลเพิ่มเติม" ใต้ส่วนเครดิต
+ */
 export function infoSections(video: VideoInfo) {
   const comments = video.stats?.comments
   return {
+    credit: video.title.trim() !== "",
     description: (video.description ?? "").trim() !== "",
     chapters: video.chapters.length > 0,
     replayed: (video.mostReplayed?.length ?? 0) > 0,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
-import type { SubOptions } from "./types"
-import { clampOptions, exportPath, isPresetName, LIMITS, notePath, PRESET_NAMES, presetOf, PRESETS } from "./sub-options"
+import * as subOptions from "./sub-options"
+import { clampOptions, isPresetName, LIMITS, notePath, PRESET_NAMES, presetOf, PRESETS } from "./sub-options"
 
 describe("presetOf", () => {
   it("รู้จักค่าสำเร็จรูปทั้งสี่แบบ", () => {
@@ -72,22 +72,10 @@ describe("clampOptions", () => {
   })
 })
 
-describe("exportPath", () => {
-  it("เรียงคีย์ตายตัว format, maxChars, lines, minMs, maxMs, mode", () => {
-    expect(exportPath("aqz-KE-bpKQ", "a.th-orig", "srt", PRESETS.medium)).toBe(
-      "/api/videos/aqz-KE-bpKQ/subtitles/a.th-orig/export?format=srt&maxChars=25&lines=1&minMs=1200&maxMs=5000&mode=chars",
-    )
-  })
-
-  it("โหมดคำต่อท้ายด้วย tokensPerCue", () => {
-    const o: SubOptions = { ...PRESETS.long, mode: "tokens", tokensPerCue: 4 }
-    expect(exportPath("aqz-KE-bpKQ", "o.th", "md", o)).toBe(
-      "/api/videos/aqz-KE-bpKQ/subtitles/o.th/export?format=md&maxChars=42&lines=2&minMs=1500&maxMs=7000&mode=tokens&tokensPerCue=4",
-    )
-  })
-
-  it("โหมดตัวอักษรไม่ส่ง tokensPerCue แม้มีค่าค้าง", () => {
-    expect(exportPath("v", "o.th", "txt", { ...PRESETS.medium, tokensPerCue: 4 })).not.toContain("tokensPerCue")
+describe("ไฟล์ซับผ่านคิว (M4)", () => {
+  it("ไม่มี exportPath แล้ว (ปุ่มโหลด .srt/.txt/.md ส่งงานเข้าคิว) · notePath ยังอยู่เพราะโน้ต .md ยังโหลดผ่านเบราว์เซอร์", () => {
+    expect("exportPath" in subOptions).toBe(false)
+    expect(typeof subOptions.notePath).toBe("function")
   })
 })
 

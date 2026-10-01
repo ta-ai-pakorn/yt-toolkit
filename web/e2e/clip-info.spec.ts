@@ -24,6 +24,8 @@ const LINES = "บรรทัดในทรานสคริปต์"
 const INFO_TAB = "ข้อมูลคลิป"
 const REPLAYED_TITLE = "ช่วงที่คนดูซ้ำบ่อย"
 const COVER = "ดูภาพปก"
+const CREDIT_TITLE = "เครดิต"
+const COPY_CREDIT = "คัดลอกเครดิต"
 
 /**
  * แก้ข้อมูลคลิปที่ backend ส่งมา: ลบคีย์ใหม่ทั้งหมดก่อน (ผลไม่ขึ้นกับว่า backend มีข้อมูลเหล่านี้แล้วหรือยัง) แล้วใส่ patch
@@ -76,6 +78,7 @@ const heading = (page: Page) => page.getByRole("heading", { level: 1 })
 const pinnedRegion = (page: Page) => page.getByRole("region", { name: PINNED_TITLE, exact: true })
 const tagsRegion = (page: Page) => page.getByRole("region", { name: /^แท็ก \(/ })
 const chapterRegion = (page: Page) => page.getByRole("region", { name: /^Chapter \(/ })
+const creditRegion = (page: Page) => page.getByRole("region", { name: CREDIT_TITLE, exact: true })
 const descriptionRegion = (page: Page) => page.getByRole("region", { name: "คำอธิบาย" })
 const replayedRegion = (page: Page) => page.getByRole("region", { name: REPLAYED_TITLE })
 const frameList = (page: Page) => page.getByRole("list", { name: FRAME_LIST })
@@ -84,7 +87,7 @@ const tile = (page: Page, name: string | RegExp) => page.getByRole("list", { nam
 const gotoInfo = (page: Page, videoId: string) => page.goto(`/v/${videoId}?tab=info`)
 
 /** ลำดับที่อ่าน (และลำดับ Tab) ของแท็บข้อมูลคลิปที่มีครบทุกส่วน ทั้งจอกว้างและจอแคบ (owner round 5) */
-const INFO_ORDER = ["คำอธิบาย", /^Chapter \(/, REPLAYED_TITLE, PINNED_TITLE, /^แท็ก \(/].map(String)
+const INFO_ORDER = [CREDIT_TITLE, "คำอธิบาย", /^Chapter \(/, REPLAYED_TITLE, PINNED_TITLE, /^แท็ก \(/].map(String)
 
 /** หัวข้อของส่วนในแท็บข้อมูลคลิปตามลำดับใน DOM (ส่วนที่เป็น pattern แปลงเป็นสตริงของ pattern ให้เทียบกับ INFO_ORDER ได้) */
 async function infoSectionOrder(page: Page): Promise<string[]> {
@@ -211,15 +214,67 @@ test.describe("แท็บข้อมูลคลิป: แท็ก", () => 
   })
 })
 
+test.describe("แท็บข้อมูลคลิป: เครดิต (AC-OUT-08)", () => {
+  const TITLE = "คลิปทดสอบเครดิต"
+  const CHANNEL = "ช่องทดสอบ"
+  const LINE = `ที่มา: ${TITLE} — ${CHANNEL} (YouTube) https://youtu.be/${ZOO}`
+
+  test("ส่วน 'เครดิต' (h2) อยู่บนสุดของแท็บ แสดงบรรทัดที่มา · ปุ่ม 'คัดลอกเครดิต' เป็นปุ่มรอง ไม่ใช่ปุ่มหลักสีเหลือง", async ({ page }) => {
+    await withVideo(page, ZOO, { title: TITLE, channel: CHANNEL })
+    await gotoInfo(page, ZOO)
+    await expect(page.getByRole("heading", { level: 2, name: CREDIT_TITLE, exact: true })).toBeVisible()
+    await expect(creditRegion(page).getByText(LINE, { exact: true })).toBeVisible()
+    // หัวข้อแรกของแท็บคือเครดิต
+    expect((await infoSectionOrder(page))[0]).toBe(CREDIT_TITLE)
+    const copy = creditRegion(page).getByRole("button", { name: COPY_CREDIT, exact: true })
+    await expect(copy).toHaveText(COPY_CREDIT)
+    await expect(copy).not.toHaveClass(/bg-primary/)
+  })
+
+  test("'คัดลอกเครดิต' ได้บรรทัดเดียว 'ที่มา: <ชื่อคลิป> — <ช่อง> (YouTube) https://youtu.be/<id>' และขึ้น toast 'คัดลอกแล้ว'", async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"])
+    await recordClipboardWrites(page)
+    await withVideo(page, ZOO, { title: TITLE, channel: CHANNEL })
+    await gotoInfo(page, ZOO)
+    await creditRegion(page).getByRole("button", { name: COPY_CREDIT, exact: true }).click()
+    await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
+    const written = await lastWrite(page)
+    expect(written).toBe(LINE)
+    expect(written?.includes("\n") || written?.includes("\r")).toBe(false)
+  })
+
+  test("คลิปจริงจาก backend (ไม่ patch ชื่อ): เครดิตใช้ชื่อคลิป ช่อง และรหัสคลิปของคลิปนั้น", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"])
+    await recordClipboardWrites(page)
+    await page.goto(`/v/${BBB}`)
+    const title = (await heading(page).textContent())?.trim() ?? ""
+    expect(title).not.toBe("")
+    await tab(page, INFO_TAB).click()
+    await creditRegion(page).getByRole("button", { name: COPY_CREDIT, exact: true }).click()
+    const written = (await lastWrite(page)) ?? ""
+    expect(written.startsWith("ที่มา: ")).toBe(true)
+    expect(written.endsWith(` (YouTube) https://youtu.be/${BBB}`)).toBe(true)
+    expect(written).toContain(" — ")
+  })
+})
+
 test.describe("แท็บข้อมูลคลิป: ไม่มีข้อมูลเลย", () => {
-  test("ไม่มีคำอธิบาย chapter ช่วงดูซ้ำ แท็ก และปิดคอมเมนต์ → ข้อความจาง 'คลิปนี้ไม่มีข้อมูลเพิ่มเติม' บรรทัดเดียว", async ({ page }) => {
+  test("ไม่มีคำอธิบาย chapter ช่วงดูซ้ำ แท็ก และปิดคอมเมนต์ → เหลือส่วนเครดิต + ข้อความจาง 'คลิปนี้ไม่มีข้อมูลเพิ่มเติม' ใต้เครดิต", async ({ page }) => {
     await withVideo(page, ZOO, { description: "", chapters: [], tags: [], stats: { comments: 0 } })
     const calls = await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: null } }))
     await gotoInfo(page, ZOO)
     const empty = page.getByRole("tabpanel").getByText("คลิปนี้ไม่มีข้อมูลเพิ่มเติม")
     await expect(empty).toBeVisible()
     await expect(empty).toHaveClass(/text-muted-foreground/)
-    await expect(page.getByRole("tabpanel").getByRole("heading")).toHaveCount(0)
+    // M4: หัวข้อเดียวที่เหลือคือ "เครดิต" และข้อความว่างอยู่ในส่วนนั้น (ใต้บรรทัดเครดิต)
+    await expect(page.getByRole("tabpanel").getByRole("heading")).toHaveText([CREDIT_TITLE])
+    await expect(creditRegion(page).getByText("คลิปนี้ไม่มีข้อมูลเพิ่มเติม")).toBeVisible()
+    const credit = await creditRegion(page).getByText(/^ที่มา: /).boundingBox()
+    const note = await empty.boundingBox()
+    expect((note?.y ?? 0) > (credit?.y ?? Number.POSITIVE_INFINITY)).toBe(true)
     expect(calls.count).toBe(0)
   })
 })
@@ -689,16 +744,16 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: { text: "ปักหมุด", byUploader: true } } }))
     await tab(page, INFO_TAB).click()
     await expect(pinnedRegion(page).getByText("ปักหมุด", { exact: true })).toBeVisible()
-    for (const name of ["คัดลอกคำอธิบาย", "คัดลอก chapter", "คัดลอกช่วงที่คนดูซ้ำบ่อย", "คัดลอกคอมเมนต์ปักหมุด", "คัดลอกแท็ก"]) {
+    for (const name of [COPY_CREDIT, "คัดลอกคำอธิบาย", "คัดลอก chapter", "คัดลอกช่วงที่คนดูซ้ำบ่อย", "คัดลอกคอมเมนต์ปักหมุด", "คัดลอกแท็ก"]) {
       const box = await page.getByRole("button", { name, exact: true }).boundingBox()
       expect(box?.height ?? 0, name).toBeGreaterThanOrEqual(44)
     }
     const order = await Promise.all(
-      [descriptionRegion(page), chapterRegion(page), replayedRegion(page), pinnedRegion(page), tagsRegion(page)].map(
+      [creditRegion(page), descriptionRegion(page), chapterRegion(page), replayedRegion(page), pinnedRegion(page), tagsRegion(page)].map(
         async (region) => (await region.boundingBox())?.y ?? -1,
       ),
     )
-    // จอ 360 px คอลัมน์เดียว: คำอธิบาย → Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก ทั้งตำแหน่งบนจอและลำดับใน DOM
+    // จอ 360 px คอลัมน์เดียว: เครดิต → คำอธิบาย → Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก ทั้งตำแหน่งบนจอและลำดับใน DOM
     expect([...order].sort((a, b) => a - b)).toEqual(order)
     expect(new Set(order).size).toBe(order.length)
     expect(await infoSectionOrder(page)).toEqual(INFO_ORDER)
@@ -807,7 +862,7 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     }
   }
 
-  test("จอกว้าง 1280 px แท็บข้อมูลคลิป: ซ้าย คำอธิบาย · ขวา Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก (owner round 6)", async ({
+  test("จอกว้าง 1280 px แท็บข้อมูลคลิป: ซ้าย เครดิต → คำอธิบาย · ขวา Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก (owner round 6)", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -815,8 +870,8 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: { text: "ปักหมุด", byUploader: false } } }))
     await gotoInfo(page, ZOO)
     await expect(pinnedRegion(page).getByText("ปักหมุด", { exact: true })).toBeVisible()
-    const [description, chapters, replayed, pinned, tags] = await Promise.all(
-      [descriptionRegion(page), chapterRegion(page), replayedRegion(page), pinnedRegion(page), tagsRegion(page)].map((region) =>
+    const [credit, description, chapters, replayed, pinned, tags] = await Promise.all(
+      [creditRegion(page), descriptionRegion(page), chapterRegion(page), replayedRegion(page), pinnedRegion(page), tagsRegion(page)].map((region) =>
         region.boundingBox(),
       ),
     )
@@ -828,8 +883,10 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     expect(y(replayed)).toBeLessThan(y(pinned))
     expect(y(pinned)).toBeLessThan(y(tags))
     expect(x(chapters)).toBeGreaterThan(x(description) + (description?.width ?? 0))
-    // คอลัมน์ขวาเริ่มบรรทัดเดียวกับคอลัมน์ซ้าย
-    expect(Math.abs(y(chapters) - y(description))).toBeLessThan(2)
+    // เครดิตอยู่บนสุดของคอลัมน์ซ้าย (เหนือคำอธิบาย คอลัมน์เดียวกัน) · คอลัมน์ขวาเริ่มบรรทัดเดียวกับเครดิต
+    expect(Math.abs(x(credit) - x(description))).toBeLessThan(2)
+    expect(y(credit)).toBeLessThan(y(description))
+    expect(Math.abs(y(chapters) - y(credit))).toBeLessThan(2)
     // ลำดับใน DOM (= ลำดับ Tab) ตรงกับลำดับที่อ่าน: คอลัมน์ซ้ายก่อน แล้วคอลัมน์ขวา
     expect(await infoSectionOrder(page)).toEqual(INFO_ORDER)
   })

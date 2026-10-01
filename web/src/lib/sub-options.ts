@@ -1,4 +1,4 @@
-import type { SubExportFormat, SubOptions, SubPreset } from "@/lib/types"
+import type { SubOptions, SubPreset } from "@/lib/types"
 
 /**
  * ค่าสำเร็จรูป 4 แบบ ต้องตรงกับ core/srt_builder.py ทุกตัวเลข (สัญญา C5) ลำดับเดียวกับปุ่มในหน้าเว็บ
@@ -83,12 +83,6 @@ function optionParams(o: SubOptions): string[] {
   const query = [`maxChars=${o.maxChars}`, `lines=${o.lines}`, `minMs=${o.minMs}`, `maxMs=${o.maxMs}`, `mode=${o.mode}`]
   if (o.mode === "tokens" && o.tokensPerCue !== undefined) query.push(`tokensPerCue=${o.tokensPerCue}`)
   return query
-}
-
-/** path โหลดไฟล์ซับ ลำดับคีย์คงที่: format, maxChars, lines, minMs, maxMs, mode[, tokensPerCue] */
-export function exportPath(videoId: string, trackId: string, format: SubExportFormat, o: SubOptions): string {
-  const query = [`format=${format}`, ...optionParams(o)]
-  return `/api/videos/${encodeURIComponent(videoId)}/subtitles/${encodeURIComponent(trackId)}/export?${query.join("&")}`
 }
 
 /**
