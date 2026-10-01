@@ -44,14 +44,17 @@ test("วิดีโอ BBB ค่าเริ่มต้น → งานเ�
   page,
   request,
 }) => {
-  const name = `${fixtureTitle(BBB)}.mp4`
   await page.goto(`/v/${BBB}?tab=video`)
   const created = await submitAndGetJob(page, "โหลด mp4")
   expect(created).toMatchObject({ videoId: BBB, kind: "video" })
   await expect(page.getByText("เพิ่มเข้าคิวแล้ว", { exact: true })).toBeVisible()
 
   const done = await waitForJob(request, (job) => job.id === created.id && job.status === "done", { timeout: 30_000 })
-  expect(done.outputs?.map((output) => output.name)).toEqual([name])
+  // ชื่อไฟล์ = ชื่อคลิป แต่ถูกตัดให้สั้นลงได้ตามความยาว path ที่เหลือของโฟลเดอร์ผลลัพธ์ (C10) จึงเทียบแค่ส่วนต้น
+  expect(done.outputs).toHaveLength(1)
+  const name = done.outputs![0].name
+  expect(name).toMatch(/\.mp4$/)
+  expect(fixtureTitle(BBB).startsWith(name.slice(0, -".mp4".length))).toBe(true)
 
   // แถวงานที่เสร็จในชีตคิวมีปุ่มดาวน์โหลดของไฟล์นี้
   const sheet = await openQueueSheet(page)
@@ -74,7 +77,7 @@ test("เสียง m4a ของคลิปพากย์ เลือก�
   const language = page.getByRole("combobox", { name: "ภาษาเสียง", exact: true })
   await language.click()
   await page.getByRole("option", { name: "อังกฤษ (สหรัฐอเมริกา)" }).click()
-  await expect(language).toHaveText("อังกฤษ (สหรัฐอเมริกา)")
+  await expect(language.locator('[data-slot="select-value"]')).toHaveText("อังกฤษ (สหรัฐอเมริกา)")
 
   const created = await submitAndGetJob(page, "โหลดเสียง")
   expect(created).toMatchObject({ videoId: DUB, kind: "audio", params: { format: "m4a", audioLanguage: "en-US" } })
