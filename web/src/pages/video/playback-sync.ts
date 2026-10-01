@@ -30,8 +30,9 @@ export function nowPlayingFrame(frames: readonly StoryboardFrame[], state: Pick<
 }
 
 /**
- * บรรทัดที่ช่วงเวลา [startMs, endMs) ครอบ ms (ค้นแบบแบ่งครึ่ง บรรทัดเรียงตามเวลาเริ่ม)
- * อยู่ในช่องว่างระหว่างบรรทัด ก่อนบรรทัดแรก หรือหลังบรรทัดสุดท้าย = -1 · บรรทัดซ้อนกัน = บรรทัดที่เริ่มทีหลัง
+ * บรรทัดที่กำลังเล่น = บรรทัดสุดท้ายที่เริ่มก่อนหรือตรง ms (ค้นแบบแบ่งครึ่ง บรรทัดเรียงตามเวลาเริ่ม)
+ * ช่องว่างเงียบระหว่างบรรทัด: บรรทัดก่อนหน้ายังติดไฟอยู่จนบรรทัดถัดไปเริ่ม (ไม่กะพริบดับ-ติด และปุ่ม "กลับไปบรรทัดที่กำลังเล่น" มีที่ไปเสมอ)
+ * ก่อนบรรทัดแรก หรือเลยเวลาจบของบรรทัดสุดท้าย = -1 · บรรทัดซ้อนกัน = บรรทัดที่เริ่มทีหลัง
  */
 export function lineAt(cues: readonly Pick<Cue, "startMs" | "endMs">[], ms: number): number {
   let low = 0
@@ -45,7 +46,8 @@ export function lineAt(cues: readonly Pick<Cue, "startMs" | "endMs">[], ms: numb
       low = mid + 1
     } else high = mid - 1
   }
-  return found >= 0 && ms < cues[found].endMs ? found : -1
+  if (found < 0) return -1
+  return found < cues.length - 1 || ms < cues[found].endMs ? found : -1
 }
 
 /** บรรทัดที่กำลังเล่น · ไม่มีตำแหน่งที่ควรแสดง = -1 */

@@ -135,7 +135,7 @@ const REPLAYED_FRAME =
 const NOW_PLAYING_FRAME =
   "pointer-events-none absolute inset-[5px] rounded-[4px] border-2 border-background ring-2 ring-foreground"
 
-// ปุ่ม ▶ มุมซ้ายบนของภาพ: เห็นเมื่อชี้เมาส์ที่ภาพหรือโฟกัสอยู่ในภาพ · จอสัมผัส (ไม่มีการชี้) เห็นตลอดและใหญ่ขึ้นให้นิ้วกดได้
+// ปุ่ม ▶ มุมซ้ายบนของภาพ: เห็นเมื่อชี้เมาส์ที่ภาพหรือโฟกัสอยู่ในภาพ (ไม่อยู่ในลำดับ Tab) · จอสัมผัส (ไม่มีการชี้) เห็นตลอดและใหญ่ขึ้นให้นิ้วกดได้
 const PLAY_CORNER =
   "absolute top-[7px] left-[7px] flex size-7 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm opacity-0 outline-none transition-opacity hover:bg-background focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 pointer-coarse:size-9 pointer-coarse:opacity-100 motion-reduce:transition-none"
 
@@ -231,8 +231,15 @@ function FrameTile({ frame, frames, frameIndex, videoId, highlighted, replayed, 
             )}
           </AspectRatio>
         </button>
-        {/* เล่นคลิปจากเวลาของภาพนี้ (คลิกตัวภาพยังเปิดภาพใหญ่เหมือนเดิม) */}
-        <button type="button" aria-label={fill(t.playFromAt, { time })} onClick={playHere} className={PLAY_CORNER}>
+        {/* เล่นคลิปจากเวลาของภาพนี้ (คลิกตัวภาพยังเปิดภาพใหญ่เหมือนเดิม)
+            ไม่อยู่ในลำดับ Tab (ภาพละ 1 จุดหยุด ไม่ใช่ 2): ผู้ใช้คีย์บอร์ดใช้เมนู "เล่นจากตรงนี้" (Shift+F10) แทน */}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={fill(t.playFromAt, { time })}
+          onClick={playHere}
+          className={PLAY_CORNER}
+        >
           <Play aria-hidden className="size-3.5 fill-current" />
         </button>
       </ContextMenuTrigger>

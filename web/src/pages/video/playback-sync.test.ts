@@ -29,10 +29,16 @@ describe("lineAt (ค้นแบบแบ่งครึ่ง)", () => {
     expect(lineAt(CUES, 11999)).toBe(2)
   })
 
-  it("ช่องว่างระหว่างบรรทัด ก่อนบรรทัดแรก และหลังบรรทัดสุดท้าย = -1", () => {
-    expect(lineAt(CUES, 3000)).toBe(-1)
-    expect(lineAt(CUES, 3500)).toBe(-1)
-    expect(lineAt(CUES, 8000)).toBe(-1)
+  it("ช่องว่างเงียบระหว่างบรรทัด: บรรทัดก่อนหน้ายังติดไฟจนบรรทัดถัดไปเริ่ม", () => {
+    expect(lineAt(CUES, 3000)).toBe(0)
+    expect(lineAt(CUES, 3500)).toBe(0)
+    expect(lineAt(CUES, 3999)).toBe(0)
+    expect(lineAt(CUES, 6000)).toBe(1)
+    expect(lineAt(CUES, 8000)).toBe(1)
+    expect(lineAt(CUES, 9999)).toBe(1)
+  })
+
+  it("ก่อนบรรทัดแรก และตั้งแต่เวลาจบของบรรทัดสุดท้าย = -1", () => {
     expect(lineAt(CUES, 0)).toBe(-1)
     expect(lineAt(CUES, 999)).toBe(-1)
     expect(lineAt(CUES, 12000)).toBe(-1)
@@ -43,6 +49,7 @@ describe("lineAt (ค้นแบบแบ่งครึ่ง)", () => {
     expect(lineAt([], 1000)).toBe(-1)
     expect(lineAt([cue(0, 500)], 0)).toBe(0)
     expect(lineAt([cue(0, 500)], 499)).toBe(0)
+    expect(lineAt([cue(0, 500)], 500)).toBe(-1)
   })
 
   it("บรรทัดติดกันพอดี (จบ = เริ่มบรรทัดถัดไป) ได้บรรทัดถัดไปที่ขอบ", () => {
@@ -55,8 +62,10 @@ describe("lineAt (ค้นแบบแบ่งครึ่ง)", () => {
   it("ตรงกับการค้นทีละบรรทัดทุกเวลา (พันบรรทัด มีช่องว่างสลับ)", () => {
     const many: Cue[] = []
     for (let i = 0; i < 1000; i++) many.push(cue(i * 1000, i * 1000 + (i % 3 === 0 ? 600 : 1000)))
-    const linear = (ms: number) => many.findIndex((c) => c.startMs <= ms && ms < c.endMs)
-    for (let ms = -500; ms < 1_001_000; ms += 137) expect(lineAt(many, ms)).toBe(linear(ms))
+    // แบบตรงไปตรงมา: บรรทัดสุดท้ายที่เริ่มแล้ว · เลยเวลาจบของบรรทัดสุดท้าย = -1
+    const last = many[many.length - 1]
+    const linear = (ms: number) => (ms >= last.endMs ? -1 : many.findLastIndex((c) => c.startMs <= ms))
+    for (let ms = -500; ms < 1_002_000; ms += 137) expect(lineAt(many, ms)).toBe(linear(ms))
   })
 })
 

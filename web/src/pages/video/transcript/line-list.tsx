@@ -209,7 +209,7 @@ export function LineList({ cues, lines, visible, needle, current, replayed, reve
     if (following && isUserScroll(input)) setFollowing(false)
   }
 
-  // กลับไปเลื่อนตาม: ปุ่มนี้จะหายไป จึงโฟกัสบรรทัดที่กำลังเล่น (อยู่ในช่องว่างระหว่างบรรทัด = บรรทัดก่อนหน้า)
+  // กลับไปเลื่อนตาม: ปุ่มนี้จะหายไป จึงโฟกัสบรรทัดที่กำลังเล่นตอนกด (โฟกัสไม่วิ่งตามบรรทัดต่อ ๆ ไป) · ก่อนบรรทัดแรก = บรรทัดที่ใกล้ที่สุด
   function resume() {
     setFollowing(true)
     const target = playing >= 0 ? playing : cueIndexAt(cues, getPlayerState().currentMs)

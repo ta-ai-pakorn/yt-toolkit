@@ -221,10 +221,10 @@ test.describe("W2 ภาพเฟรม", () => {
     const chip = (time: string) => page.getByRole("list", { name: FRAME_LIST }).getByText(time, { exact: true })
     await expect(chip("00:00:00")).toBeVisible()
     await expect(chip("00:00:04")).toBeHidden()
-    // M3.5: ถัดจากภาพคือปุ่ม ▶ "เล่นจากตรงนี้" ของภาพเดียวกัน (ชิปเวลายังเห็นอยู่ เพราะโฟกัสยังอยู่ในภาพนั้น)
-    await page.keyboard.press("Tab")
-    await expect(page.getByRole("button", { name: "เล่นจากตรงนี้ 00:00:00", exact: true })).toBeFocused()
-    await expect(chip("00:00:00")).toBeVisible()
+    // M3.5: ปุ่ม ▶ "เล่นจากตรงนี้" ที่มุมภาพไม่อยู่ในลำดับ Tab (ผู้ใช้คีย์บอร์ดใช้เมนู Shift+F10) แต่ยังมีชื่อให้โปรแกรมอ่านหน้าจอ
+    // ภาพละ 1 จุดหยุด: Tab จากภาพแรกไปภาพถัดไปเลย
+    const corner = page.getByRole("button", { name: "เล่นจากตรงนี้ 00:00:00", exact: true })
+    await expect(corner).toHaveAttribute("tabindex", "-1")
     await page.keyboard.press("Tab")
     await expect(frameButton(page, "00:00:04")).toBeFocused()
     await expect(chip("00:00:04")).toBeVisible()
@@ -899,7 +899,7 @@ test.describe("W2 บอกวิธีใช้ภาพเฟรม", () => {
   test("มีคำแนะนำใต้หัว 'ภาพเฟรม' ว่าคลิกดูใหญ่ และคลิกขวา/Shift+F10 เพื่อคัดลอกหรือโหลด", async ({ page }) => {
     await openBbb(page)
     await expect(
-      page.getByText("คลิกภาพเพื่อดูภาพใหญ่ · กด ▶ ที่มุมภาพเพื่อเล่นคลิปจากตรงนั้น · คลิกขวาหรือกด Shift+F10 เพื่อคัดลอกหรือโหลดภาพ"),
+      page.getByText("คลิกภาพเพื่อดูภาพใหญ่ · กด ▶ ที่มุมภาพเพื่อเล่นคลิปจากตรงนั้น · คลิกขวาหรือกด Shift+F10 เพื่อคัดลอก โหลดภาพ หรือเล่นจากตรงนี้"),
     ).toBeVisible()
   })
 
