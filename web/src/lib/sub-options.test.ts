@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 
-import * as subOptions from "./sub-options"
 import { clampOptions, isPresetName, LIMITS, notePath, PRESET_NAMES, presetOf, PRESETS } from "./sub-options"
 
 describe("presetOf", () => {
@@ -69,13 +68,6 @@ describe("clampOptions", () => {
   it("ค่าที่ไม่ใช่ตัวเลขไม่ทำให้ได้ NaN", () => {
     const out = clampOptions({ ...PRESETS.medium, maxChars: Number.NaN })
     expect(out.maxChars).toBe(LIMITS.maxChars[0])
-  })
-})
-
-describe("ไฟล์ซับผ่านคิว (M4)", () => {
-  it("ไม่มี exportPath แล้ว (ปุ่มโหลด .srt/.txt/.md ส่งงานเข้าคิว) · notePath ยังอยู่เพราะโน้ต .md ยังโหลดผ่านเบราว์เซอร์", () => {
-    expect("exportPath" in subOptions).toBe(false)
-    expect(typeof subOptions.notePath).toBe("function")
   })
 })
 

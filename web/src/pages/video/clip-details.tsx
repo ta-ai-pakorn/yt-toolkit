@@ -12,7 +12,7 @@ import { formatChapters } from "@/lib/chapters"
 import { formatCompact, formatCount, formatTags, formatTimecode } from "@/lib/format"
 import type { Chapter, PinnedComment, ReplaySegment, VideoInfo } from "@/lib/types"
 
-import { cleanTags, infoSections } from "./info-sections"
+import { cleanTags, creditLine, infoSections } from "./info-sections"
 import { LoadError } from "./load-error"
 import { playerActions } from "./player/player-store"
 import { pinnedCommentQuery } from "./queries"
@@ -95,10 +95,6 @@ function TimeButton({ ms }: { ms: number }) {
     </Button>
   )
 }
-
-/** บรรทัดเครดิต "ที่มา: <ชื่อคลิป> — <ช่อง> (YouTube) https://youtu.be/<id>" (บรรทัดเดียว) */
-const creditLine = (video: VideoInfo) =>
-  fill(t.info.creditLine, { title: video.title, channel: video.channel, id: video.videoId })
 
 /**
  * เครดิต (FR-OUT-7, Q6): บรรทัดที่มาของคลิป + ปุ่ม "คัดลอกเครดิต" ได้ข้อความเดียวกับที่เห็น

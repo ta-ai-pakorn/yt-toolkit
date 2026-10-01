@@ -1,4 +1,12 @@
+import { fill, th } from "@/i18n/th"
 import type { VideoInfo } from "@/lib/types"
+
+/** ยุบช่องว่างทุกชนิด (รวมขึ้นบรรทัดใหม่) เป็นช่องเดียวแล้วตัดหัวท้าย: เหมือน _one_line ของ core/files.py (C10) */
+const oneLine = (text: string) => text.replace(/\s+/g, " ").trim()
+
+/** บรรทัดเครดิต "ที่มา: <ชื่อคลิป> — <ช่อง> (YouTube) https://youtu.be/<id>" บรรทัดเดียว ตรงกับ credit_line ของ core/files.py */
+export const creditLine = (video: Pick<VideoInfo, "title" | "channel" | "videoId">) =>
+  fill(th.video.info.creditLine, { title: oneLine(video.title), channel: oneLine(video.channel), id: video.videoId })
 
 /** แท็กที่ใช้ได้ (ตัดช่องว่างหัวท้าย ข้ามแท็กว่าง) */
 export const cleanTags = (tags: readonly string[] | undefined) =>

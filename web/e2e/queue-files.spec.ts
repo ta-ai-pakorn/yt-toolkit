@@ -70,7 +70,11 @@ test.describe("ไฟล์ซับ ภาพรวมเฟรม และ zi
     const job = await finished(request, OWNER, "subtitle")
     expect(job.outputs?.[0].name.endsWith(".md")).toBe(true)
     const text = (await (await output(request, job)).body()).toString("utf8")
-    expect(text.length).toBeGreaterThan(0)
+    // รูปแบบเดียวกับ tests/fixtures/subs/golden/th-owner.md: หัวข้อ "# " ก่อน แล้วลิงก์ดูคลิป แล้วหัวข้อเวลา "## [00:00]"
+    expect(text.startsWith("# ")).toBe(true)
+    expect(text).toContain(`https://www.youtube.com/watch?v=${OWNER}`)
+    expect(text).toContain("## [00:00]")
+    expect(text.indexOf(`watch?v=${OWNER}`)).toBeLessThan(text.indexOf("## [00:00]"))
   })
 
   test("'โหลดภาพรวมเฟรม' ส่งงานเข้าคิว → เสร็จ · ไฟล์เป็น image/jpeg", async ({ page, request }) => {
@@ -94,7 +98,8 @@ test.describe("ไฟล์ซับ ภาพรวมเฟรม และ zi
     const job = await finished(request, BBB, "frames_zip")
     expect(job.outputs?.[0].name).toMatch(/\.zip$/)
     const response = await output(request, job)
-    expect(response.headers()["content-type"]).toContain("application/zip")
+    // Windows อาจให้ application/x-zip-compressed จึงรับทั้งสองแบบ
+    expect(response.headers()["content-type"]).toMatch(/^application\/(zip|x-zip-compressed)/)
     expect((await response.body()).subarray(0, 2).toString("latin1")).toBe("PK")
   })
 })
