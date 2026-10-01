@@ -370,6 +370,7 @@ export const th = {
       moved: "{title} อยู่ลำดับที่ {n}",
       dropped: "วาง {title} ไว้ลำดับที่ {n}",
       cancelled: "ยกเลิกการย้าย {title}",
+      roleDescription: "รายการที่ลากเปลี่ยนลำดับได้",
     },
     paused: {
       title: "พักคิวไว้ชั่วคราว",

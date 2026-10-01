@@ -3,7 +3,7 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from "@
 
 import type { Job, NewJob } from "../src/lib/types"
 
-import { cancelJobsFor, enqueue, listJobs, openQueueSheet, resumeQueue, waitForJob } from "./queue-helpers"
+import { cancelJobsFor, enqueue, listJobs, openQueueSheet, resumeQueue, token, waitForJob } from "./queue-helpers"
 
 // W4 แถบคิว + ชีตคิว และ W7 ยืนยันปิดโปรแกรม กับคิวจริงของ backend ปลอม (โปรเจกต์ queue, ทีละเทส)
 // คลิปของไฟล์นี้ (C14): SLOWDOWNLD1..4, BOTCHECKDL1, NETRETRYDL1, REFUSEDDL01 · พฤติกรรมอยู่ใน tests/fixtures/downloads/behaviors.json
@@ -34,6 +34,38 @@ async function queuedOrder(request: APIRequestContext): Promise<string[]> {
   return (await listJobs(request, "queued")).sort((a, b) => a.position - b.position).map((j) => j.videoId)
 }
 
+/** ลำดับของ SLOWDOWNLD3 กับ 4 ในคิว (งานอื่นในคิวไม่สน) */
+async function order34(request: APIRequestContext): Promise<string[]> {
+  return (await queuedOrder(request)).filter((id) => id === "SLOWDOWNLD3" || id === "SLOWDOWNLD4")
+}
+
+/**
+ * เปิดหน้าแล้วรอจน SSE ต่อติดและรายการงานแรกโหลดเสร็จ ก่อนส่งงานเข้าคิว
+ * (ไม่งั้นเหตุการณ์ของงานใหม่อาจมาถึงก่อนหน้าเว็บพร้อมฟัง)
+ */
+async function gotoReady(page: Page, path = "/") {
+  const events = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/events")
+  const jobs = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/jobs" && r.request().method() === "GET")
+  await page.goto(path)
+  await Promise.all([events, jobs])
+}
+
+async function getConcurrency(page: Page): Promise<number> {
+  const response = await page.request.get("/api/settings")
+  expect(response.ok(), `GET /api/settings ตอบ ${response.status()}`).toBe(true)
+  return ((await response.json()) as { concurrency: number }).concurrency
+}
+
+/** ตั้งจำนวนงานพร้อมกันของ backend คิว (ต้องคืนค่าเดิมเสมอ spec อื่นในโปรเจกต์ queue ใช้ backend เดียวกัน) */
+async function setConcurrency(page: Page, n: number) {
+  const response = await page.request.fetch("/api/settings", {
+    method: "PATCH",
+    headers: { "X-Toolkit-Token": await token(page), Origin: new URL(page.url()).origin },
+    data: { concurrency: n },
+  })
+  expect(response.ok(), `PATCH /api/settings ตอบ ${response.status()}`).toBe(true)
+}
+
 const row = (sheet: Locator, job: Job) => sheet.locator(`[data-job-id="${job.id}"]`)
 
 const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
@@ -62,11 +94,10 @@ test.afterAll(async ({ request }) => {
 })
 
 test.describe("W4 คิวงาน", () => {
-  test("ส่ง 4 งาน: แถบนับงาน · โหลดหน้าใหม่ยังเห็นงานเดิม · ลากเปลี่ยนลำดับ (เมาส์/คีย์บอร์ด) · ยกเลิก", async ({ page, request }) => {
-    test.setTimeout(90_000)
-    await page.goto("/")
+  test("ส่ง 4 งาน: แถบนับงาน · โหลดหน้าใหม่ยังเห็นงานเดิม · ยกเลิกงานที่กำลังทำ", async ({ page, request }) => {
+    test.setTimeout(60_000)
+    await gotoReady(page)
     const jobs = await enqueue(request, SLOW.map(video))
-    const byVideo = Object.fromEntries(jobs.map((j) => [j.videoId, j]))
 
     const bar = page.getByRole("region", { name: "คิวงาน" })
     await expect(bar).toContainText("กำลังทำ 2 · รอ 2", { timeout: 15_000 })
@@ -79,43 +110,11 @@ test.describe("W4 คิวงาน", () => {
     sheet = await openQueueSheet(page)
     for (const job of jobs) await expect(row(sheet, job)).toBeVisible()
 
-    // AC-Q-06: เมาส์ ลาก 4 ขึ้นเหนือ 3
-    const handle = (id: string) => sheet.getByRole("button", { name: `ลากเพื่อเปลี่ยนลำดับ ${TITLE[id]}` })
-    await mouseDrag(page, handle("SLOWDOWNLD4"), row(sheet, byVideo.SLOWDOWNLD3))
-    await expect.poll(() => queuedOrder(request)).toEqual(["SLOWDOWNLD4", "SLOWDOWNLD3"])
-
-    // คีย์บอร์ด: ย้าย 4 ลงกลับที่เดิม แล้วย้ายขึ้นอีกครั้ง (Space · ลูกศร · Space)
-    await handle("SLOWDOWNLD4").focus()
-    await page.keyboard.press("Space")
-    await expect(sheet.getByText(`ยก ${TITLE.SLOWDOWNLD4} ขึ้นแล้ว`, { exact: false })).toBeAttached()
-    await page.keyboard.press("ArrowDown")
-    await expect(sheet.getByText(`${TITLE.SLOWDOWNLD4} อยู่ลำดับที่ 2`)).toBeAttached()
-    await page.keyboard.press("Space")
-    await expect.poll(() => queuedOrder(request)).toEqual(["SLOWDOWNLD3", "SLOWDOWNLD4"])
-
-    await handle("SLOWDOWNLD4").focus()
-    await page.keyboard.press("Space")
-    await page.keyboard.press("ArrowUp")
-    await expect(sheet.getByText(`${TITLE.SLOWDOWNLD4} อยู่ลำดับที่ 1`)).toBeAttached()
-    await page.keyboard.press("Space")
-    await expect(sheet.getByText(`วาง ${TITLE.SLOWDOWNLD4} ไว้ลำดับที่ 1`)).toBeAttached()
-    await expect.poll(() => queuedOrder(request)).toEqual(["SLOWDOWNLD4", "SLOWDOWNLD3"])
-
-    // ลำดับคงอยู่หลังโหลดหน้าใหม่
-    await page.reload()
-    sheet = await openQueueSheet(page)
-    await expect(sheet.getByRole("button", { name: /^ลากเพื่อเปลี่ยนลำดับ/ }).first()).toHaveAccessibleName(
-      `ลากเพื่อเปลี่ยนลำดับ ${TITLE.SLOWDOWNLD4}`,
-    )
-
-    // ช่องว่างแรกที่ว่าง = 4 เริ่มก่อน 3
-    const started = await waitForJob(request, (j) => j.videoId === "SLOWDOWNLD4" && j.status === "running", { timeout: 30_000 })
-    expect((await listJobs(request, "queued")).map((j) => j.videoId)).toContain("SLOWDOWNLD3")
-
-    // ยกเลิกงานที่กำลังทำ = แถวหายภายใน 3 วิ
-    const startedRow = row(sheet, started)
-    await startedRow.getByRole("button", { name: `ยกเลิกงาน ${TITLE.SLOWDOWNLD4}` }).click()
-    await expect(startedRow).toHaveCount(0, { timeout: 3_000 })
+    // AC-Q-07: ยกเลิกงานที่กำลังทำ = แถวหายภายใน 3 วิ
+    const running = (await listJobs(request, "running")).find((j) => SLOW.includes(j.videoId))!
+    const runningRow = row(sheet, running)
+    await runningRow.getByRole("button", { name: `ยกเลิกงาน ${TITLE[running.videoId]}` }).click()
+    await expect(runningRow).toHaveCount(0, { timeout: 3_000 })
 
     await cancelJobsFor(request, SLOW)
     await expect
@@ -123,9 +122,69 @@ test.describe("W4 คิวงาน", () => {
       .toEqual([])
   })
 
+  test("AC-Q-06 ลากเปลี่ยนลำดับ (เมาส์/คีย์บอร์ด): backend เก็บลำดับ โหลดหน้าใหม่ยังอยู่ และ 4 เริ่มก่อน 3", async ({ page, request }) => {
+    test.setTimeout(120_000)
+    await gotoReady(page)
+    // ทำทีละงานระหว่างลาก ช่องว่างถัดไปจะว่างหลังงานแรกโหลดเสร็จ (~10 วิ) จึงมีเวลาพอ
+    const original = await getConcurrency(page)
+    await setConcurrency(page, 1)
+    try {
+      const jobs = await enqueue(request, SLOW.map(video))
+      const byVideo = Object.fromEntries(jobs.map((j) => [j.videoId, j]))
+      let sheet = await openQueueSheet(page)
+      const handle = (id: string) => sheet.getByRole("button", { name: `ลากเพื่อเปลี่ยนลำดับ ${TITLE[id]}` })
+      await expect(handle("SLOWDOWNLD4")).toBeVisible()
+
+      // เมาส์: ลาก 4 ขึ้นเหนือ 3
+      await mouseDrag(page, handle("SLOWDOWNLD4"), row(sheet, byVideo.SLOWDOWNLD3))
+      await expect.poll(() => order34(request)).toEqual(["SLOWDOWNLD4", "SLOWDOWNLD3"])
+
+      // คีย์บอร์ด: ย้าย 4 ลงกลับที่เดิม แล้วย้ายขึ้นอีกครั้ง (Space · ลูกศร · Space)
+      await handle("SLOWDOWNLD4").focus()
+      await page.keyboard.press("Space")
+      await expect(sheet.getByText(`ยก ${TITLE.SLOWDOWNLD4} ขึ้นแล้ว`, { exact: false })).toBeAttached()
+      await page.keyboard.press("ArrowDown")
+      await expect(sheet.getByText(new RegExp(`^${TITLE.SLOWDOWNLD4} อยู่ลำดับที่ \\d+$`))).toBeAttached()
+      await page.keyboard.press("Space")
+      await expect.poll(() => order34(request)).toEqual(["SLOWDOWNLD3", "SLOWDOWNLD4"])
+
+      await handle("SLOWDOWNLD4").focus()
+      await page.keyboard.press("Space")
+      await expect(sheet.getByText(`ยก ${TITLE.SLOWDOWNLD4} ขึ้นแล้ว`, { exact: false })).toBeAttached()
+      await page.keyboard.press("ArrowUp")
+      await page.keyboard.press("Space")
+      await expect(sheet.getByText(new RegExp(`^วาง ${TITLE.SLOWDOWNLD4} ไว้ลำดับที่ \\d+$`))).toBeAttached()
+      await expect.poll(() => order34(request)).toEqual(["SLOWDOWNLD4", "SLOWDOWNLD3"])
+
+      // ลำดับคงอยู่หลังโหลดหน้าใหม่
+      await page.reload()
+      sheet = await openQueueSheet(page)
+      const handles34 = sheet.getByRole("button", { name: /^ลากเพื่อเปลี่ยนลำดับ คลิปโหลดช้า [34]$/ })
+      await expect(handles34).toHaveCount(2)
+      await expect(handles34.first()).toHaveAccessibleName(`ลากเพื่อเปลี่ยนลำดับ ${TITLE.SLOWDOWNLD4}`)
+
+      // กลับไปทำพร้อมกันตามเดิม แล้วรอจนทั้งสองงานเริ่ม: 4 ต้องเริ่มก่อน 3
+      await setConcurrency(page, original)
+      await expect
+        .poll(
+          async () => {
+            const list = await listJobs(request)
+            const four = list.find((j) => j.id === byVideo.SLOWDOWNLD4.id)?.startedAt
+            const three = list.find((j) => j.id === byVideo.SLOWDOWNLD3.id)?.startedAt
+            return four && three ? four < three : null
+          },
+          { timeout: 60_000 },
+        )
+        .toBe(true)
+    } finally {
+      await setConcurrency(page, original)
+      await cancelJobsFor(request, SLOW)
+    }
+  })
+
   test("เน็ตหลุด: แถวบอกว่ากำลังลองใหม่ แล้วโหลดเสร็จพร้อม toast", async ({ page, request }) => {
     test.setTimeout(60_000)
-    await page.goto("/")
+    await gotoReady(page)
     const [job] = await enqueue(request, [video("NETRETRYDL1")])
     const sheet = await openQueueSheet(page)
     await expect(row(sheet, job)).toContainText("เน็ตหลุด กำลังลองใหม่ (ครั้งที่ 1/3)", { timeout: 20_000 })
@@ -135,7 +194,7 @@ test.describe("W4 คิวงาน", () => {
 
   test("ยูทูปไม่ส่งไฟล์: แถวผิดพลาด รายละเอียดมีรหัส · ลองใหม่ = กลับเข้าคิว", async ({ page, request }) => {
     test.setTimeout(60_000)
-    await page.goto("/")
+    await gotoReady(page)
     const [job] = await enqueue(request, [video("REFUSEDDL01")])
     await expect(page.getByText(`โหลดไม่สำเร็จ · ${TITLE.REFUSEDDL01}`)).toBeVisible({ timeout: 20_000 })
     const first = await waitForJob(request, (j) => j.id === job.id && j.status === "failed")
@@ -177,7 +236,7 @@ test.describe("W4 คิวงาน", () => {
 
   test("ติดบอท: แจ้งหยุดพักบนแถบและในชีตพร้อมนับถอยหลัง งานกลับไปรอ · ลองต่อเลย = โหลดต่อจนเสร็จ", async ({ page, request }) => {
     test.setTimeout(60_000)
-    await page.goto("/")
+    await gotoReady(page)
     const [job] = await enqueue(request, [video("BOTCHECKDL1")])
     const bar = page.getByRole("region", { name: "คิวงาน" })
     const barAlert = bar.getByTestId("queue-paused")

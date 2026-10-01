@@ -192,7 +192,10 @@ test.describe("แถบคิวงาน (ข้อมูลปลอม)", ()
     await expect(running.getByRole("progressbar")).toBeVisible()
     await expect(running.getByRole("button", { name: /^ยกเลิกงาน คลิปที่กำลังโหลด/ })).toBeVisible()
 
-    await expect(sheet.getByRole("button", { name: "ลากเพื่อเปลี่ยนลำดับ คลิปรอคิว ก" })).toBeVisible()
+    await expect(sheet.getByRole("button", { name: "ลากเพื่อเปลี่ยนลำดับ คลิปรอคิว ก" })).toHaveAttribute(
+      "aria-roledescription",
+      "รายการที่ลากเปลี่ยนลำดับได้",
+    )
     await expect(sheet.getByRole("button", { name: "ยกเลิกงาน คลิปรอคิว ข" })).toBeVisible()
 
     const failed = sheet.locator(`[data-job-id="${FAILED}"]`)
@@ -307,6 +310,53 @@ test.describe("แถบคิวงาน (ข้อมูลปลอม)", ()
     await expect(handles.nth(1)).toHaveAccessibleName("ลากเพื่อเปลี่ยนลำดับ คลิปรอคิว ข")
   })
 
+  test("Esc ระหว่างลากด้วยคีย์บอร์ด = ยกเลิกการลากอย่างเดียว ชีตยังเปิด ลำดับเดิม", async ({ page }) => {
+    await mockQueue(page, sampleJobs())
+    let reorders = 0
+    await page.route("**/api/jobs/order", (route) => {
+      reorders += 1
+      return route.fulfill({ json: { ok: true } })
+    })
+    await page.goto("/")
+    const sheet = await openQueueSheet(page)
+    await sheet.getByRole("button", { name: "ลากเพื่อเปลี่ยนลำดับ คลิปรอคิว ข" }).focus()
+    await page.keyboard.press("Space")
+    await expect(sheet.getByText("ยก คลิปรอคิว ข ขึ้นแล้ว", { exact: false })).toBeAttached()
+    await page.keyboard.press("ArrowUp")
+    await expect(sheet.getByText("คลิปรอคิว ข อยู่ลำดับที่ 1")).toBeAttached()
+    await page.keyboard.press("Escape")
+    await expect(sheet.getByText("ยกเลิกการย้าย คลิปรอคิว ข")).toBeAttached()
+
+    await expect(sheet).toBeVisible()
+    const handles = sheet.getByRole("button", { name: /^ลากเพื่อเปลี่ยนลำดับ/ })
+    await expect(handles.nth(0)).toHaveAccessibleName("ลากเพื่อเปลี่ยนลำดับ คลิปรอคิว ก")
+    await expect(handles.nth(1)).toHaveAccessibleName("ลากเพื่อเปลี่ยนลำดับ คลิปรอคิว ข")
+    expect(reorders).toBe(0)
+
+    // ไม่ได้ลากอยู่แล้ว Esc = ปิดชีตตามปกติ
+    await page.keyboard.press("Escape")
+    await expect(sheet).toBeHidden()
+  })
+
+  test("ยังไม่รู้ %: เส้นอำพันในแถบเต็มเส้นแบบกะพริบ และแถบความคืบหน้าในชีตไม่ว่าง", async ({ page }) => {
+    const probing = job({ id: RUNNING, status: "running", title: "คลิปที่กำลังดึงข้อมูล", stage: "probing", startedAt: "2026-10-01T10:00:01+00:00" })
+    await mockQueue(page, [probing])
+    await page.goto("/")
+    const bar = page.getByRole("region", { name: "คิวงาน" })
+    await expect(bar).toContainText("ดึงข้อมูล")
+    const line = bar.getByTestId("queue-bar-progress")
+    await expect(line).toHaveAttribute("data-indeterminate", "")
+    const [lineBox, barBox] = [await line.boundingBox(), await bar.boundingBox()]
+    expect(Math.round(lineBox!.width)).toBe(Math.round(barBox!.width))
+    expect(lineBox!.height).toBe(4)
+
+    const sheet = await openQueueSheet(page)
+    const indicator = sheet.locator(`[data-job-id="${RUNNING}"] [data-slot=progress-indicator]`)
+    await expect(indicator).toHaveAttribute("data-indeterminate", "")
+    const box = await indicator.boundingBox()
+    expect(box!.width).toBeGreaterThan(10)
+  })
+
   test("toast เมื่องานเสร็จหรือพลาดระหว่างเปิดหน้าอยู่ · ดูรายละเอียด = เปิดชีตที่แถวนั้น", async ({ page }) => {
     const jobs = sampleJobs()
     await mockQueue(page, jobs, {
@@ -329,6 +379,7 @@ test.describe("แถบคิวงาน (ข้อมูลปลอม)", ()
     const row = sheet.locator(`[data-job-id="${QUEUED_A}"]`)
     await expect(row.getByText("รหัส E_NETWORK")).toBeVisible()
     await expect(row).toBeInViewport()
+    await expect(row.getByRole("button", { name: "ดูรายละเอียด" })).toBeFocused()
   })
 
   test("โหลดหน้าใหม่: งานในประวัติไม่เด้ง toast", async ({ page }) => {

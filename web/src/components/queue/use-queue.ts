@@ -100,6 +100,22 @@ function createSheetStore() {
 
 export const queueSheet = createSheetStore()
 
+/**
+ * กำลังลากเปลี่ยนลำดับงานในชีตอยู่ไหม (sortable-queued.tsx ตั้งค่า) · ชีตใช้ตัดสินว่า Esc หมายถึง "ยกเลิกการลาก"
+ * ไม่ใช่ "ปิดชีต": Base UI เห็น Esc ก่อน dnd-kit จึงล้างค่าหลังเหตุการณ์ปุ่มนั้นจบ (endQueueDrag)
+ */
+export const queueDrag = { active: false }
+
+export function startQueueDrag(): void {
+  queueDrag.active = true
+}
+
+export function endQueueDrag(): void {
+  window.setTimeout(() => {
+    queueDrag.active = false
+  }, 0)
+}
+
 export function useQueueSheet(): SheetState {
   return useSyncExternalStore(queueSheet.subscribe, queueSheet.get, queueSheet.get)
 }

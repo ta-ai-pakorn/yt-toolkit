@@ -259,10 +259,23 @@ describe("connectEvents", () => {
     unsubscribe()
   })
 
-  it("ต่อใหม่หลังหลุด (error แล้ว open) โหลดรายการงานและสถานะคิวใหม่ · open ครั้งแรกไม่โหลดซ้ำ", () => {
+  it("open ครั้งแรกโหลดรายการงานและสถานะคิวใหม่หนึ่งครั้ง (เหตุการณ์ที่มาก่อนแคชพร้อมถูกข้ามไป)", () => {
     const client = new QueryClient()
     const invalidate = vi.spyOn(client, "invalidateQueries")
     const { source } = connect(client)
+    source.emit("open")
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: JOBS_KEY })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: QUEUE_KEY })
+    expect(invalidate).toHaveBeenCalledTimes(2)
+    source.emit("open")
+    expect(invalidate).toHaveBeenCalledTimes(2)
+  })
+
+  it("ต่อใหม่หลังหลุด (error แล้ว open) โหลดใหม่อีกครั้ง · open ซ้ำโดยไม่หลุดไม่โหลด", () => {
+    const client = new QueryClient()
+    const { source } = connect(client)
+    source.emit("open")
+    const invalidate = vi.spyOn(client, "invalidateQueries")
     source.emit("open")
     expect(invalidate).not.toHaveBeenCalled()
     source.emit("error")

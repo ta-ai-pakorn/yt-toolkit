@@ -1,5 +1,5 @@
 import { ChevronDown, CircleCheck, CirclePause, CircleX, Copy, Download, FolderOpen, RotateCcw } from "lucide-react"
-import type { ComponentProps, ReactNode } from "react"
+import { useState, type ComponentProps, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -16,6 +16,9 @@ import { jobTitle, progressLine } from "./job-text"
 import { revealWithToast, useJobAction } from "./use-queue"
 
 const ROW = "flex min-w-0 items-start gap-3 py-3"
+
+const INDETERMINATE =
+  "[&_[data-slot=progress-indicator][data-indeterminate]]:w-1/3 [&_[data-slot=progress-indicator][data-indeterminate]]:motion-safe:animate-pulse"
 
 /** ชื่อคลิป (ยาวเกินตัดด้วย …) + ป้ายชนิดงาน */
 function RowTitle({ job }: { job: Job }) {
@@ -58,10 +61,11 @@ export function RunningRow({ job }: { job: Job }) {
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <RowTitle job={job} />
         <p className="text-xs text-muted-foreground tabular-nums">{progressLine(job)}</p>
+        {/* ยังไม่รู้ % (เช่นกำลังดึงข้อมูล) = แถบสั้นกะพริบช้า ๆ แทนรางว่าง (ปิดการเคลื่อนไหว = แถบนิ่ง) */}
         <Progress
           aria-label={jobTitle(job)}
           value={job.progress === undefined ? null : Math.round(job.progress * 100)}
-          className="mt-1"
+          className={cn("mt-1", INDETERMINATE)}
         />
       </div>
       <CancelButton job={job} />
@@ -95,6 +99,13 @@ async function copyDetails(text: string): Promise<void> {
 /** แถวงานที่พลาดหรือหยุดกลางคัน: ข้อความผิดพลาด · "ดูรายละเอียด" (รหัส + ข้อความเทคนิค + คัดลอก) · "ลองใหม่" */
 export function FailedRow({ job, expanded }: { job: Job; expanded: boolean }) {
   const retry = useJobAction("retry", job.id)
+  // เปิดจาก toast "ดูรายละเอียด" = กางรายละเอียด แม้แถวนี้จะแสดงอยู่แล้วก่อนหน้า
+  const [open, setOpen] = useState(expanded)
+  const [lastExpanded, setLastExpanded] = useState(expanded)
+  if (expanded !== lastExpanded) {
+    setLastExpanded(expanded)
+    if (expanded) setOpen(true)
+  }
   const interrupted = job.status === "interrupted"
   const Icon = interrupted ? CirclePause : CircleX
   const code = job.error?.code
@@ -106,8 +117,9 @@ export function FailedRow({ job, expanded }: { job: Job; expanded: boolean }) {
         <RowTitle job={job} />
         <p className={cn("text-sm", !interrupted && "text-destructive")}>{job.error?.message ?? th.queue.interrupted}</p>
         {code && (
-          <Collapsible defaultOpen={expanded}>
+          <Collapsible open={open} onOpenChange={setOpen}>
             <CollapsibleTrigger
+              data-details-trigger=""
               render={<Button variant="link" size="sm" className="group/details h-7 px-0 text-muted-foreground" />}
             >
               {th.queue.details}

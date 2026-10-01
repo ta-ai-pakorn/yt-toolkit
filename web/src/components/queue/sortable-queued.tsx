@@ -26,11 +26,12 @@ import { cn } from "cn"
 
 import { QueuedRow } from "./job-row"
 import { jobTitle } from "./job-text"
-import { useReorder } from "./use-queue"
+import { endQueueDrag, startQueueDrag, useReorder } from "./use-queue"
 
 function SortableRow({ job }: { job: Job }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: job.id,
+    attributes: { roleDescription: th.queue.dnd.roleDescription },
   })
   const handle = (
     <button
@@ -86,6 +87,7 @@ export function SortableQueued({ jobs }: { jobs: Job[] }) {
   }
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
+    endQueueDrag()
     if (!over || active.id === over.id) return
     const from = ids.indexOf(String(active.id))
     const to = ids.indexOf(String(over.id))
@@ -99,7 +101,9 @@ export function SortableQueued({ jobs }: { jobs: Job[] }) {
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
+        onDragStart={startQueueDrag}
         onDragEnd={onDragEnd}
+        onDragCancel={endQueueDrag}
         accessibility={{
           announcements,
           // คำแนะนำวิธีลากอยู่ในข้อความตอนยกแล้ว (dnd.picked) ไม่ใช้คำแนะนำภาษาอังกฤษของ dnd-kit

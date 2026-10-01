@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { mergeJobPatch } from "@/lib/jobs"
 import type { Job } from "@/lib/types"
 
 import {
@@ -105,6 +106,11 @@ describe("progressLine", () => {
     expect(progressLine(job({ stage: "downloading_video", progress: 0.1, attempt: 1 }))).toBe(
       "เน็ตหลุด กำลังลองใหม่ (ครั้งที่ 1/3)",
     )
+  })
+  it("backend ล้าง attempt (null) เมื่อโหลดต่อได้ = ข้อความลองใหม่หายไป", () => {
+    const retrying = job({ stage: "downloading_video", progress: 0.1, attempt: 1 })
+    const [next] = mergeJobPatch([retrying], { id: retrying.id, attempt: null, progress: 0.2 })
+    expect(progressLine(next)).toBe("โหลดภาพ · 20%")
   })
   it("กำลังยกเลิกมาก่อนทุกอย่าง", () => {
     expect(progressLine(job({ cancelling: true, attempt: 2, stage: "merging" }))).toBe("กำลังยกเลิก")

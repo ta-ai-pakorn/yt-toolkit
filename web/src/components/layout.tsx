@@ -84,8 +84,11 @@ export function Layout() {
           </ul>
         </nav>
       </header>
-      {/* เว้นที่ท้ายหน้าเท่าความสูงแถบคิว เนื้อหาล่างสุดจึงไม่ถูกแถบบัง */}
-      <main className="mx-auto max-w-[960px] px-4 pb-[calc(4rem+var(--dock-bottom-offset))]">
+      {/*
+        เว้นที่ท้ายหน้าเท่าความสูงแถบคิว เนื้อหาล่างสุดจึงไม่ถูกแถบบัง
+        ตอนตัวเล่นลอย body เว้นที่ให้ทั้งตัวเล่นและแถบคิวแล้ว (index.css) main จึงกลับเป็น pb-16 ไม่เว้นซ้ำ
+      */}
+      <main className="mx-auto max-w-[960px] px-4 pb-[calc(4rem+var(--dock-bottom-offset))] [html[data-player-docked]_&]:pb-16">
         {closed ? <ShutdownScreen /> : <Outlet />}
       </main>
       {!closed && <QueueBar />}

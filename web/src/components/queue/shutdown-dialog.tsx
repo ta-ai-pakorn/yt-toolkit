@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query"
 import { Power } from "lucide-react"
+import { useState } from "react"
 import { toast } from "sonner"
 
 import {
@@ -39,6 +40,9 @@ export function ShutdownDialog({ open, onClose, pendingJobs, onShutdown }: Props
   const count = pendingJobs ?? (jobs ?? []).filter((job) => job.status === "running" || job.status === "queued").length
   // ยังไม่รู้จำนวนงาน = รอรายการงานก่อน จะได้ไม่ขึ้น "0 งาน" แวบหนึ่ง
   const ready = pendingJobs !== undefined || jobs !== undefined || jobsError
+  // จำจำนวนล่าสุดตอนเปิดอยู่: ระหว่างหน้าต่างค่อย ๆ ปิด ผู้เรียกล้างค่าไปแล้ว ไม่ให้ข้อความกลายเป็น "0 งาน" แวบหนึ่ง
+  const [shownCount, setShownCount] = useState(count)
+  if (open && ready && count !== shownCount) setShownCount(count)
 
   const shutdown = useMutation({
     mutationFn: () => api<{ ok: boolean }>("/shutdown", { method: "POST", body: JSON.stringify({ force: true }) }),
@@ -64,7 +68,7 @@ export function ShutdownDialog({ open, onClose, pendingJobs, onShutdown }: Props
             <Power aria-hidden />
           </AlertDialogMedia>
           <AlertDialogTitle>{th.shutdown.confirmTitle}</AlertDialogTitle>
-          <AlertDialogDescription>{fill(th.shutdown.confirmBody, { n: count })}</AlertDialogDescription>
+          <AlertDialogDescription>{fill(th.shutdown.confirmBody, { n: shownCount })}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={shutdown.isPending}>{th.shutdown.back}</AlertDialogCancel>

@@ -1,14 +1,26 @@
-import { useId, useLayoutEffect, useRef, type RefObject } from "react"
+import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentType, type RefObject } from "react"
 
 import { fill, th } from "@/i18n/th"
 import { barSummary, type BarSummary } from "@/lib/jobs"
+import { importWithReload } from "@/lib/lazy-import"
+import { cn } from "cn"
 
 import { jobTitle, progressLine } from "./job-text"
 import { PauseAlert } from "./pause-alert"
-import { QueueSheet } from "./queue-sheet"
 import { queueSheet, useQueueData, useQueueSheet } from "./use-queue"
 
 const OFFSET_VAR = "--dock-bottom-offset"
+
+// ชีตคิว (รวม dnd-kit) แยกไฟล์ โหลดเมื่อแถบคิวขึ้นครั้งแรก หน้าแรกจึงเบา · โหลดไม่ได้ = ไม่มีชีต (แถบยังใช้ได้)
+const importSheet = () => import("./queue-sheet")
+const QueueSheet = lazy(() =>
+  importWithReload(importSheet)
+    .then((m): { default: ComponentType } => ({ default: m.QueueSheet }))
+    .catch((error: unknown) => {
+      console.warn("[queue] failed to load the queue sheet", error)
+      return { default: () => null }
+    }),
+)
 
 /**
  * บอกความสูงของแถบคิวให้ของที่ลอยอยู่ข้างบน (ตัวเล่นลอย M3.5, toast) ผ่าน --dock-bottom-offset ที่ :root
@@ -61,12 +73,17 @@ function BarPanel({ summary, pausedUntil }: { summary: BarSummary; pausedUntil: 
         onClick={() => queueSheet.open()}
         className="relative block w-full text-left transition-colors outline-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
       >
-        {current && progress !== undefined && (
+        {/* เส้นอำพัน 4 px: รู้ % = ยาวตาม % · ยังไม่รู้ = เต็มเส้นกะพริบช้า ๆ (ปิดการเคลื่อนไหว = นิ่ง) */}
+        {current && (
           <span
             aria-hidden
             data-testid="queue-bar-progress"
-            className="absolute top-0 left-0 h-1 bg-primary transition-[width] duration-300"
-            style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+            data-indeterminate={progress === undefined ? "" : undefined}
+            className={cn(
+              "absolute top-0 left-0 h-1 bg-primary",
+              progress === undefined ? "w-full motion-safe:animate-pulse" : "transition-[width] duration-300",
+            )}
+            style={progress === undefined ? undefined : { width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
           />
         )}
         <span
@@ -94,11 +111,25 @@ function BarPanel({ summary, pausedUntil }: { summary: BarSummary; pausedUntil: 
  */
 export function QueueBar() {
   const { jobs, queue } = useQueueData()
+  const { open } = useQueueSheet()
   const summary = barSummary(jobs ?? [])
+  // สร้างชีตเมื่อถูกเปิดครั้งแรก แล้วคงไว้ (ปิดแล้วเปิดใหม่ไม่ต้องโหลดซ้ำ)
+  const [sheetWanted, setSheetWanted] = useState(open)
+  if (open && !sheetWanted) setSheetWanted(true)
+
+  // โหลดโค้ดชีตล่วงหน้าเมื่อแถบขึ้น ตอนกดเปิดจะได้ไม่ต้องรอ (พลาดก็ไม่เป็นไร ตอนเปิดจริงจะลองอีกครั้ง)
+  useEffect(() => {
+    if (summary.visible) importSheet().catch(() => undefined)
+  }, [summary.visible])
+
   return (
     <>
       {summary.visible && <BarPanel summary={summary} pausedUntil={queue?.pausedUntil ?? null} />}
-      <QueueSheet />
+      {sheetWanted && (
+        <Suspense fallback={null}>
+          <QueueSheet />
+        </Suspense>
+      )}
     </>
   )
 }

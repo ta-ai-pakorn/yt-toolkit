@@ -10,7 +10,7 @@ import { groupForSheet } from "@/lib/jobs"
 import { DoneRow, FailedRow, RunningRow } from "./job-row"
 import { PauseAlert } from "./pause-alert"
 import { SortableQueued } from "./sortable-queued"
-import { queueSheet, useQueueData, useQueueSheet } from "./use-queue"
+import { queueDrag, queueSheet, useQueueData, useQueueSheet } from "./use-queue"
 
 function Group({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
@@ -21,6 +21,13 @@ function Group({ id, title, children }: { id: string; title: string; children: R
       {children}
     </section>
   )
+}
+
+/** ปุ่ม "ดูรายละเอียด" ของแถวที่ toast ชี้มา · แถวไม่มีรายละเอียด = ตัวแถว · ยังไม่ได้วาด = null */
+function focusTarget(body: HTMLElement | null, focusId: string | null): HTMLElement | null {
+  if (body === null || focusId === null) return null
+  const row = body.querySelector<HTMLElement>(`[data-job-id="${CSS.escape(focusId)}"]`)
+  return row?.querySelector<HTMLElement>("[data-details-trigger]") ?? row ?? null
 }
 
 /**
@@ -36,21 +43,36 @@ export function QueueSheet() {
 
   useEffect(() => {
     if (!open || focusId === null || !loaded) return
-    // รอชีตวาดเสร็จก่อน (portal) แล้วค่อยเลื่อนไปหาแถว
+    // รอชีตวาดเสร็จก่อน (portal) แล้วเลื่อนไปหาแถว และย้ายโฟกัสไปที่ปุ่มรายละเอียดของแถวนั้น
     const timer = window.setTimeout(() => {
-      bodyRef.current
-        ?.querySelector(`[data-job-id="${CSS.escape(focusId)}"]`)
-        ?.scrollIntoView({ block: "center" })
+      const target = focusTarget(bodyRef.current, focusId)
+      target?.scrollIntoView({ block: "center" })
+      if (target?.hasAttribute("data-details-trigger")) target.focus({ preventScroll: true })
     }, 50)
     return () => window.clearTimeout(timer)
   }, [open, focusId, loaded])
+
+  const onOpenChange = (next: boolean, details: { reason: string }) => {
+    if (next) return queueSheet.open()
+    // Esc ระหว่างลากเปลี่ยนลำดับ = ยกเลิกการลาก (dnd-kit) ไม่ใช่ปิดชีต
+    if (details.reason === "escape-key" && queueDrag.active) return
+    queueSheet.close()
+  }
 
   const groups = groupForSheet(jobs ?? [])
   const paused = queue?.pausedUntil ?? null
 
   return (
-    <Sheet open={open} onOpenChange={(next) => (next ? queueSheet.open() : queueSheet.close())}>
-      <SheetContent side="bottom" showCloseButton={false} className="max-h-[80vh] gap-0 overflow-y-auto">
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="bottom"
+        showCloseButton={false}
+        initialFocus={() => {
+          const target = focusTarget(bodyRef.current, focusId)
+          return target?.hasAttribute("data-details-trigger") ? target : true
+        }}
+        className="max-h-[80vh] gap-0 overflow-y-auto"
+      >
         <div ref={bodyRef} className="mx-auto flex w-full max-w-[960px] min-w-0 flex-col px-4 pb-4">
           <SheetHeader className="flex-row items-start justify-between gap-2 px-0">
             <div className="flex min-w-0 flex-col gap-0.5">
