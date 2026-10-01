@@ -10,7 +10,9 @@ import type { SubOptions, SubTokens } from "@/lib/types"
 
 import { hasCode } from "../errors"
 import { LoadError } from "../load-error"
+import { isWarming } from "../session-warming"
 import { useCues } from "../use-cues"
+import { SessionWarming } from "./session-warming"
 import { previewTime } from "./track-groups"
 import { TranslationBlocked } from "./translation-blocked"
 
@@ -122,12 +124,14 @@ type Props = {
 
 /**
  * ตัวอย่างซับครบ 4 สถานะ: กำลังโหลด = Skeleton 5 แถว · แทร็กไม่มีข้อความ = Empty
- * ยูทูปไม่ให้โหลดซับแปล = คำแนะนำ + ปุ่มใช้ซับภาษาต้นฉบับ · ผิดพลาดอื่น = Alert + ลองใหม่ (ถ้าลองแล้วช่วย)
+ * ยูทูปไม่ให้โหลดซับแปล = คำแนะนำ + ปุ่มใช้ซับภาษาต้นฉบับ · ซับแปลรอเซสชัน = กล่องนับถอยหลัง (โหลดให้เองเมื่อครบ)
+ * ผิดพลาดอื่น = Alert + ลองใหม่ (ถ้าลองแล้วช่วย)
  */
 export function SubsPreview({ query, options, onUseOriginal }: Props) {
   if (query.isError) {
     if (hasCode(query.error, "E_NO_SUBTITLES")) return <NoTokens />
     if (hasCode(query.error, "E_TRANSLATION_BLOCKED")) return <TranslationBlocked onUseOriginal={onUseOriginal} />
+    if (isWarming(query.error)) return <SessionWarming key={query.errorUpdatedAt} query={query} onUseOriginal={onUseOriginal} />
     return <LoadError title={t.loadError} error={query.error} onRetry={() => void query.refetch()} />
   }
   if (!query.isSuccess) return <PreviewSkeleton />

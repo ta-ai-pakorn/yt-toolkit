@@ -189,7 +189,7 @@ def test_translated_track_blocked_is_503_not_bot_check(make_client, tmp_path):
         return fake.fetch_subtitle(url)
 
     cache_root = tmp_path / "cache"
-    subtitles = SubtitleService(videos, fetch, cache_root)
+    subtitles = SubtitleService(videos, fetch, cache_root, sleep=lambda seconds: None)
     client = make_client(videos=videos, extractor=fake, cache_root=cache_root, subtitles=subtitles)
     try:
         for path in (
@@ -222,3 +222,67 @@ def test_routes_absent_without_subtitle_service(make_client):
     resp = make_client().get(f"/api/videos/{THAI}/subtitles")
     assert resp.status_code == 404
     assert _error(resp)["code"] == "E_NOT_FOUND"
+
+
+# ---------- owner round 3: E_SESSION_WARMING ----------
+
+
+class _YoungSession:
+    def __init__(self, wait: int) -> None:
+        self.wait = wait
+
+    def wait_seconds(self) -> int:
+        return self.wait
+
+
+@pytest.fixture
+def warming(make_client, tmp_path):
+    db = Database(tmp_path / "warming.db")
+    db.migrate()
+    fake = FakeExtractor(FIXTURES)
+    videos = VideoService(db, fake, now=lambda: datetime(2026, 9, 30, 12, tzinfo=UTC))
+    cache_root = tmp_path / "cache"
+    session = _YoungSession(37)
+    subtitles = SubtitleService(videos, fake.fetch_subtitle, cache_root, session=session)
+    yield make_client(videos=videos, extractor=fake, cache_root=cache_root, subtitles=subtitles), session
+    db.close()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"/api/videos/{THAI}/subtitles/t.en/tokens",
+        f"/api/videos/{THAI}/subtitles/t.en/export?format=srt&{MEDIUM}",
+        f"/api/videos/{THAI}/note?trackId=t.en&{MEDIUM}",
+    ],
+)
+def test_session_warming_is_503_with_retry_after(warming, path):
+    client, _ = warming
+    resp = client.get(path)
+    assert resp.status_code == 503
+    assert resp.headers["Retry-After"] == "37"
+    error = _error(resp)
+    assert error["code"] == "E_SESSION_WARMING"
+    assert error["message"] == MESSAGES["E_SESSION_WARMING"]
+    assert error["retryAfterSeconds"] == 37
+    assert set(error) == {"code", "message", "detail", "retryAfterSeconds"}
+
+
+def test_session_warming_never_gates_original_tracks(warming):
+    client, _ = warming
+    resp = client.get(f"/api/videos/{THAI}/subtitles/{TRACK}/tokens")
+    assert resp.status_code == 200
+
+
+def test_session_ready_serves_translated_tokens(warming):
+    client, session = warming
+    session.wait = 0
+    resp = client.get(f"/api/videos/{THAI}/subtitles/t.en/tokens")
+    assert resp.status_code == 200
+    assert resp.json()["tokens"]
+
+
+def test_other_errors_have_no_retry_after(client):
+    resp = client.get(f"/api/videos/{PRIVATE}/subtitles/{TRACK}/tokens")
+    assert "Retry-After" not in resp.headers
+    assert "retryAfterSeconds" not in _error(resp)

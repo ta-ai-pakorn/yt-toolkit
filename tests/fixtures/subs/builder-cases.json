@@ -454,6 +454,238 @@
       ],
       "srt": "1\r\n00:00:00,000 --> 00:00:00,500\r\nสวัสดี\r\n\r\n2\r\n00:00:00,500 --> 00:00:00,800\r\nครับ\r\n\r\n3\r\n00:00:00,800 --> 00:00:01,400\r\nวันนี้\r\n\r\n4\r\n00:00:01,400 --> 00:00:01,600\r\nเรา\r\n\r\n5\r\n00:00:01,600 --> 00:00:03,900\r\nมาเรียนภาษาไทยกันอย่างสนุกสนาน\r\n\r\n6\r\n00:00:06,000 --> 00:00:06,800\r\nนะ\r\n",
       "txt": "สวัสดีครับวันนี้เรามาเรียนภาษาไทยกันอย่างสนุกสนาน\r\n\r\nนะ\r\n"
+    },
+    {
+      "name": "word-preset-punctuation",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "Hello", "s": 0, "e": 400},
+        {"t": ",", "s": 400, "e": 450},
+        {"t": " world", "s": 450, "e": 900},
+        {"t": ".", "s": 900, "e": 1000},
+        {"t": " Is", "s": 1000, "e": 1300},
+        {"t": " it", "s": 1300, "e": 1500},
+        {"t": " ok", "s": 1500, "e": 1700},
+        {"t": "?", "s": 1700, "e": 1800}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 450, "lines": ["Hello,"]},
+        {"startMs": 450, "endMs": 1000, "lines": ["world."]},
+        {"startMs": 1000, "endMs": 1300, "lines": ["Is"]},
+        {"startMs": 1300, "endMs": 1500, "lines": ["it"]},
+        {"startMs": 1500, "endMs": 2300, "lines": ["ok?"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,450\r\nHello,\r\n\r\n2\r\n00:00:00,450 --> 00:00:01,000\r\nworld.\r\n\r\n3\r\n00:00:01,000 --> 00:00:01,300\r\nIs\r\n\r\n4\r\n00:00:01,300 --> 00:00:01,500\r\nit\r\n\r\n5\r\n00:00:01,500 --> 00:00:02,300\r\nok?\r\n",
+      "txt": "Hello, world. Is it ok?\r\n"
+    },
+    {
+      "name": "word-preset-leading-punctuation-and-gap",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "♪", "s": 0, "e": 200},
+        {"t": " Hi", "s": 200, "e": 600},
+        {"t": " there", "s": 600, "e": 900},
+        {"t": ".", "s": 900, "e": 950},
+        {"t": "...", "s": 2500, "e": 2600},
+        {"t": " Bye", "s": 4000, "e": 4400},
+        {"t": "!", "s": 4400, "e": 4500}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 600, "lines": ["♪ Hi"]},
+        {"startMs": 600, "endMs": 1400, "lines": ["there."]},
+        {"startMs": 2500, "endMs": 3300, "lines": ["..."]},
+        {"startMs": 4000, "endMs": 4800, "lines": ["Bye!"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,600\r\n♪ Hi\r\n\r\n2\r\n00:00:00,600 --> 00:00:01,400\r\nthere.\r\n\r\n3\r\n00:00:02,500 --> 00:00:03,300\r\n...\r\n\r\n4\r\n00:00:04,000 --> 00:00:04,800\r\nBye!\r\n",
+      "txt": "♪ Hi there.... Bye!\r\n"
+    },
+    {
+      "name": "tokens-mode-punctuation-two-lines",
+      "options": {"maxChars": 10, "lines": 2, "minMs": 300, "maxMs": 5000, "mode": "tokens", "tokensPerCue": 2},
+      "tokens": [
+        {"t": "internationally", "s": 0, "e": 500},
+        {"t": ",", "s": 500, "e": 600},
+        {"t": " yes", "s": 600, "e": 900},
+        {"t": " no", "s": 900, "e": 1200},
+        {"t": ".", "s": 1200, "e": 1300}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 500, "lines": ["internationally"]},
+        {"startMs": 500, "endMs": 1300, "lines": [", yes no."]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,500\r\ninternationally\r\n\r\n2\r\n00:00:00,500 --> 00:00:01,300\r\n, yes no.\r\n",
+      "txt": "internationally, yes no.\r\n"
+    },
+    {
+      "name": "short-preset-punctuation-unchanged",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "chars"},
+      "tokens": [
+        {"t": "abcdefghijklmno", "s": 0, "e": 500},
+        {"t": ".", "s": 500, "e": 600}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 500, "lines": ["abcdefghijklmno"]},
+        {"startMs": 500, "endMs": 1300, "lines": ["."]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,500\r\nabcdefghijklmno\r\n\r\n2\r\n00:00:00,500 --> 00:00:01,300\r\n.\r\n",
+      "txt": "abcdefghijklmno.\r\n"
+    },
+    {
+      "name": "word-preset-openers",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "He", "s": 0, "e": 300},
+        {"t": " said", "s": 300, "e": 600},
+        {"t": " (", "s": 600, "e": 650},
+        {"t": "yes", "s": 650, "e": 1000},
+        {"t": ")", "s": 1000, "e": 1050},
+        {"t": " «", "s": 1050, "e": 1100},
+        {"t": "ok", "s": 1100, "e": 1400},
+        {"t": "»", "s": 1400, "e": 1500}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 300, "lines": ["He"]},
+        {"startMs": 300, "endMs": 600, "lines": ["said"]},
+        {"startMs": 600, "endMs": 1050, "lines": ["(yes)"]},
+        {"startMs": 1050, "endMs": 1850, "lines": ["«ok»"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,300\r\nHe\r\n\r\n2\r\n00:00:00,300 --> 00:00:00,600\r\nsaid\r\n\r\n3\r\n00:00:00,600 --> 00:00:01,050\r\n(yes)\r\n\r\n4\r\n00:00:01,050 --> 00:00:01,850\r\n«ok»\r\n",
+      "txt": "He said (yes) «ok»\r\n"
+    },
+    {
+      "name": "word-preset-straight-quotes",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "She", "s": 0, "e": 300},
+        {"t": " said", "s": 300, "e": 600},
+        {"t": ",", "s": 600, "e": 650},
+        {"t": " \"", "s": 650, "e": 700},
+        {"t": "Hi", "s": 700, "e": 1000},
+        {"t": ".", "s": 1000, "e": 1050},
+        {"t": "\"", "s": 1050, "e": 1100},
+        {"t": " Then", "s": 1100, "e": 1400},
+        {"t": " \"", "s": 1400, "e": 1450},
+        {"t": " go", "s": 1450, "e": 1800}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 300, "lines": ["She"]},
+        {"startMs": 300, "endMs": 650, "lines": ["said,"]},
+        {"startMs": 650, "endMs": 1100, "lines": ["\"Hi.\""]},
+        {"startMs": 1100, "endMs": 1450, "lines": ["Then \""]},
+        {"startMs": 1450, "endMs": 2250, "lines": ["go"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,300\r\nShe\r\n\r\n2\r\n00:00:00,300 --> 00:00:00,650\r\nsaid,\r\n\r\n3\r\n00:00:00,650 --> 00:00:01,100\r\n\"Hi.\"\r\n\r\n4\r\n00:00:01,100 --> 00:00:01,450\r\nThen \"\r\n\r\n5\r\n00:00:01,450 --> 00:00:02,250\r\ngo\r\n",
+      "txt": "She said, \"Hi.\" Then \" go\r\n"
+    },
+    {
+      "name": "word-preset-trailing-opener",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "A", "s": 0, "e": 400},
+        {"t": " [", "s": 400, "e": 450},
+        {"t": "B", "s": 1500, "e": 1900},
+        {"t": " (", "s": 1900, "e": 2000}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 800, "lines": ["A ["]},
+        {"startMs": 1500, "endMs": 2300, "lines": ["B ("]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,800\r\nA [\r\n\r\n2\r\n00:00:01,500 --> 00:00:02,300\r\nB (\r\n",
+      "txt": "A [B (\r\n"
+    },
+    {
+      "name": "tokens-mode-opener-keeps-its-word",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 300, "maxMs": 5000, "mode": "tokens", "tokensPerCue": 3},
+      "tokens": [
+        {"t": "a", "s": 0, "e": 100},
+        {"t": " b", "s": 100, "e": 200},
+        {"t": " (", "s": 200, "e": 250},
+        {"t": "c", "s": 250, "e": 300},
+        {"t": " d", "s": 300, "e": 400},
+        {"t": ")", "s": 400, "e": 450},
+        {"t": " e", "s": 450, "e": 500}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 300, "lines": ["a b (c"]},
+        {"startMs": 300, "endMs": 600, "lines": ["d) e"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,300\r\na b (c\r\n\r\n2\r\n00:00:00,300 --> 00:00:00,600\r\nd) e\r\n",
+      "txt": "a b (c d) e\r\n"
+    },
+    {
+      "name": "word-preset-punctuation-respects-max-duration",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "Hello", "s": 0, "e": 500},
+        {"t": " ♪", "s": 600, "e": 1100},
+        {"t": " ♪", "s": 1200, "e": 1700},
+        {"t": " ♪", "s": 1800, "e": 2300},
+        {"t": " ♪", "s": 2400, "e": 2900},
+        {"t": " ♪", "s": 3000, "e": 3500},
+        {"t": " ♪", "s": 3600, "e": 4100},
+        {"t": " ♪", "s": 4200, "e": 4700},
+        {"t": " ♪", "s": 4800, "e": 5300},
+        {"t": " ♪", "s": 5400, "e": 5900},
+        {"t": " ♪", "s": 6000, "e": 6500},
+        {"t": " ♪", "s": 6600, "e": 7100},
+        {"t": " ♪", "s": 7200, "e": 7700},
+        {"t": " ♪", "s": 7800, "e": 8300},
+        {"t": " ♪", "s": 8400, "e": 8900},
+        {"t": " ♪", "s": 9000, "e": 9500},
+        {"t": " ♪", "s": 9600, "e": 10100},
+        {"t": " ♪", "s": 10200, "e": 10700},
+        {"t": " ♪", "s": 10800, "e": 11300},
+        {"t": " ♪", "s": 11400, "e": 11900},
+        {"t": " ♪", "s": 12000, "e": 12500},
+        {"t": " ♪", "s": 12600, "e": 13100},
+        {"t": " ♪", "s": 13200, "e": 13700},
+        {"t": " ♪", "s": 13800, "e": 14300},
+        {"t": " ♪", "s": 14400, "e": 14900},
+        {"t": " ♪", "s": 15000, "e": 15500},
+        {"t": " ♪", "s": 15600, "e": 16100},
+        {"t": " ♪", "s": 16200, "e": 16700},
+        {"t": " ♪", "s": 16800, "e": 17300},
+        {"t": " ♪", "s": 17400, "e": 17900},
+        {"t": " ♪", "s": 18000, "e": 18500},
+        {"t": " ♪", "s": 18600, "e": 19100},
+        {"t": " ♪", "s": 19200, "e": 19700},
+        {"t": " ♪", "s": 19800, "e": 20300},
+        {"t": " ♪", "s": 20400, "e": 20900},
+        {"t": " ♪", "s": 21000, "e": 21500},
+        {"t": " ♪", "s": 21600, "e": 22100},
+        {"t": " ♪", "s": 22200, "e": 22700},
+        {"t": " ♪", "s": 22800, "e": 23300},
+        {"t": " ♪", "s": 23400, "e": 23900},
+        {"t": " ♪", "s": 24000, "e": 24500}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 3000, "lines": ["Hello ♪ ♪ ♪ ♪ ♪"]},
+        {"startMs": 3600, "endMs": 6600, "lines": ["♪ ♪ ♪ ♪ ♪ ♪"]},
+        {"startMs": 7200, "endMs": 10200, "lines": ["♪ ♪ ♪ ♪ ♪ ♪"]},
+        {"startMs": 10800, "endMs": 13800, "lines": ["♪ ♪ ♪ ♪ ♪ ♪"]},
+        {"startMs": 14400, "endMs": 17400, "lines": ["♪ ♪ ♪ ♪ ♪ ♪"]},
+        {"startMs": 18000, "endMs": 21000, "lines": ["♪ ♪ ♪ ♪ ♪ ♪"]},
+        {"startMs": 21600, "endMs": 24500, "lines": ["♪ ♪ ♪ ♪ ♪"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:03,000\r\nHello ♪ ♪ ♪ ♪ ♪\r\n\r\n2\r\n00:00:03,600 --> 00:00:06,600\r\n♪ ♪ ♪ ♪ ♪ ♪\r\n\r\n3\r\n00:00:07,200 --> 00:00:10,200\r\n♪ ♪ ♪ ♪ ♪ ♪\r\n\r\n4\r\n00:00:10,800 --> 00:00:13,800\r\n♪ ♪ ♪ ♪ ♪ ♪\r\n\r\n5\r\n00:00:14,400 --> 00:00:17,400\r\n♪ ♪ ♪ ♪ ♪ ♪\r\n\r\n6\r\n00:00:18,000 --> 00:00:21,000\r\n♪ ♪ ♪ ♪ ♪ ♪\r\n\r\n7\r\n00:00:21,600 --> 00:00:24,500\r\n♪ ♪ ♪ ♪ ♪\r\n",
+      "txt": "Hello ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪ ♪\r\n"
+    },
+    {
+      "name": "word-preset-long-trailing-period",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "tokens", "tokensPerCue": 1},
+      "tokens": [
+        {"t": "Hello", "s": 0, "e": 400},
+        {"t": " world", "s": 400, "e": 900},
+        {"t": ".", "s": 900, "e": 7000},
+        {"t": " Next", "s": 7000, "e": 7400}
+      ],
+      "cues": [
+        {"startMs": 0, "endMs": 400, "lines": ["Hello"]},
+        {"startMs": 400, "endMs": 3400, "lines": ["world."]},
+        {"startMs": 7000, "endMs": 7800, "lines": ["Next"]}
+      ],
+      "srt": "1\r\n00:00:00,000 --> 00:00:00,400\r\nHello\r\n\r\n2\r\n00:00:00,400 --> 00:00:03,400\r\nworld.\r\n\r\n3\r\n00:00:07,000 --> 00:00:07,800\r\nNext\r\n",
+      "txt": "Hello world. Next\r\n"
     }
   ]
 }

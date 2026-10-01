@@ -766,8 +766,8 @@ def test_trim_drops_urls_and_unused_fields_but_keeps_storyboard(db: Database) ->
 
 def test_trim_probe_adds_probe_version_description_and_captions() -> None:
     data = trim_probe(load("88o5Sk8_m1Y"))
-    assert PROBE_VERSION == 3
-    assert data["probeVersion"] == 3
+    assert PROBE_VERSION == 4  # owner round 3: mostReplayed แบบใหม่ (review I-2, M-6)
+    assert data["probeVersion"] == 4
     assert data["description"] == load("88o5Sk8_m1Y")["description"]
     assert set(data["captions"]) == {"owner", "original", "translated", "translateFrom"}
     assert [o["key"] for o in data["captions"]["original"]] == ["th-orig"]
@@ -833,6 +833,19 @@ def test_row_with_other_probe_version_is_stale(
     data["probeVersion"] = PROBE_VERSION + 1
     db.execute("UPDATE videos SET probe_json = ?", (json.dumps(data),))
     svc.get(BBB)
+    assert ext.count["probe"] == 2
+
+
+def test_round_two_row_with_old_most_replayed_is_reprobed(
+    svc: VideoService, ext: CountingExtractor, db: Database
+) -> None:
+    # review M-6: แถวรุ่น 3 เก็บ mostReplayed แบบเก่า (มีที่ราบเตี้ยและช่วงกว้าง) ต้อง probe ใหม่ ไม่ใช้ค่าเดิม
+    svc.get(ZOO)
+    data = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
+    data["probeVersion"] = 3
+    data["mostReplayed"] = [{"startMs": 0, "endMs": 190}, {"startMs": 10260, "endMs": 12160}]
+    db.execute("UPDATE videos SET probe_json = ?", (json.dumps(data),))
+    assert svc.get(ZOO)["mostReplayed"] == [{"startMs": 190, "endMs": 570}]
     assert ext.count["probe"] == 2
 
 

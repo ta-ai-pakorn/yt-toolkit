@@ -31,6 +31,27 @@ test("ไม่ใช่โหมดข้อมูลปลอม → ไม่
   await expect(page.getByTestId("fake-mode")).toHaveCount(0)
 })
 
+test("owner round 3: แถว 'ทำงานแบบเบราว์เซอร์ (curl_cffi)' พร้อมใช้ บอกเวอร์ชัน ไม่มีข้อมูลคุกกี้", async ({ page }) => {
+  await page.goto("/settings/health")
+  const row = page.getByTestId("tool-impersonation")
+  await expect(row).toContainText("ทำงานแบบเบราว์เซอร์ (curl_cffi)", { timeout: 15_000 })
+  await expect(row).toContainText("พร้อม")
+  await expect(row).toContainText(/\d+\.\d+/)
+  await expect(page.getByText(/cookie|คุกกี้|VISITOR/i)).toHaveCount(0)
+})
+
+test("backend รุ่นก่อนที่ไม่มีแถว impersonation → หน้าตรวจสุขภาพยังแสดงแถวอื่นครบ", async ({ page }) => {
+  await page.route("**/api/health", async (route) => {
+    const response = await route.fetch()
+    const body = await response.json()
+    delete body.tools.impersonation
+    await route.fulfill({ response, json: body })
+  })
+  await page.goto("/settings/health")
+  await expect(page.getByTestId("tool-network")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId("tool-impersonation")).toHaveCount(0)
+})
+
 test("แท็บเกี่ยวกับแสดงเวอร์ชัน", async ({ page }) => {
   await page.goto("/settings/about")
   await expect(page.getByText(/\d+\.\d+\.\d+/)).toBeVisible()

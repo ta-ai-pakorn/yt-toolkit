@@ -207,7 +207,9 @@ test.describe("W2 ภาพเฟรม", () => {
   test("คีย์บอร์ด: Tab ถึงภาพเฟรมได้ เห็น timecode ตอนโฟกัส", async ({ page }) => {
     await openBbb(page)
     const first = frameButton(page, "00:00:00")
-    for (let i = 0; i < 10 && !(await first.evaluate((el) => el === document.activeElement)); i++) {
+    // หัวคลิปมีปุ่มที่โฟกัสได้เพิ่มขึ้นเรื่อย ๆ (M3 owner round 2: ข้อมูลคลิป แท็ก คอมเมนต์ปักหมุด โน้ต ฯลฯ อยู่ก่อนแถบแท็บ)
+    // เทสนี้ตรวจว่ากด Tab ไปถึงภาพเฟรมได้ ไม่ได้ล็อกจำนวนครั้ง จึงให้กดได้ถึง 40 ครั้ง
+    for (let i = 0; i < 40 && !(await first.evaluate((el) => el === document.activeElement)); i++) {
       await page.keyboard.press("Tab")
     }
     await expect(first).toBeFocused()

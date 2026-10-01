@@ -3,7 +3,8 @@
 ลำดับ:
 1. ข้อมูลคลิป (VideoService.get) บอกว่าคอมเมนต์ = 0 -> None ทันที ไม่ต่อเน็ต
 2. cache ในเครื่อง `<cache_root>/<videoId>/pinned.json` อายุไม่เกิน 24 ชม. (ทั้งมีคอมเมนต์และไม่มี)
-3. ดึงพลาดเมื่อไม่ถึง 5 นาทีก่อน -> โยน error เดิมซ้ำ (เก็บในหน่วยความจำ) ไม่ยิงยูทูปถี่ ๆ
+3. ยูทูปขอยืนยันว่าไม่ใช่บอท (E_BOT_CHECK) เมื่อไม่ถึง 5 นาทีก่อน -> โยนซ้ำ (เก็บในหน่วยความจำ) ไม่ยิงยูทูปถี่ ๆ
+   error ที่ลองใหม่แล้วช่วยได้ (E_NETWORK, E_UNKNOWN ฯลฯ) ไม่จำ ปุ่ม "ลองใหม่" จึงดึงใหม่จริง (review I-1)
 4. ดึงใหม่ผ่าน Extractor.pinned_comment แล้วเก็บลง cache
 
 ส่งออกได้แค่ text / likes / publishedText เท่านั้น ไม่มีชื่อหรือ id ของผู้เขียน (PDPA)
@@ -31,6 +32,8 @@ log = logging.getLogger("yttoolkit")
 
 CACHE_TTL = timedelta(hours=24)
 ERROR_TTL = timedelta(minutes=5)
+# จำเฉพาะ error ที่หน้าเว็บไม่มีปุ่มลองใหม่ (ตรงกับ FINAL_CODES ฝั่งเว็บ) ยิงซ้ำมีแต่ทำให้ถูกบล็อกนานขึ้น
+CACHED_ERRORS = frozenset({"E_BOT_CHECK"})
 CACHE_FILE = "pinned.json"
 CACHE_VERSION = 1
 _MISS = object()
@@ -87,17 +90,29 @@ class PinnedCommentService:
             cached = self._read(video_id, moment)
             if cached is not _MISS:
                 return cached
-            failed = self._errors.get(video_id)
-            if failed is not None and timedelta(0) <= moment - failed[0] < ERROR_TTL:
-                raise YtError(failed[1].code, failed[1].detail)
+            failed = self._recent_error(video_id, moment)
+            if failed is not None:
+                raise YtError(failed.code, failed.detail)
             try:
                 comment = clean_comment(self._fetch(video_id))
             except YtError as exc:
-                self._errors[video_id] = (moment, exc)
+                if exc.code in CACHED_ERRORS:
+                    with self._guard:
+                        self._errors[video_id] = (moment, exc)
                 raise
-            self._errors.pop(video_id, None)
+            with self._guard:
+                self._errors.pop(video_id, None)
             self._write(video_id, moment, comment)
             return comment
+
+    def _recent_error(self, video_id: str, moment: datetime) -> YtError | None:
+        """error ที่จำไว้ของคลิปนี้ (ยังไม่ถึง 5 นาที) และล้าง error ที่หมดอายุของทุกคลิปทิ้ง (M-7)"""
+        with self._guard:
+            for key, (when, _) in list(self._errors.items()):
+                if not timedelta(0) <= moment - when < ERROR_TTL:
+                    del self._errors[key]
+            failed = self._errors.get(video_id)
+        return failed[1] if failed is not None else None
 
     # ---------- cache ----------
 

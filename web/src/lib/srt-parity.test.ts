@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest"
 
-import { buildCues, toMd, toSrt, toTxt, type MdMeta } from "./srt-builder"
+import { buildCues, isPunctOnly, toMd, toSrt, toTxt, type MdMeta } from "./srt-builder"
 import { PRESETS } from "./sub-options"
 import type { SubOptions, SubToken } from "./types"
 
@@ -88,7 +88,12 @@ describe.each(WORD_NAMES)("%s word preset parity", (name) => {
     const doc = tokenDocs.get(name)
     if (!doc) throw new Error(`tokens/${name}.json is missing`)
     const cues = buildCues(doc.tokens, PRESETS.word)
-    expect(cues).toHaveLength(doc.tokens.length)
+    // owner round 3: เครื่องหมายล้วนไม่นับเป็นคำ เกาะคำข้างเคียง จึงได้ไม่เกิน 1 คำต่อซับ
+    // fix round 2-3: ซับที่มีแต่เครื่องหมายเกิดได้เฉพาะเมื่อเกาะแล้วเกินขีดจำกัด (en-asr ไม่มีแล้ว)
+    const words = doc.tokens.filter((tok) => !isPunctOnly(tok)).length
+    const alone = cues.filter((cue) => isPunctOnly({ t: cue.lines.join(" "), s: 0, e: 0 })).length
+    expect(cues).toHaveLength(words + alone)
+    expect(alone).toBe(0)
     expect(toSrt(cues)).toBe(expected(`${name}.word.srt`))
   })
 })

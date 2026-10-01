@@ -107,6 +107,7 @@ class FakeYDL:
     instances: ClassVar[list[FakeYDL]] = []
     ie: ClassVar[object] = FakeIE()
     probe_result: ClassVar[dict] = {}
+    probe_error: ClassVar[BaseException | None] = None
 
     def __init__(self, params: dict) -> None:
         self.params = dict(params)
@@ -127,6 +128,8 @@ class FakeYDL:
         assert download is False
         assert self.params.get("getcomments") is True
         self.urls.append(url)
+        if FakeYDL.probe_error is not None:
+            raise FakeYDL.probe_error
         return FakeYDL.probe_result
 
 
@@ -135,6 +138,7 @@ def ydl(monkeypatch: pytest.MonkeyPatch) -> type[FakeYDL]:
     FakeYDL.instances = []
     FakeYDL.ie = FakeIE()
     FakeYDL.probe_result = {}
+    FakeYDL.probe_error = None
     FakeIE.comments = [UPLOADER_PIN]
     FakeIE.error = None
     FakeIE.calls = []
@@ -180,13 +184,41 @@ def test_public_probe_without_comments_is_none(ydl: type[FakeYDL]) -> None:
     [
         (ExtractorError("Unable to download API page: HTTP Error 429: Too Many Requests"), "E_BOT_CHECK"),
         (DownloadError("ERROR: Unable to download API page: timed out"), "E_NETWORK"),
-        (ExtractorError("something odd"), "E_UNKNOWN"),
-        (RuntimeError("boom"), "E_UNKNOWN"),
-        (KeyError("contents"), "E_UNKNOWN"),
     ],
 )
-def test_errors_become_yt_errors(ydl: type[FakeYDL], error: Exception, code: str) -> None:
+def test_network_and_bot_errors_are_raised_without_fallback(
+    ydl: type[FakeYDL], error: Exception, code: str
+) -> None:
     FakeIE.error = error
+    with pytest.raises(YtError) as exc:
+        YtDlpExtractor().pinned_comment(THAI)
+    assert exc.value.code == code
+    assert ydl.instances[0].urls == []  # ไม่ probe ทางสำรอง
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ExtractorError("something odd"), RuntimeError("boom"), KeyError("contents"), IndexError("0"), ValueError("x")],
+)
+def test_other_direct_path_errors_fall_back_to_the_public_probe(ydl: type[FakeYDL], error: Exception) -> None:
+    # review M-1: yt-dlp เปลี่ยนภายในได้หลายแบบ ไม่ใช่แค่ AttributeError/TypeError
+    FakeIE.error = error
+    FakeYDL.probe_result = {"id": THAI, "comments": [UPLOADER_PIN]}
+    assert YtDlpExtractor().pinned_comment(THAI) == pinned_from_comment(UPLOADER_PIN)
+    assert ydl.instances[0].urls == [f"https://www.youtube.com/watch?v={THAI}"]
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (ExtractorError("Unable to download API page: HTTP Error 429: Too Many Requests"), "E_BOT_CHECK"),
+        (ExtractorError("something odd"), "E_UNKNOWN"),
+        (RuntimeError("boom"), "E_UNKNOWN"),
+    ],
+)
+def test_public_probe_errors_become_yt_errors(ydl: type[FakeYDL], error: Exception, code: str) -> None:
+    FakeIE.error = KeyError("contents")
+    FakeYDL.probe_error = error
     with pytest.raises(YtError) as exc:
         YtDlpExtractor().pinned_comment(THAI)
     assert exc.value.code == code
@@ -309,9 +341,39 @@ def test_errors_are_remembered_for_five_minutes(env) -> None:
     assert ext.count == 2
 
 
+@pytest.mark.parametrize("code", ["E_NETWORK", "E_UNKNOWN"])
+def test_retryable_errors_are_not_remembered(env, code: str) -> None:
+    # review I-1: ปุ่ม "ลองใหม่" ต้องดึงใหม่จริง (error ที่ลองแล้วช่วยได้ไม่จำ)
+    svc, ext, _, _ = env
+    ext.error = YtError(code, "x")
+    for _ in range(2):
+        with pytest.raises(YtError) as exc:
+            svc.get(THAI)
+        assert exc.value.code == code
+    assert ext.count == 2
+    ext.error = None
+    ext.result = {"text": "ได้แล้ว"}
+    assert svc.get(THAI) == {"text": "ได้แล้ว"}
+    assert ext.count == 3
+
+
+def test_expired_errors_are_pruned(env) -> None:
+    # review M-7: error ที่หมดอายุของทุกคลิปถูกล้างทิ้ง ไม่สะสมในหน่วยความจำ
+    svc, ext, clock, _ = env
+    ext.error = YtError("E_BOT_CHECK", "x")
+    for video in (THAI, BBB):
+        with pytest.raises(YtError):
+            svc.get(video)
+    assert set(svc._errors) == {THAI, BBB}
+    clock.now += timedelta(minutes=5)
+    ext.error = None
+    svc.get(ZOO)
+    assert svc._errors == {}
+
+
 def test_clock_going_back_does_not_keep_an_error_forever(env) -> None:
     svc, ext, clock, _ = env
-    ext.error = YtError("E_NETWORK", "x")
+    ext.error = YtError("E_BOT_CHECK", "x")
     with pytest.raises(YtError):
         svc.get(THAI)
     clock.now -= timedelta(minutes=1)

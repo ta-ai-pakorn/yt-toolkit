@@ -44,6 +44,60 @@ export function cueText(tokens: readonly SubToken[]): string {
   return tidy(text)
 }
 
+const PUNCT_ONLY = /^[\p{P}\p{S}]+$/u
+
+/**
+ * ข้อความที่เห็นของ token (ตัด U+0020 หัวท้าย) เป็นเครื่องหมายล้วน: หมวด Unicode P* หรือ S* ทุกตัว
+ * เช่น "." "," " ?" "♪" "--" นับ ส่วน "a." "1" ". ." (มีช่องว่างกลาง) ไม่นับ (เหมือน `is_punct_only` ฝั่ง Python)
+ */
+export function isPunctOnly(tok: SubToken): boolean {
+  return PUNCT_ONLY.test(tidy(tok.t))
+}
+
+/** เครื่องหมายเปิดที่เกาะหน้าคำถัดไปเสมอ (fix round 1): ( [ { « “ ‘ ¿ ¡ และ ( [ { แบบเต็มความกว้าง */
+const OPENERS = new Set("([{\u00ab\u201c\u2018\u00bf\u00a1\uff08\uff3b\uff5b")
+/** อัญประกาศตรงที่เป็นได้ทั้งเปิดและปิด (" ' และแบบเต็มความกว้าง) ตัดสินจากช่องว่างรอบตัว (tokenKinds) */
+const STRAIGHT_QUOTES = new Set("\"'\uff02\uff07")
+const WORD = 0
+const BACK = 1
+const FORWARD = 2
+
+function only(tok: SubToken, chars: Set<string>): boolean {
+  const text = tidy(tok.t)
+  if (text === "") return false
+  for (const ch of text) if (!chars.has(ch)) return false
+  return true
+}
+
+/**
+ * โหมดนับคำ: คำ (WORD) / เครื่องหมายที่เกาะคำก่อนหน้า (BACK) / เครื่องหมายเปิดที่เกาะคำถัดไป (FORWARD)
+ * กฎเดียวกับ `_kinds` ฝั่ง Python ทุกข้อ (ดู docstring ที่นั่น)
+ */
+function tokenKinds(tokens: readonly SubToken[]): number[] {
+  const n = tokens.length
+  const kinds = new Array<number>(n).fill(WORD)
+  for (let i = n - 1; i >= 0; i--) {
+    const tok = tokens[i]
+    if (!isPunctOnly(tok)) continue
+    kinds[i] = BACK
+    if (i + 1 >= n || kinds[i + 1] === BACK || tokens[i + 1].s - tok.e >= GAP_SPLIT_MS) continue
+    if (only(tok, OPENERS)) {
+      kinds[i] = FORWARD
+    } else if (only(tok, STRAIGHT_QUOTES)) {
+      const prev = i > 0 ? tokens[i - 1] : null
+      const spacedBefore =
+        prev === null ||
+        tok.s - prev.e >= GAP_SPLIT_MS ||
+        tok.t.startsWith(" ") ||
+        prev.t.endsWith(" ") ||
+        only(prev, OPENERS)
+      const gluedAfter = !tok.t.endsWith(" ") && !tokens[i + 1].t.startsWith(" ")
+      if (spacedBefore && gluedAfter) kinds[i] = FORWARD
+    }
+  }
+  return kinds
+}
+
 /** ใช้กับชื่อคลิปและชื่อ chapter เท่านั้น: ช่องว่างทุกแบบของ JS (\s) ยุบเหลือช่องเดียว แล้วตัดหัวท้าย */
 function collapse(text: string): string {
   return text.replace(/\s+/g, " ").trim()
@@ -117,7 +171,7 @@ function fits(m: Measure, from: number, to: number, o: SubOptions, cap: number):
 
 function splitLines(m: Measure, from: number, to: number, o: SubOptions): string[] {
   if (o.lines === 2 && to - from >= 2 && m.len(from, to) > o.maxChars) {
-    // ทุกซับที่มาถึงตรงนี้ผ่าน fits แล้ว จึงมีจุดแบ่งที่ใช้ได้อย่างน้อย 1 จุดเสมอ
+    // ซับที่ผ่าน fits มีจุดแบ่งอย่างน้อย 1 จุดเสมอ ยกเว้นคำยาวเกินที่มีเครื่องหมายเกาะท้าย (โหมดนับคำ) = บรรทัดเดียว
     const cap = o.maxChars * MERGE_LIMIT_FACTOR
     let bestK = -1
     let bestDiff = Infinity
@@ -150,22 +204,46 @@ export function buildCues(tokens: readonly SubToken[], o: SubOptions): Cue[] {
   const m = measure(tokens)
   const draft = (from: number, to: number): Draft => ({ from, to, startMs: tokens[from].s, endMs: tokens[to - 1].e })
 
+  // โหมดนับคำ (owner round 3 + fix round 1): token ที่เป็นเครื่องหมายล้วนไม่นับเป็นคำ
+  // เครื่องหมายทั่วไปเกาะซับของคำก่อนหน้า ตัวแรกสุดเกาะซับถัดไป · เครื่องหมายเปิดเกาะหน้าคำถัดไป (tokenKinds)
+  // ยกเว้นเงียบ >= 1 วินาที ซึ่งยังขึ้นซับใหม่เหมือนเดิม · wordsBefore[k] = จำนวนคำ (ไม่นับเครื่องหมาย) ใน token [0, k)
+  const kinds = tokensMode ? tokenKinds(tokens) : new Array<number>(tokens.length).fill(WORD)
+  const punct = kinds.map((kind) => kind !== WORD)
+  // คำที่เครื่องหมายเปิดซึ่งต่อกันตั้งแต่ start เกาะอยู่ (token แรกที่ไม่ใช่เครื่องหมายเปิด)
+  const chainEnd = (start: number) => {
+    let k = start
+    while (kinds[k] === FORWARD) k++
+    return k
+  }
+  const wordsBefore = [0]
+  for (const p of punct) wordsBefore.push(wordsBefore[wordsBefore.length - 1] + (p ? 0 : 1))
+  const words = (from: number, to: number) => wordsBefore[to] - wordsBefore[from]
+
   // 1. จับกลุ่มแบบ greedy (โหมดนับคำก็ใช้กฎปิดซับครบทุกข้อ) ซับที่กำลังสร้าง = [curFrom, i)
   const drafts: Draft[] = []
   let curFrom = 0
   for (let i = 1; i < tokens.length; i++) {
     const tok = tokens[i]
-    const close =
-      !fits(m, curFrom, i + 1, o, o.maxChars) ||
-      tok.s - tokens[i - 1].e >= GAP_SPLIT_MS ||
-      tok.e - tokens[curFrom].s > o.maxMs ||
-      (tokensMode && i - curFrom >= perCue)
+    const gap = tok.s - tokens[i - 1].e >= GAP_SPLIT_MS
+    // เครื่องหมายเปิดตัดสินพร้อมคำที่มันเกาะ (ช่วง i..j): ถ้าคำนั้นต้องขึ้นซับใหม่ เครื่องหมายก็ขึ้นไปด้วย
+    const j = kinds[i] === FORWARD ? chainEnd(i) : i
+    // ทุก token (รวมเครื่องหมาย) ต้องไม่ทำให้เกินขีดจำกัดตัวอักษร/เวลานานสุด (fix round 2, review #1)
+    // เครื่องหมายที่เกาะคำก่อนหน้า (BACK) ดูแค่เวลาเริ่ม แล้วตัดเวลาจบของซับให้เหลือ maxMs (fix round 3)
+    const reach = kinds[i] === BACK ? tok.s : tokens[j].e
+    const capped = !fits(m, curFrom, j + 1, o, o.maxChars) || reach - tokens[curFrom].s > o.maxMs
+    // กฎจำนวนคำใช้กับคำและเครื่องหมายเปิดเท่านั้น (เหมือนฝั่ง Python)
+    const counted = kinds[i] !== BACK && kinds[i - 1] !== FORWARD
+    const close = gap || capped || (tokensMode && counted && words(curFrom, i) >= perCue)
     if (close) {
       drafts.push(draft(curFrom, i))
       curFrom = i
     }
   }
   if (tokens.length > 0) drafts.push(draft(curFrom, tokens.length))
+  // ซับที่จบด้วยเครื่องหมายที่เกาะมา (มี token >= 2) แสดงไม่เกิน maxMs (fix round 3)
+  for (const d of drafts) {
+    if (kinds[d.to - 1] === BACK && d.to - d.from > 1) d.endMs = Math.min(d.endMs, d.startMs + o.maxMs)
+  }
 
   // 2. เวลาขั้นต่ำ: ยืดไปได้ถึงต้นซับถัดไป ถ้ายังสั้นอยู่ลองรวมกับตัวถัดไป แล้วตรวจตัวเดิมซ้ำ
   let i = 0
@@ -179,7 +257,7 @@ export function buildCues(tokens: readonly SubToken[], o: SubOptions): Cue[] {
         if (
           fits(m, c.from, nxt.to, o, o.maxChars * MERGE_LIMIT_FACTOR) &&
           nxt.endMs - c.startMs <= o.maxMs &&
-          (!tokensMode || nxt.to - c.from <= perCue)
+          (!tokensMode || words(c.from, nxt.to) <= perCue)
         ) {
           drafts.splice(i, 2, { from: c.from, to: nxt.to, startMs: c.startMs, endMs: nxt.endMs })
           continue

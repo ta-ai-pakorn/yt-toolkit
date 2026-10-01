@@ -4,6 +4,8 @@ import ast
 import io
 import json
 import re
+import threading
+from http.cookiejar import CookieJar
 from pathlib import Path
 from typing import ClassVar, Self
 
@@ -308,7 +310,10 @@ class FakeYDL:
         return self
 
     def __exit__(self, *exc: object) -> None:
-        return None
+        # yt-dlp จริงเรียก save_cookies ตอนปิด (_attach_session แทนด้วยของเซสชัน)
+        save = self.__dict__.get("save_cookies")
+        if save is not None:
+            save()
 
     def extract_info(self, url: str, download: bool = True) -> dict | None:
         assert download is False
@@ -950,14 +955,16 @@ def _http_error(status: int) -> HTTPError:
 
 
 class UrlopenYDL:
-    """แทน yt_dlp.YoutubeDL ให้ urlopen คืนไบต์หรือโยน error ที่ตั้งไว้"""
+    """แทน yt_dlp.YoutubeDL ให้ urlopen คืนไบต์หรือโยน error ที่ตั้งไว้ (บันทึก Request ที่ได้ด้วย)"""
 
     instances: ClassVar[list[UrlopenYDL]] = []
     outcome: ClassVar[object] = None
+    impersonate: ClassVar[object] = True  # ผลของ _impersonate_target_available (exception = โยน)
 
     def __init__(self, params: dict) -> None:
         self.params = params
         self.urls: list[str] = []
+        self.requests: list[object] = []
         self.entered = 0
         self.exited = 0
         UrlopenYDL.instances.append(self)
@@ -968,8 +975,19 @@ class UrlopenYDL:
 
     def __exit__(self, *exc: object) -> None:
         self.exited += 1
+        save = self.__dict__.get("save_cookies")
+        if save is not None:
+            save()
 
-    def urlopen(self, url: str) -> io.BytesIO:
+    def _impersonate_target_available(self, target: object) -> bool:
+        if isinstance(UrlopenYDL.impersonate, BaseException):
+            raise UrlopenYDL.impersonate
+        return bool(UrlopenYDL.impersonate)
+
+    def urlopen(self, req: object) -> io.BytesIO:
+        self.requests.append(req)
+        url = getattr(req, "url", req)
+        assert isinstance(url, str)
         self.urls.append(url)
         if isinstance(UrlopenYDL.outcome, BaseException):
             raise UrlopenYDL.outcome
@@ -981,6 +999,7 @@ class UrlopenYDL:
 def urlopen_ydl(monkeypatch: pytest.MonkeyPatch) -> type[UrlopenYDL]:
     UrlopenYDL.instances = []
     UrlopenYDL.outcome = b"x"
+    UrlopenYDL.impersonate = True
     monkeypatch.setattr(yt_dlp, "YoutubeDL", UrlopenYDL)
     return UrlopenYDL
 
@@ -1069,3 +1088,135 @@ def test_protocol_requires_fetch_subtitle(fake: FakeExtractor) -> None:
             return b""
 
     assert not isinstance(NoSubs(), Extractor)
+
+
+# ---------- owner round 3: impersonation + เซสชันผู้ชม ----------
+
+
+def test_ytdlp_fetch_subtitle_asks_for_impersonation(urlopen_ydl: type[UrlopenYDL]) -> None:
+    from yt_dlp.networking import Request
+    from yt_dlp.networking.impersonate import ImpersonateTarget
+
+    assert YtDlpExtractor().fetch_subtitle(TIMEDTEXT) == b"x"
+    (inst,) = urlopen_ydl.instances
+    (req,) = inst.requests
+    assert isinstance(req, Request)
+    assert req.url == TIMEDTEXT
+    # เป้าหมายว่าง = "เบราว์เซอร์อะไรก็ได้" แบบเดียวกับที่ yt-dlp ใช้กับลิงก์ซับของยูทูป
+    assert req.extensions == {"impersonate": ImpersonateTarget()}
+
+
+@pytest.mark.parametrize("available", [False, AttributeError("gone")])
+def test_ytdlp_fetch_subtitle_falls_back_to_a_plain_request_and_warns_once(
+    urlopen_ydl: type[UrlopenYDL],
+    available: object,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(extractor_mod, "_impersonation_warned", threading.Event())
+    urlopen_ydl.impersonate = available
+    extractor = YtDlpExtractor()
+    with caplog.at_level("WARNING", logger="yttoolkit"):
+        assert extractor.fetch_subtitle(TIMEDTEXT) == b"x"
+        assert extractor.fetch_subtitle(TIMEDTEXT) == b"x"
+    for inst in urlopen_ydl.instances:
+        (req,) = inst.requests
+        assert req.extensions == {}
+    warnings = [r for r in caplog.records if "curl_cffi" in r.getMessage()]
+    assert len(warnings) == 1
+
+
+def test_ytdlp_without_session_passes_no_cookiefile(ydl: type[FakeYDL]) -> None:
+    YtDlpExtractor().probe(BBB)
+    assert "cookiefile" not in ydl.instances[0].params
+
+
+class _SpySession:
+    """แทน VisitorSession: jar ก้อนเดียว บันทึกว่าถูก save กี่ครั้งด้วย jar อะไร"""
+
+    def __init__(self, folder: Path) -> None:
+        self.path = folder / "visitor-session.txt"
+        self._jar = CookieJar()
+        self.saved: list[object] = []
+
+    def jar(self) -> object:
+        return self._jar
+
+    def save(self, source: object = None) -> None:
+        self.saved.append(source)
+
+
+def test_ytdlp_probe_uses_the_visitor_session(ydl: type[FakeYDL], tmp_path: Path) -> None:
+    session = _SpySession(tmp_path)
+    YtDlpExtractor(session=session).probe(BBB)  # type: ignore[arg-type]
+    (inst,) = ydl.instances
+    assert inst.params["cookiefile"] == str(tmp_path / "visitor-session.txt")
+    assert inst.__dict__["cookiejar"] is session.jar()
+    assert session.saved == [session.jar()]
+
+
+def test_ytdlp_fetch_subtitle_uses_the_same_visitor_session(
+    urlopen_ydl: type[UrlopenYDL], tmp_path: Path
+) -> None:
+    session = _SpySession(tmp_path)
+    YtDlpExtractor(session=session).fetch_subtitle(TIMEDTEXT)  # type: ignore[arg-type]
+    (inst,) = urlopen_ydl.instances
+    assert inst.params["cookiefile"] == str(session.path)
+    assert inst.__dict__["cookiejar"] is session.jar()
+    assert session.saved == [session.jar()]
+
+
+def test_ytdlp_fetch_subtitle_saves_the_session_even_after_a_429(
+    urlopen_ydl: type[UrlopenYDL], tmp_path: Path
+) -> None:
+    session = _SpySession(tmp_path)
+    urlopen_ydl.outcome = _http_error(429)
+    with pytest.raises(YtError):
+        YtDlpExtractor(session=session).fetch_subtitle(TIMEDTEXT)  # type: ignore[arg-type]
+    assert len(session.saved) == 1
+
+
+def test_ytdlp_playlist_does_not_use_the_visitor_session(ydl: type[FakeYDL], tmp_path: Path) -> None:
+    session = _SpySession(tmp_path)
+    ydl.result = {"title": "x", "entries": []}
+    YtDlpExtractor(session=session).playlist(PLAYLIST, 10)  # type: ignore[arg-type]
+    assert "cookiefile" not in ydl.instances[0].params
+    assert session.saved == []
+
+
+def test_attach_session_on_a_real_youtubedl(tmp_path: Path) -> None:
+    """สัญญากับ API ภายในของ yt-dlp (cookiejar = cached_property, save_cookies ตอนปิด) ไม่ต่อเน็ต"""
+    from yt_dlp.cookies import YoutubeDLCookieJar
+
+    session = extractor_mod.visitor_session(tmp_path)
+    jar = session.jar()
+    assert isinstance(jar, YoutubeDLCookieJar)
+    params = {"quiet": True, "no_warnings": True, "cookiefile": str(session.path)}
+    with yt_dlp.YoutubeDL(params) as ydl:
+        assert "cookiejar" not in ydl.__dict__  # __init__ ยังไม่แตะ jar (ใส่ก่อนคำขอแรกได้)
+        extractor_mod._attach_session(ydl, session)
+        assert ydl.cookiejar is jar
+        # ตัวส่งคำขอสร้างทีหลังและถือ jar ก้อนเดียวกัน
+        handler = next(iter(ydl._request_director.handlers.values()))
+        assert handler.cookiejar is jar
+        ydl._load_cookies("VISITOR_INFO1_LIVE=abc; Domain=.youtube.com", autoscope=False)
+    # ปิดแล้วบันทึกผ่านเซสชัน: ไฟล์มีคุกกี้ และนาฬิกาเริ่มแล้ว
+    assert session.path.is_file()
+    assert "VISITOR_INFO1_LIVE" in session.path.read_text(encoding="utf-8")
+    assert session.age() is not None
+
+
+def test_visitor_session_round_trips_through_ytdlp_cookie_files(tmp_path: Path) -> None:
+    first = extractor_mod.visitor_session(tmp_path)
+    with yt_dlp.YoutubeDL({"quiet": True, "cookiefile": str(first.path)}) as ydl:
+        extractor_mod._attach_session(ydl, first)
+        ydl._load_cookies("VISITOR_INFO1_LIVE=abc; Domain=.youtube.com", autoscope=False)
+    second = extractor_mod.visitor_session(tmp_path)
+    assert {c.name for c in second.jar()} == {"VISITOR_INFO1_LIVE"}
+    assert second.age() is not None
+
+
+def test_impersonation_info_reports_curl_cffi() -> None:
+    available, version = extractor_mod.impersonation_info()
+    assert available is True
+    assert version and version.startswith("0.")

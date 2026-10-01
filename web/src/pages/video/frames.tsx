@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { Captions, Copy, Download, Flame, ImageIcon, ImageOff, Link2 } from "lucide-react"
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react"
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { toast } from "sonner"
 
 import { AspectRatio } from "@/components/ui/aspect-ratio"
@@ -23,7 +23,7 @@ import { errorMessage } from "./errors"
 import { nearestFrameIndex, revealAndFocus } from "./frame-target"
 import { FrameLightbox } from "./lightbox"
 import { LoadError } from "./load-error"
-import { inReplayed } from "./most-replayed"
+import { replayedFrames, segmentFrameIndex } from "./most-replayed"
 import { ReplayedMark } from "./replayed-mark"
 import { storyboardQuery } from "./queries"
 import { subtitlesQuery } from "./subs-queries"
@@ -240,6 +240,8 @@ function FrameGrid({ frames, videoId, at, segments, onViewSubs }: FrameGridProps
   // ภาพของเวลาใน URL: เลื่อนมาให้เห็นตรงกลางและโฟกัสครั้งเดียวต่อค่า at (เลือกภาพอื่นต่อได้โดยไม่ถูกดึงกลับ)
   const highlighted = at === null ? -1 : nearestFrameIndex(frames, at)
   const revealed = useRef<number | null>(null)
+  // ภาพที่มีป้าย "ดูซ้ำบ่อย" (รวมภาพแทนของช่วงสั้นที่ไม่มีภาพอยู่ข้างใน) คิดครั้งเดียวต่อชุดภาพ
+  const marked = useMemo(() => replayedFrames(frames, segments), [frames, segments])
 
   useEffect(() => {
     if (at === null) {
@@ -271,7 +273,7 @@ function FrameGrid({ frames, videoId, at, segments, onViewSubs }: FrameGridProps
             frame={frame}
             videoId={videoId}
             highlighted={index === highlighted}
-            replayed={inReplayed(frame.tMs, segments)}
+            replayed={marked.has(index)}
             onViewSubs={onViewSubs && (() => onViewSubs(frame.tMs))}
             onOpen={() => {
               openerRef.current = index
@@ -372,9 +374,18 @@ function BulkDownloads({ videoId }: { videoId: string }) {
 
 /**
  * บรรทัด "ช่วงที่คนดูซ้ำมากที่สุด: 00:01:20, 00:05:10" ใต้หัวข้อภาพเฟรม (ไอคอนเดียวกับป้ายบนภาพ จึงอธิบายป้ายไปในตัว)
- * กดเวลาแล้วไฮไลต์ภาพที่ใกล้เวลานั้นที่สุด เลื่อนมาให้เห็นและโฟกัส (กลไกเดียวกับ ?at= จากทรานสคริปต์)
+ * กดเวลาแล้วไฮไลต์ภาพแรกในช่วงนั้น (ไม่มีภาพในช่วง = ภาพที่ใกล้กลางช่วงที่สุด ซึ่งก็มีป้าย) เลื่อนมาให้เห็นและโฟกัส
+ * (กลไกเดียวกับ ?at= จากทรานสคริปต์) ตัวเลขบนปุ่มยังเป็นเวลาเริ่มของช่วง
  */
-function ReplayedTimes({ segments, onPick }: { segments: ReplaySegment[]; onPick: (ms: number) => void }) {
+function ReplayedTimes({
+  segments,
+  frames,
+  onPick,
+}: {
+  segments: ReplaySegment[]
+  frames: StoryboardFrame[]
+  onPick: (ms: number) => void
+}) {
   return (
     <p className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm text-muted-foreground">
       <Flame aria-hidden className="size-4 shrink-0 text-accent-text" />
@@ -388,7 +399,10 @@ function ReplayedTimes({ segments, onPick }: { segments: ReplaySegment[]; onPick
               size="xs"
               className="font-mono text-foreground tabular-nums max-sm:h-11 max-sm:px-3"
               aria-label={fill(t.goToReplayed, { time })}
-              onClick={() => onPick(segment.startMs)}
+              onClick={() => {
+                const index = segmentFrameIndex(frames, segment)
+                onPick(index >= 0 ? frames[index].tMs : segment.startMs)
+              }}
             >
               {time}
             </Button>
@@ -457,6 +471,7 @@ export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionP
           {showReplayed && mostReplayed && (
             <ReplayedTimes
               segments={mostReplayed}
+              frames={frames}
               onPick={(ms) => {
                 // กดเวลาเดิมซ้ำ (at ไม่เปลี่ยน) ก็ยังพาไปที่ภาพที่ไฮไลต์อยู่
                 if (ms === at) {

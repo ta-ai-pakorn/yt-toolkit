@@ -55,14 +55,16 @@ class Fetcher:
 def make(tmp_path):
     made: list[Database] = []
 
-    def _make(fail: str | None = None, times: int = 0):
+    def _make(fail: str | None = None, times: int = 0, session=None):
         db = Database(tmp_path / f"app{len(made)}.db")
         db.migrate()
         made.append(db)
         fake = FakeExtractor(FIXTURES)
         videos = VideoService(db, fake, now=lambda: datetime(2026, 9, 30, 12, tzinfo=UTC))
         fetch = Fetcher(fake, fail, times)
-        service = SubtitleService(videos, fetch, tmp_path / "cache")
+        # รอก่อนลองซับแปลซ้ำ (20 วินาที) บันทึกไว้แทนการหลับจริง
+        fetch.sleeps = []
+        service = SubtitleService(videos, fetch, tmp_path / "cache", session=session, sleep=fetch.sleeps.append)
         return service, fake, fetch, db, videos
 
     yield _make
@@ -237,7 +239,9 @@ def test_tokens_translated_track_bot_check_is_translation_blocked(make, tmp_path
     assert isinstance(info.value.__cause__, YtError)
     assert info.value.__cause__.code == "E_BOT_CHECK"
     assert probes(fake) == before
-    assert len(fetch.urls) == 1
+    # owner round 3: ลองซ้ำครั้งเดียวหลังรอ 20 วินาที แล้วจึงยอมแพ้
+    assert len(fetch.urls) == 2
+    assert fetch.sleeps == [20]
     assert not cache_file(tmp_path, THAI, "t.en").exists()
 
 
@@ -249,10 +253,12 @@ def test_export_translated_track_bot_check_is_translation_blocked(make):
 
 
 def test_tokens_owner_track_bot_check_stays_bot_check(make):
-    service, *_ = make(fail="E_BOT_CHECK", times=99)
+    service, _, fetch, *_ = make(fail="E_BOT_CHECK", times=99)
     with pytest.raises(YtError) as info:
         service.tokens(ZOO, "o.en")
     assert info.value.code == "E_BOT_CHECK"
+    assert len(fetch.urls) == 1  # ไม่ลองซ้ำ ไม่รอ (เฉพาะซับแปล)
+    assert fetch.sleeps == []
 
 
 def test_tokens_translated_track_other_errors_keep_their_code(make):
@@ -470,3 +476,176 @@ def test_run_app_passes_subtitles_to_context(paths, fake_platform, clean_thai_en
     )
     assert code == 0
     assert isinstance(captured[0].subtitles, SubtitleService)
+
+
+# ---------- owner round 3: ประตูอายุเซสชันของซับแปล ----------
+
+
+class Session:
+    """แทน VisitorSession: waits = ค่าที่ wait_seconds คืนทีละครั้ง (ค่าสุดท้ายใช้ซ้ำ)"""
+
+    def __init__(self, *waits: int | None) -> None:
+        self.waits = list(waits)
+        self.calls = 0
+
+    def wait_seconds(self) -> int | None:
+        self.calls += 1
+        return self.waits.pop(0) if len(self.waits) > 1 else self.waits[0]
+
+
+def test_translated_track_waits_for_a_young_session(make, tmp_path):
+    service, fake, fetch, *_ = make(session=Session(42))
+    service.tracks(THAI)
+    before = probes(fake)
+    with pytest.raises(YtError) as info:
+        service.tokens(THAI, "t.en")
+    assert info.value.code == "E_SESSION_WARMING"
+    assert info.value.retry_after == 42
+    assert info.value.message == "กำลังเตรียมซับแปลจากยูทูป รอสักครู่แล้วโหลดใหม่"
+    assert fetch.urls == []  # ไม่ยิงคำขอที่รู้อยู่แล้วว่าได้ 429
+    assert probes(fake) == before
+    assert not cache_file(tmp_path, THAI, "t.en").exists()
+
+
+@pytest.mark.parametrize(("video", "track"), [(THAI, TRACK), (ZOO, "o.en")])
+def test_original_and_owner_tracks_are_never_gated(make, video, track):
+    session = Session(75)
+    service, _, fetch, *_ = make(session=session)
+    assert service.tokens(video, track).tokens
+    assert session.calls == 0
+    assert len(fetch.urls) == 1
+
+
+def test_old_session_fetches_translated_track(make):
+    service, _, fetch, *_ = make(session=Session(0))
+    parsed = service.tokens(THAI, "t.en")
+    assert parsed.tokens
+    assert len(fetch.urls) == 1
+    assert "tlang=en" in fetch.urls[0]
+    assert fetch.sleeps == []
+
+
+def test_cached_translated_track_skips_the_gate(make):
+    session = Session(0)
+    service, _, fetch, *_ = make(session=session)
+    service.tokens(THAI, "t.en")
+    session.waits = [60]
+    calls = session.calls
+    assert service.tokens(THAI, "t.en").tokens  # cache: ไม่ต้องรอ ไม่โหลดใหม่
+    assert session.calls == calls
+    assert len(fetch.urls) == 1
+
+
+def test_missing_session_is_minted_by_one_probe_then_waits(make):
+    # ไม่มีเซสชันเลย (ติดตั้งใหม่): probe คลิปนี้ใหม่เพื่อรับคุกกี้ผู้เข้าชม แล้วนับถอยหลังเต็ม 75 วินาที
+    service, fake, fetch, *_ = make(session=Session(None, 75))
+    service.tracks(THAI)
+    before = probes(fake)
+    with pytest.raises(YtError) as info:
+        service.tokens(THAI, "t.en")
+    assert (info.value.code, info.value.retry_after) == ("E_SESSION_WARMING", 75)
+    assert probes(fake) == before + 1
+    assert fetch.urls == []
+
+
+def test_no_visitor_after_probe_is_remembered_for_five_minutes(make):
+    # review #3: probe แล้วไม่ได้คุกกี้ผู้เข้าชม ไม่ probe ซ้ำทุกครั้งที่ขอซับแปลภายใน 5 นาที
+    service, fake, fetch, *_ = make(session=Session(None))
+    now = [1000.0]
+    service._monotonic = lambda: now[0]
+    service.tracks(THAI)
+    before = probes(fake)
+    calls = []
+
+    def count(url):
+        calls.append(url)
+        raise YtError("E_NETWORK", "x")
+
+    service._fetch = count
+    for _ in range(3):
+        with pytest.raises(YtError):
+            service.tokens(THAI, "t.en")
+        now[0] += 60
+    # ครั้งแรก probe ขอเซสชัน 1 ครั้ง (+ probe ใหม่จาก E_NETWORK ของลิงก์หมดอายุทุกครั้ง แบบเดิม)
+    session_probes = probes(fake) - before - 3
+    assert session_probes == 1
+    now[0] += 300
+    with pytest.raises(YtError):
+        service.tokens(THAI, "t.en")
+    assert probes(fake) - before - 4 == 2  # พ้น 5 นาทีแล้ว probe ขอเซสชันอีกครั้ง
+
+
+def test_session_still_missing_after_probe_fetches_anyway(make):
+    service, fake, fetch, *_ = make(session=Session(None))
+    service.tracks(THAI)
+    before = probes(fake)
+    assert service.tokens(THAI, "t.en").tokens
+    assert probes(fake) == before + 1
+    assert len(fetch.urls) == 1
+
+
+def test_old_session_429_retries_once_then_succeeds(make):
+    service, _, fetch, *_ = make(fail="E_BOT_CHECK", times=1, session=Session(0))
+    assert service.tokens(THAI, "t.en").tokens
+    assert len(fetch.urls) == 2
+    assert fetch.urls[0] == fetch.urls[1]
+    assert fetch.sleeps == [20]
+
+
+def test_old_session_429_twice_is_translation_blocked(make):
+    service, _, fetch, *_ = make(fail="E_BOT_CHECK", times=99, session=Session(0))
+    with pytest.raises(YtError) as info:
+        service.tokens(THAI, "t.en")
+    assert info.value.code == "E_TRANSLATION_BLOCKED"
+    assert info.value.retry_after is None
+    assert len(fetch.urls) == 2
+    assert fetch.sleeps == [20]
+
+
+def test_retry_after_429_with_another_error_keeps_that_error(make):
+    service, fake, *_ = make(session=Session(0))
+    calls = []
+
+    def fetch(url: str) -> bytes:
+        calls.append(url)
+        raise YtError("E_BOT_CHECK" if len(calls) == 1 else "E_VIDEO_UNAVAILABLE", "x")
+
+    service._fetch = fetch
+    with pytest.raises(YtError) as info:
+        service.tokens(THAI, "t.en")
+    assert info.value.code == "E_VIDEO_UNAVAILABLE"
+
+
+def test_warming_export_and_note_use_the_same_gate(make):
+    service, *_ = make(session=Session(10))
+    with pytest.raises(YtError) as info:
+        service.export(THAI, "t.en", "srt", PRESETS["medium"])
+    assert info.value.code == "E_SESSION_WARMING"
+    with pytest.raises(YtError) as info:
+        service.note(THAI, "t.en")
+    assert info.value.code == "E_SESSION_WARMING"
+
+
+def test_open_services_real_mode_shares_one_session(paths, clean_thai_env, monkeypatch):
+    from yttoolkit.core.extractor import YtDlpExtractor
+    from yttoolkit.core.visitor_session import VisitorSession
+
+    db, videos, extractor, subtitles = lifecycle.open_services(paths, fake=False)
+    try:
+        assert isinstance(extractor, YtDlpExtractor)
+        assert isinstance(extractor.session, VisitorSession)
+        assert subtitles._session is extractor.session
+        # ไฟล์คุกกี้อยู่ในโฟลเดอร์ข้อมูลของแอพ (data/ ซึ่ง git ไม่เก็บ) ยังไม่ถูกสร้างจนกว่าจะ probe
+        assert extractor.session.path == paths.data / "visitor-session.txt"
+        assert not extractor.session.path.exists()
+    finally:
+        db.close()
+
+
+def test_open_services_fake_mode_has_no_session(paths, clean_thai_env):
+    db, _, extractor, subtitles = lifecycle.open_services(paths, fake=True)
+    try:
+        assert subtitles._session is None
+        assert not hasattr(extractor, "session")
+    finally:
+        db.close()

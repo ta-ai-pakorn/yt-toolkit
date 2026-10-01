@@ -21,7 +21,7 @@ from .app import AppContext, create_app
 from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
 from .core import thai_fallback, tools
 from .core.db import Database, purge_stale_cache
-from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor
+from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, visitor_session
 from .core.subtitles import SubtitleService
 from .core.videos import VideoService
 from .platform import LockFileError, Platform, current
@@ -150,11 +150,14 @@ def open_services(
     fake=True = ใช้ข้อมูลทดสอบใน tests/fixtures แทนยูทูปจริง (serve ส่งมาเมื่อ YT_TOOLKIT_FAKE=1 ใช้กับ E2E)
     ล้าง cache ไม่สำเร็จแค่บันทึก log แล้วเปิดโปรแกรมต่อ ส่วนฐานข้อมูลเปิดไม่ได้จะโยนต่อ
     """
+    session = None
     if fake:
         log.warning("โหมดข้อมูลปลอม (YT_TOOLKIT_FAKE): ใช้ข้อมูลทดสอบใน tests/fixtures ไม่ต่อยูทูปจริง")
         extractor: Extractor = FakeExtractor(CODE_ROOT / "tests" / "fixtures")
     else:
-        extractor = YtDlpExtractor()
+        # เซสชันผู้ชมแบบไม่ระบุตัวตน (<data>/visitor-session.txt) ที่ probe และซับใช้ร่วมกัน ซับแปลต้องใช้
+        session = visitor_session(paths.data)
+        extractor = YtDlpExtractor(session=session)
     paths.db.parent.mkdir(parents=True, exist_ok=True)
     db = Database(paths.db)
     try:
@@ -165,7 +168,7 @@ def open_services(
     purge_cache_once(db, paths.cache)
     configure_thai(paths)
     videos = VideoService(db, extractor)
-    return db, videos, extractor, SubtitleService(videos, extractor.fetch_subtitle, paths.cache)
+    return db, videos, extractor, SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
 
 
 def purge_cache_once(db: Database, cache_root: Path) -> None:

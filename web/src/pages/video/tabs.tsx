@@ -3,6 +3,7 @@ import { th } from "@/i18n/th"
 import type { ReplaySegment } from "@/lib/types"
 
 import { FramesSection } from "./frames"
+import { useWarmingRefetch } from "./session-warming"
 import { SubsPanel } from "./subs-panel"
 import { TranscriptPanel } from "./transcript-panel"
 import { useVideoParams, type VideoTab } from "./url-state"
@@ -41,6 +42,8 @@ type Props = {
  */
 export function VideoTabs({ videoId, enabled, mostReplayed }: Props) {
   const { tab, update } = useVideoParams()
+  // ซับแปลที่รอเซสชัน: นับถอยหลังครั้งเดียวทั้งหน้า ครบแล้วโหลดใหม่ให้เอง แม้อยู่แท็บอื่น
+  useWarmingRefetch()
 
   function onValueChange(value: unknown) {
     if (isTab(value) && value !== tab) update({ tab: value, at: null })

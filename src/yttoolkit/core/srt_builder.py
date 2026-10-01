@@ -16,6 +16,7 @@ token มาจาก parser (T7) ซึ่งรับประกันว่�
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -93,6 +94,62 @@ def display_len(text: str) -> int:
 def cue_text(tokens: Sequence[Token]) -> str:
     """ต่อข้อความ token ยุบช่องว่างที่ติดกันเหลือช่องเดียว แล้วตัดช่องว่างหัวท้าย"""
     return _SPACE_RUN.sub(" ", "".join(tok.t for tok in tokens)).strip(" ")
+
+
+def is_punct_only(token: Token) -> bool:
+    """ข้อความที่เห็นของ token (ตัด U+0020 หัวท้าย) เป็นเครื่องหมายล้วน: หมวด Unicode P* หรือ S* ทุกตัว
+
+    เช่น "." "," " ?" "♪" "--" นับ ส่วน "a." "1" ". ." (มีช่องว่างกลาง) ไม่นับ (ฝั่ง TS ใช้ regex หมวด P กับ S แบบ u)
+    """
+    text = token.t.strip(" ")
+    return bool(text) and all(unicodedata.category(ch)[0] in "PS" for ch in text)
+
+
+# เครื่องหมายเปิดที่เกาะหน้าคำถัดไปเสมอ (fix round 1): ( [ { « “ ‘ ¿ ¡ และ ( [ { แบบเต็มความกว้าง
+OPENERS = frozenset("([{\u00ab\u201c\u2018\u00bf\u00a1\uff08\uff3b\uff5b")
+# อัญประกาศตรงที่เป็นได้ทั้งเปิดและปิด (" ' และแบบเต็มความกว้าง) ตัดสินจากช่องว่างรอบตัว (_kinds)
+STRAIGHT_QUOTES = frozenset("\"'\uff02\uff07")
+_WORD, _BACK, _FORWARD = 0, 1, 2
+
+
+def _only(token: Token, chars: frozenset[str]) -> bool:
+    text = token.t.strip(" ")
+    return bool(text) and all(ch in chars for ch in text)
+
+
+def _kinds(tokens: Sequence[Token]) -> list[int]:
+    """โหมดนับคำ: คำ (_WORD) / เครื่องหมายที่เกาะคำก่อนหน้า (_BACK) / เครื่องหมายเปิดที่เกาะคำถัดไป (_FORWARD)
+
+    เครื่องหมายเปิดเกาะไปข้างหน้าได้เมื่อถัดไปมี token ที่ห่างไม่ถึง 1 วินาที และเป็นคำหรือเครื่องหมายเปิดอีกตัว
+    (ไม่งั้นเกาะคำก่อนหน้าเหมือนเครื่องหมายอื่น เช่นวงเล็บเปิดตัวสุดท้ายของแทร็ก)
+    อัญประกาศตรงนับเป็นเครื่องหมายเปิดเมื่อ (1) ข้างหน้ามีช่องว่าง: ตัวมันขึ้นต้นด้วย U+0020, token ก่อนหน้าจบด้วย U+0020,
+    token ก่อนหน้าเป็นเครื่องหมายเปิด, เป็น token แรก หรือเงียบ >= 1 วินาทีก่อนหน้า และ (2) token ถัดไปติดกันไม่มีช่องว่าง
+    (ตัวมันไม่จบด้วย U+0020 และ token ถัดไปไม่ขึ้นต้นด้วย U+0020) ใช้ได้เพราะ token ของยูทูปเก็บช่องว่างนำหน้าคำไว้
+    """
+    n = len(tokens)
+    kinds = [_WORD] * n
+    for i in range(n - 1, -1, -1):
+        tok = tokens[i]
+        if not is_punct_only(tok):
+            continue
+        kinds[i] = _BACK
+        if i + 1 >= n or kinds[i + 1] == _BACK or tokens[i + 1].s - tok.e >= GAP_SPLIT_MS:
+            continue
+        if _only(tok, OPENERS):
+            kinds[i] = _FORWARD
+        elif _only(tok, STRAIGHT_QUOTES):
+            prev = tokens[i - 1] if i > 0 else None
+            spaced_before = (
+                prev is None
+                or tok.s - prev.e >= GAP_SPLIT_MS
+                or tok.t.startswith(" ")
+                or prev.t.endswith(" ")
+                or _only(prev, OPENERS)
+            )
+            glued_after = not tok.t.endswith(" ") and not tokens[i + 1].t.startswith(" ")
+            if spaced_before and glued_after:
+                kinds[i] = _FORWARD
+    return kinds
 
 
 def _collapse(text: str) -> str:
@@ -199,9 +256,13 @@ def _has_split(tokens: Sequence[Token], cap: float) -> bool:
 
 def _lines(tokens: list[Token], opts: SubOptions) -> tuple[str, ...]:
     text = cue_text(tokens)
-    if opts.lines == 2 and len(tokens) >= 2 and display_len(text) > opts.max_chars:
-        # ทุกซับที่มาถึงตรงนี้ผ่าน _fits แล้ว จึงมีจุดแบ่งที่ใช้ได้อย่างน้อย 1 จุดเสมอ
-        cands = _splits(tokens, opts.max_chars * MERGE_LIMIT_FACTOR)
+    cands = (
+        _splits(tokens, opts.max_chars * MERGE_LIMIT_FACTOR)
+        if opts.lines == 2 and len(tokens) >= 2 and display_len(text) > opts.max_chars
+        else []
+    )
+    if cands:
+        # ซับที่ผ่าน _fits มีจุดแบ่งอย่างน้อย 1 จุดเสมอ ยกเว้นคำยาวเกินที่มีเครื่องหมายเกาะท้าย (โหมดนับคำ) = บรรทัดเดียว
         best_k, best_diff = cands[0][0], abs(cands[0][1] - cands[0][2])
         for k, left, right in cands[1:]:
             if abs(left - right) < best_diff:  # เท่ากันให้ k ที่น้อยกว่า
@@ -221,23 +282,58 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
         raise ValueError("tokens mode needs tokens_per_cue")
     per_cue = opts.tokens_per_cue or 0
 
-    # 1. จับกลุ่มแบบ greedy
+    # โหมดนับคำ (owner round 3 + fix round 1): token ที่เป็นเครื่องหมายล้วนไม่นับเป็นคำ
+    # - เครื่องหมายทั่วไปเกาะซับของคำก่อนหน้า (ไม่ใช้กฎจำนวนคำ แต่ยังต้องไม่เกินตัวอักษร/เวลานานสุด) ตัวแรกสุดเกาะซับถัดไป
+    # - เครื่องหมายเปิด ( “ และอัญประกาศตรงที่ทำหน้าที่เปิด เกาะหน้าคำถัดไป (_kinds)
+    # ซับที่มีแค่เครื่องหมายจึงเกิดได้เฉพาะเมื่อเงียบ >= 1 วินาที หรือเกาะแล้วจะเกินตัวอักษร/เวลานานสุด (review #1)
+    kinds = _kinds(tokens) if tokens_mode else [_WORD] * len(tokens)
+    punct = [kind != _WORD for kind in kinds]
+
+    def words(start: int, end: int) -> int:
+        return sum(1 for k in range(start, end) if not punct[k])
+
+    def chain_end(start: int) -> int:
+        """token แรกหลังเครื่องหมายเปิดที่ต่อกันตั้งแต่ start (คือคำที่เครื่องหมายเปิดเหล่านี้เกาะ)"""
+        k = start
+        while kinds[k] == _FORWARD:
+            k += 1
+        return k
+
+    # 1. จับกลุ่มแบบ greedy (cur = token ช่วง [cur_from, i))
     drafts: list[_Draft] = []
     cur: list[Token] = []
-    for tok in tokens:
+    cur_from = 0
+    for i, tok in enumerate(tokens):
         if cur:
-            close = (
-                not _fits([*cur, tok], opts, opts.max_chars)
-                or tok.s - cur[-1].e >= GAP_SPLIT_MS
-                or tok.e - cur[0].s > opts.max_ms
-                or (tokens_mode and len(cur) >= per_cue)
-            )
+            gap = tok.s - cur[-1].e >= GAP_SPLIT_MS
+            # เครื่องหมายเปิดตัดสินพร้อมคำที่มันเกาะ (ช่วง i..j): ถ้าคำนั้นต้องขึ้นซับใหม่ เครื่องหมายก็ขึ้นไปด้วย
+            j = chain_end(i) if kinds[i] == _FORWARD else i
+            # ทุก token (รวมเครื่องหมาย) ต้องไม่ทำให้เกินขีดจำกัดตัวอักษร/เวลานานสุด (fix round 2, review #1)
+            # เกินเมื่อไรก็ขึ้นซับใหม่ตามปกติ แม้จะได้ซับที่ขึ้นต้นด้วยเครื่องหมาย
+            # เครื่องหมายที่เกาะคำก่อนหน้า (_BACK) ดูแค่เวลาเริ่ม (fix round 3): เริ่มภายใน maxMs ก็เกาะได้
+            # แม้เวลาจบจะเลยไป แล้วตัดเวลาจบของซับให้เหลือ maxMs หลังจากนี้ (เช่น "." ที่ยาว 6 วินาที)
+            reach = tok.s if kinds[i] == _BACK else tokens[j].e
+            capped = not _fits([*cur, *tokens[i : j + 1]], opts, opts.max_chars) or reach - cur[0].s > opts.max_ms
+            # กฎจำนวนคำใช้กับคำและเครื่องหมายเปิดเท่านั้น: เครื่องหมายที่เกาะคำก่อนหน้า และคำที่มีเครื่องหมายเปิด
+            # นำหน้าอยู่แล้ว ไม่ขึ้นซับใหม่เพราะจำนวนคำ (ซับที่มีแต่เครื่องหมายนำหน้ามีคำ 0 จึงไม่ถึงเกณฑ์เอง)
+            counted = kinds[i] != _BACK and kinds[i - 1] != _FORWARD
+            close = gap or capped or (tokens_mode and counted and words(cur_from, i) >= per_cue)
             if close:
                 drafts.append(_draft(cur))
                 cur = []
+                cur_from = i
         cur.append(tok)
     if cur:
         drafts.append(_draft(cur))
+    # ช่วง token ของแต่ละซับ (ใช้นับคำตอนรวมซับในขั้น 2)
+    first: list[int] = []
+    pos = 0
+    for d in drafts:
+        first.append(pos)
+        pos += len(d.tokens)
+        # ซับที่จบด้วยเครื่องหมายที่เกาะมา (มี token >= 2) แสดงไม่เกิน maxMs (fix round 3)
+        if kinds[pos - 1] == _BACK and len(d.tokens) > 1:
+            d.end_ms = min(d.end_ms, d.start_ms + opts.max_ms)
 
     # 2. เวลาขั้นต่ำ: ยืดไปได้ถึงต้นซับถัดไป ถ้ายังสั้นอยู่ลองรวมกับตัวถัดไป แล้วตรวจตัวเดิมซ้ำ
     i = 0
@@ -249,12 +345,14 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
             c.end_ms = min(want, nxt.start_ms) if nxt is not None else want
             if c.end_ms - c.start_ms < opts.min_ms and nxt is not None:
                 merged = c.tokens + nxt.tokens
+                start = first[i]
                 if (
                     _fits(merged, opts, opts.max_chars * MERGE_LIMIT_FACTOR)
                     and nxt.end_ms - c.start_ms <= opts.max_ms
-                    and (not tokens_mode or len(merged) <= per_cue)
+                    and (not tokens_mode or words(start, start + len(merged)) <= per_cue)
                 ):
                     drafts[i : i + 2] = [_Draft(merged, c.start_ms, nxt.end_ms)]
+                    first[i : i + 2] = [start]
                     continue
         i += 1
 

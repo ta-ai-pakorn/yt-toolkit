@@ -355,20 +355,36 @@ LIMITS = { maxChars: [10, 60], lines: [1, 2], minMs: [300, 3000] /*step 100*/,
 - **Case options bypass validation:** `buildCues` does no range checks, and shared cases may sit outside LIMITS (`thai-display-len` uses `maxChars: 3`). Case runners build options directly, never through `options_from_dict` or a clamp.
 - **Tokens mode without `tokensPerCue`:** `buildCues` raises `ValueError` (Python) or throws (TS). This is the only validation it does.
 
-**1. Greedy grouping** (tokens mode still applies **all** close rules, the char/line rule included)
+- **`isPunctOnly(tok)`** (owner round 3, controller ruling 2026-10-01): the token's text trimmed of U+0020 is non-empty and **every** code point is in a Unicode `P*` or `S*` category. Python: `unicodedata.category(ch)[0] in "PS"`; TS: `/^[\p{P}\p{S}]+$/u` on `tidy(t)`. Examples: `"."`, `","`, `" ?"`, `"..."`, `"♪"`, `"--"`, `"("`, emoji count; `"a."`, `"1"`, `". ."` (inner space), `"ฯ"` (Lo) do not.
+- **`kind(tok)`** (tokens mode only; fix round 1, controller ruling 2026-10-01), computed right to left: `word` (not `isPunctOnly`), `forward` or `back`.
+  - A punctuation token is `forward` when there is a next token, the next token starts less than 1000 ms after it, the next token's kind is not `back`, **and** either:
+    - every code point is an **opener** `( [ { « “ ‘ ¿ ¡` or a full-width `（ ［ ｛`; or
+    - every code point is a **straight quote** `" '` (or full-width `＂ ＇`) and it reads as an opener: there is space before it (its text starts with U+0020, the previous token's text ends with U+0020, the previous token is all openers, it is the first token, or it starts ≥ 1000 ms after the previous token) **and** it is glued to the next token (its text does not end with U+0020 and the next token's text does not start with U+0020).
+  - Every other punctuation token is `back`.
+  - **Choice of the spacing rule over quote parity:** YouTube json3 tokens keep their leading space (`" movie"`, `" \""`, `"Dang"`), so spacing tells openers from closers directly. Parity would drift after one unbalanced quote. Known limit: two quotes glued together (`directly.""Do`) read as two closers, so the second quote stays with `directly.`.
+- **`words(range)`** = the number of tokens in the range whose kind is not `forward`/`back`. Only used in tokens mode; in chars mode every token is a word and nothing below changes.
+
+**1. Greedy grouping** (tokens mode still applies **all** close rules, the char/line rule included, to word tokens)
 ```
 cues = []; cur = []
 for tok in tokens:
     if cur:
-        close = not fits(cur + [tok], maxChars)
-             or tok.s - cur[-1].e >= 1000
-             or tok.e - cur[0].s > maxMs
-             or (mode == "tokens" and len(cur) >= tokensPerCue)
+        gap = tok.s - cur[-1].e >= 1000
+        j = (first token after tok whose kind is not "forward") if kind(tok) == "forward" else tok
+                                       # an opener decides together with the word it attaches to
+        reach = tok.s if kind(tok) == "back" else tokens[j].e      # back punctuation: its START must fit
+        capped = not fits(cur + tokens[tok..j], maxChars) or reach - cur[0].s > maxMs
+        counted = kind(tok) != "back" and kind(prev token) != "forward"
+                                       # back punctuation and a word right after its opener never close on count
+        close = gap or capped or (mode == "tokens" and counted and words(cur) >= tokensPerCue)
         if close: cues.append(Cue(cur)); cur = []
     cur.append(tok)
 if cur: cues.append(Cue(cur))
 # Cue(cur): startMs = cur[0].s, endMs = cur[-1].e
 ```
+- **Punctuation-only tokens in tokens mode (owner round 3; openers: fix round 1):** they never count toward `tokensPerCue`. `forward` openers move with the word after them (the opener decides with that word, so `(`/`“`/an opening `"` starts the word's cue); `back` tokens attach to the previous word's cue. They bypass **only the count rule**: since fix round 2 (review #1) the line-length (`fits`) and `maxMs` caps apply to every token, so when attaching would break a cap the cue closes as usual and a punctuation-only token may start a cue (only when a cap forces it). **Fix round 3:** for `back` punctuation the `maxMs` check uses the token's **start** (`tok.s - cur[0].s <= maxMs`); if its end runs past, it still attaches and, after grouping, every cue of ≥ 2 tokens whose last token is `back` gets `endMs = min(endMs, startMs + maxMs)`. So a word followed by a 6 s "." shows "sticks." for 3 s, then nothing until the next word (en-asr now has no punctuation-only cue). Case `word-preset-long-trailing-period`; "Hello" + 40 " ♪" now splits every 3.6 s with each cue clamped to 3 s. A leading one attaches to the next word's cue. Silence still splits: a gap of ≥ 1000 ms always starts a new cue. Reason: in ทีละคำ on English ASR, 13% of cues were a lone "." or ",".
+- Step 4 consequence: a 2-line cue may now have **no** valid split (an over-long word plus attached punctuation); it then stays on one line.
+- Shared cases: `word-preset-punctuation`, `word-preset-leading-punctuation-and-gap`, `tokens-mode-punctuation-two-lines`, `short-preset-punctuation-unchanged` (chars mode keeps the lone "." cue), and (fix round 1) `word-preset-openers`, `word-preset-straight-quotes`, `word-preset-trailing-opener` (an opener at the end of the track, or before ≥ 1 s of silence, attaches backward), `tokens-mode-opener-keeps-its-word`, and (fix round 2) `word-preset-punctuation-respects-max-duration` ("Hello" + 40 " ♪" 600 ms apart: maxMs closes the cues, so most cues hold only notes); `tokens-mode-punctuation-two-lines` now expects `internationally` / `, yes no.` (the comma would break maxChars). Goldens: only `en-asr.word.srt` changed (e.g. `movie "` / `Dang` became `movie` / `"Dang`); all other presets and `th-asr.custom-tokens.srt` are byte-identical.
 
 **2. Minimum duration** (index loop, re-check the same index after a merge)
 ```
@@ -382,7 +398,7 @@ while i < len(cues):
             merged = c.tokens + nxt.tokens
             if (fits(merged, maxChars * MERGE_LIMIT_FACTOR)
                     and nxt.endMs - c.startMs <= maxMs
-                    and (mode != "tokens" or len(merged) <= tokensPerCue)):
+                    and (mode != "tokens" or words(merged) <= tokensPerCue)):
                 cues[i:i+2] = [Cue(merged, startMs=c.startMs, endMs=nxt.endMs)]
                 continue
     i += 1
@@ -392,7 +408,7 @@ while i < len(cues):
 
 **4. Lines**
 - If `lines == 2`, `displayLen(text) > maxChars` and the cue has ≥ 2 tokens, split at a token boundary k.
-  - **Candidates:** the valid splits only, i.e. every k in 1..n−1 with `lineLen(tok[:k]) <= maxChars * MERGE_LIMIT_FACTOR` and `lineLen(tok[k:]) <= maxChars * MERGE_LIMIT_FACTOR`. Every multi-token cue passed `fits`, so there is always at least one candidate.
+  - **Candidates:** the valid splits only, i.e. every k in 1..n−1 with `lineLen(tok[:k]) <= maxChars * MERGE_LIMIT_FACTOR` and `lineLen(tok[k:]) <= maxChars * MERGE_LIMIT_FACTOR`. Every multi-token cue that passed `fits` has at least one candidate; in tokens mode a word with attached punctuation may have none, and then the cue stays on one line (owner round 3).
   - **Choice:** the k that minimises `|lineLen(tok[:k]) − lineLen(tok[k:])|`. **Ties go to the smaller k.**
   - **Result:** `lines = [cueText(tok[:k]), cueText(tok[k:])]`.
   - The two line lengths always sum to `T` or `T − 1`, where `T = lineLen(tokens)`. So when any valid split exists, the most balanced split overall is valid too. The filter never changes the pick, but it is kept for clarity.

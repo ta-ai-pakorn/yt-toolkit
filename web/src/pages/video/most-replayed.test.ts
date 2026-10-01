@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { cueInReplayed, inReplayed } from "./most-replayed"
+import { cueInReplayed, inReplayed, replayedFrames, segmentFrameIndex } from "./most-replayed"
 
 const SEGMENTS = [
   { startMs: 80_000, endMs: 95_000 },
@@ -40,5 +40,35 @@ describe("cueInReplayed", () => {
     expect(cueInReplayed(cue(80_000, 80_000), SEGMENTS)).toBe(true)
     expect(cueInReplayed(cue(95_000, 95_000), SEGMENTS)).toBe(false)
     expect(cueInReplayed(cue(80_000, 90_000), undefined)).toBe(false)
+  })
+})
+
+describe("ภาพเฟรมของช่วงดูซ้ำบ่อย (review M-2)", () => {
+  // ภาพทุก 10 วินาที: 0, 10, 20, ... 100 วินาที
+  const frames = Array.from({ length: 11 }, (_, index) => ({ index, tMs: index * 10_000, url: `f${index}` }))
+
+  it("ปุ่มเวลาไปภาพแรกที่อยู่ในช่วง ไม่ใช่ภาพที่ใกล้เวลาเริ่ม (ซึ่งอาจอยู่นอกช่วง)", () => {
+    // เริ่ม 41 วินาที: ภาพที่ใกล้ที่สุดคือ 40 (นอกช่วง) ภาพแรกในช่วงคือ 50
+    expect(segmentFrameIndex(frames, { startMs: 41_000, endMs: 58_000 })).toBe(5)
+    expect(segmentFrameIndex(frames, { startMs: 40_000, endMs: 45_000 })).toBe(4)
+  })
+
+  it("ช่วงสั้นที่ไม่มีภาพอยู่ข้างใน: ภาพที่ใกล้กลางช่วงที่สุด (เท่ากันเลือกภาพก่อน)", () => {
+    expect(segmentFrameIndex(frames, { startMs: 190, endMs: 570 })).toBe(0)
+    expect(segmentFrameIndex(frames, { startMs: 12_000, endMs: 19_000 })).toBe(2)
+    expect(segmentFrameIndex(frames, { startMs: 11_000, endMs: 19_000 })).toBe(1)
+    expect(segmentFrameIndex([], { startMs: 0, endMs: 1 })).toBe(-1)
+  })
+
+  it("ภาพที่มีป้าย = ภาพในช่วงทั้งหมด + ภาพแทนของช่วงที่ไม่มีภาพข้างใน (ปุ่มเวลาพาไปภาพที่มีป้ายเสมอ)", () => {
+    const segments = [
+      { startMs: 41_000, endMs: 62_000 },
+      { startMs: 12_000, endMs: 19_000 },
+    ]
+    expect([...replayedFrames(frames, segments)].sort((a, b) => a - b)).toEqual([2, 5, 6])
+    for (const segment of segments) {
+      expect(replayedFrames(frames, segments).has(segmentFrameIndex(frames, segment))).toBe(true)
+    }
+    expect(replayedFrames(frames, undefined).size).toBe(0)
   })
 })

@@ -26,13 +26,19 @@ CACHE_TTL = timedelta(hours=24)
 # รุ่นของรูปแบบ probe_json ที่เก็บไว้ แถวรุ่นอื่น (เช่น M2 ที่ยังไม่มี captions) นับว่าเก่า -> probe ใหม่
 # แต่ยังใช้เป็นข้อมูลสำรองตอนออฟไลน์ได้ (_stored_hit)
 # 3 = owner round 2 (2026-10-01): เก็บยอดวิว/ไลก์/คอมเมนต์/ผู้ติดตาม, แท็ก, หมวดหมู่ และ heatmap เพิ่ม
-PROBE_VERSION = 3
+# 4 = owner round 3 (2026-10-01): mostReplayed คิดแบบใหม่ (review I-2) แถวรุ่น 3 เก็บช่วงแบบเก่าไว้ จึงต้อง probe ใหม่
+PROBE_VERSION = 4
 # ข้อมูลคลิป (C-A1): แท็กเก็บไม่เกินเท่านี้ ช่วงดูซ้ำบ่อยเอาไม่เกินเท่านี้ ห่างกันอย่างน้อยกี่วินาที
 # และรวมช่วงข้างเคียงที่ค่าไม่ต่ำกว่ากี่เท่าของยอด
 TAGS_MAX = 50
 MOST_REPLAYED_MAX = 3
 MOST_REPLAYED_GAP_S = 10
 MOST_REPLAYED_MERGE = 0.9
+# owner round 3 (review I-2): ยอดที่ต่ำกว่าครึ่งของยอดสูงสุดไม่นับ (ที่ราบเตี้ย ๆ ไม่ใช่ "ดูซ้ำบ่อย")
+# และช่วงที่รวมแล้วกว้างไม่เกิน max(10 วินาที, 2% ของความยาวคลิป)
+MOST_REPLAYED_MIN_SHARE = 0.5
+MOST_REPLAYED_WIDTH_MIN_S = 10
+MOST_REPLAYED_WIDTH_SHARE = 0.02
 _TOUCH_S = 0.001  # รายการ heatmap ห่างกันไม่เกินนี้ (วินาที) นับว่าติดกัน (กันเศษทศนิยม)
 # ฟิลด์ตัวเลขของ yt-dlp -> คีย์ใน stats
 _STAT_FIELDS = (
@@ -177,16 +183,27 @@ def _heatmap(value: Any) -> list[tuple[float, float, float]]:
     return sorted(entries)
 
 
-def most_replayed(heatmap: Any) -> list[dict]:
+def most_replayed(heatmap: Any, duration: Any = None) -> list[dict]:
     """ช่วงที่คนดูซ้ำมากที่สุด (C-A1) สูงสุด 3 ช่วง เรียงตามเวลาเริ่ม หน่วย ms (จำนวนเต็ม)
 
-    1. ไล่รายการจากค่าสูงไปต่ำ (ค่าเท่ากัน = อันที่มาก่อน) ข้ามอันที่ห่างจากช่วงที่เลือกแล้วไม่ถึง 10 วินาที
-    2. รวมรายการที่ติดกัน (ไม่มีช่องว่างเวลา) ทั้งซ้ายและขวาที่ค่า >= 90% ของยอดนั้น (หยุดเมื่อเจออันที่เข้าใกล้ช่วงที่เลือกแล้ว
-       ไม่ถึง 10 วินาที ช่วงที่ได้จึงไม่ซ้อนกันและห่างกันเสมอ)
-    คลิปที่ไม่มี heatmap = []
+    0. ไม่ดูรายการแรกของ heatmap: ค่าพุ่งตอนต้นคลิปมาจากคนกดเล่น ไม่ใช่การดูซ้ำ (review I-2)
+    1. ไล่รายการจากค่าสูงไปต่ำ (ค่าเท่ากัน = อันที่มาก่อน) หยุดเมื่อค่าต่ำกว่าครึ่งของค่าสูงสุด
+       ข้ามอันที่ห่างจากช่วงที่เลือกแล้วไม่ถึง 10 วินาที
+    2. รวมรายการที่ติดกัน (ไม่มีช่องว่างเวลา) ที่ค่า >= 90% ของยอดนั้น ทีละอัน เลือกข้างที่ค่าสูงกว่าก่อน (เท่ากัน = ซ้าย)
+       จนช่วงกว้างถึง max(10 วินาที, 2% ของความยาวคลิป) หยุดเมื่อเจออันที่เข้าใกล้ช่วงที่เลือกแล้วไม่ถึง 10 วินาที
+       (ช่วงที่ได้จึงไม่ซ้อนกันและห่างกันเสมอ)
+    duration = ความยาวคลิป (วินาที) ไม่มี = ใช้เวลาจบของ heatmap · คลิปที่ไม่มี heatmap = []
     """
-    entries = _heatmap(heatmap)
+    entries = _heatmap(heatmap)[1:]
     picks: list[tuple[float, float]] = []
+    if not entries:
+        return []
+    top = max(value for _, _, value in entries)
+    if top <= 0:
+        return []
+    minimum = top * MOST_REPLAYED_MIN_SHARE
+    total = _seconds(duration) or entries[-1][1]
+    width_cap = max(MOST_REPLAYED_WIDTH_MIN_S, total * MOST_REPLAYED_WIDTH_SHARE)
 
     def clear(start: float, end: float) -> bool:
         return all(
@@ -199,7 +216,9 @@ def most_replayed(heatmap: Any) -> list[dict]:
         if len(picks) >= MOST_REPLAYED_MAX:
             break
         start, end, peak = entries[i]
-        if peak <= 0 or not clear(start, end):
+        if peak < minimum:
+            break  # เรียงจากสูงไปต่ำ ที่เหลือต่ำกว่าเกณฑ์ทั้งหมด
+        if not clear(start, end):
             continue
         floor = peak * MOST_REPLAYED_MERGE
 
@@ -210,10 +229,19 @@ def most_replayed(heatmap: Any) -> list[dict]:
             return touching and o_value >= floor and clear(o_start, o_end)
 
         lo = hi = i
-        while lo > 0 and joins(lo - 1, lo, lo - 1):
-            lo -= 1
-        while hi + 1 < len(entries) and joins(hi, hi + 1, hi + 1):
-            hi += 1
+        while True:
+            left = lo > 0 and joins(lo - 1, lo, lo - 1) and entries[hi][1] - entries[lo - 1][0] <= width_cap
+            right = (
+                hi + 1 < len(entries)
+                and joins(hi, hi + 1, hi + 1)
+                and entries[hi + 1][1] - entries[lo][0] <= width_cap
+            )
+            if not (left or right):
+                break
+            if left and (not right or entries[lo - 1][2] >= entries[hi + 1][2]):
+                lo -= 1
+            else:
+                hi += 1
         picks.append((entries[lo][0], entries[hi][1]))
     return [{"startMs": round(s * 1000), "endMs": round(e * 1000)} for s, e in sorted(picks)]
 
@@ -394,7 +422,7 @@ def to_video_info(raw: dict) -> dict:
     categories = _strings(raw.get("categories"))
     if categories:
         info["categories"] = categories
-    replayed = _stored_replayed(raw.get("mostReplayed")) or most_replayed(raw.get("heatmap"))
+    replayed = _stored_replayed(raw.get("mostReplayed")) or most_replayed(raw.get("heatmap"), raw.get("duration"))
     if replayed:
         info["mostReplayed"] = replayed
     return info
@@ -457,7 +485,7 @@ def trim_probe(raw: dict) -> dict:
         if values := _strings(raw.get(field), limit):
             trimmed[field] = values
     # heatmap ดิบมี ~100 รายการ เก็บเฉพาะช่วงที่คำนวณแล้ว (ไม่เกิน 3 ช่วง) ให้ probe_json เล็ก
-    if replayed := most_replayed(raw.get("heatmap")):
+    if replayed := most_replayed(raw.get("heatmap"), raw.get("duration")):
         trimmed["mostReplayed"] = replayed
     return trimmed
 

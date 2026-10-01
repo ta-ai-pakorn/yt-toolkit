@@ -17,12 +17,13 @@ import pytest
 
 from yttoolkit.core import thai_fallback as tf
 from yttoolkit.core.db import Database
-from yttoolkit.core.extractor import YtDlpExtractor, ytdlp_version
+from yttoolkit.core.extractor import YtDlpExtractor, visitor_session, ytdlp_version
 from yttoolkit.core.srt_builder import PRESETS, Cue, Token, build_cues
-from yttoolkit.core.subparse import ParsedTrack, parse_json3, parse_vtt
+from yttoolkit.core.subparse import ParsedTrack, parse_vtt
 from yttoolkit.core.subtitles import SubtitleService
 from yttoolkit.core.tracks import find_track
 from yttoolkit.core.videos import VideoService
+from yttoolkit.core.yterrors import YtError
 
 pytestmark = pytest.mark.network
 
@@ -204,22 +205,61 @@ def test_thai_asr_forced_vtt_passes_the_same_checks(env: Env) -> None:
     )
 
 
-# ---------- ซับแปลที่สร้างลิงก์เองด้วย tlang (เรื่องที่แผน M3 บอกว่า "ยังไม่ได้ยืนยัน") ----------
+# ---------- ซับแปล (tlang) ผ่านเซสชันผู้ชมที่อายุถึง 75 วินาที (owner round 3) ----------
 
 
-def test_translated_url_built_with_tlang_returns_english(env: Env) -> None:
-    tracks_of(env, THAI_ASR)
-    track = find_track(env.videos.raw(THAI_ASR), "t.en")
-    assert track is not None and track.json3
-    assert "tlang=en" in track.json3
-    start = time.monotonic()
-    parsed = parse_json3(env.extractor.fetch_subtitle(track.json3))
-    took = time.monotonic() - start
-    env.timings.append(f"tlang=en {took:.2f}s")
-    text = "".join(t.t for t in parsed.tokens)
-    chars = [c for c in text if not c.isspace()]
-    ascii_letters = sum(1 for c in chars if c.isascii() and c.isalpha())
-    ratio = ascii_letters / len(chars) if chars else 0.0
-    print(f"tlang=en {THAI_ASR}: {took:.2f}s, {len(parsed.tokens)} tokens, ASCII letters {ratio:.0%}")
-    assert chars
-    assert ratio >= 0.5, f"ASCII letters only {ratio:.0%}: {text[:120]!r}"
+def test_translated_subs_load_after_the_visitor_session_ages(tmp_path: Path) -> None:
+    """jar ใหม่เอี่ยม -> probe (ได้คุกกี้ผู้เข้าชม) -> ประตูบอกให้รอ -> รอครบ -> โหลด t.en ได้ 200 พร้อมข้อความ
+
+    งบเน็ต: probe 1 ครั้ง + โหลด tlang ไม่เกิน 2 ครั้ง ห่างกัน 75 วินาที (ลองซ้ำของบริการตั้งไว้ 75 วินาทีในเทสนี้)
+    ยูทูปขอยืนยันว่าไม่ใช่บอท = หยุดทันที (เทสตก) ไม่ลองต่อ ไม่พิมพ์ค่าคุกกี้ใด ๆ
+    """
+    session = visitor_session(tmp_path / "data")
+    extractor = YtDlpExtractor(session=session)
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    fetches: list[str] = []
+
+    def fetch(url: str) -> bytes:
+        fetches.append(time.strftime("%H:%M:%S"))
+        return extractor.fetch_subtitle(url)
+
+    try:
+        videos = VideoService(db, extractor)
+        subs = SubtitleService(videos, fetch, tmp_path / "cache", session=session, retry_delay_s=75)
+        try:
+            videos.get(THAI_ASR, refresh=True)
+        except YtError as exc:
+            pytest.fail(f"probe stopped: {exc.code} (no further requests)")
+        assert session.age() is not None, "the probe did not leave a visitor cookie in the jar"
+        cookie_names = sorted({c.name for c in session.jar()})
+        print(f"jar cookie names (values never printed): {cookie_names}")
+
+        with pytest.raises(YtError) as warming:
+            subs.tokens(THAI_ASR, "t.en")
+        assert warming.value.code == "E_SESSION_WARMING"
+        wait = warming.value.retry_after
+        assert wait is not None and 1 <= wait <= 75
+        assert fetches == []  # ประตูไม่ยิงคำขอที่รู้อยู่แล้วว่าได้ 429
+        print(f"E_SESSION_WARMING retryAfterSeconds={wait}, sleeping")
+        time.sleep(wait)
+
+        started = time.monotonic()
+        try:
+            parsed = subs.tokens(THAI_ASR, "t.en")
+        except YtError as exc:
+            pytest.fail(f"t.en after {session.age():.0f}s session age: {exc.code} ({len(fetches)} fetches at {fetches})")
+        took = time.monotonic() - started
+        text = "".join(t.t for t in parsed.tokens)
+        chars = [c for c in text if not c.isspace()]
+        ascii_letters = sum(1 for c in chars if c.isascii() and c.isalpha())
+        ratio = ascii_letters / len(chars) if chars else 0.0
+        print(
+            f"t.en {THAI_ASR}: HTTP 200, session age {session.age():.0f}s, fetches {len(fetches)} at {fetches}, "
+            f"{took:.2f}s, {len(parsed.tokens)} tokens, source {parsed.source}, ASCII letters {ratio:.0%}"
+        )
+        assert parsed.tokens
+        assert ratio >= 0.5, f"ASCII letters only {ratio:.0%}"
+    finally:
+        extractor.close()
+        db.close()
