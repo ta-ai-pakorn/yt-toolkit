@@ -501,7 +501,7 @@ def audio_choice(info: dict, params: Mapping[str, Any]) -> DownloadChoice
 4. No candidates at all → `(None, ())`.
 
 `video_choice` (exact): `H = params.get("maxHeight", 1080)`; compat = not `maxQuality` and no `formatId`.
-- Video part: `formatId` present and in `info["formats"]` → `formatId`; present but missing → treat as automatic and add note `QUALITY_FALLBACK`; `maxQuality` → `bv*`; compat → `bv*[vcodec^=avc1][height<={H}]`.
+- Video part: `formatId` present and in `info["formats"]` → `formatId`; present but missing → treat as automatic and add note `QUALITY_FALLBACK`; `maxQuality` → `bv*`; compat → `bv*[vcodec^=avc1][height<={H}]` for landscape; for portrait clips (largest video format taller than wide) `[width<={H}]` instead (gate 2: the cap and the "{h}p" labels use the short side, `min(width, height)`, on both C8 and C12).
 - `noAudio` → `format_spec = <video part>` (no `+`, no `ba`, no fallback; AC-VID-08).
 - With audio: `aud = pick_audio(formats, audioLanguage, codec_prefix=None if maxQuality else "mp4a")`; `aid = aud["format_id"]` or `"ba"` (maxQuality) / `"ba[acodec^=mp4a]"` (otherwise); `format_spec = f"{video}+{aid}"` + (`"/b[ext=mp4]"` if compat, `"/b"` if maxQuality, `""` if formatId).
 - `merge_mp4 = True`; `audio_language = aud.get("language")` (None for noAudio); `expected_bytes` = size of the best format matching the video part (max height, then max `filesize`/`filesize_approx`) + size of `aud` (`filesize`, `filesize_approx`, or `abr * 1000 / 8 * duration`), None when unknown.
