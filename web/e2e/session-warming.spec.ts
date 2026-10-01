@@ -244,6 +244,45 @@ test.describe("ซับแปลรอเซสชันของยูทู�
     expect(calls.n).toBe(1)
   })
 
+  test("เปลี่ยนแทร็กหนีระหว่างคำขอตอนครบเวลา (ช้า 3 วินาที) แล้วกลับมา: โหลดซับแปลได้ ไม่ค้าง 'กำลังโหลด' (I-2)", async ({
+    page,
+  }) => {
+    // คำขอแรก = E_SESSION_WARMING 2 วินาที · คำขอตอนครบเวลาค้าง 3 วินาที (เหมือน backend รอ 429) · คำขอต่อไปผ่านทันที
+    const calls = { n: 0 }
+    await page.route(`**/api/videos/${THAI}/subtitles/${TRACK}/tokens`, async (route: Route) => {
+      calls.n += 1
+      if (calls.n === 1) return route.fulfill({ status: 503, json: warmingBody(2) })
+      if (calls.n === 2) {
+        await new Promise((resolve) => setTimeout(resolve, 3_000))
+        // เบราว์เซอร์ยกเลิกคำขอนี้ไปแล้ว (ผู้ใช้เปลี่ยนแทร็ก) continue จึงอาจล้มเหลว
+        return route.continue().catch(() => undefined)
+      }
+      return route.continue()
+    })
+    await page.goto(URL)
+    await expect(box(page)).toBeVisible()
+    await expect.poll(() => calls.n, { timeout: 8_000 }).toBe(2)
+    // ระหว่างคำขอตอนครบเวลา (ยังไม่ตอบ) กล่องนับหายไปเป็นการโหลดปกติ แล้วผู้ใช้เปลี่ยนไปซับไทย
+    await expect(box(page)).toHaveCount(0)
+    await expect(cues(page)).toHaveCount(0)
+    await page.getByRole("combobox", { name: "แทร็กซับ" }).click()
+    await page.getByRole("option", { name: "ไทย (อัตโนมัติ)" }).click()
+    await expect(page).toHaveURL(/[?&]track=a\.th-orig(&|$)/)
+    await expect(cues(page)).toHaveCount(5)
+    // กลับไปซับแปลอังกฤษ: ต้องได้ซับมาแสดง
+    await page.getByRole("combobox", { name: "แทร็กซับ" }).click()
+    await page.getByRole("option", { name: "เลือกซับแปลอัตโนมัติ…" }).click()
+    const dialog = page.getByRole("dialog", { name: "ซับแปลอัตโนมัติ" })
+    await dialog.getByRole("searchbox", { name: "ค้นหาภาษา" }).fill("อังกฤษ")
+    await dialog.getByRole("button", { name: /^อังกฤษ/ }).first().click()
+    await expect(page).toHaveURL(/[?&]track=t\.en(&|$)/)
+    await expect(cues(page)).toHaveCount(5, { timeout: 10_000 })
+    await expect(page.getByTestId("session-warming")).toHaveCount(0)
+    // คำขอที่ถูกยกเลิก + โหลดใหม่หนึ่งครั้ง ไม่ยิงวน
+    await page.waitForTimeout(2_000)
+    expect(calls.n).toBe(3)
+  })
+
   test("แท็บทรานสคริปต์ก็แสดงกล่องนับถอยหลังเดียวกัน และโหลดให้เองเมื่อครบ", async ({ page }) => {
     const calls = await warmTranslated(page, 2)
     await page.goto(`/v/${THAI}?tab=transcript&track=${TRACK}`)
