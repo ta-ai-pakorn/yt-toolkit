@@ -10,7 +10,7 @@ import { groupForSheet } from "@/lib/jobs"
 import { DoneRow, FailedRow, RunningRow } from "./job-row"
 import { PauseAlert } from "./pause-alert"
 import { SortableQueued } from "./sortable-queued"
-import { queueDrag, queueSheet, useQueueData, useQueueSheet } from "./use-queue"
+import { isDragEscape, queueDrag, queueSheet, useQueueData, useQueueSheet } from "./use-queue"
 
 function Group({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
@@ -52,10 +52,10 @@ export function QueueSheet() {
     return () => window.clearTimeout(timer)
   }, [open, focusId, loaded])
 
-  const onOpenChange = (next: boolean, details: { reason: string }) => {
+  const onOpenChange = (next: boolean, details: { reason: string; event?: Event }) => {
     if (next) return queueSheet.open()
     // Esc ระหว่างลากเปลี่ยนลำดับ = ยกเลิกการลาก (dnd-kit) ไม่ใช่ปิดชีต
-    if (details.reason === "escape-key" && queueDrag.active) return
+    if (details.reason === "escape-key" && isDragEscape(details.event)) return
     queueSheet.close()
   }
 
@@ -70,6 +70,10 @@ export function QueueSheet() {
         initialFocus={() => {
           const target = focusTarget(bodyRef.current, focusId)
           return target?.hasAttribute("data-details-trigger") ? target : true
+        }}
+        // Base UI หยุดลูกศรไม่ให้ขึ้นไปถึง document ส่วน dnd-kit ฟังลูกศรที่ document: ระหว่างลากจึงข้ามตัวจัดการของ Base UI
+        onKeyDown={(event) => {
+          if (queueDrag.active) event.preventBaseUIHandler()
         }}
         className="max-h-[80vh] gap-0 overflow-y-auto"
       >

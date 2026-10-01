@@ -8,6 +8,7 @@ import {
   applyActionResult,
   applyReorder,
   jobToast,
+  isDragEscape,
   queueDrag,
   queueSheet,
   resetQueueDrag,
@@ -149,6 +150,10 @@ describe("queueSheet", () => {
   })
 })
 
+// เทสรันบน node: window ปลอมพอให้ฟัง/ส่ง keydown ได้
+vi.stubGlobal("window", new EventTarget())
+const escape = () => Object.assign(new Event("keydown"), { key: "Escape" })
+
 describe("queueDrag", () => {
   it("ล้างได้ทันที และปิดชีตแล้วไม่ค้างว่ากำลังลาก", () => {
     startQueueDrag()
@@ -160,5 +165,18 @@ describe("queueDrag", () => {
     startQueueDrag()
     queueSheet.close()
     expect(queueDrag.active).toBe(false)
+  })
+
+  it("Esc ที่ยกเลิกการลากไม่ถูกนับเป็นคำสั่งปิดชีต แม้ dnd-kit ล้างสถานะก่อน Base UI เห็นปุ่มนั้น", () => {
+    startQueueDrag()
+    const cancel = escape()
+    window.dispatchEvent(cancel)
+    resetQueueDrag()
+    expect(isDragEscape(cancel)).toBe(true)
+
+    const next = escape()
+    window.dispatchEvent(next)
+    expect(isDragEscape(next)).toBe(false)
+    expect(isDragEscape(undefined)).toBe(false)
   })
 })

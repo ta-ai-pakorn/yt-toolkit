@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright"
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 
 import type { Job, QueueState } from "../src/lib/types"
 
@@ -126,18 +126,22 @@ function sampleJobs(): Job[] {
 
 const NOT_PAUSED: QueueState = { pausedUntil: null, reason: null, concurrency: 2 }
 
-type MockOptions = { queue?: QueueState; events?: string; eventsAfterJobs?: boolean }
+type MockOptions = { queue?: QueueState; events?: string; eventsAfterJobs?: boolean; jobsAfterEvents?: Job[] }
 
 /**
  * ตอบ GET /api/jobs และ /api/queue ด้วยข้อมูลปลอม · /api/events = สตรีมที่ส่งเหตุการณ์ที่ให้มาแล้วจบ
  * (retry ยาว เบราว์เซอร์จะไม่ต่อใหม่ระหว่างเทส) · eventsAfterJobs = ส่งเหตุการณ์หลังรายการงานโหลดเสร็จแล้วเท่านั้น
+ * · jobsAfterEvents = รายการที่ตอบตั้งแต่ครั้งที่สอง (หน้าเว็บโหลดใหม่ตอน SSE ต่อติด backend จริงตอบสถานะหลังเหตุการณ์)
  */
 async function mockQueue(page: Page, jobs: Job[], opts: MockOptions = {}) {
   let jobsServed!: () => void
   const served = new Promise<void>((resolve) => (jobsServed = resolve))
+  let jobsCalls = 0
   await page.route(/\/api\/jobs(\?.*)?$/, async (route: Route) => {
     if (route.request().method() !== "GET") return route.fallback()
-    await route.fulfill({ json: { jobs } })
+    const body = jobsCalls > 0 && opts.jobsAfterEvents ? opts.jobsAfterEvents : jobs
+    jobsCalls += 1
+    await route.fulfill({ json: { jobs: body } })
     jobsServed()
   })
   await page.route("**/api/queue", (route) => route.fulfill({ json: opts.queue ?? NOT_PAUSED }))
@@ -152,6 +156,17 @@ async function mockQueue(page: Page, jobs: Job[], opts: MockOptions = {}) {
       body: `retry: 600000\n\n${opts.events ?? ""}`,
     })
   })
+}
+
+/**
+ * ลูกศรขึ้นระหว่างลากด้วยคีย์บอร์ด · dnd-kit เริ่มฟังปุ่มและวัดตำแหน่งแถวหลังประกาศ "ยก…" เล็กน้อย
+ * กดเร็วกว่านั้นปุ่มหาย จึงกดซ้ำจนได้ยินตำแหน่งใหม่ (แถวบนสุดแล้วกดขึ้นอีกไม่มีผล)
+ */
+async function moveUpWhileDragging(page: Page, sheet: Locator, announced: string) {
+  await expect(async () => {
+    await page.keyboard.press("ArrowUp")
+    await expect(sheet.getByText(announced)).toBeAttached({ timeout: 500 })
+  }).toPass()
 }
 
 const sse = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`
@@ -299,8 +314,7 @@ test.describe("แถบคิวงาน (ข้อมูลปลอม)", ()
     await sheet.getByRole("button", { name: "ลากเพื่อเปลี่ยนลำดับ คลิปรอคิว ข" }).focus()
     await page.keyboard.press("Space")
     await expect(sheet.getByText("ยก คลิปรอคิว ข ขึ้นแล้ว", { exact: false })).toBeAttached()
-    await page.keyboard.press("ArrowUp")
-    await expect(sheet.getByText("คลิปรอคิว ข อยู่ลำดับที่ 1")).toBeAttached()
+    await moveUpWhileDragging(page, sheet, "คลิปรอคิว ข อยู่ลำดับที่ 1")
     await page.keyboard.press("Space")
     await expect(sheet.getByText("วาง คลิปรอคิว ข ไว้ลำดับที่ 1")).toBeAttached()
 
@@ -322,8 +336,7 @@ test.describe("แถบคิวงาน (ข้อมูลปลอม)", ()
     await sheet.getByRole("button", { name: "ลากเพื่อเปลี่ยนลำดับ คลิปรอคิว ข" }).focus()
     await page.keyboard.press("Space")
     await expect(sheet.getByText("ยก คลิปรอคิว ข ขึ้นแล้ว", { exact: false })).toBeAttached()
-    await page.keyboard.press("ArrowUp")
-    await expect(sheet.getByText("คลิปรอคิว ข อยู่ลำดับที่ 1")).toBeAttached()
+    await moveUpWhileDragging(page, sheet, "คลิปรอคิว ข อยู่ลำดับที่ 1")
     await page.keyboard.press("Escape")
     await expect(sheet.getByText("ยกเลิกการย้าย คลิปรอคิว ข")).toBeAttached()
 
@@ -359,14 +372,24 @@ test.describe("แถบคิวงาน (ข้อมูลปลอม)", ()
 
   test("toast เมื่องานเสร็จหรือพลาดระหว่างเปิดหน้าอยู่ · ดูรายละเอียด = เปิดชีตที่แถวนั้น", async ({ page }) => {
     const jobs = sampleJobs()
+    const finishedOutputs = [{ index: 0, name: "a.mp4", sizeBytes: 1 }]
+    const networkError = { code: "E_NETWORK", message: "เน็ตหลุด ลองใหม่อีกครั้ง", detail: "timed out" }
+    const jobsAfterEvents = jobs.map((j) =>
+      j.id === RUNNING
+        ? { ...j, status: "done" as const, progress: 1, stage: undefined, speedBps: undefined, etaS: undefined, finishedAt: "2026-10-01T10:01:00+00:00", outputs: finishedOutputs }
+        : j.id === QUEUED_A
+          ? { ...j, status: "failed" as const, error: networkError, finishedAt: "2026-10-01T10:01:01+00:00" }
+          : j,
+    )
     await mockQueue(page, jobs, {
       eventsAfterJobs: true,
+      jobsAfterEvents,
       events:
-        sse("job.updated", { id: RUNNING, status: "done", progress: 1, stage: null, speedBps: null, etaS: null, finishedAt: "2026-10-01T10:01:00+00:00", outputs: [{ index: 0, name: "a.mp4", sizeBytes: 1 }] }) +
+        sse("job.updated", { id: RUNNING, status: "done", progress: 1, stage: null, speedBps: null, etaS: null, finishedAt: "2026-10-01T10:01:00+00:00", outputs: finishedOutputs }) +
         sse("job.updated", {
           id: QUEUED_A,
           status: "failed",
-          error: { code: "E_NETWORK", message: "เน็ตหลุด ลองใหม่อีกครั้ง", detail: "timed out" },
+          error: networkError,
           finishedAt: "2026-10-01T10:01:01+00:00",
         }),
     })

@@ -18,7 +18,7 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { GripVertical } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { fill, th } from "@/i18n/th"
 import type { Job } from "@/lib/types"
@@ -26,7 +26,7 @@ import { cn } from "cn"
 
 import { QueuedRow } from "./job-row"
 import { jobTitle } from "./job-text"
-import { endQueueDrag, resetQueueDrag, startQueueDrag, useReorder } from "./use-queue"
+import { resetQueueDrag, startQueueDrag, useReorder } from "./use-queue"
 
 function SortableRow({ job }: { job: Job }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
@@ -76,11 +76,20 @@ export function SortableQueued({ jobs }: { jobs: Job[] }) {
     return job ? jobTitle(job) : String(id)
   }
   const placeOf = (id: UniqueIdentifier) => ids.indexOf(String(id)) + 1
+  // dnd-kit เรียก onDragOver ทันทีหลังยก (over = แถวตัวเอง) และเมื่อวัดตำแหน่งใหม่ ข้อความ "ยก…ขึ้นแล้ว" จึงถูกทับ
+  // ประกาศเฉพาะตอนตำแหน่งเปลี่ยนจริง
+  const lastOver = useRef<UniqueIdentifier | null>(null)
 
   const announcements: Announcements = {
-    onDragStart: ({ active }) => fill(th.queue.dnd.picked, { title: titleOf(active.id) }),
-    onDragOver: ({ active, over }) =>
-      over ? fill(th.queue.dnd.moved, { title: titleOf(active.id), n: placeOf(over.id) }) : undefined,
+    onDragStart: ({ active }) => {
+      lastOver.current = active.id
+      return fill(th.queue.dnd.picked, { title: titleOf(active.id) })
+    },
+    onDragOver: ({ active, over }) => {
+      if (!over || over.id === lastOver.current) return undefined
+      lastOver.current = over.id
+      return fill(th.queue.dnd.moved, { title: titleOf(active.id), n: placeOf(over.id) })
+    },
     onDragEnd: ({ active, over }) =>
       over
         ? fill(th.queue.dnd.dropped, { title: titleOf(active.id), n: placeOf(over.id) })
@@ -89,7 +98,7 @@ export function SortableQueued({ jobs }: { jobs: Job[] }) {
   }
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
-    endQueueDrag()
+    resetQueueDrag()
     if (!over || active.id === over.id) return
     const from = ids.indexOf(String(active.id))
     const to = ids.indexOf(String(over.id))
@@ -105,7 +114,7 @@ export function SortableQueued({ jobs }: { jobs: Job[] }) {
         collisionDetection={closestCenter}
         onDragStart={startQueueDrag}
         onDragEnd={onDragEnd}
-        onDragCancel={endQueueDrag}
+        onDragCancel={resetQueueDrag}
         accessibility={{
           announcements,
           // คำแนะนำวิธีลากอยู่ในข้อความตอนยกแล้ว (dnd.picked) ไม่ใช้คำแนะนำภาษาอังกฤษของ dnd-kit

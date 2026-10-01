@@ -105,21 +105,34 @@ export const queueSheet = createSheetStore()
 
 /**
  * กำลังลากเปลี่ยนลำดับงานในชีตอยู่ไหม (sortable-queued.tsx ตั้งค่า) · ชีตใช้ตัดสินว่า Esc หมายถึง "ยกเลิกการลาก"
- * ไม่ใช่ "ปิดชีต": Base UI เห็น Esc ก่อน dnd-kit จึงล้างค่าหลังเหตุการณ์ปุ่มนั้นจบ (endQueueDrag)
+ * ไม่ใช่ "ปิดชีต" · ลำดับที่ Base UI กับ dnd-kit เห็น Esc ไม่แน่นอน จึงจำตัวเหตุการณ์ Esc ที่กดระหว่างลากไว้ (cancelKey)
+ * แล้วเทียบกับเหตุการณ์ที่ Base UI ส่งมา แทนการรอเวลา
  */
-export const queueDrag = { active: false }
+export const queueDrag: { active: boolean; cancelKey: Event | null } = { active: false, cancelKey: null }
+
+function rememberCancelKey(event: KeyboardEvent): void {
+  if (event.key === "Escape") queueDrag.cancelKey = event
+}
 
 export function startQueueDrag(): void {
   queueDrag.active = true
+  queueDrag.cancelKey = null
+  // capture ที่ window: เห็นก่อนทั้ง Base UI และ dnd-kit
+  window.addEventListener("keydown", rememberCancelKey, { capture: true })
 }
 
-export function endQueueDrag(): void {
-  window.setTimeout(resetQueueDrag, 0)
-}
-
-/** ล้างทันที: รายการที่ลากอยู่หายไปกลางคัน (งานเริ่มทำ, กดนอกชีต) หรือชีตปิด จะได้ไม่ค้างว่ายังลากอยู่ */
+/**
+ * จบการลาก (วาง / ยกเลิก) หรือล้างทันทีเมื่อรายการที่ลากอยู่หายไปกลางคัน (งานเริ่มทำ, กดนอกชีต) หรือชีตปิด
+ * จะได้ไม่ค้างว่ายังลากอยู่
+ */
 export function resetQueueDrag(): void {
   queueDrag.active = false
+  window.removeEventListener("keydown", rememberCancelKey, { capture: true })
+}
+
+/** Esc นี้เป็นของการลาก (กำลังลากอยู่ หรือเป็นปุ่มเดียวกับที่เพิ่งยกเลิกการลาก) ไม่ใช่คำสั่งปิดชีต */
+export function isDragEscape(event: Event | undefined): boolean {
+  return queueDrag.active || (event !== undefined && event === queueDrag.cancelKey)
 }
 
 export function useQueueSheet(): SheetState {
