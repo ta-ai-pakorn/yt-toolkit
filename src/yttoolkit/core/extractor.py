@@ -77,9 +77,9 @@ class Extractor(Protocol):
         ...
 
     def pinned_comment(self, video_id: str) -> dict | None:
-        """คอมเมนต์ปักหมุดที่เจ้าของช่องเขียนเอง (C-A2): {"text", "likes"?, "publishedText"?} หรือ None
+        """คอมเมนต์ที่ปักหมุดไว้ (ของใครก็ได้ C-A2): {"text", "byUploader", "likes"?, "publishedText"?} หรือ None
 
-        None = ไม่มีคอมเมนต์ปักหมุด, ปักหมุดคอมเมนต์ของผู้ชม หรือปิดคอมเมนต์ ไม่คืนชื่อ/id ของผู้เขียน (PDPA)
+        byUploader = เจ้าของช่องเขียนเอง · None = ไม่มีคอมเมนต์ปักหมุดหรือปิดคอมเมนต์ ไม่คืนชื่อ/id ของผู้เขียน (PDPA)
         """
         ...
 
@@ -375,7 +375,7 @@ class YtDlpExtractor:
             raise YtError("E_UNKNOWN", f"{type(exc).__name__}: {exc}") from exc
 
     def pinned_comment(self, video_id: str) -> dict | None:
-        """คอมเมนต์ปักหมุดของเจ้าของช่อง (C-A2) ดึงเมื่อผู้ใช้เปิดดูเท่านั้น ไม่ดึงตอน probe
+        """คอมเมนต์ที่ปักหมุดไว้ ของใครก็ได้ พร้อม byUploader (C-A2) ดึงเมื่อผู้ใช้เปิดดูเท่านั้น ไม่ดึงตอน probe
 
         ทางหลัก (ถูกสุด ~2 คำขอ innertube "next"): เรียกตัวดึงคอมเมนต์ของ yt-dlp ตรง ๆ
         ด้วย comment_sort=top และ max_comments=1 (คอมเมนต์ปักหมุดอยู่อันดับแรกเสมอ)

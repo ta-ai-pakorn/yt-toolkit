@@ -250,7 +250,7 @@ test.describe("แท็บข้อมูลคลิป: คอมเมนต
     expect(await text.evaluate((el) => el.textContent)).toBe(COMMENT.text)
     await expect(text).toHaveCSS("white-space", "pre-line")
     await expect(pinnedRegion(page).getByRole("link")).toHaveCount(0)
-    await expect(pinnedRegion(page).getByRole("img", { name: "ถูกใจ 1,520 ครั้ง" })).toHaveText("1.5 พัน")
+    await expect(pinnedRegion(page).getByRole("img", { name: "ไลก์ 1,520 ครั้ง" })).toHaveText("1.5 พัน")
     expect(calls.count).toBe(1)
 
     const copy = page.getByRole("button", { name: "คัดลอกคอมเมนต์ปักหมุด" })
@@ -286,6 +286,17 @@ test.describe("แท็บข้อมูลคลิป: คอมเมนต
       await expect(pinnedRegion(page).getByText(other, { exact: true })).toHaveCount(0)
     })
   }
+
+  test("backend รุ่นเก่าไม่ส่ง byUploader (ไม่มีคีย์): ขึ้นป้าย 'ผู้ชม' ไม่ใช่ 'เจ้าของช่อง' (review I-1)", async ({ page }) => {
+    await withVideo(page, ZOO)
+    await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: { text: "ปักหมุดไว้" } } }))
+    await gotoInfo(page, ZOO)
+    await expect(pinnedRegion(page).getByText("ปักหมุดไว้")).toBeVisible()
+    const badge = pinnedRegion(page).locator("[data-author]")
+    await expect(badge).toHaveCount(1)
+    await expect(badge).toHaveAttribute("data-author", "viewer")
+    await expect(badge).toHaveText("ผู้เขียน: ผู้ชม")
+  })
 
   test("ไม่มีคอมเมนต์ปักหมุด (null): ข้อความจาง ไม่มีป้ายผู้เขียน และไม่มีปุ่มคัดลอก", async ({ page }) => {
     await withVideo(page, ZOO)
@@ -577,6 +588,22 @@ test.describe("แท็บข้อมูลคลิป: ช่วงที่
     await expect(highlighted).toBeInViewport()
   })
 
+  test("เปิด ?tab=info ตรง ๆ ไม่ขอ storyboard จนกว่าจะกดเวลาของช่วงที่คนดูซ้ำ (review M-2)", async ({ page }) => {
+    await withVideo(page, THAI, { mostReplayed: SEGMENTS })
+    const storyboardCalls: string[] = []
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === `/api/videos/${THAI}/storyboard`) storyboardCalls.push(request.url())
+    })
+    await gotoInfo(page, THAI)
+    const times = replayedRegion(page).getByRole("button", { name: /^ไปภาพเฟรมช่วง / })
+    await expect(times).toHaveText(["00:00:20", "00:01:00"])
+    await page.waitForTimeout(500)
+    expect(storyboardCalls).toHaveLength(0)
+    await times.nth(1).click()
+    await expect(page).toHaveURL(new RegExp(`/v/${THAI}\\?at=63635$`))
+    expect(storyboardCalls.length).toBeGreaterThan(0)
+  })
+
   test("ช่วงสั้นที่ไม่มีภาพอยู่ข้างใน: ภาพที่ใกล้กลางช่วงที่สุดได้ป้าย และปุ่มเวลาพาไปภาพนั้น (review M-2)", async ({ page }) => {
     // 61-62 วินาที: ไม่มีภาพในช่วง กลางช่วง 61.5 วินาที ใกล้ภาพ 63635 ms (00:01:03) ที่สุด
     await withVideo(page, THAI, { mostReplayed: [{ startMs: 61_000, endMs: 62_000 }] })
@@ -742,6 +769,31 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
       await page.reload()
       await expect(page.getByText("ซับ: ไทย (อัตโนมัติ)")).toBeVisible()
       expect(await tabTop(page)).toBe(before)
+    })
+  }
+
+  for (const width of [1280, 360]) {
+    test(`จอ ${width} px: Skeleton หัวคลิปสูงใกล้เคียงของจริง แถบแท็บขยับไม่เกิน 40 px ตอนโหลดเสร็จ`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 })
+      await withVideo(page, BBB, FULL)
+      let release = () => {}
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      // ลงทะเบียนทีหลัง = ทำงานก่อน: หน่วงคำขอข้อมูลคลิปแล้วส่งต่อให้ตัวแก้ข้อมูลด้านบน
+      await page.route(
+        (url) => url.pathname === `/api/videos/${BBB}`,
+        async (route) => {
+          await gate
+          await route.fallback()
+        },
+      )
+      await page.goto(`/v/${BBB}`)
+      await expect(page.getByRole("status").filter({ hasText: "กำลังโหลด" }).first()).toBeAttached()
+      const skeletonTop = await tabTop(page)
+      expect(skeletonTop).toBeGreaterThan(0)
+      release()
+      await expect(tile(page, "ยอดวิว 123,456 ครั้ง")).toBeVisible()
+      const loadedTop = await tabTop(page)
+      expect(Math.abs(loadedTop - skeletonTop)).toBeLessThanOrEqual(40)
     })
   }
 

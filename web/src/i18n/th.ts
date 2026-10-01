@@ -87,7 +87,7 @@ export const th = {
       publishedLabel: "เผยแพร่ {date}",
     },
     stats: {
-      likesLabel: "ถูกใจ {n} ครั้ง",
+      likesLabel: "ไลก์ {n} ครั้ง",
     },
     category: "หมวดหมู่",
     openYoutube: "เปิดในยูทูป",

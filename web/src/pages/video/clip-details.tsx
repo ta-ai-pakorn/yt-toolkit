@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { cn } from "cn"
 import { Copy, Flame, ThumbsUp } from "lucide-react"
 import { useId, type ReactNode } from "react"
@@ -131,7 +131,8 @@ const formatSegments = (segments: readonly ReplaySegment[]) =>
 /**
  * ช่วงที่คนดูซ้ำบ่อย (ไม่เกิน 3 ช่วง): ไอคอนเดียวกับป้ายบนภาพเฟรม + ปุ่มเวลาเริ่มของแต่ละช่วง
  * กดแล้วไปแท็บภาพเฟรม ไฮไลต์ภาพแรกในช่วงนั้น (ไม่มีภาพในช่วง = ภาพที่ใกล้กลางช่วงที่สุด ซึ่งก็มีป้าย)
- * ใช้ storyboard ใน cache (ปกติโหลดไว้แล้วจากแท็บภาพเฟรม) ยังไม่มี = ใช้เวลาเริ่มของช่วง
+ * ไม่ขอ storyboard เองตอนเปิดแท็บ: ตอนกดปุ่มเวลาจึงใช้ของใน cache หรือขอตอนนั้น (ensureQueryData) แล้วค่อยไป
+ * ขอไม่สำเร็จ = ใช้เวลาเริ่มของช่วงแทน
  */
 function ReplayedSection({
   videoId,
@@ -142,8 +143,18 @@ function ReplayedSection({
   segments: ReplaySegment[]
   onPick: (ms: number) => void
 }) {
-  const storyboard = useQuery(storyboardQuery(videoId, true))
-  const frames = storyboard.data?.frames ?? []
+  const queryClient = useQueryClient()
+  async function pick(segment: ReplaySegment) {
+    let target = segment.startMs
+    try {
+      const { frames } = await queryClient.ensureQueryData(storyboardQuery(videoId, true))
+      const frame = segmentFrameIndex(frames, segment)
+      if (frame >= 0) target = frames[frame].tMs
+    } catch {
+      // ไม่มี storyboard: ใช้เวลาเริ่มของช่วง
+    }
+    onPick(target)
+  }
   return (
     <InfoSection
       title={t.info.replayedTitle}
@@ -155,10 +166,7 @@ function ReplayedSection({
           <li key={`${segment.startMs}-${index}`}>
             <TimeButton
               ms={segment.startMs}
-              onPick={() => {
-                const frame = segmentFrameIndex(frames, segment)
-                onPick(frame >= 0 ? frames[frame].tMs : segment.startMs)
-              }}
+              onPick={() => void pick(segment)}
             />
           </li>
         ))}
@@ -219,14 +227,14 @@ function PinnedText({ comment }: { comment: PinnedComment }) {
 
 /**
  * ป้ายบอกว่าใครเขียนคอมเมนต์ที่ปักหมุด: "เจ้าของช่อง" หรือ "ผู้ชม" (ไม่มีชื่อผู้เขียน ตาม PDPA)
- * โปรแกรมอ่านหน้าจอได้ "ผู้เขียน: เจ้าของช่อง" · backend รุ่นก่อนที่ไม่ส่ง byUploader = ไม่มีป้าย
+ * โปรแกรมอ่านหน้าจอได้ "ผู้เขียน: เจ้าของช่อง" · ไม่มีคีย์ byUploader (backend รุ่นก่อน) = "ผู้ชม" (ไม่รู้ว่าเป็นของเจ้าของช่อง)
  */
-function AuthorBadge({ byUploader }: { byUploader: boolean | undefined }) {
-  if (byUploader === undefined) return null
+function AuthorBadge({ byUploader }: { byUploader: boolean }) {
+  const owner = byUploader === true
   return (
-    <Badge variant={byUploader ? "secondary" : "outline"} data-author={byUploader ? "owner" : "viewer"}>
+    <Badge variant={owner ? "secondary" : "outline"} data-author={owner ? "owner" : "viewer"}>
       <span className="sr-only">{t.pinned.author} </span>
-      {byUploader ? t.pinned.byOwner : t.pinned.byViewer}
+      {owner ? t.pinned.byOwner : t.pinned.byViewer}
     </Badge>
   )
 }
@@ -250,7 +258,7 @@ function PinnedSection({ videoId }: { videoId: string }) {
   return (
     <InfoSection
       title={t.pinned.title}
-      extra={comment && <AuthorBadge byUploader={(comment as Partial<PinnedComment>).byUploader} />}
+      extra={comment && <AuthorBadge byUploader={comment.byUploader} />}
       copy={comment ? { label: t.pinned.copy, text: comment.text } : undefined}
     >
       {body}
