@@ -766,8 +766,8 @@ def test_trim_drops_urls_and_unused_fields_but_keeps_storyboard(db: Database) ->
 
 def test_trim_probe_adds_probe_version_description_and_captions() -> None:
     data = trim_probe(load("88o5Sk8_m1Y"))
-    assert PROBE_VERSION == 4  # owner round 3: mostReplayed แบบใหม่ (review I-2, M-6)
-    assert data["probeVersion"] == 4
+    assert PROBE_VERSION == 5  # M4: เก็บ license และ asr/audio_channels ของเสียงเพิ่ม
+    assert data["probeVersion"] == 5
     assert data["description"] == load("88o5Sk8_m1Y")["description"]
     assert set(data["captions"]) == {"owner", "original", "translated", "translateFrom"}
     assert [o["key"] for o in data["captions"]["original"]] == ["th-orig"]
@@ -847,6 +847,37 @@ def test_round_two_row_with_old_most_replayed_is_reprobed(
     db.execute("UPDATE videos SET probe_json = ?", (json.dumps(data),))
     assert svc.get(ZOO)["mostReplayed"] == [{"startMs": 190, "endMs": 570}]
     assert ext.count["probe"] == 2
+
+
+def test_round_three_row_without_license_is_reprobed(
+    svc: VideoService, ext: CountingExtractor, db: Database
+) -> None:
+    # M4: แถวรุ่น 4 ไม่มี license / asr / audio_channels ต้อง probe ใหม่ (แบบเดียวกับรุ่นก่อน ๆ)
+    svc.get("88o5Sk8_m1Y")
+    data = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
+    data["probeVersion"] = 4
+    data.pop("license")
+    db.execute("UPDATE videos SET probe_json = ?", (json.dumps(data),))
+    assert svc.get("88o5Sk8_m1Y")["license"] == "Creative Commons Attribution license (reuse allowed)"
+    assert ext.count["probe"] == 2
+    stored = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
+    assert stored["probeVersion"] == 5 and "license" in stored
+
+
+def test_trim_keeps_license_and_audio_sample_rate_and_channels() -> None:
+    raw = load(BBB)
+    raw["license"] = "Creative Commons Attribution license (reuse allowed)"
+    for fmt in raw["formats"]:
+        if fmt.get("format_id") == "140":
+            fmt["asr"], fmt["audio_channels"] = 44100, 2
+        elif fmt.get("format_id") == "299":
+            fmt["asr"], fmt["audio_channels"] = None, None
+    data = trim_probe(raw)
+    assert data["license"] == raw["license"]
+    by_id = {f["format_id"]: f for f in data["formats"] if "format_id" in f}
+    assert by_id["140"]["asr"] == 44100 and by_id["140"]["audio_channels"] == 2
+    assert "asr" not in by_id["299"] and "audio_channels" not in by_id["299"]
+    assert "license" not in trim_probe(load(BBB))
 
 
 def test_row_without_probe_version_is_still_the_offline_fallback(

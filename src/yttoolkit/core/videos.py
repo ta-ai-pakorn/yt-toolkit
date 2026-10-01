@@ -27,7 +27,8 @@ CACHE_TTL = timedelta(hours=24)
 # แต่ยังใช้เป็นข้อมูลสำรองตอนออฟไลน์ได้ (_stored_hit)
 # 3 = owner round 2 (2026-10-01): เก็บยอดวิว/ไลก์/คอมเมนต์/ผู้ติดตาม, แท็ก, หมวดหมู่ และ heatmap เพิ่ม
 # 4 = owner round 3 (2026-10-01): mostReplayed คิดแบบใหม่ (review I-2) แถวรุ่น 3 เก็บช่วงแบบเก่าไว้ จึงต้อง probe ใหม่
-PROBE_VERSION = 4
+# 5 = M4 (2026-10-01): เก็บ license ของคลิป และ asr/audio_channels ของแทร็กเสียง (แหล่งที่มา.txt, ขนาดไฟล์ wav)
+PROBE_VERSION = 5
 # ข้อมูลคลิป (C-A1): แท็กเก็บไม่เกินเท่านี้ ช่วงดูซ้ำบ่อยเอาไม่เกินเท่านี้ ห่างกันอย่างน้อยกี่วินาที
 # และรวมช่วงข้างเคียงที่ค่าไม่ต่ำกว่ากี่เท่าของยอด
 TAGS_MAX = 50
@@ -71,6 +72,8 @@ _MEDIA_FIELDS = (
     "language",
     "language_preference",
     "abr",
+    "asr",
+    "audio_channels",
 )
 _STORYBOARD_FIELDS = (
     "format_id",
@@ -337,6 +340,22 @@ def _video_formats(formats: list[dict]) -> list[dict]:
     )
 
 
+def _positive_int(value: Any) -> int | None:
+    """จำนวนเต็มบวก (float ที่เป็นจำนวนเต็มก็รับ) อย่างอื่น = ไม่รู้ (None)"""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
+    return int(value) if value > 0 else None
+
+
+def _license(raw: dict) -> str | None:
+    value = raw.get("license")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
 def _audio_candidates(formats: list[dict]) -> list[dict]:
     result = []
     for fmt in formats:
@@ -387,6 +406,11 @@ def _audio_formats(formats: list[dict]) -> list[dict]:
         abr = fmt.get("abr")
         if isinstance(abr, int | float) and not isinstance(abr, bool) and abr > 0:
             entry["abrKbps"] = round(abr)
+        # M4: ขนาดไฟล์ wav คาดการณ์จากค่าเหล่านี้ (ไม่รู้ = ไม่ใส่คีย์ หน้าเว็บใช้ 44100 Hz 2 ช่อง)
+        if (rate := _positive_int(fmt.get("asr"))) is not None:
+            entry["sampleRate"] = rate
+        if (channels := _positive_int(fmt.get("audio_channels"))) is not None:
+            entry["channels"] = channels
         result.append(entry)
     return result
 
@@ -425,6 +449,10 @@ def to_video_info(raw: dict) -> dict:
     replayed = _stored_replayed(raw.get("mostReplayed")) or most_replayed(raw.get("heatmap"), raw.get("duration"))
     if replayed:
         info["mostReplayed"] = replayed
+    # สัญญาอนุญาตตามที่ยูทูปแสดง (เช่น Creative Commons) ใช้ใน แหล่งที่มา.txt (M4)
+    license_text = _license(raw)
+    if license_text is not None:
+        info["license"] = license_text
     return info
 
 
@@ -432,7 +460,7 @@ def trim_probe(raw: dict) -> dict:
     """ตัดข้อมูลดิบให้เหลือที่งานถัดไปต้องใช้: ฟิลด์ของ VideoInfo, format วิดีโอ/เสียงล้วน
     และ storyboard (พร้อม fragments/rows/columns/fps/width/height) ไม่เก็บ URL ตรงของสื่อ
 
-    เพิ่ม probeVersion, description (ถ้ามี) และ captions (กลุ่มซับตาม tracks.trim_captions)
+    เพิ่ม probeVersion, description (ถ้ามี), license (ถ้ามี) และ captions (กลุ่มซับตาม tracks.trim_captions)
     """
     # import ในฟังก์ชัน: tracks import _audio_formats จากโมดูลนี้ (กัน import วนตอนโหลดโมดูล)
     from .tracks import trim_captions
@@ -487,6 +515,8 @@ def trim_probe(raw: dict) -> dict:
     # heatmap ดิบมี ~100 รายการ เก็บเฉพาะช่วงที่คำนวณแล้ว (ไม่เกิน 3 ช่วง) ให้ probe_json เล็ก
     if replayed := most_replayed(raw.get("heatmap"), raw.get("duration")):
         trimmed["mostReplayed"] = replayed
+    if (license_text := _license(raw)) is not None:
+        trimmed["license"] = license_text
     return trimmed
 
 

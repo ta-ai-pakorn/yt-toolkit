@@ -1,4 +1,5 @@
-"""ข้อมูลคลิป (C-A1, owner round 2): stats, tags, categories, mostReplayed ใน VideoInfo"""
+"""ข้อมูลคลิป (C-A1, owner round 2): stats, tags, categories, mostReplayed ใน VideoInfo
+และ (M4) license กับ sampleRate/channels ของแทร็กเสียง"""
 
 from __future__ import annotations
 
@@ -246,3 +247,40 @@ def test_stored_most_replayed_that_is_broken_falls_back_to_heatmap() -> None:
     for broken in ([{"startMs": 5, "endMs": 1}], [{"startMs": 1.5, "endMs": 3}], "x", [1]):
         assert to_video_info({**raw, "mostReplayed": broken})["mostReplayed"] == expected
     assert "mostReplayed" not in to_video_info({"id": BBB, "mostReplayed": [{"startMs": True, "endMs": 4}]})
+
+
+# ---------- license / sample rate (M4) ----------
+
+
+def test_license_of_the_thai_clip() -> None:
+    info = to_video_info(load(THAI))
+    assert info["license"] == "Creative Commons Attribution license (reuse allowed)"
+    assert to_video_info(trim_probe(load(THAI)))["license"] == info["license"]
+
+
+@pytest.mark.parametrize("bad", [None, "", "   ", 3, ["x"]])
+def test_missing_or_bad_license_is_omitted(bad: object) -> None:
+    assert "license" not in to_video_info({"id": BBB, "license": bad})
+    assert "license" not in to_video_info(load(BBB))
+
+
+def test_audio_entries_carry_sample_rate_and_channels_when_known() -> None:
+    raw = load(BBB)
+    for fmt in raw["formats"]:
+        if fmt.get("format_id") == "140":
+            fmt["asr"], fmt["audio_channels"] = 44100, 2
+        elif fmt.get("format_id") == "251":
+            fmt["asr"], fmt["audio_channels"] = 48000.0, None
+    audio = {a["formatId"]: a for a in to_video_info(raw)["audio"]}
+    assert audio["140"]["sampleRate"] == 44100 and audio["140"]["channels"] == 2
+    assert audio["251"]["sampleRate"] == 48000 and type(audio["251"]["sampleRate"]) is int
+    assert "channels" not in audio["251"]
+    assert "sampleRate" not in audio["139"] and "channels" not in audio["139"]
+    assert to_video_info(trim_probe(raw))["audio"] == to_video_info(raw)["audio"]
+
+
+@pytest.mark.parametrize("bad", [True, 0, -1, "44100", 1.5])
+def test_bad_sample_rate_and_channels_are_dropped(bad: object) -> None:
+    fmt = {"format_id": "140", "vcodec": "none", "acodec": "mp4a.40.2", "asr": bad, "audio_channels": bad}
+    entry = to_video_info({"id": BBB, "formats": [fmt]})["audio"][0]
+    assert "sampleRate" not in entry and "channels" not in entry
