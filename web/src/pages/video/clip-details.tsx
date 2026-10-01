@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query"
 import { cn } from "cn"
 import { ChevronDown, Copy, ThumbsUp } from "lucide-react"
 import {
-  useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -166,6 +166,8 @@ function ExpandButton({
 /**
  * ข้อความถูกตัดที่ 3 บรรทัดอยู่หรือไม่ (วัดใหม่เมื่อกล่องเปลี่ยนขนาด เช่นหมุนจอหรือย่อหน้าต่าง)
  * วัดเฉพาะตอนพับ ตอนกางอยู่ใช้ผลครั้งล่าสุด (ปุ่ม "ย่อ" จึงยังอยู่)
+ * วัดใน useLayoutEffect (ก่อนเบราว์เซอร์วาดจอ): ปุ่ม "ดูทั้งหมด" ขึ้นพร้อมข้อความในเฟรมแรก
+ * แถบแท็บที่อยู่ด้านล่างจึงไม่กระโดดลงหลังหน้าโผล่ (review owner fb1)
  */
 function useClamped(
   box: RefObject<HTMLElement | null>,
@@ -173,7 +175,7 @@ function useClamped(
   text: string
 ): boolean {
   const [clamped, setClamped] = useState(false)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = box.current
     if (!element || !collapsed) return
     const check = () =>

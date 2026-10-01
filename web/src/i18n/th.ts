@@ -139,6 +139,7 @@ export const th = {
     availableLater: "เปิดใช้ในเวอร์ชันถัดไป",
     viewSubs: "ดูซับช่วงนี้",
     replayed: "ดูซ้ำบ่อย",
+    replayedHint: "ช่วงที่คนดูซ้ำบ่อย",
     replayedTitle: "ช่วงที่คนดูซ้ำมากที่สุด:",
     goToReplayed: "ไปภาพเฟรมช่วง {time}",
   },

@@ -417,7 +417,7 @@ test.describe("ช่วงที่คนดูซ้ำมากที่ส�
     await expect(button.locator("[data-replayed] svg")).toBeVisible()
   })
 
-  test("บรรทัด 'ช่วงที่คนดูซ้ำมากที่สุด: 00:00:20, 00:01:00' · กดเวลาแล้วภาพที่ใกล้ที่สุดถูกไฮไลต์ เลื่อนมาให้เห็น และได้โฟกัส", async ({
+  test("บรรทัด 'ช่วงที่คนดูซ้ำมากที่สุด: 00:00:20, 00:01:00' · กดเวลาแล้วภาพแรกในช่วงถูกไฮไลต์ เลื่อนมาให้เห็น และได้โฟกัส", async ({
     page,
   }) => {
     await withVideo(page, THAI, { mostReplayed: SEGMENTS })
@@ -427,13 +427,15 @@ test.describe("ช่วงที่คนดูซ้ำมากที่ส�
     const times = section.getByRole("button", { name: /^ไปภาพเฟรมช่วง / })
     await expect(times).toHaveText(["00:00:20", "00:01:00"])
     await times.nth(1).click()
-    await expect(page).toHaveURL(/[?&]at=60000(&|$)/)
+    // review M-2: ภาพแรกที่อยู่ในช่วง 60-66 วินาที (ภาพห่างกัน 4895 ms → 63635 ms = 00:01:03) ไม่ใช่ภาพที่ใกล้ 60 วินาที
+    // ที่สุด (58740 ms อยู่นอกช่วงและไม่มีป้าย)
+    await expect(page).toHaveURL(/[?&]at=63635(&|$)/)
     const highlighted = frameList(page).locator("[data-highlighted]")
     await expect(highlighted).toHaveCount(1)
     await expect(highlighted).toBeFocused()
     await expect(highlighted).toBeInViewport()
-    // ภาพที่ใกล้ 60 วินาทีที่สุด (ภาพห่างกัน 4895 ms → 58740 ms = 00:00:58)
-    await expect(highlighted.locator("img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:00:58")
+    await expect(highlighted.locator("img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:01:03")
+    await expect(highlighted.locator("[data-replayed]")).toHaveCount(1)
 
     // กดเวลาเดิมซ้ำหลังโฟกัสไปที่อื่น ก็กลับมาที่ภาพเดิม
     await page.evaluate(() => window.scrollTo(0, 0))
@@ -441,6 +443,26 @@ test.describe("ช่วงที่คนดูซ้ำมากที่ส�
     await times.nth(1).click()
     await expect(highlighted).toBeFocused()
     await expect(highlighted).toBeInViewport()
+  })
+
+  test("ช่วงสั้นที่ไม่มีภาพอยู่ข้างใน: ภาพที่ใกล้กลางช่วงที่สุดได้ป้าย และปุ่มเวลาพาไปภาพนั้น (review M-2)", async ({ page }) => {
+    // 61-62 วินาที: ไม่มีภาพในช่วง กลางช่วง 61.5 วินาที ใกล้ภาพ 63635 ms (00:01:03) ที่สุด
+    await withVideo(page, THAI, { mostReplayed: [{ startMs: 61_000, endMs: 62_000 }] })
+    await page.goto(`/v/${THAI}`)
+    const marked = frameList(page).locator("button:has([data-replayed])")
+    await expect(marked).toHaveCount(1)
+    await expect(marked.locator("img")).toHaveAttribute("alt", "ภาพเฟรมที่ 00:01:03")
+    await page.getByRole("button", { name: /^ไปภาพเฟรมช่วง 00:01:01/ }).click()
+    const highlighted = frameList(page).locator("[data-highlighted]")
+    await expect(highlighted).toBeFocused()
+    await expect(highlighted.locator("[data-replayed]")).toHaveCount(1)
+  })
+
+  test("ป้ายในแท็บทรานสคริปต์มีคำอธิบายเมื่อชี้เมาส์ (review M-3)", async ({ page }) => {
+    await withVideo(page, THAI, { mostReplayed: SEGMENTS })
+    await page.goto(`/v/${THAI}?tab=transcript`)
+    const mark = page.getByRole("list", { name: LINES }).locator("[data-replayed]").first()
+    await expect(mark).toHaveAttribute("title", "ช่วงที่คนดูซ้ำบ่อย")
   })
 
   test("คลิปที่ไม่มี heatmap: ไม่มีบรรทัดช่วงที่ดูซ้ำ และไม่มีป้ายบนภาพ", async ({ page }) => {
@@ -511,6 +533,28 @@ test.describe("หัวคลิปแบบกระชับ", () => {
     await expect(chapters).toHaveAttribute("aria-expanded", "true")
     await expect(chapterRegion(page).getByRole("listitem")).toHaveText(["00:00:00Intro", "00:00:05The cool thing", "00:00:17End"])
   })
+
+  // review I-3: ชื่อคลิปยาวต้องไม่ดันแถบแท็บพ้นจอแรกของมือถือ (ชื่อ BBB 64 ตัว และชื่อไทย 100 ตัว)
+  const LONG_THAI = "วิธีทำการตลาดออนไลน์ให้ได้ลูกค้าจริงสำหรับธุรกิจเล็กด้วยงบประมาณจำกัดและเครื่องมือฟรี".repeat(3)
+  const LONG_TITLES = [
+    ["ชื่อ BBB 64 ตัว", "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film"],
+    ["ชื่อไทย 100 ตัว", [...LONG_THAI].slice(0, 100).join("")],
+  ] as const
+  for (const [label, title] of LONG_TITLES) {
+    test(`จอ 360×800 กับ${label}: แถบแท็บยังอยู่ในจอแรก (ไม่เกิน 800 px) และอ่านชื่อเต็มได้`, async ({ page }) => {
+      await page.setViewportSize({ width: 360, height: 800 })
+      await withVideo(page, ZOO, { ...FULL, title })
+      await page.goto(`/v/${ZOO}`)
+      await expect(heading(page)).toHaveAccessibleName(title)
+      await expect(toggle(page, "แท็ก (12)")).toBeVisible()
+      const tabs = await page.getByRole("tablist", { name: TAB_LIST }).boundingBox()
+      expect(tabs).not.toBeNull()
+      expect((tabs?.y ?? 0) + (tabs?.height ?? 0)).toBeLessThanOrEqual(800)
+      // ชื่อที่ถูกตัดที่ 3 บรรทัดยังอ่านเต็มได้: ชื่อเต็มอยู่ใน title (ชี้เมาส์/กดค้าง) และโปรแกรมอ่านหน้าจออ่านครบ
+      await expect(heading(page)).toHaveAttribute("title", title)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
+    })
+  }
 
   test("จอกว้าง: chapter เริ่มแบบกาง (เห็นรายการเลย) พับได้จากหัวข้อ", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -583,3 +627,56 @@ async function seriousViolations(page: Page) {
     .filter((v) => v.impact === "serious" || v.impact === "critical")
     .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))
 }
+
+// review M-8: รอยต่อกับ backend ปลอมจริง (ไม่ mock /pinned-comment และ /note) ล็อกว่ารูปแบบคำตอบตรงกับที่หน้าเว็บอ่าน
+test.describe("รอยต่อกับ backend (ไม่ mock)", () => {
+  const OWNER = "OWNERTHSUB1"
+
+  test("คอมเมนต์ปักหมุด: 88o5Sk8_m1Y มี · aqz-KE-bpKQ ไม่มี (null) · OWNERTHSUB1 เน็ตหลุดและลองใหม่ได้จริง", async ({ page }) => {
+    const calls: string[] = []
+    page.on("request", (request) => {
+      if (request.url().includes("/pinned-comment")) calls.push(new URL(request.url()).pathname)
+    })
+
+    await page.goto(`/v/${THAI}`)
+    await toggle(page, PINNED_TITLE).click()
+    await expect(pinnedRegion(page).getByText(/^ขอบคุณที่ดูคลิปนี้นะครับ/)).toBeVisible()
+    await expect(pinnedRegion(page).getByRole("button", { name: "คัดลอกคอมเมนต์ปักหมุด" })).toBeVisible()
+
+    await page.goto(`/v/${BBB}`)
+    await toggle(page, PINNED_TITLE).click()
+    await expect(pinnedRegion(page).getByText(NO_PINNED)).toBeVisible()
+
+    await page.goto(`/v/${OWNER}`)
+    await toggle(page, PINNED_TITLE).click()
+    const alert = pinnedRegion(page).getByRole("alert")
+    await expect(alert).toContainText("โหลดคอมเมนต์ปักหมุดไม่สำเร็จ")
+    await expect(alert).toContainText("เน็ตหลุด ลองใหม่อีกครั้ง")
+    // review I-1: backend ไม่จำ E_NETWORK ปุ่มลองใหม่จึงยิงคำขอใหม่ถึง backend จริง
+    const before = calls.filter((path) => path.includes(OWNER)).length
+    await alert.getByRole("button", { name: "ลองใหม่" }).click()
+    await expect.poll(() => calls.filter((path) => path.includes(OWNER)).length).toBe(before + 1)
+    await expect(pinnedRegion(page).getByRole("alert")).toContainText("เน็ตหลุด ลองใหม่อีกครั้ง")
+  })
+
+  test("โน้ต: backend ปลอมส่งไฟล์ .md (LF) ชื่อไทย มี front matter แท็กแบบ Obsidian และทรานสคริปต์", async ({ page }) => {
+    await page.goto(`/v/${THAI}`)
+    await expect(page.getByText("ซับ: ไทย (อัตโนมัติ)")).toBeVisible()
+    const downloading = page.waitForEvent("download")
+    await page.getByRole("button", { name: NOTE_BUTTON }).click()
+    const download = await downloading
+    expect(download.suggestedFilename()).toBe("Thai Listening Practice EP.1 Beginner.note.md")
+    const text = await download.createReadStream().then(async (stream) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of stream) chunks.push(chunk as Buffer)
+      return Buffer.concat(chunks).toString("utf8")
+    })
+    expect(text.startsWith('---\ntitle: "Thai Listening Practice | EP.1 | Beginner"\n')).toBe(true)
+    expect(text).not.toContain("\r")
+    expect(text).toContain("\nsource: YT Toolkit\n---\n")
+    expect(text).toContain("\n## ทรานสคริปต์\n")
+    const tags = text.match(/^tags: \[(.*)\]$/m)?.[1] ?? ""
+    // แท็กไม่มีช่องว่างข้างใน (Obsidian ใช้ไม่ได้) ทุกอันอยู่ในเครื่องหมายคำพูด
+    for (const tag of tags.split(", ").filter(Boolean)) expect(tag).toMatch(/^"[^\s"]+"$/)
+  })
+})

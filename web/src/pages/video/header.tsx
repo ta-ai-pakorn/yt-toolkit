@@ -223,10 +223,13 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
     <div className={LAYOUT}>
       <Thumbnail src={data.thumbnailUrl} className={COVER} />
       <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:contents">
+        {/* จอแคบ (< 640 px) ตัดชื่อที่ 3 บรรทัด ไม่ให้ชื่อยาวดันแถบแท็บพ้นจอแรก (review I-3: ชื่อไทย 100 ตัวดันไป 805 px)
+            ชื่อเต็มยังอยู่ใน title (ชี้เมาส์) และโปรแกรมอ่านหน้าจออ่านครบ (ตัดแค่ที่ตาเห็น) */}
         <h1
           ref={headingRef}
           tabIndex={-1}
-          className="text-xl leading-relaxed font-semibold break-words outline-none max-sm:self-center max-sm:text-lg"
+          title={data.title}
+          className="text-xl leading-relaxed font-semibold break-words outline-none max-sm:line-clamp-3 max-sm:self-center max-sm:text-lg"
         >
           {data.title}
         </h1>
