@@ -146,6 +146,8 @@ def pinned_from_comment(comment: object) -> dict | None:
 # คอมเมนต์อันดับแรกของแบบ "ยอดนิยม" (= คอมเมนต์ปักหมุด ถ้ามี) ไม่เอาคำตอบ
 # max_comments = max-comments, max-parents, max-replies, max-replies-per-thread, max-depth
 _COMMENT_ARGS = {"youtube": {"comment_sort": ["top"], "max_comments": ["1", "1", "0", "0", "1"]}}
+# error ของทางหลักที่ไม่ถอยไปทางสำรอง: ทางสำรองก็จะเจอแบบเดียวกัน (review M-1)
+_NO_FALLBACK = frozenset({"E_NETWORK", "E_BOT_CHECK"})
 
 
 def _first_comment_direct(ydl: Any, video_id: str) -> dict | None:
@@ -373,8 +375,10 @@ class YtDlpExtractor:
 
         ทางหลัก (ถูกสุด ~2 คำขอ innertube "next"): เรียกตัวดึงคอมเมนต์ของ yt-dlp ตรง ๆ
         ด้วย comment_sort=top และ max_comments=1 (คอมเมนต์ปักหมุดอยู่อันดับแรกเสมอ)
-        เป็น API ภายในของ yt-dlp ที่อาจเปลี่ยนได้ทุกรุ่น ถ้าเรียกไม่ได้ (AttributeError/TypeError)
+        เป็น API ภายในของ yt-dlp ที่อาจเปลี่ยนได้ทุกรุ่น ทางหลักพังด้วยเหตุอื่นที่ไม่ใช่เน็ตหรือยูทูปบล็อก
+        (exception ใดก็ได้ที่ไม่ใช่ YoutubeDLError หรือ YoutubeDLError ที่ไม่ใช่ E_NETWORK/E_BOT_CHECK)
         ถอยไปใช้ getcomments ของ probe ปกติ (API สาธารณะ แพงกว่า: probe ทั้งคลิปอีกรอบ) จำกัดจำนวนเท่ากัน
+        เน็ตหลุดหรือยูทูปบล็อกโยนต่อทันที (ลองทางสำรองก็เจอแบบเดียวกัน แถมยิงยูทูปเพิ่ม)
         """
         _check_video_id(video_id)
         import yt_dlp
@@ -385,10 +389,15 @@ class YtDlpExtractor:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 try:
                     first = _first_comment_direct(ydl, video_id)
-                except (AttributeError, TypeError) as exc:
+                except Exception as exc:
+                    if isinstance(exc, YoutubeDLError):
+                        message = _ANSI.sub("", str(exc)) or type(exc).__name__
+                        if classify(message) in _NO_FALLBACK:
+                            raise
                     log.warning(
-                        "ดึงคอมเมนต์ปักหมุดของ %s ทางหลักไม่ได้ (yt-dlp อาจเปลี่ยนภายใน) ใช้ probe แทน: %s",
+                        "ดึงคอมเมนต์ปักหมุดของ %s ทางหลักไม่ได้ (yt-dlp อาจเปลี่ยนภายใน) ใช้ probe แทน: %s: %s",
                         video_id,
+                        type(exc).__name__,
                         exc,
                     )
                     first = _first_comment_public(ydl, video_id)

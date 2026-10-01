@@ -73,7 +73,7 @@ def test_video_info_has_clip_stats(client):
     assert body["stats"] == {"views": 438721846, "likes": 19966949, "comments": 10000000, "channelFollowers": 6640000}
     assert body["tags"] == ["me at the zoo", "jawed karim", "first youtube video"]
     assert body["categories"] == ["Film & Animation"]
-    assert body["mostReplayed"] == [{"startMs": 0, "endMs": 190}, {"startMs": 10260, "endMs": 12160}]
+    assert body["mostReplayed"] == [{"startMs": 190, "endMs": 570}]
 
 
 def test_missing_clip_stats_are_omitted(client):
@@ -105,14 +105,15 @@ def test_pinned_comment_null(env):
     assert fake.pinned_calls == 1  # คลิปที่คอมเมนต์ = 0 ไม่ต่อยูทูป
 
 
-def test_pinned_comment_network_error_is_502_and_remembered(env):
+def test_pinned_comment_network_error_is_502_and_retry_really_retries(env):
+    # review I-1: E_NETWORK ไม่ถูกจำ ปุ่ม "ลองใหม่" บนหน้าเว็บจึงดึงใหม่จริงทุกครั้ง (จำเฉพาะ E_BOT_CHECK 5 นาที)
     client, fake = env
     for _ in range(2):
         resp = client.get(f"/api/videos/{OWNER}/pinned-comment")
         assert resp.status_code == 502
         assert _error(resp)["code"] == "E_NETWORK"
         assert _error(resp)["message"] == MESSAGES["E_NETWORK"]
-    assert fake.pinned_calls == 1
+    assert fake.pinned_calls == 2
 
 
 @pytest.mark.parametrize(
@@ -199,7 +200,8 @@ def test_note_without_any_track_has_no_transcript(client):
 
 def test_note_yaml_survives_tricky_tags(client):
     front = _front(_note(client, OWNER).text)
-    assert front["tags"] == ["ซับไทย", 'test: "quotes"', "#hashtag", "back\\slash", "padded tag"]
+    # แท็กแบบ Obsidian (review M-5): ช่องว่างเป็น "-" ตัวที่แท็กรับไม่ได้ (เช่น : " # และ backslash) ถูกตัดทิ้ง
+    assert front["tags"] == ["ซับไทย", "test-quotes", "hashtag", "backslash", "padded-tag"]
     assert front["channel"] == "ชุดทดสอบ"
 
 

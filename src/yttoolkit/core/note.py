@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Sequence
 from typing import Any
 
@@ -78,6 +79,37 @@ def _lines(text: str) -> list[str]:
     return text.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n").split("\n")
 
 
+_SPACE_RUN = re.compile(r"\s+")
+_DASH_RUN = re.compile(r"-{2,}")
+
+
+def obsidian_tag(tag: str) -> str:
+    """แท็กของยูทูป -> แท็กที่ Obsidian ใช้ได้ (review M-5): "me at the zoo" -> "me-at-the-zoo"
+
+    ตัดช่องว่างหัวท้าย ช่องว่างกลางเป็น "-" แล้วเหลือแค่ตัวอักษร (รวมสระ/วรรณยุกต์ไทย) ตัวเลข "_" "-" "/"
+    (Obsidian ไม่รับช่องว่าง, "#", ",", ":" ฯลฯ ในแท็ก) "-" ซ้อนกันยุบเหลือตัวเดียว ไม่มี "-" หรือ "/" หัวท้าย
+    ผลที่ไม่มีตัวอักษรเลย (ว่าง หรือมีแต่ตัวเลขกับขีด) = "" (Obsidian ไม่นับเป็นแท็ก ผู้เรียกทิ้งไป)
+    """
+    text = _SPACE_RUN.sub("-", tag.strip())
+    kept = "".join(ch for ch in text if ch in "_-/" or unicodedata.category(ch)[0] in "LNM")
+    kept = _DASH_RUN.sub("-", kept).strip("-/")
+    if not any(unicodedata.category(ch)[0] in "LM" for ch in kept):
+        return ""
+    return kept
+
+
+def note_tags(tags: Any) -> list[str]:
+    """แท็กทั้งหมดแบบ Obsidian ไม่ซ้ำ (เทียบแบบไม่สนตัวพิมพ์ เหมือน Obsidian) คงลำดับเดิม"""
+    out: list[str] = []
+    seen: set[str] = set()
+    for tag in tags if isinstance(tags, list) else []:
+        slug = obsidian_tag(tag) if isinstance(tag, str) else ""
+        if slug and slug.casefold() not in seen:
+            seen.add(slug.casefold())
+            out.append(slug)
+    return out
+
+
 def _front_matter(info: dict[str, Any], video_id: str) -> list[str]:
     title = str(info.get("title") or "")
     out = ["---", f"title: {yaml_str(title)}", f"url: https://www.youtube.com/watch?v={video_id}"]
@@ -90,7 +122,7 @@ def _front_matter(info: dict[str, Any], video_id: str) -> list[str]:
     duration = info.get("durationS")
     if isinstance(duration, int) and not isinstance(duration, bool) and duration > 0:
         out.append(f'duration: "{hms(duration)}"')
-    tags = [t for t in info.get("tags") or [] if isinstance(t, str) and t]
+    tags = note_tags(info.get("tags"))
     if tags:
         out.append("tags: [" + ", ".join(yaml_str(t) for t in tags) + "]")
     views = (info.get("stats") or {}).get("views")

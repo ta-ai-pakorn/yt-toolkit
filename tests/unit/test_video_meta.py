@@ -92,10 +92,17 @@ def test_no_heatmap_means_nothing() -> None:
 
 
 def test_real_heatmap_of_a_short_clip() -> None:
-    # Me at the zoo ยาว 19 วินาที: ช่วงที่ห่างกัน 10 วินาทีได้แค่ 2 ช่วง
-    assert to_video_info(load(ZOO))["mostReplayed"] == [
-        {"startMs": 0, "endMs": 190},
-        {"startMs": 10260, "endMs": 12160},
+    # Me at the zoo ยาว 19 วินาที: รายการแรก (0-190 ms คนกดเล่น) ไม่นับ ยอดถัดมาอยู่ต้นคลิป
+    # ยอดช่วงกลาง (10-12 วินาที) ต่ำกว่าครึ่งของยอดสูงสุด จึงไม่นับ (review I-2)
+    assert to_video_info(load(ZOO))["mostReplayed"] == [{"startMs": 190, "endMs": 570}]
+
+
+def test_owner_thai_fixture_drops_the_low_opening_plateau() -> None:
+    # รุ่นก่อนเลือกที่ราบเตี้ย ๆ 0-16.8 วินาทีด้วย ตอนนี้เหลือแค่ยอดจริง
+    owner = json.loads((FIXTURES / "OWNERTHSUB1.json").read_text(encoding="utf-8"))
+    assert to_video_info(owner)["mostReplayed"] == [
+        {"startMs": 28800, "endMs": 31200},
+        {"startMs": 122400, "endMs": 127200},
     ]
 
 
@@ -125,8 +132,8 @@ def test_merge_takes_neighbours_at_or_above_ninety_percent() -> None:
     heat = flat(40)
     for i, value in ((9, 0.89), (10, 0.9), (11, 0.95), (12, 1.0), (13, 0.92), (14, 0.5)):
         heat[i]["value"] = value
-    # ช่วงที่สอง = พื้นราบ 0.1 อันแรกที่ห่าง 10 วินาที รวมไปจนสุดคลิป (ที่ราบมีค่าเท่ากัน)
-    assert most_replayed(heat) == [{"startMs": 10000, "endMs": 14000}, {"startMs": 24000, "endMs": 40000}]
+    # พื้นราบ 0.1 ต่ำกว่าครึ่งของยอดสูงสุด จึงไม่เป็นช่วงที่สอง (รุ่นก่อนได้ 24-40 วินาที, review I-2)
+    assert most_replayed(heat) == [{"startMs": 10000, "endMs": 14000}]
 
 
 def test_merge_stops_before_reaching_another_pick() -> None:
@@ -136,28 +143,82 @@ def test_merge_stops_before_reaching_another_pick() -> None:
         heat[i]["value"] = 0.8  # ที่ราบยาว: รวมได้แต่ห้ามเข้าใกล้ช่วงแรกไม่ถึง 10 วินาที
     picks = most_replayed(heat)
     assert picks[0] == {"startMs": 5000, "endMs": 6000}
-    assert picks[1] == {"startMs": 16000, "endMs": 30000}
-    assert len(picks) == 2
+    # ที่ราบ 0.8 เริ่มได้ที่ 16 วินาที (ห่างช่วงแรก 10 วินาที) และกว้างได้ไม่เกิน 10 วินาที (คลิป 40 วินาที: 2% < 10)
+    assert picks[1] == {"startMs": 16000, "endMs": 26000}
+    assert len(picks) == 2  # ที่ราบที่เหลือ (26-30) ห่างช่วงที่สองไม่ถึง 10 วินาที
 
 
 def test_at_most_three_and_ties_go_to_the_earlier() -> None:
     heat = [entry(i * 20, i * 20 + 1, 0.7) for i in range(6)]
+    # รายการแรก (0 วินาที) ไม่นับ
     assert most_replayed(heat) == [
-        {"startMs": 0, "endMs": 1000},
         {"startMs": 20000, "endMs": 21000},
         {"startMs": 40000, "endMs": 41000},
+        {"startMs": 60000, "endMs": 61000},
     ]
 
 
 def test_unsorted_and_malformed_entries() -> None:
-    heat = [entry(30, 31, 1.0), "x", {"start_time": True, "end_time": 2, "value": 1}, entry(0, 1, 0.5)]
-    assert most_replayed(heat) == [{"startMs": 0, "endMs": 1000}, {"startMs": 30000, "endMs": 31000}]
+    heat = [entry(30, 31, 1.0), "x", {"start_time": True, "end_time": 2, "value": 1}, entry(0, 1, 0.5), entry(9, 10, 0.6)]
+    # เรียงตามเวลาก่อน แล้วรายการแรก (0-1) ไม่นับ
+    assert most_replayed(heat) == [{"startMs": 9000, "endMs": 10000}, {"startMs": 30000, "endMs": 31000}]
 
 
 def test_ms_are_rounded_ints() -> None:
-    (pick,) = most_replayed([entry(1.2346, 2.0006, 1.0)])
+    (pick,) = most_replayed([entry(0, 1.2346, 0.1), entry(1.2346, 2.0006, 1.0)])
     assert pick == {"startMs": 1235, "endMs": 2001}
     assert all(type(v) is int for v in pick.values())
+
+
+def test_first_entry_is_ignored_even_when_it_is_the_highest() -> None:
+    # ค่าพุ่งตอนเริ่มคลิป (คนกดเล่น) ไม่ใช่การดูซ้ำ และต้องไม่ทำให้ยอดอื่นตกเกณฑ์ครึ่งหนึ่ง
+    heat = flat(60)
+    heat[0]["value"] = 1.0
+    heat[30]["value"] = 0.4
+    assert most_replayed(heat) == [{"startMs": 30000, "endMs": 31000}]
+
+
+def test_peaks_below_half_of_the_top_are_dropped() -> None:
+    heat = flat(60, value=0.0)
+    heat[10]["value"] = 1.0
+    heat[30]["value"] = 0.5  # ครึ่งพอดี = นับ
+    heat[50]["value"] = 0.49  # ต่ำกว่าครึ่ง = ไม่นับ
+    assert most_replayed(heat) == [{"startMs": 10000, "endMs": 11000}, {"startMs": 30000, "endMs": 31000}]
+
+
+def test_merge_width_is_capped_at_two_percent_of_a_long_clip() -> None:
+    # คลิป 1,000 วินาที: กว้างได้ max(10, 20) = 20 วินาที แม้ที่ราบจะยาวกว่านั้น
+    heat = flat(100, step=10.0, value=0.0)
+    for i in range(40, 60):
+        heat[i]["value"] = 0.95
+    heat[50]["value"] = 1.0
+    picks = most_replayed(heat, 1000)
+    peak = next(p for p in picks if p["startMs"] <= 500000 < p["endMs"])
+    assert peak["endMs"] - peak["startMs"] == 20000
+    assert all(p["endMs"] - p["startMs"] <= 20000 for p in picks)
+    # ไม่ส่งความยาว (ใช้ปลาย heatmap 1,000 วินาที) ได้ผลเท่ากัน
+    assert most_replayed(heat) == picks
+
+
+def test_merge_grows_towards_the_higher_neighbour_first() -> None:
+    heat = flat(40, value=0.0)
+    heat[19]["value"] = 0.91
+    heat[20]["value"] = 1.0
+    heat[21]["value"] = 0.99
+    heat[22]["value"] = 0.98
+    # ขวาสูงกว่าซ้ายจึงโตไปทางขวาก่อน ทุกอันผ่านเกณฑ์ 90% และไม่เกิน 10 วินาที จึงได้ครบ 19-23
+    assert most_replayed(heat) == [{"startMs": 19000, "endMs": 23000}]
+
+
+def test_duration_falls_back_to_the_end_of_the_heatmap() -> None:
+    heat = flat(1000, value=0.0)
+    for i in range(400, 460):
+        heat[i]["value"] = 1.0
+    # ไม่ส่งความยาวคลิป: ใช้ปลาย heatmap (1,000 วินาที) กว้างได้ 20 วินาที
+    picks = most_replayed(heat)
+    assert picks[0] == {"startMs": 400000, "endMs": 420000}
+    # ส่งความยาวสั้นกว่า (100 วินาที): กว้างได้แค่ 10 วินาที
+    assert most_replayed(heat, 100)[0] == {"startMs": 400000, "endMs": 410000}
 
 
 # ---------- trim_probe ----------

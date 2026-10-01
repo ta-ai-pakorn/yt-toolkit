@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from yttoolkit.core.note import build_note, hms, yaml_str
+from yttoolkit.core.note import build_note, hms, note_tags, obsidian_tag, yaml_str
 from yttoolkit.core.srt_builder import Token, md_sections, to_md
 
 VID = "jNQXAC9IVRw"
@@ -96,7 +96,7 @@ def test_full_note_layout() -> None:
         "channel": "ช่อง: ทดสอบ",
         "published": yaml.safe_load("d: 2025-05-20")["d"],
         "duration": "0:06:12",
-        "tags": ["a", "b: c"],
+        "tags": ["a", "b-c"],  # แท็กแบบ Obsidian (review M-5)
         "views": 10,
         "source": "YT Toolkit",
     }
@@ -177,3 +177,51 @@ def test_md_sections_is_the_body_of_to_md(chapters: list) -> None:
     assert [line for line in level3 if line.startswith("#")] == [
         "#" + line for line in md_sections(tokens, chapters) if line.startswith("#")
     ]
+
+
+# ---------- แท็กแบบ Obsidian (review M-5) ----------
+
+
+@pytest.mark.parametrize(
+    ("raw", "slug"),
+    [
+        ("me at the zoo", "me-at-the-zoo"),
+        ("  spaced   out  ", "spaced-out"),
+        ("การตลาด ออนไลน์", "การตลาด-ออนไลน์"),
+        ("น้ำใจ", "น้ำใจ"),
+        ("C++ #tips", "C-tips"),
+        ("a, b: c", "a-b-c"),
+        ("nested/tag", "nested/tag"),
+        ("/edge/", "edge"),
+        ("snake_case", "snake_case"),
+        ("2026", ""),
+        ("2026 ๒๕๖๙", ""),
+        ("y2k", "y2k"),
+        ("!!!", ""),
+        ("   ", ""),
+        ("-- a -- b --", "a-b"),
+    ],
+)
+def test_obsidian_tag(raw: str, slug: str) -> None:
+    assert obsidian_tag(raw) == slug
+
+
+def test_purely_numeric_after_slugify_is_dropped() -> None:
+    assert obsidian_tag("2026") == ""
+    assert obsidian_tag("12 34") == ""  # "12-34" ยังเป็นเลขกับขีด ไม่มีตัวอักษร
+    assert obsidian_tag("12-34a") == "12-34a"
+
+
+def test_note_tags_drop_empty_and_duplicates_keep_order() -> None:
+    assert note_tags(["Zoo", "me at the zoo", "zoo", "!!!", "2026", 5, None, "Me at the zoo"]) == [
+        "Zoo",
+        "me-at-the-zoo",
+    ]
+    assert note_tags(None) == []
+
+
+def test_note_front_matter_uses_obsidian_tags() -> None:
+    text = build_note({"videoId": VID, "title": "t", "tags": ["me at the zoo", "2026", "!!"]}, VID, [])
+    assert _front(text)["tags"] == ["me-at-the-zoo"]
+    only_bad = build_note({"videoId": VID, "title": "t", "tags": ["2026", "!!"]}, VID, [])
+    assert "tags" not in _front(only_bad)
