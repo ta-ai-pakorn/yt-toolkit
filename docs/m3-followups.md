@@ -55,6 +55,7 @@ M3 (ซับและทรานสคริปต์) ผ่านรีว�
 
 - **คิวงาน:** `E_TRANSLATION_BLOCKED` ต้องไม่พักคิว (ต่างจาก `E_BOT_CHECK` ที่ M4 จะพักทั้งคิว 10 นาที) เป็นแค่งานนั้นล้มเหลว
 - **ลิงก์หมดอายุ:** json3 ที่พลาดด้วย `E_NETWORK` จะ probe ใหม่แล้วลอง json3 อีกรอบเดียว ไม่ลอง vtt ต่อ ถ้าย้ายการโหลดซับเข้าคิวแล้วค่อยทบทวนพร้อมกฎลองใหม่ 3 ครั้ง
+- **ตัวเล่นคลิป (จาก M3.5):** ตั้งจุดเริ่ม/ตั้งจุดจบจากตัวเล่น → ฟอร์มโหลดช่วง (BRD #81) · ปุ่มบนตัวเล่นดึง `currentMs` ใส่ช่องเวลาเริ่ม/จบของฟอร์มโหลดช่วง
 
 ## เลื่อนไป M6 (การเข้าถึง)
 
@@ -80,6 +81,8 @@ M3 (ซับและทรานสคริปต์) ผ่านรีว�
 - **หน้าเว็บ:** ลูกศร ▼ ที่ซ่อนไว้ในช่องเลือกแทร็กติดมากับ textContent (เทส e2e อ่านเฉพาะส่วนค่าแทน)
 
 ## Next milestone: M3.5 clip player (owner decision 2026-10-01)
+
+**Status: in progress** (started 2026-10-01 on branch `m35-player`; design approved: `docs/superpowers/specs/2026-10-01-m35-clip-player-design.md`; decisions: BRD ข้อ 19 #75-#82; acceptance: PRD ข้อ 5.2.1 AC-PLAY-01..14 and `docs/acceptance.md` M3.5).
 
 - On 2026-10-01 Pete decided to build the clip player as its own milestone, after M3 and before M4.
 - **What it is:** a YouTube player embedded in the clip page (W2). Pressing a frame, a chapter time or a most-replayed range plays the clip from that point.
