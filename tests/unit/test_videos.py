@@ -1511,3 +1511,17 @@ def test_curated_music_playlist_takes_the_normal_playlist_path(db: Database) -> 
     assert stub.calls == [(curated, 200, None)]
     assert "isMix" not in result
     assert (result["total"], result["truncated"], len(result["entries"])) == (30, False, 30)
+
+
+def test_peek_cached_reads_the_stored_row_without_probing_or_opening(
+    svc: VideoService, ext: CountingExtractor, db: Database, clock: Clock
+) -> None:
+    assert svc.peek_cached("aqz-KE-bpKQ") is None
+    assert svc.peek_cached("not an id") is None
+    svc.get("aqz-KE-bpKQ", peek=True)
+    opened = db.execute("SELECT opened_at FROM videos WHERE video_id = 'aqz-KE-bpKQ'")[0]["opened_at"]
+    clock.advance(days=3)  # older than the 24 h cache: still returned
+    info = svc.peek_cached("aqz-KE-bpKQ")
+    assert info is not None and info["durationS"] == 635 and info["chapters"] == []
+    assert ext.count["probe"] == 1
+    assert db.execute("SELECT opened_at FROM videos WHERE video_id = 'aqz-KE-bpKQ'")[0]["opened_at"] == opened

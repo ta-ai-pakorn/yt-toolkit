@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .jobs import SPONSORBLOCK_CATEGORIES
 from .srt_builder import PRESETS, SubOptions, options_from_dict
 
 if TYPE_CHECKING:
@@ -27,7 +28,6 @@ RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))}
 )
 LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
-SPONSOR_CATEGORY = re.compile(r"^[a-z][a-z_]{0,31}$")
 
 VIDEO_DEFAULTS = ("compat-1080", "compat-720", "max")
 AUDIO_FORMATS = ("m4a", "mp3", "wav")
@@ -120,8 +120,13 @@ def _validate_sub_custom(value: Any) -> dict[str, Any]:
 
 
 def _validate_sponsorblock(value: Any) -> list[str]:
-    if not isinstance(value, list) or not all(isinstance(v, str) and SPONSOR_CATEGORY.fullmatch(v) for v in value):
-        raise _bad("sponsorblockDefault", "must be a list of category names")
+    """หมวด SponsorBlock ที่ติ๊กไว้ (D3 จำข้ามคลิป): ต้องมีอย่างน้อย 1 หมวด และเป็นหมวดที่ตัดได้เท่านั้น"""
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(isinstance(v, str) and v in SPONSORBLOCK_CATEGORIES for v in value)
+    ):
+        raise _bad("sponsorblockDefault", "must be a non-empty list of SponsorBlock categories")
     return list(dict.fromkeys(value))
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from collections.abc import Callable, Collection, Sequence
@@ -21,7 +22,12 @@ from .yterrors import MESSAGES
 
 JOB_KINDS = ("video", "audio", "subtitle", "note", "frames_sharp", "contact_sheet", "frames_zip")
 STATUSES = ("queued", "running", "done", "failed", "cancelled", "interrupted")
-STAGES = ("probing", "downloading_video", "downloading_audio", "merging", "converting", "writing")
+STAGES = (
+    "probing", "downloading_video", "downloading_audio", "merging", "converting", "writing",
+    "cutting", "cutting_ads",
+)  # fmt: skip
+# "splitting:<i>/<n>" = กำลังแยก chapter ที่ i จาก n (M5 รอบ A) หน้าเว็บแสดง "กำลังแยก chapter i/n"
+SPLIT_STAGE = re.compile(r"splitting:(\d{1,4})/(\d{1,4})")
 TERMINAL = frozenset({"done", "failed", "cancelled", "interrupted"})
 # PRD 6.1 บวก running -> queued (Q1: เจอเช็กบอทครั้งแรก กลับไปหัวคิว)
 # ทุกคู่ที่ไปเป็น "queued" ทำได้ผ่าน JobStore.requeue() เท่านั้น (ล้างผลรอบก่อนและจัดตำแหน่งคิว)
@@ -37,7 +43,28 @@ NOTES = {
     "NO_SUBTITLES": "คลิปนี้ไม่มีซับ",
     "EMBED_SUBS_SKIPPED": "ฝังซับไม่สำเร็จ ได้ไฟล์วิดีโอที่ไม่มีซับ",
     "QUALITY_FALLBACK": "คุณภาพที่เลือกไม่มีแล้ว ใช้คุณภาพที่ใกล้ที่สุดแทน",
+    "SPONSORBLOCK_EMPTY": "ไม่มีข้อมูลจากชุมชน ได้คลิปเต็ม",
+    "SPONSORBLOCK_UNREACHABLE": "ติดต่อ SponsorBlock ไม่ได้ ได้คลิปเต็ม",
+    "NO_CHAPTERS": "คลิปนี้ไม่มี chapter ได้ไฟล์เต็ม",
 }
+# ตัวเลือกขั้นสูงของงานโหลด (M5 รอบ A) ที่ API ตรวจและตัวทำงานใช้ร่วมกัน
+SPONSORBLOCK_CATEGORIES = (
+    "sponsor", "selfpromo", "interaction", "intro", "outro", "preview", "filler", "music_offtopic",
+)  # fmt: skip
+MIN_RANGE_MS = 1000  # ช่วงเวลาต้องยาวอย่างน้อย 1 วินาที
+RANGE_TOLERANCE_MS = 500  # ความยาวคลิปเก็บเป็นวินาทีปัดเศษ ปลายช่วงจึงเกินได้ไม่เกินครึ่งวินาที
+
+
+def split_stage(index: int, total: int) -> str:
+    """ขั้นของการแยกไฟล์ตาม chapter: "splitting:<i>/<n>" (1 <= i <= n <= 9999)"""
+    if not 1 <= index <= total <= 9999:
+        raise ValueError(f"split stage out of range: {index}/{total}")
+    return f"splitting:{index}/{total}"
+
+
+def is_stage(value: str) -> bool:
+    return value in STAGES or SPLIT_STAGE.fullmatch(value) is not None
+
 
 # ชื่อช่องฝั่ง Python -> คอลัมน์ ที่ transition() เขียนได้
 _FIELD_COLUMNS = {
@@ -256,7 +283,7 @@ def _encode(field: str, value: Any) -> Any:
         return _dump_notes(value)
     if field == "outputs":
         return _dump_outputs(value)
-    if field == "stage" and value is not None and value not in STAGES:
+    if field == "stage" and value is not None and not is_stage(value):
         raise ValueError(f"stage ไม่รู้จัก: {value!r}")
     if field == "title":
         return value

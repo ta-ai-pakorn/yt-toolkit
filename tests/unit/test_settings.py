@@ -91,6 +91,9 @@ def test_patch_changes_only_the_named_keys(store):
         {"subCustom": "x"},
         {"sponsorblockDefault": "sponsor"},
         {"sponsorblockDefault": ["Bad Name"]},
+        {"sponsorblockDefault": []},
+        {"sponsorblockDefault": ["sponsor", "poi_highlight"]},
+        {"sponsorblockDefault": ["chapter"]},
         {"theme": "blue"},
         {"filenameStyle": "x"},
         {"lastUsed": []},
@@ -290,3 +293,8 @@ def test_stored_values_are_revalidated_on_read(db, store, key, stored):
 def test_stored_valid_value_survives_revalidation(db, store):
     db.execute("INSERT INTO settings (key, value_json) VALUES ('concurrency', '3')")
     assert store.concurrency() == 3
+
+
+def test_sponsorblock_default_keeps_order_and_drops_duplicates(store):
+    saved = store.patch({"sponsorblockDefault": ["filler", "sponsor", "filler", "music_offtopic"]})
+    assert saved["sponsorblockDefault"] == ["filler", "sponsor", "music_offtopic"]
