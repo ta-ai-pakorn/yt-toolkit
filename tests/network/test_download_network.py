@@ -3,7 +3,7 @@
 ตรวจ AC-VID-01..05, 08, 09 · AC-AUD-01..04 · เพดาน compat ของคลิปแนวตั้ง · ยกเลิกกลางการโหลด (AC-Q-07)
 · ไฟล์เซสชันผู้ชมไม่เปลี่ยนหลังโหลด
 
-ต้องได้รับอนุญาตก่อนรัน: เทสนี้โหลดไฟล์วิดีโอจริงจากยูทูป (รวมประมาณ 100-200 MB ใน temp ลบทิ้งเมื่อจบ)
+ต้องได้รับอนุญาตก่อนรัน: เทสนี้โหลดไฟล์วิดีโอจริงจากยูทูป (รวมประมาณ 100-200 MB ใน temp ลบทิ้งเมื่อทุกเทสผ่าน ถ้ามีเทสตกจะเก็บไว้ดูและพิมพ์ path ที่เก็บ)
 รันเองด้วย: uv run pytest -m network -q tests/network/test_download_network.py -s
 id ของคลิปอยู่ใน tests/network_videos.toml ([downloads]) เทสเก็บไฟล์ใน temp เท่านั้น ไม่มีอะไรลงรีโป
 ยูทูปตอบ 429 หรือขอยืนยันว่าไม่ใช่บอท (E_BOT_CHECK) = เทสตก ให้รายงานผล ห้ามแก้เทสให้หลวมลง
@@ -53,7 +53,9 @@ THAI_SUBS = CLIPS["thai_subs"]
 PORTRAIT = CLIPS["portrait_short"]
 
 MEDIUM = {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000}
-SMALL = 240  # เพดานความสูงของคลิปยาว ๆ ให้ไฟล์เล็ก (ตัวเลือก maxHeight ของงานจริง)
+# เทสที่ไม่ได้ตรวจความละเอียดส่ง maxHeight ต่ำ (240 / 360) ให้ไฟล์เล็กและโหลดเร็ว ลดปริมาณเน็ตของ network test
+# maxHeight เป็นตัวเลือกจริงของงาน (compat cap) เส้นทางเลือก format จึงยังเป็นของจริง เทสที่ตรวจ 1080/2160 ไม่ส่ง maxHeight
+SMALL = 240
 QUEUE_GAP_S = 2  # ช่วงห่างระหว่างงานที่ต่อยูทูป (คิวจริงเว้น 2-5 วินาที)
 CANCEL_LIMIT_S = 3.0  # AC-Q-07
 
@@ -180,7 +182,7 @@ class Env:
 
 
 @pytest.fixture(scope="module")
-def env(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Env]:
+def env(tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest) -> Iterator[Env]:
     root = tmp_path_factory.mktemp("download-network")
     ffmpeg = shutil.which("ffmpeg")
     assert ffmpeg is not None
@@ -210,6 +212,10 @@ def env(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Env]:
             db.close()
             # ASCII ล้วน: คอนโซล Windows ภาษาไทย (cp874) พิมพ์ตัวอักษรพิเศษไม่ได้
             print("\n[timings] " + ", ".join(state.timings))
+            if request.session.testsfailed:
+                print(f"[kept for inspection] {root}")  # เทสตก = เก็บไฟล์ไว้ดู
+            else:
+                shutil.rmtree(root, ignore_errors=True)  # ผ่านหมด = ลบไฟล์ที่โหลดมาทิ้ง
 
 
 def tags(section: dict) -> dict[str, str]:
@@ -237,6 +243,16 @@ def original_audio(info: dict) -> dict:
     originals = [a for a in info["audio"] if a["isOriginal"]] or info["audio"]
     aac = [a for a in originals if str(a["acodec"]).startswith("mp4a")] or originals
     return max(aac, key=lambda a: a.get("abrKbps", 0))
+
+
+def audio_md5(ffmpeg: Path, path: Path) -> str:
+    """แฮชข้อมูลเสียงแทร็กแรกแบบไม่ถอดรหัส (copy) ใช้เทียบว่าเป็นแทร็กเดียวกันไหม โดยไม่พึ่งแท็กที่ handler เขียนเอง"""
+    out = subprocess.run(
+        [str(ffmpeg), "-v", "error", "-i", str(path), "-map", "0:a:0", "-c", "copy", "-f", "md5", "-"],
+        check=True,
+        capture_output=True,
+    ).stdout.decode()
+    return out.strip()
 
 
 def srt_texts(text: str) -> list[str]:
@@ -337,6 +353,9 @@ def test_dub_language_is_chosen_not_the_original(env: Env) -> None:
     assert tags(audio[0])["language"] == "eng"
     assert tags(audio[0])["language"] != iso639_2(original["language"])
     assert not run.result.notes  # มีแทร็กนี้จริง จึงไม่มีหมายเหตุว่าใช้เสียงต้นฉบับแทน
+    # ตรวจอิสระจากแท็กที่ handler เขียนเอง: ข้อมูลเสียงของสองไฟล์ต้องต่างกันจริง (คนละแทร็ก)
+    original_run = env.run("video", DUB_CLIP, maxHeight=SMALL)
+    assert audio_md5(env.ffmpeg, run.path) != audio_md5(env.ffmpeg, original_run.path)
 
 
 def test_dub_language_in_m4a(env: Env) -> None:
@@ -352,7 +371,7 @@ def test_dub_language_in_m4a(env: Env) -> None:
 
 def test_no_audio_has_no_audio_stream(env: Env) -> None:
     """AC-VID-08: เปิด "ไม่เอาเสียง" → ไม่มี audio stream และชื่อไฟล์ลงท้าย " (ไม่มีเสียง).mp4" """
-    run = env.run("video", SHORT_4K, noAudio=True, maxHeight=360)
+    run = env.run("video", SHORT_4K, noAudio=True, maxHeight=360)  # 360 = ให้ไฟล์เล็ก (ดูหมายเหตุที่ SMALL)
     assert streams(run, "audio") == []
     assert run.path.name.endswith(f"{NO_AUDIO_SUFFIX}.mp4")
     assert main_video(run)["codec_name"] == "h264"
@@ -378,8 +397,9 @@ def test_embedded_subtitle_is_mov_text_without_reencoding(env: Env) -> None:
     a, b = main_video(plain), main_video(embedded)
     assert a["codec_name"] == b["codec_name"]
     assert (a["width"], a["height"]) == (b["width"], b["height"])
-    if a.get("bit_rate") and b.get("bit_rate"):
-        assert abs(int(a["bit_rate"]) - int(b["bit_rate"])) <= 0.01 * int(a["bit_rate"])
+    # bit_rate ต้องมีทั้งคู่ ไม่ปล่อยผ่านเงียบ ๆ ถ้า ffprobe ไม่ให้ค่า
+    assert a.get("bit_rate") and b.get("bit_rate"), "ffprobe ไม่ให้ bit_rate ของภาพหลัก"
+    assert abs(int(a["bit_rate"]) - int(b["bit_rate"])) <= 0.01 * int(a["bit_rate"])
 
     # ข้อความซับตรงกับ .srt ที่สร้างด้วย preset เดียวกัน
     expected = env.subs.export(THAI_SUBS, "a.th-orig", "srt", options_from_dict(MEDIUM)).data.decode("utf-8")
@@ -512,7 +532,8 @@ def test_visitor_session_is_unchanged_by_a_download(env: Env) -> None:
     env.run("audio", SHORT_4K, format="mp3", mp3Kbps=128)  # งานใหม่จริง ๆ อีกหนึ่งงาน
     after_visitor, after_created = _session_state(folder)
     same_visitor = before_visitor == after_visitor  # ไม่ใส่ในข้อความ assert: ห้ามพิมพ์ค่าคุกกี้
-    assert same_visitor, "ค่าคุกกี้ผู้เข้าชมเปลี่ยนหลังโหลด"
+    # ค่าเปลี่ยน = ให้ไปตรวจ ไม่ได้แปลว่าบั๊กเสมอไป: ยูทูปอาจหมุนค่าคุกกี้ผู้เข้าชมเอง (ลองรันซ้ำก่อน)
+    assert same_visitor, "ค่าคุกกี้ผู้เข้าชมเปลี่ยนหลังโหลด (ตรวจว่าเป็นแอพทำ หรือยูทูปหมุนค่าเอง)"
     assert before_created == after_created, "เวลาเกิดของเซสชันเปลี่ยนหลังโหลด"
     # ไฟล์ยังอ่านได้ทั้งไฟล์ และไม่ทิ้งไฟล์ชั่วคราวข้าง ๆ
     assert [p.name for p in folder.iterdir() if p.name.startswith("visitor-session")] == sorted(
