@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 import pytest
 from yttoolkit.core.db import Database
-from yttoolkit.core.jobs import InvalidTransition, JobStore, NewJob, OutputFile, uuid7
+from yttoolkit.core.jobs import NOTES, InvalidTransition, JobStore, NewJob, OutputFile, is_stage, split_stage, uuid7
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
@@ -332,3 +332,27 @@ def test_store_survives_reopen(tmp_path):
         assert got.created_at.endswith("+00:00")
     finally:
         db.close()
+
+
+def test_m5a_stages_are_stored(store):
+    (job,) = add(store)
+    store.transition(job.id, "running")
+    for stage in ("cutting", "cutting_ads", split_stage(3, 12)):
+        assert store.update(job.id, stage=stage).stage == stage
+    with pytest.raises(ValueError):
+        store.update(job.id, stage="splitting:x/12")
+
+
+def test_is_stage_and_split_stage_bounds():
+    assert is_stage("writing") and is_stage("cutting_ads") and is_stage("splitting:1/2")
+    assert not is_stage("splitting:1/2/3") and not is_stage("splitting:") and not is_stage("nope")
+    assert split_stage(1, 1) == "splitting:1/1"
+    for bad in ((0, 3), (4, 3), (1, 10_000)):
+        with pytest.raises(ValueError):
+            split_stage(*bad)
+
+
+def test_m5a_notes_are_verbatim():
+    assert NOTES["SPONSORBLOCK_EMPTY"] == "ไม่มีข้อมูลจากชุมชน ได้คลิปเต็ม"
+    assert NOTES["SPONSORBLOCK_UNREACHABLE"] == "ติดต่อ SponsorBlock ไม่ได้ ได้คลิปเต็ม"
+    assert NOTES["NO_CHAPTERS"] == "คลิปนี้ไม่มี chapter ได้ไฟล์เต็ม"

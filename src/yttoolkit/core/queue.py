@@ -26,7 +26,7 @@ from typing import Any, Protocol
 from .cancel import JobCancelled
 from .download import YOUTUBE_KINDS
 from .events import EventBus
-from .jobs import STAGES, Handler, InvalidTransition, Job, JobResult, JobStore, NewJob
+from .jobs import Handler, InvalidTransition, Job, JobResult, JobStore, NewJob, is_stage
 from .yterrors import MESSAGES, YtError
 
 log = logging.getLogger("yttoolkit")
@@ -95,7 +95,7 @@ class _JobContext:
     # ---------- JobContext ----------
 
     def stage(self, stage: str) -> None:
-        if stage not in STAGES:
+        if not is_stage(stage):
             raise ValueError(f"stage ไม่รู้จัก: {stage!r}")
         clear_attempt = self._attempt_shown  # รอบใหม่หลังรอลองใหม่เริ่มเดินแล้ว (เหมือนใน progress)
         if stage == self._stage and not clear_attempt:

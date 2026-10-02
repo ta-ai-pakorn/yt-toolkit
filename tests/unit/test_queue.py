@@ -840,3 +840,32 @@ def test_stage_after_a_network_retry_clears_attempt(runner_factory, monkeypatch,
     after = patches[attempt_index + 1]
     assert after["attempt"] is None and after["stage"] == stages[-1]
     assert r.store.get(job.id).status == "done"
+
+
+def test_context_accepts_m5a_stages(runner_factory):
+    seen: list[str | None] = []
+
+    def handler(job, ctx):
+        for stage in ("cutting", "cutting_ads", "splitting:2/3"):
+            ctx.stage(stage)
+            seen.append(r.store.get(job.id).stage)
+        return JobResult()
+
+    r, spawn, _ = runner_factory(handler=handler)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    r.tick()
+    spawn.run_all()
+    assert seen == ["cutting", "cutting_ads", "splitting:2/3"]
+    assert r.store.get(job.id).status == "done"
+
+
+def test_context_rejects_an_unknown_stage(runner_factory):
+    def handler(job, ctx):
+        ctx.stage("splitting:x")
+        return JobResult()
+
+    r, spawn, _ = runner_factory(handler=handler)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    r.tick()
+    spawn.run_all()
+    assert (r.store.get(job.id).status, r.store.get(job.id).error_code) == ("failed", "E_UNKNOWN")
