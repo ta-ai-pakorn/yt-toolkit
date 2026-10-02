@@ -27,11 +27,12 @@ if TYPE_CHECKING:
     from ..app import AppContext
     from ..core.queue import QueueRunner
 
-ITEMS_MAX = 500
+ITEMS_MAX = 1200  # 200 คลิป x 6 งาน (W3: หลัก + srt + txt + โน้ต + ภาพรวมเฟรม + zip)
 ORDER_IDS_MAX = 1000
 LIST_LIMIT_DEFAULT = 50
 LIST_LIMIT_MAX = 200
 TITLE_MAX_CHARS = 500
+FOLDER_MAX_CHARS = 80  # params.folder (ชื่อโฟลเดอร์กลุ่มของ W3) หลัง strip
 MP3_KBPS_DEFAULT = 192
 # ชนิดไฟล์ผลลัพธ์ตามนามสกุล (ไม่พึ่ง mimetypes: บน Windows เดา zip เป็น application/x-zip-compressed)
 OUTPUT_MEDIA_TYPES = {
@@ -64,6 +65,26 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class _Grouped(_Strict):
+    """params ทุกชนิดรับ folder ได้ (owner preview round 2): ชื่อโฟลเดอร์กลุ่มของงานจาก W3
+
+    strip แล้วยาว 1..80 ตัวอักษร (เกิน = 422) strip แล้วว่าง = ไม่มี (ไม่เก็บลง params)
+    เก็บข้อความตามที่ส่งมา (strip แล้ว) ตัวทำงานทำความสะอาดเป็นชื่อโฟลเดอร์เอง (files.group_folder_name)
+    """
+
+    folder: str | None = None
+
+    @field_validator("folder")
+    @classmethod
+    def _folder(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if len(value) > FOLDER_MAX_CHARS:
+            raise ValueError(f"folder must be at most {FOLDER_MAX_CHARS} characters")
+        return value or None
+
+
 def _audio_language(value: str) -> str:
     if value != "original" and not _LANGUAGE.fullmatch(value):
         raise ValueError("audioLanguage must be 'original' or a language tag")
@@ -84,7 +105,7 @@ class SubOptionsModel(_Strict):
         return self
 
 
-class VideoParams(_Strict):
+class VideoParams(_Grouped):
     formatId: str | None = Field(None, pattern=_FORMAT_ID)
     maxQuality: bool = False
     maxHeight: Literal[720, 1080] | None = None
@@ -103,7 +124,7 @@ class VideoParams(_Strict):
         return self
 
 
-class AudioParams(_Strict):
+class AudioParams(_Grouped):
     format: Literal["m4a", "mp3", "wav"]
     mp3Kbps: Literal[128, 192, 320] | None = None
     splitChapters: Literal[False] = False
@@ -120,25 +141,32 @@ class AudioParams(_Strict):
         return self
 
 
-class SubtitleParams(_Strict):
+class SubtitleParams(_Grouped):
     trackId: str | None = Field(None, pattern=_TRACK_ID)
     format: Literal["srt", "txt", "md"]
     options: SubOptionsModel
 
 
-class ContactSheetParams(_Strict):
+class ContactSheetParams(_Grouped):
     source: Literal["fast"] = "fast"
     columns: Literal[5] = 5
 
 
-class FramesZipParams(_Strict):
+class FramesZipParams(_Grouped):
     source: Literal["fast"] = "fast"
+
+
+class NoteParams(_Grouped):
+    """โน้ต .md ของคลิป ไม่ส่ง trackId = แทร็กที่เลือกให้เอง (เหมือน GET /videos/{id}/note)"""
+
+    trackId: str | None = Field(None, pattern=_TRACK_ID)
 
 
 PARAMS_BY_KIND: dict[str, type[BaseModel]] = {
     "video": VideoParams,
     "audio": AudioParams,
     "subtitle": SubtitleParams,
+    "note": NoteParams,
     "contact_sheet": ContactSheetParams,
     "frames_zip": FramesZipParams,
 }
@@ -146,7 +174,7 @@ PARAMS_BY_KIND: dict[str, type[BaseModel]] = {
 
 class NewJobModel(_Strict):
     videoId: str = Field(pattern=_VIDEO_ID)
-    kind: Literal["video", "audio", "subtitle", "contact_sheet", "frames_zip"]  # frames_sharp = M5
+    kind: Literal["video", "audio", "subtitle", "note", "contact_sheet", "frames_zip"]  # frames_sharp = M5
     params: dict[str, Any]
     title: str = Field("", max_length=TITLE_MAX_CHARS)
 

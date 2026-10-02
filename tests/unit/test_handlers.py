@@ -747,8 +747,226 @@ def test_contact_sheet_without_storyboard_fails(env):
     assert folders(env.out) == []
 
 
+# ---------- txt = srt (owner preview round 2) ----------
+
+
+def test_txt_job_writes_the_srt_bytes_with_a_txt_extension(env):
+    srt, _ = env.run("subtitle", THAI, {"trackId": "a.th-orig", "format": "srt", "options": MEDIUM})
+    txt, _ = env.run("subtitle", THAI, {"trackId": "a.th-orig", "format": "txt", "options": MEDIUM})
+
+    srt_path, txt_path = output_path(srt), output_path(txt)
+    assert txt_path.read_bytes() == srt_path.read_bytes()
+    assert txt_path.read_bytes().startswith(b"1\r\n00:")
+    assert txt_path.parent == srt_path.parent
+    assert txt_path.name == srt_path.name.removesuffix(".srt") + ".txt"
+
+
+# ---------- โฟลเดอร์กลุ่ม (params.folder) ----------
+
+GROUP = "รวมคลิป ก/ข"
+GROUP_DIR = "รวมคลิป กข"  # files.group_folder_name(GROUP)
+
+
+@pytest.mark.parametrize(
+    ("kind", "video_id", "title", "params", "suffix", "ext"),
+    [
+        ("video", BBB, BBB_TITLE, video_params(), "", "mp4"),
+        ("audio", BBB, BBB_TITLE, audio_params("m4a"), "", "m4a"),
+        ("subtitle", THAI, THAI_TITLE, {"trackId": "a.th-orig", "format": "srt", "options": MEDIUM}, ".th", "srt"),
+        ("note", THAI, THAI_TITLE, {}, ".note", "md"),
+        ("contact_sheet", BBB, BBB_TITLE, {"source": "fast", "columns": 5}, " - contact sheet", "jpg"),
+        ("frames_zip", BBB, BBB_TITLE, {"source": "fast"}, " - frames", "zip"),
+    ],
+)
+def test_group_folder_layout_for_every_kind(env, kind, video_id, title, params, suffix, ext):
+    result, _ = env.run(kind, video_id, {**params, "folder": GROUP})
+
+    (out,) = result.outputs
+    path = output_path(result)
+    assert out.root == str(env.out.resolve())  # root ยังเป็นโฟลเดอร์ผลลัพธ์
+    assert path == files.plan_output(env.out.resolve(), title, video_id, suffix, ext, GROUP)
+    assert path.parent.parent == env.out.resolve() / GROUP_DIR
+    assert out.rel == f"{GROUP_DIR}/{path.parent.name}/{path.name}"  # rel รวมโฟลเดอร์กลุ่ม
+    assert path.parent.name.endswith(f" [{video_id}]")
+    assert (path.parent / files.SOURCE_NOTE_NAME).is_file()  # แหล่งที่มา.txt อยู่ในโฟลเดอร์ของคลิป
+    assert not (env.out / GROUP_DIR / files.SOURCE_NOTE_NAME).exists()
+    assert folders(env.out) == [env.out / GROUP_DIR]
+
+
+def test_jobs_of_one_batch_share_the_group_and_clip_folders(env):
+    a, _ = env.run("subtitle", THAI, {"trackId": "a.th-orig", "format": "srt", "options": MEDIUM, "folder": GROUP})
+    b, _ = env.run("note", THAI, {"folder": GROUP})
+    c, _ = env.run("contact_sheet", BBB, {"source": "fast", "columns": 5, "folder": GROUP})
+
+    assert output_path(a).parent == output_path(b).parent
+    assert output_path(c).parent.parent == output_path(a).parent.parent == env.out.resolve() / GROUP_DIR
+
+
+@pytest.mark.parametrize("folder", ["", "   ", None, 12])
+def test_blank_or_odd_folder_means_no_group(env, folder):
+    result, _ = env.run("frames_zip", BBB, {"source": "fast", "folder": folder})
+
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, " - frames", "zip")
+
+
+def test_dangerous_folder_names_stay_inside_the_output_root(env):
+    root = env.out.resolve()
+    for raw in ("..", "../../escape", "CON", "a."):
+        result, _ = env.run("frames_zip", BBB, {"source": "fast", "folder": raw})
+        path = output_path(result)
+        assert path.resolve().is_relative_to(root), raw
+        assert path.parent.parent.parent == root, raw
+        assert result.outputs[0].rel.count("/") == 2, raw
+    names = {p.name for p in folders(env.out)}
+    assert names == {files.GROUP_FALLBACK, "....escape", "_CON", "a"}
+
+
+# ---------- note ----------
+
+
+class PinnedRecorder:
+    """ตัวดึงคอมเมนต์ปักหมุดปลอม (แทน PinnedCommentService.get) ตอบตาม `answer` หรือโยน `error`"""
+
+    def __init__(self, answer: dict | None = None, error: BaseException | None = None) -> None:
+        self.answer = answer
+        self.error = error
+        self.calls: list[str] = []
+
+    def __call__(self, video_id: str) -> dict | None:
+        self.calls.append(video_id)
+        if self.error is not None:
+            raise self.error
+        return self.answer
+
+
+PINNED = {"text": "ขอบคุณที่ดูนะ\nกดติดตามด้วย", "byUploader": True, "likes": 3}
+
+
+def test_note_job_writes_the_same_markdown_as_the_note_endpoint(env):
+    pinned = PinnedRecorder(PINNED)
+    result, ctx = env.run("note", THAI, {"trackId": "a.th-orig"}, deps=replace(env.deps, pinned=pinned))
+
+    expected = env.subtitles.note(THAI, "a.th-orig", pinned=lambda _vid: PINNED)
+    path = output_path(result)
+    assert path.read_bytes() == expected.data
+    assert path == env.planned(THAI, THAI_TITLE, ".note", "md")
+    assert path.name.endswith(".note.md")
+    assert result.outputs[0].kind == "note"
+    assert result.outputs[0].size_bytes == len(expected.data)
+    assert result.notes == ()
+    assert result.title == THAI_TITLE
+    assert ctx.stages == ["probing", "writing"]
+    assert ctx.titles == [THAI_TITLE]
+    assert pinned.calls == [THAI]
+    text = path.read_text(encoding="utf-8")
+    assert "## คอมเมนต์ปักหมุด (เจ้าของช่อง)" in text
+    assert "## ทรานสคริปต์" in text
+    assert b"\r\n" not in path.read_bytes() and not path.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert (path.parent / files.SOURCE_NOTE_NAME).is_file()
+
+
+def test_note_job_without_track_uses_the_default_track(env):
+    result, _ = env.run("note", THAI, {})
+
+    assert output_path(result).read_bytes() == env.subtitles.note(THAI).data
+    assert "## ทรานสคริปต์" in output_path(result).read_text(encoding="utf-8")
+
+
+def test_note_job_without_pinned_getter_has_no_pinned_section(env):
+    assert env.deps.pinned is None
+    result, _ = env.run("note", THAI, {})
+
+    assert "คอมเมนต์ปักหมุด" not in output_path(result).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [YtError("E_BOT_CHECK", "comments"), YtError("E_NETWORK", "x"), RuntimeError("boom"), OSError("disk")],
+    ids=lambda e: type(e).__name__ + getattr(e, "code", ""),
+)
+def test_pinned_failure_never_fails_the_note_job(env, error):
+    pinned = PinnedRecorder(error=error)
+    result, _ = env.run("note", THAI, {"trackId": "a.th-orig"}, deps=replace(env.deps, pinned=pinned))
+
+    path = output_path(result)
+    assert pinned.calls == [THAI]
+    assert path.read_bytes() == env.subtitles.note(THAI, "a.th-orig").data
+    assert "คอมเมนต์ปักหมุด" not in path.read_text(encoding="utf-8")
+    assert result.notes == ()
+
+
+def test_note_job_on_clip_without_subtitles_still_writes_the_note(env):
+    result, _ = env.run("note", BBB, {}, deps=replace(env.deps, pinned=PinnedRecorder(None)))
+
+    text = output_path(result).read_text(encoding="utf-8")
+    assert "ทรานสคริปต์" not in text
+    assert f"# {BBB_TITLE}" in text
+    assert output_path(result).name.endswith(".note.md")
+
+
+def test_note_job_missing_track_falls_back_to_default(env):
+    result, _ = env.run("note", THAI, {"trackId": "o.xx"})
+
+    assert output_path(result).read_bytes() == env.subtitles.note(THAI).data
+
+
+def test_note_job_missing_track_on_clip_without_subs_still_writes(env):
+    result, _ = env.run("note", BBB, {"trackId": "a.en-orig"})
+
+    assert output_path(result).read_bytes() == env.subtitles.note(BBB).data
+
+
+class WarmingNotes:
+    """SubtitleService ที่ตอบ E_SESSION_WARMING ในการทำโน้ตครั้งแรก (หรือทุกครั้ง)"""
+
+    def __init__(self, inner: SubtitleService, always: bool = False) -> None:
+        self.inner = inner
+        self.always = always
+        self.notes = 0
+
+    def note(self, *args, **kwargs):
+        self.notes += 1
+        if self.always or self.notes == 1:
+            raise YtError("E_SESSION_WARMING", "warming", retry_after=4)
+        return self.inner.note(*args, **kwargs)
+
+
+def test_note_job_waits_for_session_warmup(env):
+    warming = WarmingNotes(env.subtitles)
+    result, ctx = env.run("note", THAI, {"trackId": "a.th-orig"}, deps=replace(env.deps, subtitles=warming))
+
+    assert ctx.waits == [4]
+    assert warming.notes == 2
+    assert output_path(result).is_file()
+
+
+def test_note_job_warming_twice_fails(env):
+    warming = WarmingNotes(env.subtitles, always=True)
+    with pytest.raises(YtError) as err:
+        env.run("note", THAI, {"trackId": "a.th-orig"}, deps=replace(env.deps, subtitles=warming))
+
+    assert err.value.code == "E_SESSION_WARMING"
+    assert warming.notes == 2
+    assert folders(env.out) == []
+
+
+def test_note_job_other_errors_fail_the_job(env):
+    with pytest.raises(YtError) as err:
+        env.run("note", "UPCOMINGLV1", {})
+
+    assert err.value.code == "E_LIVE_NOT_READY"
+    assert folders(env.out) == []
+
+
+def test_note_job_cancelled_before_writing_leaves_nothing(env):
+    with pytest.raises(JobCancelled):
+        env.run("note", THAI, {}, cancel_on="writing")
+
+    assert folders(env.out) == []
+
+
 def test_build_handlers_keys(env):
-    assert set(build_handlers(env.deps)) == {"video", "audio", "subtitle", "contact_sheet", "frames_zip"}
+    assert set(build_handlers(env.deps)) == {"video", "audio", "subtitle", "note", "contact_sheet", "frames_zip"}
     assert isinstance(env.downloader, Downloader)
 
 

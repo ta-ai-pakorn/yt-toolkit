@@ -342,6 +342,6 @@ def test_audio_without_tracks_uses_generic_spec(fake: FakeExtractor) -> None:
 
 
 def test_kind_sets() -> None:
-    assert YOUTUBE_KINDS == {"video", "audio", "subtitle", "frames_sharp"}
+    assert YOUTUBE_KINDS == {"video", "audio", "subtitle", "note", "frames_sharp"}
     assert FFMPEG_KINDS == {"video", "audio"}
     assert isinstance(YOUTUBE_KINDS, frozenset) and isinstance(FFMPEG_KINDS, frozenset)

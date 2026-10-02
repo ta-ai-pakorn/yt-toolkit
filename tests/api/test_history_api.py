@@ -147,12 +147,13 @@ def test_only_done_jobs_with_files_count(env, status, outputs):
 def test_outputs_are_distinct_and_in_fixed_order(env):
     client, _, add_job = env
     client.get(f"/api/videos/{BBB}")
-    for n, kind in enumerate(["frames_zip", "video", "subtitle", "contact_sheet", "audio", "video", "audio"]):
+    kinds = ["frames_zip", "note", "video", "subtitle", "contact_sheet", "audio", "video", "audio", "note"]
+    for n, kind in enumerate(kinds):
         add_job(BBB, kind, T0 + timedelta(minutes=n))
     add_job(BBB, "subtitle", T0 + timedelta(hours=9), status="failed")
     for scope in ("all", "opened"):
         item = client.get("/api/history", params={"scope": scope}).json()["items"][0]
-        assert item["outputs"] == ["video", "audio", "subtitle", "contact_sheet", "frames_zip"]
+        assert item["outputs"] == ["video", "audio", "subtitle", "note", "contact_sheet", "frames_zip"]
 
 
 def test_last_at_is_the_later_of_open_and_latest_finish(env):

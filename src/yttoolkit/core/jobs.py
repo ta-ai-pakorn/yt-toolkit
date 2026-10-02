@@ -19,7 +19,7 @@ from typing import Any, Protocol
 from .db import Database, Transaction
 from .yterrors import MESSAGES
 
-JOB_KINDS = ("video", "audio", "subtitle", "frames_sharp", "contact_sheet", "frames_zip")
+JOB_KINDS = ("video", "audio", "subtitle", "note", "frames_sharp", "contact_sheet", "frames_zip")
 STATUSES = ("queued", "running", "done", "failed", "cancelled", "interrupted")
 STAGES = ("probing", "downloading_video", "downloading_audio", "merging", "converting", "writing")
 TERMINAL = frozenset({"done", "failed", "cancelled", "interrupted"})
@@ -106,7 +106,7 @@ class OutputFile:
     root: str        # โฟลเดอร์ผลลัพธ์ (absolute) ตอนทำงาน ไม่ส่งให้เบราว์เซอร์
     rel: str         # "<folder>/<file>" ใช้ "/" คั่น
     size_bytes: int
-    kind: str        # "video" | "audio" | "subtitle" | "image" | "archive"
+    kind: str        # "video" | "audio" | "subtitle" | "note" | "image" | "archive"
 
 
 @dataclass(frozen=True)

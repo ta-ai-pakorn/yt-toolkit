@@ -23,6 +23,7 @@ from .api.errors import redact_home
 from .app import AppContext, create_app
 from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
 from .core import files, thai_fallback, tools
+from .core.comments import PinnedCommentService
 from .core.db import Database, purge_stale_cache
 from .core.events import CLOSED, Event, EventBus
 from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, visitor_session
@@ -32,6 +33,7 @@ from .core.handlers import (
     NO_AUDIO_SUFFIX,
     HandlerDeps,
     build_handlers,
+    job_group,
 )
 from .core.jobs import JobStore
 from .core.media import FakeMediaTools, FfmpegTools, MediaTools
@@ -60,7 +62,8 @@ SWEEP_RECENT_INTERRUPTED = 20
 # ชื่อไฟล์ที่ core/handlers.py เขียนจริง (ล้างไฟล์ค้างเฉพาะชื่อแบบนี้ ไม่แตะไฟล์อื่นของผู้ใช้)
 _SWEEP_SUFFIXES = (NO_AUDIO_SUFFIX, CONTACT_SHEET_SUFFIX, FRAMES_ZIP_SUFFIX)
 _SWEEP_MEDIA_EXTS = ("mp4", "m4a", "mp3", "wav", "jpg", "zip")  # video, audio, contact_sheet, frames_zip
-_SWEEP_SUB_EXTS = ("srt", "txt", "md")  # subtitle (api/jobs.py SubtitleParams.format)
+# subtitle (api/jobs.py SubtitleParams.format) และโน้ต "<ชื่อ>.note.md" (ส่วน ".note" อยู่ตำแหน่งรหัสภาษา)
+_SWEEP_SUB_EXTS = ("srt", "txt", "md")
 # stop รอแอพปิดเองไม่เกินเท่านี้ก่อน kill ต้องนานกว่า หยุดคิว + uvicorn รอ request ค้าง (มีเทสคุม)
 STOP_WAIT_S = 10.0
 STOP_POLL_S = 0.1
@@ -249,6 +252,7 @@ class Services:
     events: EventBus
     media: MediaTools
     queue: QueueRunner
+    pinned: PinnedCommentService | None = None  # ส่งต่อเป็น ctx.pinned (router ข้อมูลคลิปใช้ตัวนี้ ไม่สร้างใหม่)
 
 
 def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
@@ -284,12 +288,16 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         else:
             media = FfmpegTools(lambda: tools.find_ffmpeg(paths, plat), popen_flags=plat.popen_flags)
         events = EventBus()
+        # ตัวเดียวกับที่ API ข้อมูลคลิปใช้ (ctx.pinned): งานโน้ตในคิวกับ GET pinned-comment ใช้ cache และล็อกร่วมกัน
+        # เรียกผ่าน lambda: extractor ทดสอบบางตัวไม่มี pinned_comment และไม่ต้องมีถ้าไม่ได้เรียก
+        pinned = PinnedCommentService(videos, lambda vid: extractor.pinned_comment(vid), paths.cache)
         deps = HandlerDeps(
             videos=videos,
             downloader=extractor,  # type: ignore[arg-type]  # ทั้งตัวจริงและตัวปลอมมี download (C8)
             media=media,
             subtitles=subtitles,
             cache_root=paths.cache,
+            pinned=pinned.get,
         )
         delays = {"delay_range": FAKE_DELAY_RANGE} if fake else {}
         queue = QueueRunner(
@@ -313,6 +321,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         events=events,
         media=media,
         queue=queue,
+        pinned=pinned,
     )
 
 
@@ -334,14 +343,14 @@ def recover_jobs(services: Services) -> None:
         log.exception("ล้างไฟล์ที่ค้างจากงานที่หยุดกลางคันไม่สำเร็จ (ข้ามไปก่อน)")
 
 
-def _clip_folders(root: Path, video_id: str, title: str) -> list[tuple[Path, str]]:
-    """โฟลเดอร์ของคลิป (กฎตั้งชื่อเดียวกับ files.plan_output) คู่กับคำขึ้นต้นของชื่อไฟล์ในโฟลเดอร์นั้น
+def _clip_folders(root: Path, video_id: str, title: str, group: str | None = None) -> list[tuple[Path, str]]:
+    """โฟลเดอร์ของคลิป (กฎตั้งชื่อเดียวกับ files.plan_output รวมโฟลเดอร์กลุ่ม) คู่กับคำขึ้นต้นของชื่อไฟล์ในโฟลเดอร์นั้น
 
     ลองทั้งชื่องานและชื่อว่าง (คลิปไม่มีชื่อ handler ตั้งชื่อจาก videoId ส่วนชื่องานอาจเป็นชื่อที่หน้าเว็บส่งมา)"""
     found: list[tuple[Path, str]] = []
     for candidate in dict.fromkeys((title, "")):
         try:
-            folder = files.plan_output(root, candidate, video_id, "", "x").parent
+            folder = files.plan_output(root, candidate, video_id, "", "x", group).parent
         except Exception:
             continue
         tag = f" [{video_id}]"
@@ -377,7 +386,7 @@ def sweep_interrupted_outputs(store: JobStore, output_root: Path, job_ids: Itera
     seen: set[Path] = set()
     removed = 0
     for job in jobs.values():
-        for folder, prefix in _clip_folders(root, job.video_id, job.title):
+        for folder, prefix in _clip_folders(root, job.video_id, job.title, job_group(job.params)):
             if folder not in seen:
                 seen.add(folder)
                 removed += _sweep_folder(folder, prefix, keep)
@@ -631,6 +640,7 @@ def _run_server(
         queue=queue,
         events=services.events,
         media=services.media,
+        pinned=services.pinned,
         # router อ่านค่านี้ตอนเรียกจริง และเรียกจากเธรดของ FastAPI (brake ถือ lock ของคิวเอง)
         on_bot_check=queue.brake,
     )
