@@ -350,6 +350,13 @@ def test_no_audio_video_name_suffix(env):
     assert output_path(result).read_bytes() == (MEDIA / "video-noaudio.mp4").read_bytes()
     assert ctx.stages == ["probing", "downloading_video", "merging", "writing"]
     assert env.media.calls[-1][1]["audio_language"] is None
+    assert env.media.calls[-1][1]["no_audio"] is True
+
+
+def test_video_with_audio_keeps_audio(env):
+    env.run("video", BBB, video_params())
+
+    assert env.media.calls[-1][1]["no_audio"] is False
 
 
 def test_video_quality_fallback_note(env):

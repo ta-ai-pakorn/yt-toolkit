@@ -87,6 +87,21 @@ def test_mp4_cover_only_and_bare() -> None:
     )  # fmt: skip
 
 
+def test_mp4_no_audio_drops_every_audio_stream() -> None:
+    # noAudio: format bv* อาจได้ไฟล์ที่มีเสียงติดมา ไฟล์ "(ไม่มีเสียง)" ต้องไม่มีเสียงจริงๆ
+    args = mp4_args(FF, SRC, DST, META, cover=COVER, subtitle=SUB, audio_language="th", no_audio=True)
+    assert "0:a?" not in args
+    assert _contains(args, ["-map", "0:v:0", "-map", "2:0", "-map", "1:0"])
+    assert "-an" in args
+    assert not any(a.startswith("-metadata:s:a") for a in args)
+    assert args[-3:] == ["-movflags", "+faststart", str(DST)]
+
+
+def test_mp4_keeps_audio_by_default() -> None:
+    args = mp4_args(FF, SRC, DST, META, cover=None, subtitle=None, audio_language=None)
+    assert "-an" not in args and "0:a?" in args
+
+
 def test_m4a_args() -> None:
     args = m4a_args(FF, SRC, Path("o.m4a"), META, cover=COVER, audio_language="en")
     assert args == (
