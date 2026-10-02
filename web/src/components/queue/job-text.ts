@@ -1,9 +1,30 @@
 import { fill, th } from "@/i18n/th"
+import { rangeText } from "@/lib/advanced-options"
 import { formatDuration } from "@/lib/format"
-import type { Job } from "@/lib/types"
+import type { Job, JobParams, JobStage } from "@/lib/types"
 
-/** ชื่อที่แสดงของงาน: ชื่อคลิป (ยังไม่รู้ชื่อ = รหัสคลิป) */
-export const jobTitle = (job: Pick<Job, "title" | "videoId">): string => job.title || job.videoId
+const SPLIT = /^splitting:(\d+)\/(\d+)$/
+type FixedStage = keyof typeof th.queue.stages
+
+/** ข้อความของขั้นตอน: "splitting:3/12" = "กำลังแยก chapter 3/12" (M5 รอบ A) ที่เหลือตามตาราง th.queue.stages */
+export function stageText(stage: JobStage): string {
+  const split = SPLIT.exec(stage)
+  if (split) return fill(th.queue.splitting, { i: split[1], n: split[2] })
+  return th.queue.stages[stage as FixedStage]
+}
+
+/** ตัวเลือกขั้นสูงของงาน ต่อท้ายชื่องาน (spec 3.5): " · ช่วง 1:30-5:00", " · แยก chapter", " · ตัดโฆษณา" */
+export function jobChoice(params: JobParams): string {
+  let text = ""
+  if ("range" in params && params.range) text += fill(th.queue.choice.range, { range: rangeText(params.range) })
+  if ("splitChapters" in params && params.splitChapters) text += th.queue.choice.chapters
+  if ("sponsorblock" in params && params.sponsorblock && params.sponsorblock.length > 0) text += th.queue.choice.ads
+  return text
+}
+
+/** ชื่อที่แสดงของงาน: ชื่อคลิป (ยังไม่รู้ชื่อ = รหัสคลิป) + ตัวเลือกขั้นสูงของงาน */
+export const jobTitle = (job: Pick<Job, "title" | "videoId"> & { params?: JobParams }): string =>
+  (job.title || job.videoId) + (job.params ? jobChoice(job.params) : "")
 
 /** เปอร์เซ็นต์จากความคืบหน้า 0..1 (ปัดลง ไม่ขึ้น 100% ก่อนเสร็จจริง) เช่น "42%" */
 export function formatPercent(progress: number): string {
@@ -52,7 +73,7 @@ export function progressLine(job: Job): string {
   if (job.cancelling) return th.queue.cancelling
   if (job.attempt !== undefined && job.attempt > 0) return retryText(job.attempt)
   if (job.stage === undefined) return th.queue.starting
-  const parts: string[] = [th.queue.stages[job.stage]]
+  const parts: string[] = [stageText(job.stage)]
   if (job.progress !== undefined) parts.push(formatPercent(job.progress))
   if (job.speedBps !== undefined && job.speedBps > 0) parts.push(formatSpeed(job.speedBps))
   if (job.etaS !== undefined && job.etaS >= 0) parts.push(formatEta(job.etaS))
