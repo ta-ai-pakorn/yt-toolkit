@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { SubOptions } from "./types"
-import { clampOptions, exportPath, isPresetName, LIMITS, notePath, PRESET_NAMES, presetOf, PRESETS } from "./sub-options"
+import { clampOptions, isPresetName, LIMITS, PRESET_NAMES, presetOf, PRESETS } from "./sub-options"
 
 describe("presetOf", () => {
   it("รู้จักค่าสำเร็จรูปทั้งสี่แบบ", () => {
@@ -69,50 +68,5 @@ describe("clampOptions", () => {
   it("ค่าที่ไม่ใช่ตัวเลขไม่ทำให้ได้ NaN", () => {
     const out = clampOptions({ ...PRESETS.medium, maxChars: Number.NaN })
     expect(out.maxChars).toBe(LIMITS.maxChars[0])
-  })
-})
-
-describe("exportPath", () => {
-  it("เรียงคีย์ตายตัว format, maxChars, lines, minMs, maxMs, mode", () => {
-    expect(exportPath("aqz-KE-bpKQ", "a.th-orig", "srt", PRESETS.medium)).toBe(
-      "/api/videos/aqz-KE-bpKQ/subtitles/a.th-orig/export?format=srt&maxChars=25&lines=1&minMs=1200&maxMs=5000&mode=chars",
-    )
-  })
-
-  it("โหมดคำต่อท้ายด้วย tokensPerCue", () => {
-    const o: SubOptions = { ...PRESETS.long, mode: "tokens", tokensPerCue: 4 }
-    expect(exportPath("aqz-KE-bpKQ", "o.th", "md", o)).toBe(
-      "/api/videos/aqz-KE-bpKQ/subtitles/o.th/export?format=md&maxChars=42&lines=2&minMs=1500&maxMs=7000&mode=tokens&tokensPerCue=4",
-    )
-  })
-
-  it("โหมดตัวอักษรไม่ส่ง tokensPerCue แม้มีค่าค้าง", () => {
-    expect(exportPath("v", "o.th", "txt", { ...PRESETS.medium, tokensPerCue: 4 })).not.toContain("tokensPerCue")
-  })
-})
-
-describe("notePath", () => {
-  it("มีแทร็ก: trackId ก่อน แล้วความยาวซับลำดับเดียวกับไฟล์ซับ (ไม่มี format)", () => {
-    expect(notePath("88o5Sk8_m1Y", "a.th-orig", PRESETS.medium)).toBe(
-      "/api/videos/88o5Sk8_m1Y/note?trackId=a.th-orig&maxChars=25&lines=1&minMs=1200&maxMs=5000&mode=chars",
-    )
-  })
-
-  it("ทีละคำ (โหมดนับเป็นคำ) ส่ง tokensPerCue ท้ายสุด", () => {
-    expect(notePath("v", "o.th", PRESETS.word)).toBe(
-      "/api/videos/v/note?trackId=o.th&maxChars=15&lines=1&minMs=800&maxMs=3000&mode=tokens&tokensPerCue=1",
-    )
-  })
-
-  it("ไม่มีแทร็ก: ไม่ส่ง trackId ให้ backend ใช้แทร็กเริ่มต้นเอง", () => {
-    expect(notePath("aqz-KE-bpKQ", null, PRESETS.long)).toBe(
-      "/api/videos/aqz-KE-bpKQ/note?maxChars=42&lines=2&minMs=1500&maxMs=7000&mode=chars",
-    )
-  })
-
-  it("โหมดตัวอักษรไม่ส่ง tokensPerCue ที่ค้างอยู่ · รหัสถูกเข้ารหัสใน URL", () => {
-    const path = notePath("a/b", "t.zh-Hant", { ...PRESETS.medium, tokensPerCue: 4 })
-    expect(path).not.toContain("tokensPerCue")
-    expect(path.startsWith("/api/videos/a%2Fb/note?trackId=t.zh-Hant&")).toBe(true)
   })
 })

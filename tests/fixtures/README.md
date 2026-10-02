@@ -118,6 +118,49 @@
 
 path ในตารางอยู่ใต้ `.venv/Lib/site-packages/yt_dlp/`
 
+## media/ (ไฟล์สื่อจิ๋วของ M4)
+ไฟล์สื่อสร้างเองในเครื่องด้วย ffmpeg 8.1 (ไม่ได้โหลดจากที่ไหน) ใช้เทส `core/media.py` กับ ffmpeg จริง (`tests/integration/test_media_ffmpeg.py`) และเป็นไฟล์ที่ `FakeMediaTools` คัดลอกให้ (`video.mp4`, `audio.m4a`, `audio.mp3`, `audio.wav`) ทุกไฟล์เล็กกว่า 60 KB ภาพคือ test pattern ของ ffmpeg เสียงคือโทน 440 Hz ไม่มีเนื้อหาของบุคคลที่สาม
+
+สร้างด้วยคำสั่งนี้ (รันในโฟลเดอร์ `tests/fixtures/media`):
+
+```bash
+ffmpeg -hide_banner -y -f lavfi -i testsrc=size=160x90:rate=10 -f lavfi -i sine=frequency=440:sample_rate=44100 -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 64k -shortest video.mp4
+ffmpeg -hide_banner -y -f lavfi -i testsrc=size=160x90:rate=10 -t 2 -c:v libx264 -pix_fmt yuv420p video-noaudio.mp4
+ffmpeg -hide_banner -y -f lavfi -i sine=frequency=440:sample_rate=44100 -t 2 -c:a aac -b:a 64k audio.m4a
+ffmpeg -hide_banner -y -f lavfi -i sine=frequency=440:sample_rate=44100 -t 2 -c:a libmp3lame -b:a 128k audio.mp3
+ffmpeg -hide_banner -y -f lavfi -i sine=frequency=440:sample_rate=22050 -t 0.5 -ac 1 -c:a pcm_s16le audio.wav
+ffmpeg -hide_banner -y -f lavfi -i testsrc=size=160x90 -frames:v 1 cover.jpg
+```
+
+| ไฟล์ | ขนาดประมาณ | ใช้ทำอะไร |
+|---|---|---|
+| `video.mp4` | 24 KB | h264 160×90 10 fps 2 วินาที + เสียง aac 64k |
+| `video-noaudio.mp4` | 6 KB | ภาพอย่างเดียว (เทสคลิปไม่มีเสียง) |
+| `audio.m4a` | 18 KB | aac 44.1 kHz 2 วินาที (ต้นทางของ mp3 / wav / ใส่ปก) |
+| `audio.mp3` | 33 KB | mp3 128k (สิ่งที่ `FakeMediaTools.to_mp3` เขียนออกมา) |
+| `audio.wav` | 22 KB | pcm_s16le mono 22.05 kHz 0.5 วินาที (สิ่งที่ `FakeMediaTools.to_wav` เขียนออกมา) |
+| `cover.jpg` | 5 KB | ภาพปก 160×90 |
+
+เทส real-ffmpeg ใช้ `requires_ffmpeg` (`tests/helpers_ffmpeg.py`) จะถูกข้ามเมื่อเครื่องไม่มี ffmpeg
+
+หมายเหตุ `license`: `probe/88o5Sk8_m1Y.json` มีฟิลด์ระดับบน `"license": "Creative Commons Attribution license (reuse allowed)"` ซึ่งใส่เข้าไปด้วยมือ (ตัวตัด probe `core/videos.trim_probe` ไม่เก็บฟิลด์นี้ และไฟล์ probe อื่นไม่มี) เพื่อให้เทสเครดิตของคลิป CC BY อ่านค่าจากไฟล์ได้ (`tests/unit/test_video_meta.py`) คลิปนี้เผยแพร่แบบ CC BY ตามหัวข้อ "ลิขสิทธิ์" ด้านล่าง
+
+## downloads/ (งานโหลดของตัวปลอม M4)
+`behaviors.json` (ตามสัญญา C14 ของแผน M4 ทุกตัวอักษร) บอก `FakeExtractor.download` ว่าแต่ละคลิปโหลดกี่ขั้น ขั้นละกี่มิลลิวินาที และพลาดตรงไหน ตัวปลอมไม่ต่อเน็ตและไม่ใช้ ffmpeg: เดินครบทุกขั้นแล้วคัดลอกไฟล์จาก `media/` (`video.mp4` เมื่อรวมภาพกับเสียง, `video-noaudio.mp4` เมื่อไม่มีเสียง, `audio.m4a` เมื่อโหลดเสียง) ไปเป็น `media.mp4` / `media.m4a` ใน workdir ของงาน
+
+- `default`: คลิปที่ไม่อยู่ใน `videos` โหลด 6 ขั้น ขั้นละ 120 ms (คลิปต้องมีไฟล์ใน `probe/` ไม่มี = `E_VIDEO_UNAVAILABLE` เหมือนเดิม)
+- `videos`: คลิปสังเคราะห์ ไม่มีไฟล์ใน `probe/` ของตัวเอง `probeAs` บอกว่าให้ใช้ข้อมูลของคลิปไหน (ทุกตัวใช้ Big Buck Bunny `aqz-KE-bpKQ`) แล้วตัวปลอมเปลี่ยน `id` เป็นของคลิปนั้นและเปลี่ยน `title` ตามที่ตั้งไว้
+- `failAtStep` / `error` / `failTimes`: พอถึงขั้นที่ `failAtStep` (นับจาก 0) ให้พลาดด้วยรหัส `error` ไม่เกิน `failTimes` ครั้งต่อคลิป นับตลอดอายุของตัวปลอมหนึ่งตัว (เปิดโปรแกรมใหม่ = เริ่มนับใหม่)
+
+| id | ชื่อคลิป | ทำอะไร | สเปก e2e ที่ใช้ |
+|---|---|---|---|
+| `SLOWDOWNLD1`..`SLOWDOWNLD4` | คลิปโหลดช้า 1..4 | 40 ขั้น ขั้นละ 250 ms (ราว 10 วินาที) ไว้เห็นงานที่กำลังโหลด งานรอคิว และการยกเลิก | `queue-flow.spec.ts` (T14) |
+| `BOTCHECKDL1` | คลิปติดบอท | พลาด `E_BOT_CHECK` ที่ขั้น 2 ครั้งเดียว แล้วรอบถัดไปผ่าน (Q1: คิวพัก งานกลับไปหัวคิวหนึ่งครั้ง แล้วโหลดได้) | `queue-flow.spec.ts` |
+| `NETRETRYDL1` | คลิปเน็ตหลุด | พลาด `E_NETWORK` ที่ขั้น 1 ครั้งเดียว แล้วรอบถัดไปผ่าน (ตัวนับ "ลองใหม่ครั้งที่ n/3") | `queue-flow.spec.ts` |
+| `REFUSEDDL01` | คลิปที่ยูทูปไม่ส่งไฟล์ | พลาด `E_YT_REFUSED` ตั้งแต่ขั้น 0 ทุกครั้ง (99 ครั้ง) งานจบเป็นสีแดง ไม่ลองซ้ำเอง (Q2) | `queue-flow.spec.ts` |
+
+เทสหน่วย (`tests/unit/test_extractor_download.py`) ส่งพารามิเตอร์ `behaviors` ชี้ไปที่สำเนาของไฟล์นี้ที่ตั้ง `stepMs` เป็น 0 จะได้ไม่ต้องรอ และเช็คว่าไฟล์นี้ตรงกับ C14 ทุกค่า แก้ไฟล์นี้ต้องแก้สัญญา C14 ในแผนก่อน
+
 ## ลิขสิทธิ์
 Big Buck Bunny © Blender Foundation | www.bigbuckbunny.org
 เผยแพร่ภายใต้ [Creative Commons Attribution 3.0](https://creativecommons.org/licenses/by/3.0/)

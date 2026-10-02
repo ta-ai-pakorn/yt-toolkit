@@ -11,3 +11,15 @@ no_subs = "aqz-KE-bpKQ"
 [comments]
 # คลิปที่เจ้าของช่องปักหมุดคอมเมนต์ของตัวเองไว้ (เทสเก็บแค่ใน temp ไม่มีข้อความคอมเมนต์ในรีโป)
 uploader_pinned = "TggVh3WCwxg"  # พิธยืนยัน 2026-10-01 ว่าเจ้าของช่องปักหมุดคอมเมนต์ของตัวเอง
+
+[downloads]
+# M4 (T20): คลิปที่ test_download_network.py ใช้ เก็บแค่ id (ชื่อ ใบอนุญาต วันที่ตรวจ อยู่ในคอมเมนต์)
+# ตรวจ 2026-10-02 ด้วย probe ข้อมูลอย่างเดียว (ยังไม่โหลดไฟล์) · ถ้าห่างหลายเดือนให้ probe ซ้ำก่อนรัน
+# คลิปสั้นมาก หลายความละเอียด: avc1 สูงสุด 1080 และ vp9/av01 ถึง 2160 (AC-VID-01/02/04/08, AC-AUD-*)
+short_4k = "kwmHaXUAa0M"  # "Abstract White Background 4K - Motion Graphics Background Loop" 10 วิ, CC BY, 144p-2160p
+# เสียงไทยต้นฉบับ + พากย์ en-US (AC-VID-03 และ AC-VID-05 แบบกลับด้าน: ยังหาคลิปอังกฤษที่มีพากย์ไทยไม่เจอ ดู docs/m4-followups.md)
+dub_clip = "8lpOfyoxcvU"  # "3 นาทีคดีดัง : 2499 บันทึกชีวิต แดง ไบเล่" 403 วิ, CC BY, th (original) + en-US, 144p-720p
+# มีซับ a.th-orig สำหรับฝังซับ (AC-VID-09) และคลิปยาวพอให้ลองยกเลิกกลางการโหลด
+thai_subs = "88o5Sk8_m1Y"  # "Thai Listening Practice | EP.1 | Beginner" 372 วิ, CC BY, th-orig, 144p-1080p
+# คลิปแนวตั้งยาว 60 วิ: เพดาน compat นับที่ด้านสั้น ต้องได้ 1080x1920 ไม่ใช่ 480p
+portrait_short = "IngFfl6DTqY"  # "nature 4K 698 ... Free Vertical Stream Scene Video" 60 วิ, CC BY, แนวตั้ง, avc1 ถึง 1080 ด้านสั้น

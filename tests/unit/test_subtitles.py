@@ -8,15 +8,13 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from yttoolkit import lifecycle
-from yttoolkit.api.subtitles import export_filenames
-from yttoolkit.api.videos import safe_title
-from yttoolkit.core.db import Database
+from yttoolkit.core.db import PEEK_SENTINEL, Database
 from yttoolkit.core.extractor import FakeExtractor
 from yttoolkit.core.srt_builder import PRESETS, SubOptions
 from yttoolkit.core.subparse import PARSER_VERSION
@@ -60,7 +58,14 @@ def make(tmp_path):
         db.migrate()
         made.append(db)
         fake = FakeExtractor(FIXTURES)
-        videos = VideoService(db, fake, now=lambda: datetime(2026, 9, 30, 12, tzinfo=UTC))
+        # นาฬิกาเดินทุกครั้งที่ถูกอ่าน: ทุกครั้งที่มีการ stamp เวลาจึงต่างกัน เทสเรื่อง opened_at ถึงจับได้
+        ticks = [0]
+
+        def clock() -> datetime:
+            ticks[0] += 1
+            return datetime(2026, 9, 30, 12, tzinfo=UTC) + timedelta(seconds=ticks[0])
+
+        videos = VideoService(db, fake, now=clock)
         fetch = Fetcher(fake, fail, times)
         # รอก่อนลองซับแปลซ้ำ (20 วินาที) บันทึกไว้แทนการหลับจริง
         fetch.sleeps = []
@@ -343,26 +348,27 @@ def test_export_srt_bytes(make):
     assert all(a[1] <= b[0] for a, b in zip(times, times[1:], strict=False))
 
 
-def test_export_filename_parts(make):
+def test_export_result_carries_title_and_lang(make):
     service, *_ = make()
     result = service.export(THAI, TRACK, "srt", PRESETS["medium"])
     assert (result.title, result.lang) == (THAI_TITLE, "th")
-    filename, fallback = export_filenames(result.title, THAI, result.lang, "srt")
-    assert filename == f"{safe_title(THAI_TITLE)}.th.srt"
-    assert filename == "Thai Listening Practice EP.1 Beginner.th.srt"
-    assert fallback == "subtitles.th.srt"
 
 
-def test_export_filename_falls_back_to_video_id():
-    assert export_filenames("|||", THAI, "th", "md")[0] == f"{THAI}.th.md"
-
-
-def test_export_txt_and_md(make):
+@pytest.mark.parametrize("preset", ["short", "medium", "long", "word"])
+def test_export_txt_is_the_srt_byte_for_byte(make, preset):
+    """owner preview round 2: .txt = เนื้อเดียวกับ .srt (cue ตามตัวเลือกความยาว CRLF UTF-8 ไม่มี BOM) ต่างแค่นามสกุล"""
     service, *_ = make()
-    txt = service.export(THAI, TRACK, "txt", PRESETS["medium"]).data
+    srt = service.export(THAI, TRACK, "srt", PRESETS[preset])
+    txt = service.export(THAI, TRACK, "txt", PRESETS[preset])
+    assert txt == srt
+    assert not txt.data.startswith(b"\xef\xbb\xbf")
+    assert txt.data.count(b"\n") == txt.data.count(b"\r\n") > 0
+    assert txt.data.startswith(b"1\r\n00:")
+
+
+def test_export_md(make):
+    service, *_ = make()
     md = service.export(THAI, TRACK, "md", PRESETS["medium"]).data.decode("utf-8")
-    assert not txt.startswith(b"\xef\xbb\xbf")
-    assert txt.count(b"\n") == txt.count(b"\r\n") > 0
     assert f"# {THAI_TITLE}" in md
     assert "https://www.youtube.com/watch?v=88o5Sk8_m1Y" in md
     assert md.count("\n") == md.count("\r\n")
@@ -420,10 +426,11 @@ def clean_thai_env(monkeypatch):
     return monkeypatch
 
 
-def test_open_services_builds_subtitle_service_and_thai_dir(paths, clean_thai_env):
+def test_open_services_builds_subtitle_service_and_thai_dir(paths, fake_platform, clean_thai_env):
     import os
 
-    db, videos, extractor, subtitles = lifecycle.open_services(paths, fake=True)
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    db, subtitles = services.db, services.subtitles
     try:
         assert isinstance(subtitles, SubtitleService)
         assert subtitles.tracks(THAI)["defaultTrackId"] == TRACK
@@ -626,11 +633,12 @@ def test_warming_export_and_note_use_the_same_gate(make):
     assert info.value.code == "E_SESSION_WARMING"
 
 
-def test_open_services_real_mode_shares_one_session(paths, clean_thai_env, monkeypatch):
+def test_open_services_real_mode_shares_one_session(paths, fake_platform, clean_thai_env, monkeypatch):
     from yttoolkit.core.extractor import YtDlpExtractor
     from yttoolkit.core.visitor_session import VisitorSession
 
-    db, videos, extractor, subtitles = lifecycle.open_services(paths, fake=False)
+    services = lifecycle.open_services(paths, fake_platform, fake=False)
+    db, extractor, subtitles = services.db, services.extractor, services.subtitles
     try:
         assert isinstance(extractor, YtDlpExtractor)
         assert isinstance(extractor.session, VisitorSession)
@@ -642,10 +650,94 @@ def test_open_services_real_mode_shares_one_session(paths, clean_thai_env, monke
         db.close()
 
 
-def test_open_services_fake_mode_has_no_session(paths, clean_thai_env):
-    db, _, extractor, subtitles = lifecycle.open_services(paths, fake=True)
+def test_open_services_fake_mode_has_no_session(paths, fake_platform, clean_thai_env):
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    db, extractor, subtitles = services.db, services.extractor, services.subtitles
     try:
         assert subtitles._session is None
         assert not hasattr(extractor, "session")
     finally:
         db.close()
+
+
+# ---------- งานในคิวไม่นับว่าเปิดคลิป (ไม่ขึ้น "ล่าสุด") ----------
+
+
+def test_export_never_marks_a_clip_as_opened(make):
+    service, _, _, _, videos = make()
+    service.export(THAI, TRACK, "srt", PRESETS["medium"])
+    assert videos.recent(10, scope="opened") == ([], 0)  # โหลดซับแล้วแต่ไม่เคยเปิดคลิปใน W2
+    videos.get(THAI)  # เปิดจริงแล้วจึงขึ้น
+    assert [i["videoId"] for i in videos.recent(10, scope="opened")[0]] == [THAI]
+
+
+def test_tracks_tokens_and_note_do_not_stamp_opened_at_either(make):
+    service, _, _, _, videos = make()
+    service.tracks(THAI)
+    service.tokens(THAI, TRACK)
+    service.note(THAI, TRACK)
+    assert videos.recent(10, scope="opened") == ([], 0)
+
+
+def _opened_at(db, video_id: str) -> str:
+    return db.execute("SELECT opened_at FROM videos WHERE video_id = ?", (video_id,))[0]["opened_at"]
+
+
+def _drop_captions(db, video_id: str) -> None:
+    """ทำให้แถวเหมือนของ M2 (ไม่มี captions) เพื่อบังคับให้ _trimmed probe ใหม่"""
+    row = db.execute("SELECT probe_json FROM videos WHERE video_id = ?", (video_id,))[0]
+    data = json.loads(row["probe_json"])
+    data.pop("captions")
+    db.execute("UPDATE videos SET probe_json = ? WHERE video_id = ?", (json.dumps(data), video_id))
+
+
+def _check_reprobe_leaves_opened_at(videos, db, probes_before_call, run, opened: bool) -> None:
+    """opened=False: คลิปไม่เคยเปิด ต้องยังเป็น PEEK_SENTINEL / opened=True: opened_at เดิมต้องไม่ขยับ"""
+    before = _opened_at(db, THAI)
+    assert before != PEEK_SENTINEL if opened else before == PEEK_SENTINEL
+    run()
+    assert probes_before_call() == 1  # re-probe เกิดขึ้นจริง (ไม่งั้นเทสนี้ไม่ได้ทดสอบอะไร)
+    assert _opened_at(db, THAI) == before
+    assert (videos.recent(10, scope="opened")[1]) == (1 if opened else 0)
+
+
+@pytest.mark.parametrize("opened", [False, True])
+def test_reprobe_for_missing_captions_does_not_stamp_opened_at(make, opened):
+    service, fake, _, db, videos = make()
+    videos.get(THAI, peek=not opened)
+    _drop_captions(db, THAI)
+    start = probes(fake)
+    _check_reprobe_leaves_opened_at(videos, db, lambda: probes(fake) - start, lambda: service.tracks(THAI), opened)
+
+
+@pytest.mark.parametrize("opened", [False, True])
+def test_reprobe_for_expired_link_does_not_stamp_opened_at(make, opened):
+    service, fake, fetch, db, videos = make(fail="E_NETWORK", times=1)
+    videos.get(THAI, peek=not opened)
+    service.tracks(THAI)
+    start = probes(fake)
+    _check_reprobe_leaves_opened_at(videos, db, lambda: probes(fake) - start, lambda: service.tokens(THAI, TRACK), opened)
+    assert len(fetch.urls) == 2
+
+
+@pytest.mark.parametrize("opened", [False, True])
+def test_reprobe_to_mint_a_session_does_not_stamp_opened_at(make, opened):
+    service, fake, fetch, db, videos = make(session=Session(None, 75))
+    videos.get(THAI, peek=not opened)
+    service.tracks(THAI)
+    start = probes(fake)
+
+    def run() -> None:
+        with pytest.raises(YtError) as info:
+            service.tokens(THAI, "t.en")
+        assert info.value.code == "E_SESSION_WARMING"
+
+    _check_reprobe_leaves_opened_at(videos, db, lambda: probes(fake) - start, run, opened)
+
+
+def test_first_probe_through_raw_is_a_peek(make):
+    # คลิปที่ยังไม่มีในเครื่อง: tracks() probe ครั้งแรกผ่าน raw() แถวที่ได้ต้องเป็น PEEK_SENTINEL
+    service, _, _, db, videos = make()
+    service.tracks(THAI)
+    assert _opened_at(db, THAI) == PEEK_SENTINEL
+    assert videos.recent(10, scope="opened") == ([], 0)

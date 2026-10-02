@@ -3,7 +3,9 @@ import { th } from "@/i18n/th"
 import type { VideoInfo } from "@/lib/types"
 
 import { ClipInfoPanel } from "./clip-details"
-
+import { AudioPanel } from "./download/audio-panel"
+import { audioPanelHasControls, useDownloadChoices, videoPanelHasControls } from "./download/use-download-state"
+import { VideoPanel } from "./download/video-panel"
 import { FramesSection } from "./frames"
 import { infoSections } from "./info-sections"
 import { useWarmingRefetch } from "./session-warming"
@@ -13,7 +15,7 @@ import { useVideoParams, VIDEO_TABS, type VideoTab } from "./url-state"
 
 const t = th.video.tabs
 
-// ลำดับแท็บบนแถบ: ภาพเฟรม · ซับ · ทรานสคริปต์ · ข้อมูลคลิป (M4 จะเพิ่มวิดีโอ/เสียงระหว่างภาพเฟรมกับซับ)
+// ลำดับแท็บบนแถบ (M4 Q8): ภาพเฟรม · วิดีโอ · เสียง · ซับ · ทรานสคริปต์ · ข้อมูลคลิป (เริ่มที่ภาพเฟรมเหมือนเดิม)
 const TABS = VIDEO_TABS
 
 const isTab = (value: unknown): value is VideoTab => TABS.some((tab) => tab === value)
@@ -31,11 +33,9 @@ const LIST =
 // แผงของแท็บรับโฟกัสได้ (Base UI ตั้ง tabIndex 0) จึงต้องมีวงโฟกัสให้เห็น แบบเดียวกับ breadcrumb
 const PANEL = "rounded-md pt-2 focus-visible:ring-3 focus-visible:ring-ring/50"
 
-/** แท็บข้อมูลคลิปมีปุ่มที่โฟกัสได้แน่นอน (คำอธิบาย chapter ช่วงดูซ้ำ แท็ก มีปุ่มคัดลอกเสมอ) */
+/** แท็บข้อมูลคลิปมีปุ่มที่โฟกัสได้แน่นอนเมื่อมีส่วนเครดิต (ปุ่ม "คัดลอกเครดิต", M4 T16): ใช้เงื่อนไขเดียวกับ infoSections */
 function panelHasButtons(video: VideoInfo | undefined): boolean {
-  if (!video) return false
-  const has = infoSections(video)
-  return has.description || has.chapters || has.replayed || has.tags
+  return video !== undefined && infoSections(video).credit
 }
 
 type Props = {
@@ -46,15 +46,17 @@ type Props = {
 }
 
 /**
- * แถบแท็บของ W2 ใต้หัวคลิป: ภาพเฟรม · ซับ · ทรานสคริปต์ · ข้อมูลคลิป (แท็บที่เปิดอยู่เก็บใน URL ?tab=…)
+ * แถบแท็บของ W2 ใต้หัวคลิป: ภาพเฟรม · วิดีโอ · เสียง · ซับ · ทรานสคริปต์ · ข้อมูลคลิป (แท็บที่เปิดอยู่เก็บใน URL ?tab=…)
  * เปลี่ยนแท็บแบบแทนที่ประวัติ ปุ่ม back จึงกลับหน้าก่อนหน้าในก้าวเดียว และล้างเวลาที่ไฮไลต์ไว้ (at)
  * จอแคบแถวแท็บเลื่อนแนวนอนได้ ไม่ตัดขึ้นบรรทัดใหม่ · แท็บที่ไม่ได้เปิดไม่ถูกเรนเดอร์ (ข้อมูลอยู่ใน cache)
+ * ตัวเลือกการโหลดที่ผู้ใช้เลือกกับคลิปนี้เก็บที่นี่ แท็บวิดีโอและเสียงจึงใช้ค่าเดียวกัน (เช่น ภาษาเสียง) แม้สลับแท็บไปมา
  */
 export function VideoTabs({ videoId, enabled, video }: Props) {
   const mostReplayed = video?.mostReplayed
   const { tab, update } = useVideoParams()
   // ซับแปลที่รอเซสชัน: นับถอยหลังครั้งเดียวทั้งหน้า ครบแล้วโหลดใหม่ให้เอง แม้อยู่แท็บอื่น
   useWarmingRefetch()
+  const [choices, choose] = useDownloadChoices(videoId)
 
   function onValueChange(value: unknown) {
     if (isTab(value) && value !== tab) update({ tab: value, at: null })
@@ -76,6 +78,14 @@ export function VideoTabs({ videoId, enabled, video }: Props) {
       <TabsContent value="frames" tabIndex={-1} className={PANEL}>
         <FramesSection videoId={videoId} enabled={enabled} mostReplayed={mostReplayed} />
       </TabsContent>
+      {/* แท็บวิดีโอ/เสียงที่มีตัวเลือกเริ่มด้วยช่องเลือกที่โฟกัสได้อยู่แล้ว = แผงไม่เป็นจุด Tab เพิ่ม
+          ยังโหลดอยู่หรือคลิปไม่มีไฟล์ให้โหลด (ไม่มีปุ่ม) = แผงรับโฟกัสเอง */}
+      <TabsContent value="video" tabIndex={videoPanelHasControls(video) ? -1 : undefined} className={PANEL}>
+        <VideoPanel video={video} enabled={enabled} choices={choices} choose={choose} />
+      </TabsContent>
+      <TabsContent value="audio" tabIndex={audioPanelHasControls(video) ? -1 : undefined} className={PANEL}>
+        <AudioPanel video={video} choices={choices} choose={choose} />
+      </TabsContent>
       <TabsContent value="subs" className={PANEL}>
         <SubsPanel videoId={videoId} enabled={enabled} />
       </TabsContent>
@@ -84,7 +94,7 @@ export function VideoTabs({ videoId, enabled, video }: Props) {
         <TranscriptPanel videoId={videoId} enabled={enabled} mostReplayed={mostReplayed} />
       </TabsContent>
       {/* แท็บข้อมูลคลิป: คอมเมนต์ปักหมุดเริ่มขอข้อมูลเมื่อแท็บนี้ถูกเปิดครั้งแรก (แผงถูกสร้างตอนนั้น)
-          มีส่วนที่มีปุ่มคัดลอก/ปุ่มเวลาอยู่แล้ว = แผงไม่เป็นจุด Tab เพิ่ม · มีแต่ข้อความ (หรือว่าง) = แผงรับโฟกัสเอง */}
+          ข้อมูลคลิปมาแล้ว = มีปุ่มคัดลอกเครดิตเสมอ แผงไม่เป็นจุด Tab เพิ่ม · ยังโหลดอยู่ = แผงรับโฟกัสเอง */}
       <TabsContent value="info" tabIndex={panelHasButtons(video) ? -1 : undefined} className={PANEL}>
         <ClipInfoPanel video={video} />
       </TabsContent>

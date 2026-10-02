@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Check, ChevronDown, ChevronUp, CircleX, ListVideo, Trash2 } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, CircleX, ListChecks, ListVideo, Trash2 } from "lucide-react"
 import { useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { Link } from "react-router"
 
@@ -22,13 +22,8 @@ import { formatDuration } from "@/lib/format"
 import type { PlaylistEntry, ResolveItem } from "@/lib/types"
 import { cn } from "cn"
 
-import {
-  BotStopContext,
-  createBotStop,
-  useBotStop,
-  useBotStopped,
-  type BotStop,
-} from "./bot-stop"
+import { BotStopContext, useBotStop, useBotStopped } from "./bot-stop"
+import { botStopFor } from "./bot-stop-gate"
 import {
   AUTO_TITLE_ROWS,
   playlistQuery,
@@ -38,6 +33,7 @@ import {
 import { homeStore, playlistKey, useHomeState } from "./state"
 import { Thumbnail } from "./thumbnail"
 import { fromListState, fromPlaylistState } from "./use-analyze"
+import { batchPath } from "@/pages/batch/path"
 
 const t = th.home.results
 
@@ -258,7 +254,7 @@ function PlaylistClips({ title, entries, shown, playlistId, mixVideoId }: Playli
 }
 
 /** `mixVideoId` = คลิปตั้งต้นของมิกซ์อัตโนมัติ (ยูทูปให้ดึงมิกซ์จากลิงก์คลิปเท่านั้น) */
-function PlaylistRow({ playlistId, mixVideoId }: { playlistId: string; mixVideoId?: string }) {
+function PlaylistRow({ listId, playlistId, mixVideoId }: { listId: string; playlistId: string; mixVideoId?: string }) {
   const botStop = useBotStop() ?? undefined
   const stopped = useBotStopped()
   const panelId = useId()
@@ -359,7 +355,7 @@ function PlaylistRow({ playlistId, mixVideoId }: { playlistId: string; mixVideoI
       </ItemContent>
       {entries.length > 0 && (
         // จอแคบ: ปุ่มลงไปอยู่บรรทัดใต้ชื่อเพลย์ลิสต์ ข้อความในแถวจะได้ไม่ถูกบีบจนตัดหาย
-        <ItemActions className="max-sm:basis-full max-sm:pl-10">
+        <ItemActions className="flex-wrap max-sm:basis-full max-sm:pl-10">
           <Button
             variant="ghost"
             size="sm"
@@ -371,6 +367,14 @@ function PlaylistRow({ playlistId, mixVideoId }: { playlistId: string; mixVideoI
             {expanded ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
             {expanded ? t.hideClips : t.showClips}
           </Button>
+          {/* เลือกคลิปของเพลย์ลิสต์/มิกซ์นี้ไปหน้าเลือกคลิป (W3) */}
+          <Link
+            to={batchPath(listId, { id: playlistId, v: mixVideoId })}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "relative z-10")}
+          >
+            <ListChecks aria-hidden />
+            {th.batch.open}
+          </Link>
         </ItemActions>
       )}
       {/* กล่องรายชื่ออยู่ในหน้าเสมอ (aria-controls ชี้ได้) แต่มีรายการเฉพาะตอนกาง */}
@@ -391,15 +395,15 @@ function PlaylistRow({ playlistId, mixVideoId }: { playlistId: string; mixVideoI
 
 // ลิงก์ที่เป็นทั้งคลิปและเพลย์ลิสต์ปนอยู่ในรายการหลายบรรทัด: เริ่มที่คลิป แล้วให้ผู้ใช้กดขอทั้งเพลย์ลิสต์ได้เอง
 // กดแล้วแถวกลายเป็นแถวเพลย์ลิสต์ถาวร (บันทึกลงรายการผล กลับมาจากหน้าคลิปก็ยังเป็นเพลย์ลิสต์)
-type RowProps = { item: ResolveItem; autoTitle: boolean; onWhole: () => void }
+type RowProps = { item: ResolveItem; listId: string; autoTitle: boolean; onWhole: () => void }
 
-function Row({ item, autoTitle, onWhole }: RowProps) {
+function Row({ item, listId, autoTitle, onWhole }: RowProps) {
   switch (item.kind) {
     case "video":
       return <VideoRow item={item} autoTitle={autoTitle} />
     case "playlist":
       return item.playlistId ? (
-        <PlaylistRow playlistId={item.playlistId} mixVideoId={item.isMix ? item.videoId : undefined} />
+        <PlaylistRow listId={listId} playlistId={item.playlistId} mixVideoId={item.isMix ? item.videoId : undefined} />
       ) : (
         <InvalidRow item={item} />
       )
@@ -408,14 +412,6 @@ function Row({ item, autoTitle, onWhole }: RowProps) {
     default:
       return <InvalidRow item={item} />
   }
-}
-
-// เบรก E_BOT_CHECK ผูกกับรายการผลชุดหนึ่ง (listId) ไม่ใช่กับการแสดงผล: ไปหน้าคลิปแล้วกลับมา
-// รายการเดิมยังถูกเบรกอยู่ ไม่ยิงคำขอซ้ำ · วิเคราะห์ใหม่ = listId ใหม่ = เบรกใหม่
-let currentGate: { listId: string; gate: BotStop } | null = null
-function botStopFor(listId: string): BotStop {
-  if (currentGate?.listId !== listId) currentGate = { listId, gate: createBotStop() }
-  return currentGate.gate
 }
 
 const isClip = (item: ResolveItem) =>
@@ -433,6 +429,8 @@ type ResultListProps = {
 
 export function ResultList({ items, listId, onWhole, onClear, skipped = false }: ResultListProps) {
   const botStop = botStopFor(listId)
+  // คลิปไม่ซ้ำรหัส: ลิงก์คลิปเดียวกันที่เขียนต่างกัน (คลิปล้วน + คลิปในเพลย์ลิสต์) ไม่นับเป็นสองคลิป
+  const clipCount = new Set(items.filter(isClip).map((item) => item.videoId)).size
   // นับเฉพาะแถวที่เป็นคลิป: 10 แถวแรกของคลิปดึงชื่อเอง
   const autoTitle = items.map(
     (item, index) =>
@@ -452,10 +450,19 @@ export function ResultList({ items, listId, onWhole, onClear, skipped = false }:
           >
             {t.title}
           </h2>
-          <Button variant="ghost" size="sm" onClick={onClear}>
-            <Trash2 aria-hidden />
-            {t.clear}
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-1">
+            {/* คลิปตั้งแต่ 2 แถวขึ้นไป: เลือกว่าจะโหลดคลิปไหนบ้างในครั้งเดียว (W3) */}
+            {clipCount >= 2 && (
+              <Link to={batchPath(listId)} className={buttonVariants({ variant: "outline", size: "sm" })}>
+                <ListChecks aria-hidden />
+                {th.batch.open}
+              </Link>
+            )}
+            <Button variant="ghost" size="sm" onClick={onClear}>
+              <Trash2 aria-hidden />
+              {t.clear}
+            </Button>
+          </div>
         </div>
         {items.length === 0 ? (
           <Empty className="border">
@@ -469,6 +476,7 @@ export function ResultList({ items, listId, onWhole, onClear, skipped = false }:
               <Row
                 key={`${index}-${item.input}`}
                 item={item}
+                listId={listId}
                 autoTitle={autoTitle[index]}
                 onWhole={() => onWhole(index)}
               />

@@ -27,7 +27,9 @@ CACHE_TTL = timedelta(hours=24)
 # แต่ยังใช้เป็นข้อมูลสำรองตอนออฟไลน์ได้ (_stored_hit)
 # 3 = owner round 2 (2026-10-01): เก็บยอดวิว/ไลก์/คอมเมนต์/ผู้ติดตาม, แท็ก, หมวดหมู่ และ heatmap เพิ่ม
 # 4 = owner round 3 (2026-10-01): mostReplayed คิดแบบใหม่ (review I-2) แถวรุ่น 3 เก็บช่วงแบบเก่าไว้ จึงต้อง probe ใหม่
-PROBE_VERSION = 4
+# 5 = M4 (2026-10-01): เก็บ license ของคลิป และ asr/audio_channels ของแทร็กเสียง (แหล่งที่มา.txt, ขนาดไฟล์ wav)
+# 6 = M4 gate 2 (2026-10-02): เก็บความกว้าง (width) ของ format วิดีโอ ใช้ตัดสินคลิปแนวตั้ง (Shorts) ตอนจำกัดความละเอียด
+PROBE_VERSION = 6
 # ข้อมูลคลิป (C-A1): แท็กเก็บไม่เกินเท่านี้ ช่วงดูซ้ำบ่อยเอาไม่เกินเท่านี้ ห่างกันอย่างน้อยกี่วินาที
 # และรวมช่วงข้างเคียงที่ค่าไม่ต่ำกว่ากี่เท่าของยอด
 TAGS_MAX = 50
@@ -47,11 +49,16 @@ _STAT_FIELDS = (
     ("comments", "comment_count"),
     ("channelFollowers", "channel_follower_count"),
 )
-# probe ใหม่พลาดด้วยรหัสเหล่านี้ (ไม่มีเน็ต / ยูทูปให้รอก่อน) แต่มีข้อมูลเดิมในเครื่อง = ใช้ข้อมูลเดิมไปก่อน
-STALE_OK_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK"})
+# probe ใหม่พลาดด้วยรหัสเหล่านี้ (ไม่มีเน็ต / ยูทูปให้รอก่อน / ยูทูปตอบ 4xx ชั่วคราว) แต่มีข้อมูลเดิมในเครื่อง
+# = ใช้ข้อมูลเดิมไปก่อน (ไม่ยิงคำขอเพิ่ม จึงไม่ขัดกับ Q2 ที่ห้ามลอง E_YT_REFUSED ซ้ำอัตโนมัติ)
+# M4: probe v5 ทำให้ทุกแถวเดิมต้อง probe ใหม่ 403/404/410 ตอนนั้นจึงต้องไม่ทำให้คลิปที่เคยเปิดได้เปิดไม่ได้
+STALE_OK_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK", "E_YT_REFUSED"})
 # นาฬิกาเครื่องเลื่อนถอยได้ไม่เกินนี้ยังถือว่า probe ล่าสุดยังใหม่
 CLOCK_SKEW = timedelta(minutes=5)
 PLAYLIST_LIMIT = 200
+# ประวัติ (C15): scope ที่รองรับ และลำดับชนิดงานใน outputs
+HISTORY_SCOPES = ("all", "opened")
+HISTORY_KIND_ORDER = ("video", "audio", "subtitle", "note", "contact_sheet", "frames_zip")
 # มิกซ์อัตโนมัติของยูทูปยาวได้ไม่รู้จบ เอาแค่ช่วงต้น (เจ้าของตัดสิน 2026-09-30)
 MIX_LIMIT = 25
 
@@ -62,6 +69,7 @@ _STORYBOARD = "storyboard"
 _MEDIA_FIELDS = (
     "format_id",
     "format_note",
+    "width",
     "height",
     "fps",
     "vcodec",
@@ -71,6 +79,8 @@ _MEDIA_FIELDS = (
     "language",
     "language_preference",
     "abr",
+    "asr",
+    "audio_channels",
 )
 _STORYBOARD_FIELDS = (
     "format_id",
@@ -317,6 +327,10 @@ def _video_formats(formats: list[dict]) -> list[dict]:
             "vcodec": str(vcodec),
             "compat": str(vcodec).startswith("avc1"),
         }
+        width = fmt.get("width")
+        # width ใช้หาความละเอียดแบบด้านสั้น (คลิปแนวตั้ง 1080x1920 = 1080p) ไม่รู้ = ไม่ใส่ หน้าเว็บใช้ height แทน
+        if isinstance(width, int | float) and not isinstance(width, bool) and width > 0:
+            entry["width"] = round(width)
         size = _size(fmt)
         if size is not None:
             entry["sizeBytes"] = size
@@ -335,6 +349,22 @@ def _video_formats(formats: list[dict]) -> list[dict]:
             e["formatId"],
         ),
     )
+
+
+def _positive_int(value: Any) -> int | None:
+    """จำนวนเต็มบวก (float ที่เป็นจำนวนเต็มก็รับ) อย่างอื่น = ไม่รู้ (None)"""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
+    return int(value) if value > 0 else None
+
+
+def _license(raw: dict) -> str | None:
+    value = raw.get("license")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
 
 
 def _audio_candidates(formats: list[dict]) -> list[dict]:
@@ -387,6 +417,11 @@ def _audio_formats(formats: list[dict]) -> list[dict]:
         abr = fmt.get("abr")
         if isinstance(abr, int | float) and not isinstance(abr, bool) and abr > 0:
             entry["abrKbps"] = round(abr)
+        # M4: ขนาดไฟล์ wav คาดการณ์จากค่าเหล่านี้ (ไม่รู้ = ไม่ใส่คีย์ หน้าเว็บใช้ 44100 Hz 2 ช่อง)
+        if (rate := _positive_int(fmt.get("asr"))) is not None:
+            entry["sampleRate"] = rate
+        if (channels := _positive_int(fmt.get("audio_channels"))) is not None:
+            entry["channels"] = channels
         result.append(entry)
     return result
 
@@ -425,6 +460,10 @@ def to_video_info(raw: dict) -> dict:
     replayed = _stored_replayed(raw.get("mostReplayed")) or most_replayed(raw.get("heatmap"), raw.get("duration"))
     if replayed:
         info["mostReplayed"] = replayed
+    # สัญญาอนุญาตตามที่ยูทูปแสดง (เช่น Creative Commons) ใช้ใน แหล่งที่มา.txt (M4)
+    license_text = _license(raw)
+    if license_text is not None:
+        info["license"] = license_text
     return info
 
 
@@ -432,7 +471,7 @@ def trim_probe(raw: dict) -> dict:
     """ตัดข้อมูลดิบให้เหลือที่งานถัดไปต้องใช้: ฟิลด์ของ VideoInfo, format วิดีโอ/เสียงล้วน
     และ storyboard (พร้อม fragments/rows/columns/fps/width/height) ไม่เก็บ URL ตรงของสื่อ
 
-    เพิ่ม probeVersion, description (ถ้ามี) และ captions (กลุ่มซับตาม tracks.trim_captions)
+    เพิ่ม probeVersion, description (ถ้ามี), license (ถ้ามี) และ captions (กลุ่มซับตาม tracks.trim_captions)
     """
     # import ในฟังก์ชัน: tracks import _audio_formats จากโมดูลนี้ (กัน import วนตอนโหลดโมดูล)
     from .tracks import trim_captions
@@ -487,6 +526,8 @@ def trim_probe(raw: dict) -> dict:
     # heatmap ดิบมี ~100 รายการ เก็บเฉพาะช่วงที่คำนวณแล้ว (ไม่เกิน 3 ช่วง) ให้ probe_json เล็ก
     if replayed := most_replayed(raw.get("heatmap"), raw.get("duration")):
         trimmed["mostReplayed"] = replayed
+    if (license_text := _license(raw)) is not None:
+        trimmed["license"] = license_text
     return trimmed
 
 
@@ -541,7 +582,8 @@ class VideoService:
         เรียกซ้อนกันด้วย id เดียวกัน (เช่น กดเปิดคลิปเดิมสองแท็บ) จะ probe ครั้งเดียว:
         คนที่มาทีหลังรอคิว แล้วอ่าน cache ที่คนแรกเพิ่งเขียนแทนการ probe ซ้ำ
 
-        cache หมดอายุแล้ว probe ใหม่พลาดด้วย E_NETWORK/E_BOT_CHECK แต่มีข้อมูลเดิม = คืนข้อมูลเดิม
+        cache หมดอายุ (หรือแถวรุ่นเก่า) แล้ว probe ใหม่พลาดด้วย E_NETWORK/E_BOT_CHECK/E_YT_REFUSED
+        แต่มีข้อมูลเดิม = คืนข้อมูลเดิม
         (บันทึก warning ไม่แตะ probed_at) ยกเว้น refresh=True ที่โยน error ต่อเสมอ
         """
         self._check_video_id(video_id)
@@ -562,7 +604,7 @@ class VideoService:
             try:
                 return self._probe_and_store(video_id, peek)
             except YtError as exc:
-                # cache หมดอายุแต่ไม่มีเน็ต: คืนข้อมูลเดิม (หน้า W2, contact sheet, zip ใช้ต่อได้)
+                # cache หมดอายุแต่ไม่มีเน็ต (หรือยูทูปไม่ตอบชั่วคราว): คืนข้อมูลเดิม (หน้า W2, contact sheet, zip ใช้ต่อได้)
                 # ไม่แตะ probed_at รอบหน้าจึง probe ใหม่เมื่อเน็ตกลับมา
                 # refresh=True = ผู้เรียกรู้ว่าของเดิมใช้ไม่ได้แล้ว (ลิงก์ storyboard หมดอายุ) จึงโยนต่อ
                 if refresh or exc.code not in STALE_OK_CODES:
@@ -676,37 +718,83 @@ class VideoService:
                     data = None
                 if isinstance(data, dict):
                     return data
-            self.get(video_id, refresh=True)
+            self.get(video_id, refresh=True, peek=True)
         raise YtError("E_UNKNOWN", f"อ่านข้อมูลคลิป {video_id} ที่เก็บไว้ไม่ได้")
 
     def recent(
-        self, limit: int, offset: int = 0, q: str | None = None
+        self,
+        limit: int,
+        offset: int = 0,
+        q: str | None = None,
+        scope: str = "opened",
     ) -> tuple[list[dict], int]:
-        # คลิปที่แค่ peek (ยังไม่เคยเปิดจริง) ไม่ขึ้นใน "ล่าสุด" ทั้งรายการและยอดรวม
-        where, params = " WHERE opened_at != ?", [PEEK_SENTINEL]
+        """ประวัติคลิป (C15) scope="opened" = คลิปที่เปิดจริงใน W2 (peek ไม่นับ) เรียงตามเวลาเปิด
+        scope="all" = คลิปที่เปิดจริง หรือมีงานโหลดที่เสร็จแล้วและมีไฟล์ เรียงตามเวลาล่าสุดของสองอย่างนั้น
+
+        outputs = ชนิดงานที่เสร็จและมีไฟล์ (ไม่ซ้ำ) เรียงตาม HISTORY_KIND_ORDER ทั้งสอง scope
+        """
+        if scope not in HISTORY_SCOPES:
+            raise ValueError(f"scope ไม่รู้จัก: {scope!r}")
+        # เวลาของงานโหลดล่าสุดที่เสร็จและมีไฟล์ (รูปแบบเวลาเดียวกับ opened_at จึงเทียบเป็นข้อความได้)
+        done_at = (
+            "(SELECT max(j.finished_at) FROM jobs j WHERE j.video_id = v.video_id "
+            "AND j.status = 'done' AND j.outputs_json IS NOT NULL)"
+        )
+        if scope == "opened":
+            last_at = "CASE WHEN v.opened_at = ? THEN NULL ELSE v.opened_at END"
+        else:
+            last_at = (
+                f"CASE WHEN v.opened_at = ? THEN {done_at} "
+                f"WHEN {done_at} IS NULL OR v.opened_at >= {done_at} THEN v.opened_at "
+                f"ELSE {done_at} END"
+            )
+        inner = (
+            f"SELECT v.video_id, v.title, v.thumbnail_url, v.duration_s, {last_at} AS last_at "
+            "FROM videos v"
+        )
+        params: list[Any] = [PEEK_SENTINEL]
+        where = " WHERE last_at IS NOT NULL"
         if q and q.strip():
             where += " AND title LIKE ? ESCAPE '\\'"
             params.append(f"%{_like_escape(q.strip())}%")
-        total = self._db.execute(f"SELECT count(*) AS n FROM videos{where}", params)[0][
-            "n"
-        ]
+        base = f"FROM ({inner}){where}"
+        total = self._db.execute(f"SELECT count(*) AS n {base}", params)[0]["n"]
         rows = self._db.execute(
-            "SELECT video_id, title, thumbnail_url, duration_s, opened_at FROM videos"
-            f"{where} ORDER BY opened_at DESC, video_id LIMIT ? OFFSET ?",
+            f"SELECT video_id, title, thumbnail_url, duration_s, last_at {base} "
+            "ORDER BY last_at DESC, video_id LIMIT ? OFFSET ?",
             [*params, max(limit, 0), max(offset, 0)],
         )
+        outputs = self._outputs_of([row["video_id"] for row in rows])
         items = [
             {
                 "videoId": row["video_id"],
                 "title": row["title"],
                 "thumbnailUrl": row["thumbnail_url"] or "",
                 "durationS": row["duration_s"] or 0,
-                "outputs": [],
-                "lastAt": row["opened_at"],
+                "outputs": outputs.get(row["video_id"], []),
+                "lastAt": row["last_at"],
             }
             for row in rows
         ]
         return items, total
+
+    def _outputs_of(self, video_ids: list[str]) -> dict[str, list[str]]:
+        """video_id -> ชนิดงานที่เสร็จและมีไฟล์ (ไม่ซ้ำ เรียงตาม HISTORY_KIND_ORDER)"""
+        if not video_ids:
+            return {}
+        marks = ",".join("?" for _ in video_ids)
+        rows = self._db.execute(
+            "SELECT DISTINCT video_id, kind FROM jobs "
+            f"WHERE status = 'done' AND outputs_json IS NOT NULL AND video_id IN ({marks})",
+            video_ids,
+        )
+        found: dict[str, set[str]] = {}
+        for row in rows:
+            found.setdefault(row["video_id"], set()).add(row["kind"])
+        rank = {kind: n for n, kind in enumerate(HISTORY_KIND_ORDER)}
+        return {
+            vid: sorted(kinds, key=lambda k: (rank.get(k, len(rank)), k)) for vid, kinds in found.items()
+        }
 
     def playlist(
         self,

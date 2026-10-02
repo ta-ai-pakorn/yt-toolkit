@@ -1,4 +1,4 @@
-"""API ของ M2: resolve, ข้อมูลคลิป, storyboard, contact sheet, zip, เพลย์ลิสต์, ประวัติ และ /cache
+"""API ของ M2: resolve, ข้อมูลคลิป, storyboard, เพลย์ลิสต์, ประวัติ และ /cache
 
 ใช้ FakeExtractor + ฐานข้อมูลและโฟลเดอร์ cache ชั่วคราว ไม่แตะเครือข่าย
 """
@@ -9,10 +9,8 @@ import io
 import json
 import logging
 import re
-import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import quote
 
 import pytest
 from PIL import Image
@@ -29,20 +27,10 @@ LIVE = "UPCOMINGLV1"
 PRIVATE = "PRIVATEVID1"
 MISSING = "zzzzzzzzzzz"
 PLAYLIST = "PLfakeplaylist250"
-THAI_TITLE = 'คลิป: สอน/ทำ "ภาพ" *ใหม่*?  <ตอน|1>'
 
 # ค่าเดียวกับ tests/api/conftest.py (import conftest ตรง ๆ ไม่ได้)
 BASE = "http://127.0.0.1:8787"
 AUTH = {"X-Toolkit-Token": "test-token", "Origin": BASE}
-
-
-class ThaiTitleExtractor(FakeExtractor):
-    """คลิป BBB แต่ชื่อเป็นภาษาไทยและมีอักขระต้องห้ามของชื่อไฟล์"""
-
-    def probe(self, video_id: str) -> dict:
-        info = super().probe(video_id)
-        info["title"] = THAI_TITLE
-        return info
 
 
 class BrokenExtractor(FakeExtractor):
@@ -424,69 +412,6 @@ def test_storyboard_bad_id_is_422(api):
     assert _error(resp)["code"] == "E_INVALID_INPUT"
 
 
-# ---------- contact sheet + zip ----------
-
-
-def _disposition(resp) -> str:
-    return resp.headers["content-disposition"]
-
-
-def test_contact_sheet(api):
-    client = api()
-    resp = client.get(f"/api/videos/{BBB}/storyboard/contact-sheet.jpg")
-    assert resp.status_code == 200
-    assert resp.headers["content-type"] == "image/jpeg"
-    with Image.open(io.BytesIO(resp.content)) as image:
-        assert image.format == "JPEG"
-        assert image.width == 5 * 320 + 6 * 8  # 5 คอลัมน์ (AC-FRAME-05)
-    name = "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film - contact sheet.jpg"
-    assert _disposition(resp) == (
-        f"attachment; filename=\"contact-sheet.jpg\"; filename*=UTF-8''{quote(name, safe='')}"
-    )
-    assert _probes(client.fake) == 1
-
-
-def test_frames_zip(api):
-    resp = api().get(f"/api/videos/{BBB}/storyboard/frames.zip")
-    assert resp.status_code == 200
-    assert resp.headers["content-type"] == "application/zip"
-    with zipfile.ZipFile(io.BytesIO(resp.content)) as archive:
-        names = archive.namelist()
-    assert len(names) == 128  # AC-FRAME-06
-    assert names[0] == "frame_00-00-00.jpg"
-    assert all(re.fullmatch(r"frame_\d\d-\d\d-\d\d(_\d)?\.jpg", n) for n in names)
-    disposition = _disposition(resp)
-    assert disposition.startswith('attachment; filename="frames.zip"; filename*=UTF-8\'\'')
-    assert disposition.endswith(quote(" - frames.zip", safe=""))
-
-
-def test_thai_title_in_filename_star(api):
-    client = api(ThaiTitleExtractor(FIXTURES))
-    resp = client.get(f"/api/videos/{BBB}/storyboard/contact-sheet.jpg")
-    assert resp.status_code == 200
-    disposition = _disposition(resp)
-    disposition.encode("latin-1")  # header ต้องเป็น ASCII ล้วน
-    assert disposition.isascii()
-    encoded = disposition.split("filename*=UTF-8''", 1)[1]
-    from urllib.parse import unquote
-
-    assert unquote(encoded) == "คลิป สอนทำ ภาพ ใหม่ ตอน1 - contact sheet.jpg"
-    zip_disposition = _disposition(client.get(f"/api/videos/{BBB}/storyboard/frames.zip"))
-    assert unquote(zip_disposition.split("''", 1)[1]) == "คลิป สอนทำ ภาพ ใหม่ ตอน1 - frames.zip"
-
-
-def test_contact_sheet_without_storyboard_is_404(api):
-    resp = api().get(f"/api/videos/{ZOO}/storyboard/contact-sheet.jpg")
-    assert resp.status_code == 404
-    assert _error(resp)["code"] == "E_NO_STORYBOARD"
-
-
-def test_zip_private_is_404(api):
-    resp = api().get(f"/api/videos/{PRIVATE}/storyboard/frames.zip")
-    assert resp.status_code == 404
-    assert _error(resp)["code"] == "E_VIDEO_PRIVATE"
-
-
 # ---------- ชื่อไฟล์ ----------
 
 
@@ -500,17 +425,6 @@ def test_safe_title_rules():
     assert attachment_header("x.jpg", "ก.jpg") == (
         "attachment; filename=\"x.jpg\"; filename*=UTF-8''%E0%B8%81.jpg"
     )
-
-
-def test_empty_title_falls_back_to_video_id(api):
-    class Untitled(FakeExtractor):
-        def probe(self, video_id: str) -> dict:
-            info = super().probe(video_id)
-            info["title"] = '???'
-            return info
-
-    resp = api(Untitled(FIXTURES)).get(f"/api/videos/{BBB}/storyboard/frames.zip")
-    assert _disposition(resp).endswith(quote(f"{BBB} - frames.zip", safe=""))
 
 
 # ---------- เพลย์ลิสต์ ----------
@@ -743,15 +657,6 @@ def test_cross_site_get_does_not_probe(api, site):
     assert client.fake.calls == []
 
 
-def test_cross_site_contact_sheet_rejected(api):
-    client = api()
-    resp = client.get(
-        f"/api/videos/{BBB}/storyboard/contact-sheet.jpg", headers={"sec-fetch-site": "cross-site"}
-    )
-    assert resp.status_code == 403
-    assert client.fake.calls == []
-
-
 def test_same_origin_get_allowed(api):
     resp = api().get(f"/api/videos/{BBB}", headers={"sec-fetch-site": "same-origin"})
     assert resp.status_code == 200
@@ -797,33 +702,6 @@ def test_safe_title_strips_bidi_override_and_line_breaks():
     assert safe_title("บรรทัด1\r\nบรรทัด2\rสาม\nสี่") == "บรรทัด1 บรรทัด2 สาม สี่"
 
 
-# ---------- error อื่นที่ไม่ใช่ YtError ระหว่างทำภาพ ----------
-
-
-@pytest.mark.parametrize(
-    ("func", "path"),
-    [("contact_sheet", "contact-sheet.jpg"), ("frames_zip", "frames.zip")],
-)
-def test_unexpected_error_while_building_file_is_500(api, monkeypatch, func, path):
-    from fastapi.testclient import TestClient
-
-    from yttoolkit.api import videos as videos_api
-
-    def boom(*args, **kwargs):
-        raise RuntimeError("ภาพพัง")
-
-    monkeypatch.setattr(videos_api, func, boom)
-    client = TestClient(api().app, base_url=BASE, raise_server_exceptions=False)
-    resp = client.get(f"/api/videos/{BBB}/storyboard/{path}")
-    assert resp.status_code == 500
-    assert resp.headers["content-type"].startswith("application/json")
-    error = _error(resp)
-    assert error["code"] == "E_UNKNOWN"
-    assert error["message"] == MESSAGES["E_UNKNOWN"]
-    assert "Traceback" not in resp.text
-    assert "content-disposition" not in resp.headers
-
-
 # ---------- 422 ไม่สะท้อนข้อความยาว ๆ กลับไป ----------
 
 
@@ -833,6 +711,18 @@ def test_validation_detail_is_truncated(api):
     detail = _error(resp)["detail"]
     assert len(detail) <= 500
     assert "ก" * 600 not in resp.text
+
+
+# ---------- M4: ไฟล์ภาพรวมเฟรม/zip ย้ายเข้าคิวงาน (Q3) endpoint เดิมถูกถอดออก ----------
+
+
+@pytest.mark.parametrize("path", ["storyboard/contact-sheet.jpg", "storyboard/frames.zip"])
+def test_removed_browser_download_endpoints_answer_404(api, path):
+    client = api()
+    resp = client.get(f"/api/videos/{BBB}/{path}")
+    assert resp.status_code == 404
+    assert _error(resp)["code"] == "E_NOT_FOUND"
+    assert client.fake.calls == []
 
 
 # ---------- final review: ไม่มีเน็ต + cache เก่ากว่า 24 ชม. ----------
@@ -855,7 +745,7 @@ class OfflineSwitch(FakeExtractor):
         return super().fetch(url)
 
 
-def test_contact_sheet_zip_and_info_work_offline_with_old_cache(make_client, tmp_path):
+def test_info_and_storyboard_work_offline_with_old_cache(make_client, tmp_path):
     now = [datetime(2026, 9, 29, 12, tzinfo=UTC)]
     db = Database(tmp_path / "offline.db")
     db.migrate()
@@ -868,11 +758,8 @@ def test_contact_sheet_zip_and_info_work_offline_with_old_cache(make_client, tmp
         fake.offline = True
         info = client.get(f"/api/videos/{BBB}")
         assert info.status_code == 200 and info.json()["videoId"] == BBB
-        sheet = client.get(f"/api/videos/{BBB}/storyboard/contact-sheet.jpg")
-        assert sheet.status_code == 200 and sheet.headers["content-type"] == "image/jpeg"
-        zipped = client.get(f"/api/videos/{BBB}/storyboard/frames.zip")
-        assert zipped.status_code == 200
-        assert len(zipfile.ZipFile(io.BytesIO(zipped.content)).namelist()) == 128
+        board = client.get(f"/api/videos/{BBB}/storyboard")
+        assert board.status_code == 200 and len(board.json()["frames"]) == 128
     finally:
         db.close()
 
@@ -1045,3 +932,79 @@ def test_normal_playlist_has_no_mix_flag(api):
     body = api().get(f"/api/playlists/{PLAYLIST}?v={BBB}").json()
     assert "isMix" not in body
     assert body["total"] == 250
+
+
+# ---------- M4: E_BOT_CHECK จากคำขอของผู้ใช้พักคิวด้วย (ctx.on_bot_check) ----------
+
+
+@pytest.fixture
+def brake_api(make_client, services):
+    def _make(code: str, on_bot_check=None):
+        parts = services(BrokenExtractor(FIXTURES, code))
+        client = make_client(**parts, on_bot_check=on_bot_check)
+        return client
+
+    return _make
+
+
+def test_bot_check_calls_brake_once_and_still_answers_429(brake_api):
+    calls: list[int] = []
+    client = brake_api("E_BOT_CHECK", lambda: calls.append(1))
+    resp = client.get(f"/api/videos/{BBB}")
+    assert resp.status_code == 429
+    assert _error(resp)["code"] == "E_BOT_CHECK"
+    assert _error(resp)["message"] == MESSAGES["E_BOT_CHECK"]
+    assert "10 นาที" in _error(resp)["message"]
+    assert calls == [1]
+
+
+def test_bot_check_brake_is_read_from_ctx_at_request_time(brake_api):
+    client = brake_api("E_BOT_CHECK")
+    calls: list[int] = []
+    client.app.state.ctx.on_bot_check = lambda: calls.append(1)  # ต่อเข้าทีหลัง (ตัวรันคิวสร้างหลัง router)
+    assert client.get(f"/api/videos/{BBB}").status_code == 429
+    assert calls == [1]
+
+
+def test_bot_check_without_brake_still_answers_429(brake_api):
+    resp = brake_api("E_BOT_CHECK").get(f"/api/videos/{BBB}")
+    assert resp.status_code == 429
+    assert _error(resp)["code"] == "E_BOT_CHECK"
+
+
+def test_failing_brake_is_logged_and_response_unchanged(brake_api, caplog):
+    def boom() -> None:
+        raise RuntimeError("พักคิวไม่ได้")
+
+    client = brake_api("E_BOT_CHECK", boom)
+    with caplog.at_level(logging.ERROR, logger="yttoolkit"):
+        resp = client.get(f"/api/videos/{BBB}")
+    assert resp.status_code == 429
+    assert _error(resp)["code"] == "E_BOT_CHECK"
+    assert _error(resp)["message"] == MESSAGES["E_BOT_CHECK"]
+    assert any("พักคิว" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.parametrize(
+    ("code", "status"),
+    [
+        ("E_NETWORK", 502),
+        ("E_YT_REFUSED", 502),
+        ("E_VIDEO_PRIVATE", 404),
+        ("E_UNKNOWN", 500),
+        ("E_SESSION_WARMING", 503),
+        ("E_TRANSLATION_BLOCKED", 503),
+    ],
+)
+def test_other_errors_do_not_call_brake(brake_api, code, status):
+    calls: list[int] = []
+    resp = brake_api(code, lambda: calls.append(1)).get(f"/api/videos/{BBB}")
+    assert resp.status_code == status
+    assert calls == []
+
+
+def test_yt_refused_maps_to_502_with_its_message(brake_api):
+    resp = brake_api("E_YT_REFUSED").get(f"/api/videos/{BBB}")
+    assert resp.status_code == 502
+    assert _error(resp)["code"] == "E_YT_REFUSED"
+    assert _error(resp)["message"] == MESSAGES["E_YT_REFUSED"]

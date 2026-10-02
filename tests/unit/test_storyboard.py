@@ -479,6 +479,24 @@ def test_get_storyboard_refreshes_probe_once_on_network_error(
     assert sum(1 for c in fake.calls if c[0] == "probe") == probes_before + 1
 
 
+def test_get_storyboard_refresh_does_not_mark_clip_opened(
+    tmp_path: Path, videos: VideoService
+) -> None:
+    fake = videos.fake  # type: ignore[attr-defined]
+    videos.get(BBB, peek=True)  # งานในคิว: ยังไม่เคยเปิดคลิป
+    state = {"failed": False}
+
+    def flaky(url: str) -> bytes:
+        if not state["failed"]:
+            state["failed"] = True
+            raise YtError("E_NETWORK", "ลิงก์หมดอายุ")
+        return fake.fetch(url)
+
+    get_storyboard(BBB, videos, tmp_path / "cache", flaky)
+    assert state["failed"]
+    assert videos.recent(10) == ([], 0)
+
+
 def test_get_storyboard_does_not_loop_on_repeated_network_error(
     tmp_path: Path, videos: VideoService
 ) -> None:
@@ -615,7 +633,7 @@ def test_get_storyboard_does_not_reprobe_when_first_raw_fails(tmp_path: Path) ->
         def raw(self, video_id: str) -> dict:
             raise YtError("E_NETWORK", "probe ครั้งแรกพลาด")
 
-        def get(self, video_id: str, refresh: bool = False) -> dict:
+        def get(self, video_id: str, refresh: bool = False, peek: bool = False) -> dict:
             Videos.gets += 1
             return {}
 

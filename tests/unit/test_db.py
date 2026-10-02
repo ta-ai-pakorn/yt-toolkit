@@ -66,6 +66,7 @@ def test_fresh_database_migrates(db: Database):
 def test_pragmas(db: Database):
     assert db.execute("PRAGMA journal_mode")[0][0] == "wal"
     assert db.execute("PRAGMA foreign_keys")[0][0] == 1
+    assert db.execute("PRAGMA synchronous")[0][0] == 1  # NORMAL
 
 
 def test_migrate_twice_is_noop(db: Database):
@@ -358,3 +359,95 @@ def test_purge_keeps_row_reopened_during_the_purge(db: Database, tmp_path: Path,
     removed = purge_stale_cache(db, cache_root, datetime(2026, 3, 1, tzinfo=UTC))
     assert removed == 0
     assert len(db.execute("SELECT video_id FROM videos")) == 1
+
+
+V1_JOBS = """CREATE TABLE schema_version (version INTEGER NOT NULL);
+CREATE TABLE videos (video_id TEXT PRIMARY KEY, title TEXT NOT NULL, channel TEXT, duration_s INTEGER,
+  thumbnail_url TEXT, chapters_json TEXT, probe_json TEXT NOT NULL, probed_at TEXT NOT NULL, opened_at TEXT NOT NULL);
+CREATE TABLE jobs (id TEXT PRIMARY KEY, video_id TEXT NOT NULL REFERENCES videos(video_id), kind TEXT NOT NULL,
+  params_json TEXT NOT NULL, status TEXT NOT NULL, stage TEXT, progress REAL, speed_bps INTEGER, eta_s INTEGER,
+  position INTEGER NOT NULL, error_code TEXT, error_detail TEXT, outputs_json TEXT, created_at TEXT NOT NULL,
+  started_at TEXT, finished_at TEXT);
+CREATE INDEX jobs_status_position ON jobs(status, position);
+CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
+INSERT INTO schema_version (version) VALUES (1);"""
+
+
+def test_fresh_database_is_v2_without_job_foreign_key(tmp_path):
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 2
+    db.execute(
+        "INSERT INTO jobs (id, video_id, kind, params_json, status, position, created_at) "
+        "VALUES ('j1', 'notprobed01', 'video', '{}', 'queued', 1, '2026-10-01T00:00:00+00:00')"
+    )
+    cols = {r["name"] for r in db.execute("PRAGMA table_info(jobs)")}
+    assert {"title", "attempt", "bot_checks", "error_message", "notes_json"} <= cols
+    db.close()
+
+
+def test_v1_database_migrates_and_keeps_rows(tmp_path):
+    raw = sqlite3.connect(tmp_path / "app.db")
+    raw.executescript(V1_JOBS)
+    raw.execute("INSERT INTO videos VALUES ('aqz-KE-bpKQ','t',NULL,NULL,NULL,NULL,'{}','x','x')")
+    raw.execute("INSERT INTO jobs (id, video_id, kind, params_json, status, position, created_at) "
+                "VALUES ('old', 'aqz-KE-bpKQ', 'video', '{}', 'done', 3, 'x')")
+    raw.commit()
+    raw.close()
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    row = db.execute("SELECT * FROM jobs WHERE id = 'old'")[0]
+    assert (row["status"], row["position"], row["title"], row["attempt"]) == ("done", 3, "", 0)
+    assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 2
+    assert not db.execute("SELECT 1 FROM sqlite_master WHERE name = 'jobs_v1'")
+    # v2 ไม่มี foreign key แล้ว: งานของคลิปที่ไม่เคย probe ใส่ได้
+    db.execute(
+        "INSERT INTO jobs (id, video_id, kind, params_json, status, position, created_at) "
+        "VALUES ('new', 'notprobed01', 'video', '{}', 'queued', 4, '2026-10-01T00:00:00+00:00')"
+    )
+    assert db.execute("SELECT video_id FROM jobs WHERE id = 'new'")[0]["video_id"] == "notprobed01"
+    assert db.execute("PRAGMA foreign_key_list(jobs)") == []
+    db.close()
+
+
+def _jobs_video_index_columns(db: Database) -> list[str]:
+    return [r["name"] for r in db.execute("PRAGMA index_info(jobs_video)")]
+
+
+def test_fresh_database_has_jobs_video_index(tmp_path):
+    # คำค้นงานตามคลิป (หน้าประวัติ ป้ายสถานะ และรอบล้างแคช) ไม่ต้องไล่ทั้งตาราง
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    assert _jobs_video_index_columns(db) == ["video_id", "status"]
+    db.close()
+
+
+def test_v1_migration_adds_jobs_video_index(tmp_path):
+    raw = sqlite3.connect(tmp_path / "app.db")
+    raw.executescript(V1_JOBS)
+    raw.commit()
+    raw.close()
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    assert _jobs_video_index_columns(db) == ["video_id", "status"]
+    db.close()
+
+
+def test_v1_migration_failure_rolls_back(tmp_path, monkeypatch):
+    raw = sqlite3.connect(tmp_path / "app.db")
+    raw.executescript(V1_JOBS)
+    raw.commit()
+    raw.close()
+    db = Database(tmp_path / "app.db")
+    try:
+        with monkeypatch.context() as m:
+            m.setitem(db_module._MIGRATIONS, 2, "ALTER TABLE jobs RENAME TO jobs_v1; CREATE TABLE broken (;")
+            with pytest.raises(sqlite3.Error):
+                db.migrate()
+        assert db._conn.in_transaction is False
+        assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 1
+        assert not db.execute("SELECT 1 FROM sqlite_master WHERE name = 'jobs_v1'")
+        db.migrate()
+        assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 2
+    finally:
+        db.close()

@@ -145,6 +145,7 @@ def test_output_has_exactly_the_prd_keys() -> None:
     }  # fmt: skip
     assert set(info["video"][0]) <= {
         "formatId",
+        "width",  # M4 gate 2: หน้าเว็บนับความละเอียดที่ด้านสั้น (คลิปแนวตั้ง 1080x1920 = 1080p)
         "height",
         "fps",
         "vcodec",
@@ -211,6 +212,18 @@ def test_video_list_dedupes_same_height_fps_codec_family_keeping_largest() -> No
         "160"
     ]  # ตัวที่มีขนาดไฟล์ ชนะตัว 269 ที่ไม่มี
     assert at_144_30_avc[0]["sizeBytes"] == 4323893
+
+
+def test_video_width_is_kept_for_short_side_resolution() -> None:
+    """width ผ่าน trim_probe ถึง VideoInfo (หน้าเว็บนับความละเอียดที่ด้านสั้น) format ที่ไม่บอก width = ไม่มีคีย์"""
+    raw = load(BBB)
+    for info in (to_video_info(raw), to_video_info(trim_probe(raw))):
+        by_id = {e["formatId"]: e for e in info["video"]}
+        assert by_id["299"]["width"] == 1920 and by_id["299"]["height"] == 1080
+    raw = copy.deepcopy(raw)
+    for fmt in raw["formats"]:
+        fmt.pop("width", None)
+    assert all("width" not in e for e in to_video_info(raw)["video"])
 
 
 def test_compat_is_true_only_for_h264() -> None:
@@ -766,8 +779,8 @@ def test_trim_drops_urls_and_unused_fields_but_keeps_storyboard(db: Database) ->
 
 def test_trim_probe_adds_probe_version_description_and_captions() -> None:
     data = trim_probe(load("88o5Sk8_m1Y"))
-    assert PROBE_VERSION == 4  # owner round 3: mostReplayed แบบใหม่ (review I-2, M-6)
-    assert data["probeVersion"] == 4
+    assert PROBE_VERSION == 6  # M4 gate 2: เก็บความกว้างของ format วิดีโอ (คลิปแนวตั้ง)
+    assert data["probeVersion"] == PROBE_VERSION
     assert data["description"] == load("88o5Sk8_m1Y")["description"]
     assert set(data["captions"]) == {"owner", "original", "translated", "translateFrom"}
     assert [o["key"] for o in data["captions"]["original"]] == ["th-orig"]
@@ -847,6 +860,37 @@ def test_round_two_row_with_old_most_replayed_is_reprobed(
     db.execute("UPDATE videos SET probe_json = ?", (json.dumps(data),))
     assert svc.get(ZOO)["mostReplayed"] == [{"startMs": 190, "endMs": 570}]
     assert ext.count["probe"] == 2
+
+
+def test_round_three_row_without_license_is_reprobed(
+    svc: VideoService, ext: CountingExtractor, db: Database
+) -> None:
+    # M4: แถวรุ่น 4 ไม่มี license / asr / audio_channels ต้อง probe ใหม่ (แบบเดียวกับรุ่นก่อน ๆ)
+    svc.get("88o5Sk8_m1Y")
+    data = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
+    data["probeVersion"] = 4
+    data.pop("license")
+    db.execute("UPDATE videos SET probe_json = ?", (json.dumps(data),))
+    assert svc.get("88o5Sk8_m1Y")["license"] == "Creative Commons Attribution license (reuse allowed)"
+    assert ext.count["probe"] == 2
+    stored = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
+    assert stored["probeVersion"] == PROBE_VERSION and "license" in stored
+
+
+def test_trim_keeps_license_and_audio_sample_rate_and_channels() -> None:
+    raw = load(BBB)
+    raw["license"] = "Creative Commons Attribution license (reuse allowed)"
+    for fmt in raw["formats"]:
+        if fmt.get("format_id") == "140":
+            fmt["asr"], fmt["audio_channels"] = 44100, 2
+        elif fmt.get("format_id") == "299":
+            fmt["asr"], fmt["audio_channels"] = None, None
+    data = trim_probe(raw)
+    assert data["license"] == raw["license"]
+    by_id = {f["format_id"]: f for f in data["formats"] if "format_id" in f}
+    assert by_id["140"]["asr"] == 44100 and by_id["140"]["audio_channels"] == 2
+    assert "asr" not in by_id["299"] and "audio_channels" not in by_id["299"]
+    assert "license" not in trim_probe(load(BBB))
 
 
 def test_row_without_probe_version_is_still_the_offline_fallback(
@@ -1304,6 +1348,57 @@ def test_stale_fallback_with_peek_keeps_opened_at(
     assert svc.get(BBB, peek=True)["videoId"] == BBB
     row = db.execute("SELECT opened_at FROM videos WHERE video_id = ?", (BBB,))[0]
     assert row["opened_at"] == stamp(T0)
+
+
+def _refused(ext: CountingExtractor) -> None:
+    def refuse(video_id: str) -> dict:
+        ext.count["probe"] += 1
+        raise YtError("E_YT_REFUSED", "HTTP Error 403")
+
+    ext.probe = refuse  # type: ignore[method-assign]
+
+
+def test_refused_reprobe_serves_the_stored_row(
+    svc: VideoService, ext: CountingExtractor, clock: Clock, db: Database
+) -> None:
+    # review I-1 (M4): 403/404/410 ตอน probe ใหม่ = ใช้แถวเดิม (ไม่ยิงคำขอเพิ่ม) ทั้งแถวหมดอายุและแถวรุ่นเก่า
+    first = svc.get(BBB)
+    clock.advance(hours=30)
+    _refused(ext)
+    assert svc.get(BBB) == first
+    assert ext.count["probe"] == 2
+    row = db.execute("SELECT probed_at FROM videos WHERE video_id = ?", (BBB,))[0]
+    assert row["probed_at"] == stamp(T0)
+
+
+def test_refused_reprobe_of_a_version_4_row_serves_it(
+    svc: VideoService, ext: CountingExtractor, db: Database
+) -> None:
+    first = svc.get(BBB)
+    data = json.loads(db.execute("SELECT probe_json FROM videos")[0]["probe_json"])
+    data["probeVersion"] = 4
+    db.execute("UPDATE videos SET probe_json = ?", (json.dumps(data),))
+    _refused(ext)
+    assert svc.get(BBB) == first
+    assert ext.count["probe"] == 2
+
+
+def test_refused_with_refresh_still_raises(
+    svc: VideoService, ext: CountingExtractor, clock: Clock
+) -> None:
+    svc.get(BBB)
+    clock.advance(hours=30)
+    _refused(ext)
+    with pytest.raises(YtError) as exc:
+        svc.get(BBB, refresh=True)
+    assert exc.value.code == "E_YT_REFUSED"
+
+
+def test_refused_without_stored_row_raises(svc: VideoService, ext: CountingExtractor) -> None:
+    _refused(ext)
+    with pytest.raises(YtError) as exc:
+        svc.get(BBB)
+    assert exc.value.code == "E_YT_REFUSED"
 
 
 @pytest.mark.parametrize("code", ["E_VIDEO_UNAVAILABLE", "E_VIDEO_PRIVATE", "E_UNKNOWN"])

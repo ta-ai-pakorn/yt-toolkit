@@ -14,7 +14,8 @@ const THAI = "88o5Sk8_m1Y"
 const FRAME_COUNT = 128
 const FRAME_LIST = "รายการภาพเฟรม"
 const TAB_LIST = "เครื่องมือของคลิปนี้"
-const TAB_NAMES = ["ภาพเฟรม", "ซับ", "ทรานสคริปต์", "ข้อมูลคลิป"]
+// M4 (Q8): วิดีโอและเสียงอยู่ระหว่างภาพเฟรมกับซับ แท็บเริ่มต้นยังเป็นภาพเฟรม
+const TAB_NAMES = ["ภาพเฟรม", "วิดีโอ", "เสียง", "ซับ", "ทรานสคริปต์", "ข้อมูลคลิป"]
 const NO_SUBS = "คลิปนี้ไม่มีซับ"
 const RESULT_ROWS = 'section[aria-labelledby="results-title"] [role="listitem"]'
 
@@ -92,7 +93,7 @@ const toLf = (text: string) => text.replaceAll("\r\n", "\n")
 const readClipboardLf = async (page: Page) => toLf(await readClipboard(page))
 
 test.describe("W2 แถบแท็บ", () => {
-  test("มี 4 แท็บตามลำดับ (ภาพเฟรม · ซับ · ทรานสคริปต์ · ข้อมูลคลิป) · เริ่มที่ภาพเฟรมพร้อมภาพครบ 128 ภาพ", async ({ page }) => {
+  test("มี 6 แท็บตามลำดับ (ภาพเฟรม · วิดีโอ · เสียง · ซับ · ทรานสคริปต์ · ข้อมูลคลิป) · เริ่มที่ภาพเฟรมพร้อมภาพครบ 128 ภาพ", async ({ page }) => {
     await page.goto(`/v/${BBB}`)
     await expect(tabList(page).getByRole("tab")).toHaveText(TAB_NAMES)
     await expect(tab(page, "ภาพเฟรม")).toHaveAttribute("aria-selected", "true")
@@ -193,7 +194,7 @@ test.describe("W2 แถบแท็บ", () => {
   test("จอกว้าง 360 px: แถวแท็บไม่ตัดขึ้นบรรทัดใหม่ (เลื่อนแนวนอนได้) และแต่ละแท็บสูงอย่างน้อย 44 px", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 800 })
     await page.goto(`/v/${BBB}`)
-    await expect(tabList(page).getByRole("tab")).toHaveCount(4)
+    await expect(tabList(page).getByRole("tab")).toHaveCount(TAB_NAMES.length)
     const layout = await tabList(page).evaluate((list) => {
       const tabs = [...list.querySelectorAll<HTMLElement>('[role="tab"]')]
       return {
@@ -223,7 +224,7 @@ test.describe("W2 แถบแท็บ ไม่มีแถบเลื่อ�
     test(`${label}: แถวแท็บไม่ล้นแนวตั้ง และไม่แสดงแถบเลื่อน`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 })
       await page.goto(`/v/${BBB}`)
-      await expect(tabList(page).getByRole("tab")).toHaveCount(4)
+      await expect(tabList(page).getByRole("tab")).toHaveCount(TAB_NAMES.length)
       expect(await tabListBox(page)).toEqual(NO_SCROLLBARS)
     })
   }
@@ -232,7 +233,7 @@ test.describe("W2 แถบแท็บ ไม่มีแถบเลื่อ�
     await page.setViewportSize({ width: 360, height: 800 })
     await page.goto(`/v/${BBB}`)
     await tab(page, "ภาพเฟรม").focus()
-    for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight")
+    for (let i = 0; i < TAB_NAMES.length - 1; i++) await page.keyboard.press("ArrowRight")
     const last = tab(page, "ข้อมูลคลิป")
     await expect(last).toBeFocused()
     const inView = await tabList(page).evaluate((list) => {
@@ -249,7 +250,7 @@ test.describe("W2 แถบแท็บ ไม่มีแถบเลื่อ�
     // review owner fb1: เทสที่ 360 px อาจไม่ล้นเลย (แท็บพอดีจอ) จอ 280 px ล้นแน่นอน จึงพิสูจน์การเลื่อนแนวนอนได้จริง
     await page.setViewportSize({ width: 280, height: 700 })
     await page.goto(`/v/${BBB}`)
-    await expect(tabList(page).getByRole("tab")).toHaveCount(4)
+    await expect(tabList(page).getByRole("tab")).toHaveCount(TAB_NAMES.length)
     const sizes = await tabList(page).evaluate((list) => ({ scroll: list.scrollWidth, client: list.clientWidth, left: list.scrollLeft }))
     expect(sizes.scroll).toBeGreaterThan(sizes.client)
     expect(sizes.left).toBe(0)
@@ -496,16 +497,24 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(tab(page, "ภาพเฟรม")).toBeFocused()
   })
 
-  test("คีย์บอร์ด: แท็บข้อมูลคลิป → คัดลอกคำอธิบาย → คัดลอก chapter → ปุ่มเวลาของ chapter ทีละตอน (แผงไม่เป็นจุด Tab เพิ่ม)", async ({
+  test("คีย์บอร์ด: แท็บข้อมูลคลิป → คัดลอกคำอธิบาย → คัดลอกเครดิต → คัดลอก chapter → ปุ่มเวลาของ chapter ทีละตอน (แผงไม่เป็นจุด Tab เพิ่ม)", async ({
     page,
   }) => {
+    // owner (M4 preview): เครดิตอยู่ใต้คำอธิบาย ปุ่ม "คัดลอกเครดิต" จึงตามหลัง "คัดลอกคำอธิบาย"
     // ไม่มีแท็ก ไม่มีช่วงดูซ้ำ และไม่มีคอมเมนต์ปักหมุด (ส่วนคอมเมนต์ไม่มีปุ่ม): ลำดับ Tab ไม่ขึ้นกับข้อมูลในชุดทดสอบ
     await withVideo(page, ZOO, { tags: [], mostReplayed: undefined, stats: undefined })
     await page.route(`**/api/videos/${ZOO}/pinned-comment`, (route) => route.fulfill({ json: { comment: null } }))
     await gotoInfo(page, ZOO)
     await expect(page.getByText("ไม่มีคอมเมนต์ปักหมุด")).toBeVisible()
     await tab(page, "ข้อมูลคลิป").focus()
-    for (const name of ["คัดลอกคำอธิบาย", "คัดลอก chapter", "เล่นจาก 00:00:00", "เล่นจาก 00:00:05", "เล่นจาก 00:00:17"]) {
+    for (const name of [
+      "คัดลอกคำอธิบาย",
+      "คัดลอกเครดิต",
+      "คัดลอก chapter",
+      "เล่นจาก 00:00:00",
+      "เล่นจาก 00:00:05",
+      "เล่นจาก 00:00:17",
+    ]) {
       await page.keyboard.press("Tab")
       await expect(page.getByRole("button", { name, exact: true })).toBeFocused()
     }

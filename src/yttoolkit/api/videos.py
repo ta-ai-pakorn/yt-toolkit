@@ -15,15 +15,15 @@ import unicodedata
 import uuid
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from ..core.comments import PinnedCommentService
-from ..core.frames import contact_sheet, file_timecode, frames_zip
+from ..core.frames import file_timecode
 from ..core.inputs import VIDEO_ID, InputItem, scan_text
 from ..core.storyboard import FOLDER as STORYBOARD_FOLDER
 from ..core.storyboard import INDEX as STORYBOARD_INDEX
@@ -44,6 +44,8 @@ TITLE_MAX_CHARS = 100
 PLAYLIST_V_MAX_CHARS = 64
 FRAME_CACHE_CONTROL = "public, max-age=86400, immutable"
 
+F = TypeVar("F", bound=Callable[..., Any])
+
 # รหัส error -> HTTP status (รหัสอื่นทั้งหมด รวม E_UNKNOWN = 500)
 STATUS_BY_CODE: dict[str, int] = {
     "E_INVALID_INPUT": 422,
@@ -61,6 +63,8 @@ STATUS_BY_CODE: dict[str, int] = {
     # ไม่ใช้ 425 Too Early เพราะรหัสนั้นหมายถึงคำขอแบบ TLS early data ไม่ใช่ทรัพยากรที่ยังไม่พร้อม
     "E_SESSION_WARMING": 503,
     "E_NETWORK": 502,
+    # ยูทูปปฏิเสธการโหลดไฟล์ (HTTP 4xx ที่ไม่ใช่ 429): ปลายทางตอบผิดปกติ ใช้ 502 เหมือน E_NETWORK
+    "E_YT_REFUSED": 502,
 }
 
 # อักขระที่ Windows ห้ามใช้ในชื่อไฟล์
@@ -103,15 +107,21 @@ def attachment_header(fallback: str, filename: str) -> str:
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
-def _download_stem(info: dict, video_id: str) -> str:
-    return safe_title(str(info.get("title") or "")) or video_id
-
-
 # ---------- error ----------
 
 
-def yt_error_response(exc: YtError, subject: str) -> JSONResponse:
-    """YtError -> error envelope ตามตารางรหัส ข้อความถึงผู้ใช้มาจาก MESSAGES (ไม่รู้จักใช้ของ E_UNKNOWN)"""
+def yt_error_response(
+    exc: YtError, subject: str, *, on_bot_check: Callable[[], None] | None = None
+) -> JSONResponse:
+    """YtError -> error envelope ตามตารางรหัส ข้อความถึงผู้ใช้มาจาก MESSAGES (ไม่รู้จักใช้ของ E_UNKNOWN)
+
+    E_BOT_CHECK จากคำขอของผู้ใช้ก็ต้องพักคิวด้วย: เรียก on_bot_check หนึ่งครั้ง (error ในนั้นแค่ log คำตอบไม่เปลี่ยน)
+    """
+    if exc.code == "E_BOT_CHECK" and on_bot_check is not None:
+        try:
+            on_bot_check()
+        except Exception:
+            log.exception("พักคิวหลังยูทูปขอยืนยันบอทไม่สำเร็จ (%s)", subject)
     status = STATUS_BY_CODE.get(exc.code, 500)
     unexpected = status == 500
     # รหัสที่หน้าเว็บไม่รู้จักส่งเป็น E_UNKNOWN (log ยังเก็บรหัสเดิมไว้)
@@ -133,16 +143,32 @@ def yt_error_response(exc: YtError, subject: str) -> JSONResponse:
     return JSONResponse(status_code=status, content=body, headers={"Retry-After": str(seconds)})
 
 
-def _maps_yt_errors(func: Callable[..., Any]) -> Callable[..., Any]:
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return func(*args, **kwargs)
-        except YtError as exc:
-            subject = kwargs.get("video_id") or kwargs.get("playlist_id") or "-"
-            return yt_error_response(exc, str(subject))
+def yt_error_mapper(on_bot_check: Callable[[], None] | None) -> Callable[[F], F]:
+    """ตัวห่อ route: YtError -> error envelope และแจ้ง on_bot_check เมื่อเป็น E_BOT_CHECK"""
 
-    return wrapper
+    def decorate(func: F) -> F:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except YtError as exc:
+                subject = kwargs.get("video_id") or kwargs.get("playlist_id") or "-"
+                return yt_error_response(exc, str(subject), on_bot_check=on_bot_check)
+
+        return wrapper  # type: ignore[return-value]
+
+    return decorate
+
+
+def ctx_bot_check(ctx: AppContext) -> Callable[[], None]:
+    """อ่าน ctx.on_bot_check ตอนเรียกจริง (ตัวรันคิวถูกต่อเข้า ctx หลังสร้าง router ได้)"""
+
+    def call() -> None:
+        callback = ctx.on_bot_check
+        if callback is not None:
+            callback()
+
+    return call
 
 
 # ---------- resolve ----------
@@ -170,16 +196,16 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
         raise ValueError("ต้องมี videos, extractor และ cache_root ครบถึงจะเปิด API ข้อมูลคลิปได้")
     cache_root = Path(cache_root)
     router = APIRouter()
+    maps_yt_errors = yt_error_mapper(ctx_bot_check(ctx))
+    # run_app สร้างให้แล้ว (ตัวเดียวกับงานโน้ตในคิว) ไม่มี (เทส) = สร้างที่นี่
     # เรียกผ่าน lambda: extractor ทดสอบบางตัวไม่มี pinned_comment และไม่ต้องมีถ้าไม่ได้เรียก route นี้
-    pinned = PinnedCommentService(videos, lambda vid: extractor.pinned_comment(vid), cache_root)
-    ctx.pinned = pinned
+    pinned = ctx.pinned
+    if pinned is None:
+        pinned = PinnedCommentService(videos, lambda vid: extractor.pinned_comment(vid), cache_root)
+        ctx.pinned = pinned
 
     def storyboard_index(video_id: str) -> dict:
         return get_storyboard(video_id, videos, cache_root, extractor.fetch)
-
-    def frame_files(video_id: str, index: dict) -> list[tuple[int, Path]]:
-        folder = cache_root / video_id / STORYBOARD_FOLDER
-        return [(frame["tMs"], folder / frame["file"]) for frame in index["frames"]]
 
     @router.post("/resolve")
     def resolve(body: ResolveBody) -> dict:
@@ -194,19 +220,19 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
         return out
 
     @router.get("/videos/{video_id}", response_model=None)
-    @_maps_yt_errors
+    @maps_yt_errors
     def video_info(video_id: str, refresh: bool = False, peek: bool = False) -> dict:
         # peek=1: หน้าเว็บขอแค่ชื่อ/ภาพปก (รายการผล W1) ไม่นับว่าเปิดคลิป จึงไม่ขึ้น "ล่าสุด"
         return videos.get(video_id, refresh=refresh, peek=peek)
 
     @router.get("/videos/{video_id}/pinned-comment", response_model=None)
-    @_maps_yt_errors
+    @maps_yt_errors
     def pinned_comment(video_id: str) -> dict:
         # C-A2: ดึงเมื่อผู้ใช้เปิดดูเท่านั้น null = ไม่มีคอมเมนต์ปักหมุดจากเจ้าของช่อง
         return {"comment": pinned.get(video_id)}
 
     @router.get("/videos/{video_id}/storyboard", response_model=None)
-    @_maps_yt_errors
+    @maps_yt_errors
     def storyboard(video_id: str) -> dict:
         index = storyboard_index(video_id)
         # ภาพเฟรมตอบแบบ immutable จึงต่อ ?v=<เวลาแก้ไข index.json> ให้ URL เปลี่ยนเมื่อสร้างชุดใหม่
@@ -227,34 +253,8 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
             ],
         }
 
-    # M4 ย้ายสองอันนี้เข้าคิวงาน (job kind contact_sheet / frames_zip) และบันทึกลงโฟลเดอร์ผลลัพธ์
-    @router.get("/videos/{video_id}/storyboard/contact-sheet.jpg", response_model=None)
-    @_maps_yt_errors
-    def storyboard_contact_sheet(video_id: str) -> Response:
-        info = videos.get(video_id)
-        frames = frame_files(video_id, storyboard_index(video_id))
-        data = contact_sheet(frames, str(info.get("title") or ""), int(info.get("durationS") or 0))
-        name = f"{_download_stem(info, video_id)} - contact sheet.jpg"
-        return Response(
-            data,
-            media_type="image/jpeg",
-            headers={"Content-Disposition": attachment_header("contact-sheet.jpg", name)},
-        )
-
-    @router.get("/videos/{video_id}/storyboard/frames.zip", response_model=None)
-    @_maps_yt_errors
-    def storyboard_zip(video_id: str) -> Response:
-        info = videos.get(video_id)
-        data = frames_zip(frame_files(video_id, storyboard_index(video_id)))
-        name = f"{_download_stem(info, video_id)} - frames.zip"
-        return Response(
-            data,
-            media_type="application/zip",
-            headers={"Content-Disposition": attachment_header("frames.zip", name)},
-        )
-
     @router.get("/playlists/{playlist_id}", response_model=None)
-    @_maps_yt_errors
+    @maps_yt_errors
     def playlist(playlist_id: str, v: str | None = None) -> dict:
         # v = คลิปตั้งต้น ต้องมีเมื่อเป็นมิกซ์ (id ขึ้นต้น RD) เพลย์ลิสต์ปกติไม่ใช้
         # ยาวเกินก็เป็น v ที่ผิดรูปแบบเหมือนค่าผิดอื่น ๆ (E_INVALID_INPUT ไม่ใช่ E_BAD_REQUEST) และไม่ยกค่ากลับไปใน log
@@ -267,8 +267,10 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
         q: str | None = Query(None, max_length=200),
         limit: int = Query(HISTORY_DEFAULT_LIMIT, ge=1, le=HISTORY_MAX_LIMIT),
         offset: int = Query(0, ge=0, le=1_000_000),
+        scope: Literal["all", "opened"] = "all",
     ) -> dict:
-        items, total = videos.recent(limit, offset, q)
+        # all = เปิดหรือโหลดแล้ว (W5) / opened = เฉพาะที่เปิดใน W2 (W1 "ล่าสุด") scope แปลกปลอม = 422
+        items, total = videos.recent(limit, offset, q, scope)
         return {"items": items, "total": total}
 
     @router.get("/cache/{video_id}/{file_path:path}", response_model=None)

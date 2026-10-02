@@ -21,6 +21,8 @@ export type Health = {
 
 export type VideoFormat = {
   formatId: string
+  /** ไม่มี = ไม่รู้ (ข้อมูลคลิปที่เก็บไว้ก่อน M4 gate 2) ใช้ height แทน */
+  width?: number
   height: number
   fps: number
   vcodec: string
@@ -34,6 +36,10 @@ export type AudioFormat = {
   isOriginal: boolean
   acodec: string
   abrKbps?: number
+  /** อัตราสุ่มเสียง (Hz) ไม่มีคีย์นี้ = ยูทูปไม่บอก (หน้าเว็บประมาณขนาด wav ด้วย 44,100) */
+  sampleRate?: number
+  /** จำนวนช่องเสียง ไม่มีคีย์นี้ = ยูทูปไม่บอก (หน้าเว็บประมาณด้วย 2) */
+  channels?: number
 }
 
 export type Chapter = { startS: number; endS: number; title: string }
@@ -66,6 +72,8 @@ export type VideoInfo = {
   categories?: string[]
   /** ช่วงที่คนดูซ้ำมากที่สุด ไม่เกิน 3 ช่วง เรียงตามเวลา · คลิปที่ไม่มี heatmap ไม่มีคีย์นี้ */
   mostReplayed?: ReplaySegment[]
+  /** สัญญาอนุญาตของคลิปตามที่ยูทูปบอก ไม่มีคีย์นี้เมื่อไม่รู้ */
+  license?: string
 }
 
 /**
@@ -122,7 +130,8 @@ export type HistoryItem = {
   title: string
   thumbnailUrl: string
   durationS: number
-  outputs: unknown[]
+  /** ชนิดไฟล์ที่เคยโหลดของคลิปนี้ (ป้ายในหน้าประวัติ) ว่าง = เปิดดูอย่างเดียว */
+  outputs: JobKind[]
   lastAt: string
 }
 
@@ -155,3 +164,116 @@ export type SubPreset = "short" | "medium" | "long" | "word"
 export type Cue = { startMs: number; endMs: number; lines: string[] }
 
 export type SubExportFormat = "srt" | "txt" | "md"
+
+// ---------- M4 งานในคิว (สัญญา C2) ----------
+
+export type JobKind = "video" | "audio" | "subtitle" | "frames_sharp" | "contact_sheet" | "frames_zip" | "note"
+
+export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
+
+export type JobStage = "probing" | "downloading_video" | "downloading_audio" | "merging" | "converting" | "writing"
+
+export type JobError = { code: string; message: string; detail?: string | null }
+
+/** หมายเหตุสีเทาในแถวงาน เช่น ไม่มีเสียงภาษาที่เลือกจึงใช้เสียงต้นฉบับแทน */
+export type JobNote = { code: string; message: string }
+
+/** ไฟล์ที่งานสร้าง: name = ชื่อไฟล์อย่างเดียว ไม่มีที่อยู่โฟลเดอร์ */
+export type JobOutput = { index: number; name: string; sizeBytes: number }
+
+export type Job = {
+  id: string
+  videoId: string
+  title: string
+  kind: JobKind
+  params: JobParams
+  status: JobStatus
+  stage?: JobStage
+  progress?: number
+  speedBps?: number
+  etaS?: number
+  /** มีเมื่อ > 0: "เน็ตหลุด กำลังลองใหม่ (ครั้งที่ n/3)" */
+  attempt?: number
+  /** true ระหว่างที่งานที่กำลังทำถูกสั่งยกเลิก (สถานะสุดท้าย cancelled มาทาง SSE) */
+  cancelling?: boolean
+  position: number
+  error?: JobError
+  notes?: JobNote[]
+  outputs?: JobOutput[]
+  createdAt: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+/** ส่วนที่เปลี่ยนของงาน (SSE job.updated) · ค่า null = ลบคีย์นั้นออก */
+export type JobPatch = { id: string } & { [K in keyof Omit<Job, "id">]?: Job[K] | null }
+
+// ---------- ค่าของงานแต่ละชนิด (สัญญา C3) ----------
+
+/**
+ * โฟลเดอร์กลุ่ม (owner round 2): ทุกชนิดงานส่ง `folder` ได้ = ไฟล์ไปอยู่ใน <โฟลเดอร์ผลลัพธ์>/<folder>/<คลิป [id]>/
+ * หน้า W3 ส่งทุกงาน · หน้า W2 (คลิปเดียว) ไม่ส่ง · backend ตัดช่องว่างหัวท้าย ยาว 1..80 ตัว และทำให้เป็นชื่อโฟลเดอร์ที่ปลอดภัยเอง
+ */
+export type GroupFolder = { folder?: string }
+
+export type VideoJobParams = GroupFolder & {
+  /** ไม่มีคีย์ = เลือกให้อัตโนมัติ */
+  formatId?: string
+  maxQuality: boolean
+  /** เพดานความละเอียดของโหมดเปิดได้ทุกที่ (ค่าเริ่มต้น 1080) */
+  maxHeight?: 720 | 1080
+  splitChapters: false
+  noAudio: boolean
+  /** "original" หรือรหัสภาษา เช่น "en-US" */
+  audioLanguage: string
+  /** รหัสแทร็กซับที่ฝังในไฟล์ ต้องมี subOptions ด้วย */
+  embedSubs?: string
+  subOptions?: SubOptions
+}
+
+export type AudioJobParams = GroupFolder & {
+  format: "m4a" | "mp3" | "wav"
+  mp3Kbps?: 128 | 192 | 320
+  splitChapters: false
+  audioLanguage: string
+}
+
+export type SubtitleJobParams = GroupFolder & { trackId?: string; format: SubExportFormat; options: SubOptions }
+
+export type ContactSheetJobParams = GroupFolder & { source: "fast"; columns: 5 }
+
+export type FramesZipJobParams = GroupFolder & { source: "fast" }
+
+/** โน้ต .md ของคลิป (ข้อมูลคลิป คำอธิบาย chapter คอมเมนต์ปักหมุด ทรานสคริปต์) · ไม่มี trackId = backend ใช้แทร็กเริ่มต้นของคลิป */
+export type NoteJobParams = GroupFolder & { trackId?: string }
+
+export type JobParams =
+  | VideoJobParams
+  | AudioJobParams
+  | SubtitleJobParams
+  | ContactSheetJobParams
+  | FramesZipJobParams
+  | NoteJobParams
+
+export type NewJob = { videoId: string; kind: Exclude<JobKind, "frames_sharp">; params: JobParams; title?: string }
+
+// ---------- คิวและการตั้งค่า (สัญญา C12) ----------
+
+export type QueueState = { pausedUntil: string | null; reason: string | null; concurrency: 1 | 2 | 3 }
+
+export type Settings = {
+  outputDir: string
+  videoDefault: "compat-1080" | "compat-720" | "max"
+  audioDefault: "m4a" | "mp3" | "wav"
+  audioLanguage: string
+  mp3Kbps: 128 | 192 | 320
+  subPreset: SubPreset | "custom"
+  subCustom: SubOptions
+  concurrency: 1 | 2 | 3
+  sponsorblockDefault: string[]
+  theme: "system" | "dark" | "light"
+  filenameStyle: "title" | "title-channel" | "title-quality"
+  cookies: { enabled: boolean; source: "file" | "firefox" | null; warningAccepted: boolean; importedAt?: string }
+  statsResetAt: string | null
+  lastUsed: Record<string, unknown>
+}

@@ -205,6 +205,7 @@ _ALLOWED_TOP = {
     "timestamp",
     "live_status",
     "availability",
+    "license",
     "thumbnail",
     "chapters",
     "playlist_count",

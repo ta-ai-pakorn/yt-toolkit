@@ -492,3 +492,53 @@ test.describe("รอบแก้หลังรีวิว (2026-09-30)", () =
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
   })
 })
+
+// M4 งาน 19 (Q7): ทางเข้าหน้า W3 สองทาง · spec นี้ไม่สร้างงาน (อยู่ในโปรเจกต์ chromium) แค่กดไปหน้าเลือกคลิป
+test.describe("W3 ทางเข้าหน้าเลือกคลิป (Q7)", () => {
+  const OPEN_BATCH = "เลือกคลิปที่จะโหลด"
+  const batchLink = (scope: Page | ReturnType<typeof rows>) => scope.getByRole("link", { name: OPEN_BATCH, exact: true })
+
+  test("ผลมีคลิป 2 แถวขึ้นไป → หัวรายการมีปุ่ม 'เลือกคลิปที่จะโหลด' กดแล้วไป /batch?src=…", async ({ page }) => {
+    await pasteThree(page)
+    // ปุ่มหัวรายการอยู่ก่อนปุ่มของแถวเพลย์ลิสต์ในหน้า
+    const header = batchLink(page).first()
+    await expect(header).toBeVisible()
+    await header.click()
+    await expect(page).toHaveURL(/\/batch\?src=[^&]+$/)
+    await expect(heading(page)).toHaveText("หลายลิงก์")
+    await expect(crumbs(page)).toContainText("รายการที่วาง (3 ลิงก์)")
+    // แถวเพลย์ลิสต์ไม่เข้าตาราง: มีบรรทัดบอกทางไปเลือกที่หน้าแรก
+    await expect(page.getByText("เพลย์ลิสต์ในรายการนี้เลือกคลิปได้จากปุ่มในแถวของเพลย์ลิสต์ที่หน้าแรก")).toBeVisible()
+  })
+
+  test("แถวเพลย์ลิสต์มีปุ่มของตัวเอง → /batch?src=…&playlist=<id> แสดงชื่อเพลย์ลิสต์ · แถวคลิปไม่มีปุ่มนี้", async ({ page }) => {
+    await pasteThree(page)
+    await expect(batchLink(rows(page).nth(0))).toHaveCount(0)
+    await expect(batchLink(rows(page).nth(1))).toHaveCount(0)
+    const own = batchLink(rows(page).nth(2))
+    await expect(own).toBeVisible()
+    await own.click()
+    await expect(page).toHaveURL(new RegExp(`/batch\\?src=[^&]+&playlist=${PLAYLIST_ID}$`))
+    await expect(heading(page)).toHaveText(PLAYLIST_TITLE)
+  })
+
+  test("ลิงก์คลิปเดียวกันสองแบบ (คลิปล้วน + คลิปในเพลย์ลิสต์) = คลิปเดียว → ไม่มีปุ่มที่หัวรายการ", async ({ page }) => {
+    await analyze(page, [`https://youtu.be/${BBB}`, `https://www.youtube.com/watch?v=${BBB}&list=${PLAYLIST_ID}`].join("\n"))
+    await expect(rows(page)).toHaveCount(2)
+    await expect(batchLink(page)).toHaveCount(0)
+  })
+
+  test("คลิปแถวเดียว (อีกแถวเป็นลิงก์เสีย) → ไม่มีปุ่มที่หัวรายการ · เพลย์ลิสต์อย่างเดียว = มีแค่ปุ่มของแถว", async ({
+    page,
+  }) => {
+    await analyze(page, [`https://youtu.be/${BBB}`, "https://vimeo.com/123"].join("\n"))
+    await expect(rows(page)).toHaveCount(2)
+    await expect(batchLink(page)).toHaveCount(0)
+
+    await analyze(page, PLAYLIST_URL)
+    await expect(rows(page)).toHaveCount(1)
+    await expect(rows(page).first()).toContainText(PLAYLIST_TITLE)
+    await expect(batchLink(page)).toHaveCount(1)
+    await expect(batchLink(rows(page).first())).toBeVisible()
+  })
+})

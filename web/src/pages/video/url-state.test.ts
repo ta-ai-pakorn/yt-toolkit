@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { patchSearch, readVideoParams } from "./url-state"
+import { clipPathFrom, patchSearch, readVideoParams, VIDEO_TABS } from "./url-state"
 
 const params = (q: string) => new URLSearchParams(q)
 
@@ -37,6 +37,26 @@ describe("readVideoParams", () => {
     expect(readVideoParams(params("track=o.")).trackId).toBeNull()
     expect(readVideoParams(params("track=o.th/../x")).trackId).toBeNull()
     expect(readVideoParams(params("track=t.fr")).trackId).toBe("t.fr")
+  })
+})
+
+describe("แท็บวิดีโอและเสียง (M4)", () => {
+  it("ลำดับแท็บ: ภาพเฟรม · วิดีโอ · เสียง · ซับ · ทรานสคริปต์ · ข้อมูลคลิป", () => {
+    expect(VIDEO_TABS).toEqual(["frames", "video", "audio", "subs", "transcript", "info"])
+  })
+
+  it("อ่าน ?tab=video และ ?tab=audio ได้ · ตัวพิมพ์ใหญ่หรือค่าใกล้เคียงอ่านเป็นภาพเฟรม", () => {
+    expect(readVideoParams(params("tab=video")).tab).toBe("video")
+    expect(readVideoParams(params("tab=audio")).tab).toBe("audio")
+    for (const bad of ["VIDEO", "Audio", "videos", "mp4", "download"]) {
+      expect(readVideoParams(params(`tab=${bad}`)).tab).toBe("frames")
+    }
+  })
+
+  it("patch ไปแท็บวิดีโอ/เสียงขึ้นใน URL และเก็บแทร็กเดิมไว้ · กลับภาพเฟรมแล้ว tab หายจาก URL", () => {
+    expect(patchSearch(params(""), { tab: "video" })).toBe("?tab=video")
+    expect(patchSearch(params("tab=video&track=o.th"), { tab: "audio" })).toBe("?tab=audio&track=o.th")
+    expect(patchSearch(params("tab=audio"), { tab: "frames" })).toBe("")
   })
 })
 
@@ -93,5 +113,19 @@ describe("patchSearch", () => {
 
   it("ค่าที่ผิดรูปใน URL เดิมถูกล้างเมื่อ patch", () => {
     expect(patchSearch(params("tab=weird&at=abc"), { trackId: "o.th" })).toBe("?track=o.th")
+  })
+})
+
+describe("clipPathFrom (ปุ่มก่อนหน้า/ถัดไป)", () => {
+  it("คลิปถัดไปอยู่แท็บเดิมตาม URL ตอนกด ไม่พาแทร็กซับ เวลา และตัวกรองไปด้วย", () => {
+    expect(clipPathFrom("jNQXAC9IVRw", "?tab=subs&track=a.th-orig&at=90500")).toBe("/v/jNQXAC9IVRw?tab=subs")
+    expect(clipPathFrom("jNQXAC9IVRw", "?tab=transcript")).toBe("/v/jNQXAC9IVRw?tab=transcript")
+    expect(clipPathFrom("jNQXAC9IVRw", "?tab=video&replayed=1")).toBe("/v/jNQXAC9IVRw?tab=video")
+  })
+
+  it("แท็บภาพเฟรมหรือแท็บที่ไม่รู้จักไม่ขึ้นใน URL", () => {
+    expect(clipPathFrom("jNQXAC9IVRw", "")).toBe("/v/jNQXAC9IVRw")
+    expect(clipPathFrom("jNQXAC9IVRw", "?tab=frames&replayed=1")).toBe("/v/jNQXAC9IVRw")
+    expect(clipPathFrom("jNQXAC9IVRw", "?tab=weird")).toBe("/v/jNQXAC9IVRw")
   })
 })

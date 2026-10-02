@@ -1,14 +1,15 @@
 import { useCallback } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router"
 
-export type VideoTab = "frames" | "subs" | "transcript" | "info"
+export type VideoTab = "frames" | "video" | "audio" | "subs" | "transcript" | "info"
 
 /** replayed = ตัวกรอง "ดูซ้ำบ่อย" ของแท็บภาพเฟรม (?replayed=1) */
 export type VideoParams = { tab: VideoTab; trackId: string | null; at: number | null; replayed: boolean }
 
 export type VideoParamsPatch = { tab?: VideoTab; trackId?: string | null; at?: number | null; replayed?: boolean }
 
-export const VIDEO_TABS: readonly VideoTab[] = ["frames", "subs", "transcript", "info"]
+// ลำดับบนแถบแท็บ (M4 Q8): ภาพเฟรม · วิดีโอ · เสียง · ซับ · ทรานสคริปต์ · ข้อมูลคลิป
+export const VIDEO_TABS: readonly VideoTab[] = ["frames", "video", "audio", "subs", "transcript", "info"]
 const DEFAULT_TAB: VideoTab = "frames"
 // รูปแบบรหัสแทร็กตามสัญญา C1 (o./a./t. นำหน้า)
 const TRACK_ID = /^[oat]\.[A-Za-z0-9_-]{1,64}$/
@@ -64,6 +65,15 @@ export function patchSearch(search: URLSearchParams, patch: VideoParamsPatch): s
   }
   const text = next.toString()
   return text === "" ? "" : `?${text}`
+}
+
+/**
+ * ที่อยู่ของคลิปอื่น (ปุ่มก่อนหน้า/ถัดไป): อยู่แท็บเดิมตาม search ที่ส่งมา แต่ไม่พาแทร็กซับ เวลา
+ * และตัวกรองของคลิปนี้ไปด้วย (คลิปอื่นมีแทร็กคนละชุด)
+ */
+export function clipPathFrom(videoId: string, search: string): string {
+  const { tab } = readVideoParams(new URLSearchParams(search))
+  return `/v/${videoId}${tab !== DEFAULT_TAB ? `?tab=${tab}` : ""}`
 }
 
 /**

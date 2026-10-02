@@ -9,7 +9,7 @@ import { playlistQuery } from "@/pages/home/queries"
 import { useHomeState } from "@/pages/home/state"
 import type { FromListState } from "@/pages/home/use-analyze"
 
-import { useVideoParams, type VideoTab } from "./url-state"
+import { clipPathFrom } from "./url-state"
 
 const t = th.video
 
@@ -41,9 +41,6 @@ function useClipSequence(from: FromListState | null): string[] | null {
 
 const STEP = "h-11 px-3"
 
-/** ที่อยู่ของคลิปถัดไป: อยู่แท็บเดิม แต่ไม่พาแทร็กซับและเวลาของคลิปนี้ไปด้วย (คลิปอื่นมีแทร็กคนละชุด) */
-const clipPath = (videoId: string, tab: VideoTab) => `/v/${videoId}${tab !== "frames" ? `?tab=${tab}` : ""}`
-
 /**
  * "‹ ก่อนหน้า · 3 จาก 5 · ถัดไป ›" ของ W2 เมื่อเปิดจากรายการ (ไม่ได้มาจากรายการ = ไม่แสดงเลย)
  * ไปคลิปอื่นแบบแทนที่ประวัติ: ปุ่ม back / "รายการที่วาง" ยังพากลับหน้ารายการในครั้งเดียว
@@ -52,7 +49,6 @@ const clipPath = (videoId: string, tab: VideoTab) => `/v/${videoId}${tab !== "fr
  */
 export function ClipSequence({ videoId, from }: { videoId: string; from: FromListState }) {
   const navigate = useNavigate()
-  const { tab } = useVideoParams()
   const ids = useClipSequence(from)
   const index = ids ? ids.indexOf(videoId) : -1
   if (!ids || index < 0 || ids.length < 2) return null
@@ -63,7 +59,8 @@ export function ClipSequence({ videoId, from }: { videoId: string; from: FromLis
     if (!ids || target < 0 || target >= ids.length) return
     // ปล่อยโฟกัสจากปุ่ม: หัวคลิปย้ายโฟกัสไปชื่อคลิปใหม่ให้ (โปรแกรมอ่านหน้าจออ่านชื่อคลิปใหม่)
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
-    void navigate(clipPath(ids[target], tab), { state: from, replace: true })
+    // อ่านแท็บจาก URL ตอนกด ไม่ใช้ค่าที่จับไว้ตอน render: เครื่องช้าๆ หน้าจออาจยังไม่ render ตามแท็บที่เพิ่งเปลี่ยน
+    void navigate(clipPathFrom(ids[target], window.location.search), { state: from, replace: true })
     window.scrollTo({ top: 0 })
   }
 

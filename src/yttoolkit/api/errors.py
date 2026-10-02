@@ -31,7 +31,7 @@ def _home_aliases(home: str) -> tuple[str, ...]:
         return ()
 
 
-def _redact_home(text: str) -> str:
+def redact_home(text: str) -> str:
     """แทนโฟลเดอร์ผู้ใช้ด้วย ~ เพื่อไม่ให้ชื่อผู้ใช้หลุดไปกับภาพหน้าจอที่ส่งต่อ"""
     home = str(Path.home())
     if not home.strip("/\\"):
@@ -49,9 +49,13 @@ def _redact_home(text: str) -> str:
     return re.sub(f"(?:{alternatives})" + r"(?![\w.\-])", "~", text, flags=re.IGNORECASE)
 
 
+# ชื่อเดิม (ก่อน M4) ยังใช้อยู่ในโมดูลอื่น
+_redact_home = redact_home
+
+
 def error_body(code: str, message: str, detail: str | None = None) -> dict:
     if detail is not None:
-        detail = _redact_home(detail)
+        detail = redact_home(detail)
     return {"error": {"code": code, "message": message, "detail": detail}}
 
 
@@ -73,7 +77,7 @@ async def _http_error(request: Request, exc: HTTPException) -> Response:
 async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     # ข้อความของ pydantic ยกค่าที่ส่งมาทั้งก้อน (เช่นข้อความยาว 20,000 ตัว) ตัดไว้ไม่ให้สะท้อนกลับยาว ๆ
     # ซ่อนโฟลเดอร์ผู้ใช้ก่อนตัด ไม่งั้นตัดกลาง path แล้วชื่อผู้ใช้ครึ่งหนึ่งจะหลุดไป
-    detail = _redact_home(str(exc))[:VALIDATION_DETAIL_MAX]
+    detail = redact_home(str(exc))[:VALIDATION_DETAIL_MAX]
     return error_response(422, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, detail)
 
 

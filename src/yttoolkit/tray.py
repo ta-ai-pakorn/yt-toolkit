@@ -11,6 +11,7 @@ ACCENT = (245, 185, 66, 255)  # --accent #F5B942
 ON_ACCENT = (26, 20, 5, 255)  # --on-accent #1A1405
 WINDOW = (14, 15, 17, 255)  # film window color #0E0F11
 MENU_LABELS = ("เปิดแอพ", "เปิดโฟลเดอร์ผลลัพธ์", "ปิดโปรแกรม")
+RUNNING_LABEL = "กำลังทำ {n} งาน"  # แถวแรกของเมนู กดไม่ได้ บอกจำนวนงานที่กำลังทำ (FR-LIFE-6)
 
 
 def make_icon_image(size: int = 64) -> Image.Image:
@@ -89,10 +90,23 @@ def _make_icon_image_full(size: int) -> Image.Image:
     return large_image.resize((size, size), Image.BOX)
 
 
+def running_text(running_count: Callable[[], int]) -> Callable[[pystray.MenuItem], str]:
+    """ข้อความแถวจำนวนงาน pystray เรียกใหม่ทุกครั้งที่สร้างเมนู (ตอน update_menu) จึงได้ตัวเลขล่าสุด"""
+
+    def text(item: pystray.MenuItem) -> str:
+        return RUNNING_LABEL.format(n=running_count())
+
+    return text
+
+
 def build_menu(
-    open_app: Callable[[], None], open_output: Callable[[], None], quit_app: Callable[[], None]
+    open_app: Callable[[], None],
+    open_output: Callable[[], None],
+    quit_app: Callable[[], None],
+    running_count: Callable[[], int],
 ) -> pystray.Menu:
     return pystray.Menu(
+        pystray.MenuItem(running_text(running_count), None, enabled=False),
         pystray.MenuItem(MENU_LABELS[0], lambda icon, item: open_app(), default=True),
         pystray.MenuItem(MENU_LABELS[1], lambda icon, item: open_output()),
         pystray.Menu.SEPARATOR,
@@ -101,8 +115,14 @@ def build_menu(
 
 
 def build_tray(
-    open_app: Callable[[], None], open_output: Callable[[], None], quit_app: Callable[[], None]
+    open_app: Callable[[], None],
+    open_output: Callable[[], None],
+    quit_app: Callable[[], None],
+    running_count: Callable[[], int],
 ) -> pystray.Icon:
     return pystray.Icon(
-        "yt-toolkit", make_icon_image(32), "YT Toolkit", menu=build_menu(open_app, open_output, quit_app)
+        "yt-toolkit",
+        make_icon_image(32),
+        "YT Toolkit",
+        menu=build_menu(open_app, open_output, quit_app, running_count),
     )

@@ -9,3 +9,16 @@ export function languageName(code: string): string {
     return code
   }
 }
+
+/**
+ * ชื่อภาษาของเสียง (ช่องภาษาเสียงในแท็บวิดีโอ/เสียง): en-US → "อังกฤษ (สหรัฐอเมริกา)" (แบบ standard ใส่วงเล็บ)
+ * ต่างจาก languageName ที่ได้ "อังกฤษ - สหรัฐอเมริกา" (ป้ายของ M3 ใช้แบบนั้นอยู่) รหัสที่ไม่รู้จักคืนรหัสเดิม
+ */
+export function audioLanguageName(code: string): string {
+  try {
+    const names = new Intl.DisplayNames(["th"], { type: "language", languageDisplay: "standard", fallback: "none" })
+    return names.of(code) ?? code
+  } catch {
+    return code
+  }
+}
