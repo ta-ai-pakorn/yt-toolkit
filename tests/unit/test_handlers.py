@@ -1263,3 +1263,77 @@ def test_cancel_while_cutting_leaves_nothing(env):
     with pytest.raises(JobCancelled):
         env.run("video", BBB, video_params(range=RANGE), cancel_on="cutting")
     assert folders(env.out) == []
+
+
+# ---------- M5 รอบ A fix round 1: คลิปไม่มีเสียง และช่วงของคลิปที่ยังไม่เคยดึงข้อมูล ----------
+
+
+class SilentDownloader(StubDownloader):
+    """คลิปที่ไม่มีแทร็กเสียงเลย: ทุก format ของการดึงข้อมูลรอบโหลดมี acodec "none" ไฟล์ที่โหลดไม่มีเสียง"""
+
+    def download(self, video_id, choose, workdir, hooks):
+        info = dict(self.fake.probe(video_id))
+        info["formats"] = [f for f in info["formats"] if f.get("acodec") == "none"]
+        choice = choose(info)
+        self.choices.append(choice)
+        target = workdir / "media.mp4"
+        shutil.copyfile(MEDIA / "video-noaudio.mp4", target)
+        return DownloadResult(target, info, choice)
+
+
+def test_range_on_a_clip_without_audio_cuts_without_audio(env):
+    deps = replace(env.deps, downloader=SilentDownloader(env.fake))
+    result, _ = env.run("video", BBB, video_params(range=RANGE), deps=deps)
+    assert env.media.cuts == [CutCall("media.mp4", "cut.mp4", ((90_000, 300_000),), "exact", "mp4", False)]
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, " (01.30-05.00)", "mp4")
+
+
+def test_clip_with_audio_formats_cuts_with_audio(env):
+    env.run("video", BBB, video_params(range=RANGE))
+    assert env.media.cuts[-1].has_audio is True
+
+
+@requires_ffmpeg
+def test_range_on_a_clip_without_audio_with_real_ffmpeg(env):
+    ffmpeg = find_test_ffmpeg()
+    assert ffmpeg is not None
+    deps = replace(env.deps, downloader=SilentDownloader(env.fake), media=FfmpegTools(lambda: Path(ffmpeg)))
+    result, _ = env.run("video", BBB, video_params(range={"startMs": 0, "endMs": 1000}), deps=deps)
+    probe = ffprobe_json(output_path(result))
+    assert [s["codec_type"] for s in probe["streams"]] == ["video"]
+    assert abs(float(probe["format"]["duration"]) - 1.0) < 0.15
+
+
+def subtitle_range_params(start_ms: int, end_ms: int) -> dict:
+    return {"trackId": "a.th-orig", "format": "srt", "options": MEDIUM, "range": {"startMs": start_ms, "endMs": end_ms}}
+
+
+def test_subtitle_range_past_the_end_is_clipped_to_the_clip(env):
+    result, _ = env.run("subtitle", THAI, subtitle_range_params(360_000, 400_000))
+    expected = env.subtitles.export(THAI, "a.th-orig", "srt", PRESETS["medium"], (360_000, 372_000))
+    assert output_path(result).read_bytes() == expected.data
+    assert output_path(result) == env.planned(THAI, THAI_TITLE, f" (06.00-06.12).{expected.lang}", "srt")
+
+
+@pytest.mark.parametrize("span", [(700_000, 710_000), (371_500, 380_000)], ids=["outside", "under-1s-left"])
+def test_subtitle_range_outside_the_clip_fails_the_job(env, span):
+    with pytest.raises(YtError) as info:
+        env.run("subtitle", THAI, subtitle_range_params(*span))
+    assert info.value.code == "E_UNKNOWN"
+    assert folders(env.out) == []
+
+
+def test_embedded_subtitles_and_cut_use_the_same_clipped_range(env):
+    params = video_params(embedSubs="a.th-orig", subOptions=MEDIUM, range={"startMs": 360_000, "endMs": 400_000})
+    result, _ = env.run("video", THAI, params)
+    assert env.media.cuts[-1].intervals == ((360_000, 372_000),)
+    expected = env.subtitles.export(THAI, "a.th-orig", "srt", PRESETS["medium"], (360_000, 372_000)).data
+    assert env.media.calls[-1][1]["sub_text"] == expected
+    assert output_path(result).name.endswith(" (06.00-06.12).mp4")
+
+
+def test_range_outside_the_clip_fails_before_downloading(env):
+    with pytest.raises(YtError) as info:
+        env.run("video", BBB, video_params(range={"startMs": 700_000, "endMs": 710_000}))
+    assert info.value.code == "E_UNKNOWN"
+    assert env.downloader.choices == []

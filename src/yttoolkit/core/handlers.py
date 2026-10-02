@@ -252,6 +252,40 @@ def _duration_ms(raw: Mapping[str, Any], clip: _Clip) -> int | None:
     return None
 
 
+def _clipped_range(span: Interval | None, total_ms: int | None) -> Interval | None:
+    """ช่วงที่ขอ ตัดปลายให้ไม่เกินความยาวคลิป (API ตรวจไม่ได้ถ้าคลิปยังไม่เคยดึงข้อมูลก่อนเข้าคิว)
+
+    ไม่รู้ความยาว = ตามที่ขอ · เหลือไม่ถึง 1 วินาที = E_UNKNOWN
+    งานวิดีโอ เสียง ซับ และการฝังซับใช้กฎเดียวกัน ช่วงของสื่อกับของซับจึงตรงกันเสมอ
+    """
+    if span is None:
+        return None
+    start, end = span
+    if total_ms is not None:
+        end = min(end, total_ms)
+    if end - start < MIN_RANGE_MS:
+        raise YtError("E_UNKNOWN", f"range {span} is outside the clip ({total_ms} ms)")
+    return start, end
+
+
+def _job_range(params: Mapping[str, Any], clip: _Clip) -> Interval | None:
+    """ช่วงเวลาของงานที่ตัดปลายตามความยาวจาก probe แล้ว (ตรวจก่อนโหลด ช่วงนอกคลิปไม่ต้องรอโหลดทั้งคลิปก่อนล้ม)"""
+    return _clipped_range(_requested_range(params), _duration_ms({}, clip))
+
+
+def _has_audio_stream(raw: Mapping[str, Any]) -> bool:
+    """คลิปมีเสียงไหม ดูจากรายการ format ของการดึงข้อมูลรอบที่โหลด (ชุดเดียวกับที่ choose ใช้เลือก format)
+
+    มี format ที่ acodec ไม่ใช่ "none" = มีเสียง (acodec ไม่รู้ เช่น HLS ถือว่าอาจมีเสียง)
+    ไม่มีรายการ format = ไม่รู้ ถือว่ามีเสียงแบบ M4
+    คลิปไม่มีเสียงเลยต้องตัดแบบไม่มีเสียง ไม่งั้นการตัดแบบแม่นยำต้องการแทร็กเสียงแล้ว ffmpeg ล้ม
+    """
+    formats = [f for f in (raw.get("formats") or []) if isinstance(f, Mapping)]
+    if not formats:
+        return True
+    return any(f.get("acodec") != "none" for f in formats)
+
+
 @dataclass(frozen=True)
 class _Cut:
     path: Path  # ไฟล์ที่จะเข้าขั้นจัดไฟล์ (ไม่ได้ตัด = ไฟล์ที่โหลดมาเอง)
@@ -281,13 +315,7 @@ def _cut(
     if span is None and ads is None:
         return full
     total = _duration_ms(result.info, clip)
-    if span is not None:
-        start, end = span
-        if total is not None:
-            end = min(end, total)
-        if end - start < MIN_RANGE_MS:
-            raise YtError("E_UNKNOWN", f"range {span} is outside the clip ({total} ms)")
-        span = (start, end)
+    span = _clipped_range(span, total)
     whole = span if span is not None else ((0, total) if total is not None else None)
     if whole is None:
         raise YtError("E_UNKNOWN", "clip duration unknown, cannot cut")
@@ -439,7 +467,7 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     clip = _start(deps, job, ctx, report)
     params = job.params
     workdir = Path(ctx.workdir)
-    span = _requested_range(params)
+    span = _job_range(params, clip)
     subtitle, sub_notes = _embedded_subtitle(deps, ctx, clip, params, span)
     ads, ad_notes = _sponsor_segments(deps, ctx, clip, params)
     ctx.check_cancelled()
@@ -451,7 +479,8 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     result = deps.downloader.download(clip.video_id, choose, workdir, _hooks(deps, ctx, report))
     ctx.check_cancelled()
     no_audio = bool(params.get("noAudio"))
-    cut = _cut(deps, ctx, clip, result, report, span=span, ads=ads, target="mp4", has_audio=not no_audio)
+    has_audio = not no_audio and _has_audio_stream(result.info)
+    cut = _cut(deps, ctx, clip, result, report, span=span, ads=ads, target="mp4", has_audio=has_audio)
     cover = _cover(deps, clip, ctx)
     ctx.check_cancelled()
     report.stage("writing")
@@ -480,7 +509,7 @@ def _audio(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     if fmt not in ("m4a", "mp3", "wav"):
         raise YtError("E_UNKNOWN", f"audio format {fmt!r}")
     workdir = Path(ctx.workdir)
-    span = _requested_range(params)
+    span = _job_range(params, clip)
     ads, ad_notes = _sponsor_segments(deps, ctx, clip, params)
     ctx.check_cancelled()
     factor = CUT_DISK_FACTOR if span is not None or ads is not None else DISK_FACTOR
@@ -525,7 +554,7 @@ def _subtitle(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
         # คลิปไม่มีซับ: งานจบแบบไม่มีไฟล์ (ไม่ใช่ error สีแดง PRD 7) ไม่สร้างโฟลเดอร์
         return JobResult(notes=("NO_SUBTITLES",), title=clip.title or None)
     opts = _sub_options(params.get("options"), "options")
-    span = _requested_range(params)
+    span = _job_range(params, clip)
     try:
         result = _export_subtitle(deps, ctx, clip.video_id, str(track_id), fmt, opts, span)
     except YtError as exc:
