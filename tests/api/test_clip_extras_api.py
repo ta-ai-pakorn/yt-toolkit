@@ -12,6 +12,7 @@ from urllib.parse import quote
 import pytest
 import yaml
 
+from yttoolkit.core.comments import PinnedCommentService
 from yttoolkit.core.db import Database
 from yttoolkit.core.extractor import FakeExtractor
 from yttoolkit.core.subtitles import SubtitleService
@@ -85,6 +86,24 @@ def test_missing_clip_stats_are_omitted(client):
 
 
 # ---------- C-A2 ----------
+
+
+def test_router_reuses_the_pinned_service_from_run_app(make_client, tmp_path):
+    """run_app สร้าง PinnedCommentService ตัวเดียวให้ทั้ง API และงานโน้ตในคิว router ต้องไม่สร้างตัวใหม่ทับ"""
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    try:
+        fake = Counting(FIXTURES)
+        videos = VideoService(db, fake, now=lambda: datetime(2026, 10, 1, 12, tzinfo=UTC))
+        cache_root = tmp_path / "cache"
+        shared = PinnedCommentService(videos, fake.pinned_comment, cache_root)
+        shared.get(THAI)  # งานโน้ตในคิวดึงไปแล้ว
+        client = make_client(videos=videos, extractor=fake, cache_root=cache_root, pinned=shared)
+        assert client.app.state.ctx.pinned is shared
+        assert client.get(f"/api/videos/{THAI}/pinned-comment").json()["comment"]["byUploader"] is True
+        assert fake.pinned_calls == 1  # API ได้จาก cache ของตัวเดียวกัน
+    finally:
+        db.close()
 
 
 def test_pinned_comment_found(env):

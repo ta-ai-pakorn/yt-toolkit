@@ -334,3 +334,107 @@ def test_move_across_devices_failed_copy_cleans_up(tmp_path, monkeypatch):
         files.move_into_place(src, planned)
     assert err.value.code == "E_DISK_FULL"
     assert list(planned.parent.iterdir()) == [] and src.read_bytes() == b"payload"
+
+
+# ---------- โฟลเดอร์กลุ่ม (params.folder ของงานจาก W3, owner preview round 2) ----------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("คลิปสอน ภาษาไทย", "คลิปสอน ภาษาไทย"),
+        ("a/b\\c", "abc"),  # ตัวคั่น path ถูกตัด จึงเป็นโฟลเดอร์ชั้นเดียวเสมอ
+        ("../../Windows", "....Windows"),
+        ("..", files.GROUP_FALLBACK),
+        (" . . ", files.GROUP_FALLBACK),
+        ("///", files.GROUP_FALLBACK),
+        ("C:\\Users", "CUsers"),
+        ("CON", "_CON"),
+        ("nul.txt", "_nul.txt"),
+        ("Com1", "_Com1"),
+        ("CONIN$", "_CONIN$"),
+        ("COM¹", "_COM¹"),
+        ("lpt³.txt", "_lpt³.txt"),
+        ("COM0", "COM0"),  # Windows สร้างได้ ไม่ใช่ชื่อสงวน
+        ("ชื่อ...", "ชื่อ"),
+        ("ชื่อ .  ", "ชื่อ"),
+        ('ทดสอบ: "A" <1>?*|', "ทดสอบ A 1"),
+        ("tab\there\nnew", "tab here new"),
+    ],
+)
+def test_group_folder_name_is_one_safe_component(raw, expected):
+    name = files.group_folder_name(raw)
+    assert name == expected
+    assert not set('\\/:*?"<>|') & set(name)
+    assert name not in (".", "..") and not name.endswith((".", " "))
+
+
+@pytest.mark.parametrize("dev", ["COM", "LPT", "com", "Lpt"])
+@pytest.mark.parametrize("sup", ["¹", "²", "³"])
+def test_superscript_device_names_are_reserved_for_titles_too(tmp_path, dev, sup):
+    name = f"{dev}{sup}"
+    assert files.safe_component(name, ID) == f"_{name}"
+    p = files.plan_output(tmp_path, name, ID, "", "mp4")
+    assert p.parent.name == f"_{name} [{ID}]" and p.name == f"_{name}.mp4"
+
+
+def test_plan_output_with_group_layout(tmp_path):
+    p = files.plan_output(tmp_path, "Hi", ID, ".th", "srt", "รวมคลิป ก/ข")
+    assert p == tmp_path / "รวมคลิป กข" / f"Hi [{ID}]" / "Hi.th.srt"
+
+
+def test_plan_output_without_group_is_unchanged(tmp_path):
+    assert files.plan_output(tmp_path, "Hi", ID, "", "mp4", None) == files.plan_output(tmp_path, "Hi", ID, "", "mp4")
+    assert files.plan_output(tmp_path, "Hi", ID, "", "mp4", "") == tmp_path / f"Hi [{ID}]" / "Hi.mp4"
+
+
+def test_plan_output_group_cannot_escape_root(tmp_path):
+    root = tmp_path / "out"
+    for raw in ("..", "../..", "..\\..", "/etc", "C:\\x", "\\\\server\\share"):
+        p = files.plan_output(root, "Hi", ID, "", "mp4", raw)
+        assert p.parent.parent.parent == root
+        assert p.resolve().is_relative_to(root.resolve())
+
+
+def _root_of_length(tmp_path: Path, n: int) -> Path:
+    """root ยาว n ตัวพอดี (plan_output ไม่แตะดิสก์ จึงใช้ path ที่ไม่มีจริงได้ ไม่ขึ้นกับความยาวของ tmp_path)"""
+    anchor = Path(tmp_path.anchor)
+    root = anchor / ("x" * (n - len(str(anchor))))
+    assert len(str(root)) == n
+    return root
+
+
+def test_long_group_shortens_the_clip_title_first(tmp_path):
+    group = "ก" * 80
+    root = _root_of_length(tmp_path, 60)
+    plain = files.plan_output(root, "ข" * 300, ID, " (ไม่มีเสียง)", "mp4")
+    grouped = files.plan_output(root, "ข" * 300, ID, " (ไม่มีเสียง)", "mp4", group)
+    assert grouped.parent.parent == root / group  # ชื่อกลุ่มไม่ถูกตัด
+    assert grouped.parent.name.endswith(f" [{ID}]")
+    assert len(grouped.name) < len(plain.name)  # ตัดชื่อคลิปแทน
+    assert len(str(grouped)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
+
+
+def test_long_group_on_long_root_falls_back_to_id(tmp_path):
+    root = _root_of_length(tmp_path, 110)
+    p = files.plan_output(root, "ชื่อคลิปยาวพอสมควร", ID, "", "mp4", "g" * 80)
+    assert p == root / ("g" * 80) / ID / f"{ID}.mp4"
+    assert len(str(p)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
+
+
+def test_long_group_on_very_long_root_is_not_writable(tmp_path):
+    root = _root_of_length(tmp_path, 150)
+    files.plan_output(root, "ชื่อ", ID, "", "mp4")  # ไม่มีกลุ่มยังได้
+    with pytest.raises(YtError) as err:
+        files.plan_output(root, "ชื่อ", ID, "", "mp4", "g" * 80)
+    assert err.value.code == "E_OUTPUT_NOT_WRITABLE"
+
+
+def test_group_emoji_counts_in_utf16_units(tmp_path):
+    group = "😀" * 80  # 160 UTF-16 code unit
+    root = _root_of_length(tmp_path, 4)
+    p = files.plan_output(root, "ข" * 300, ID, "", "mp4", group)
+    assert p.parent.parent.name == group and p.parent.name.endswith(f" [{ID}]")
+    assert files._u16(str(p)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
+    # งบ 240 ถูกใช้ตามหน่วย UTF-16: ชื่อคลิปเหลือ 12 ตัว (นับ code point จะได้ชื่อยาวกว่านี้มาก)
+    assert len(p.name) == 12 + len(".mp4")

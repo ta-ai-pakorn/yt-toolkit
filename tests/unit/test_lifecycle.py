@@ -13,6 +13,7 @@ from yttoolkit.api.errors import redact_home
 from yttoolkit.app import AppContext
 from yttoolkit.config import CODE_ROOT
 from yttoolkit.core import files, tools
+from yttoolkit.core.comments import PinnedCommentService
 from yttoolkit.core.db import Database
 from yttoolkit.core.events import CLOSED, Event, EventBus
 from yttoolkit.core.extractor import FakeExtractor, YtDlpExtractor
@@ -21,6 +22,7 @@ from yttoolkit.core.media import FakeMediaTools, FfmpegTools
 from yttoolkit.core.queue import QueueRunner
 from yttoolkit.core.settings import SettingsStore
 from yttoolkit.core.videos import VideoService
+from yttoolkit.core.yterrors import YtError
 from yttoolkit.runstate import RunInfo
 
 
@@ -1174,7 +1176,7 @@ def test_run_app_fake_mode_never_opens_real_folders(paths, fake_platform, monkey
 
 # ---------- M4 T18: ต่อคิว ตั้งค่า ข่าว และเครื่องมือสื่อเข้ากับวงจรชีวิตของแอพ ----------
 
-JOB_KINDS = {"video", "audio", "subtitle", "contact_sheet", "frames_zip"}
+JOB_KINDS = {"video", "audio", "subtitle", "note", "contact_sheet", "frames_zip"}
 
 
 def test_open_services_fake_mode_wires_fakes(paths, fake_platform):
@@ -1195,6 +1197,88 @@ def test_open_services_fake_mode_wires_fakes(paths, fake_platform):
         assert services.settings.output_dir() == paths.data_root / "output"
     finally:
         services.db.close()
+
+
+class _NoteCtx:
+    """JobContext ขั้นต่ำสำหรับเรียกตัวทำงานโน้ตตรง ๆ"""
+
+    def __init__(self, job_id: str, workdir: Path, output_root: Path) -> None:
+        self.job_id = job_id
+        self.workdir = workdir
+        self.output_root = output_root
+        workdir.mkdir(parents=True)
+
+    def stage(self, stage: str) -> None:
+        pass
+
+    def progress(self, fraction, speed_bps=None, eta_s=None) -> None:
+        pass
+
+    def set_title(self, title: str) -> None:
+        pass
+
+    def cancelled(self) -> bool:
+        return False
+
+    def check_cancelled(self) -> None:
+        pass
+
+    def wait(self, seconds: float) -> None:
+        pass
+
+
+def test_open_services_note_job_shares_the_pinned_service(paths, fake_platform, tmp_path, monkeypatch):
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        assert isinstance(services.pinned, PinnedCommentService)
+        calls: list[str] = []
+        original = services.extractor.pinned_comment
+
+        def counting(video_id: str):
+            calls.append(video_id)
+            return original(video_id)
+
+        monkeypatch.setattr(services.extractor, "pinned_comment", counting)
+        (job,) = services.queue.store.add([NewJob("88o5Sk8_m1Y", "note", {"folder": "กลุ่ม"})])
+        ctx = _NoteCtx(job.id, tmp_path / "note-work", tmp_path / "note-out")
+        result = services.queue._handlers["note"](job, ctx)
+
+        (out,) = result.outputs
+        assert out.kind == "note" and out.rel.startswith("กลุ่ม/") and out.rel.endswith(".note.md")
+        text = (Path(out.root) / out.rel).read_text(encoding="utf-8")
+        assert "## คอมเมนต์ปักหมุด (เจ้าของช่อง)" in text
+        assert services.pinned.get("88o5Sk8_m1Y")["byUploader"] is True
+        assert calls == ["88o5Sk8_m1Y"]  # API ใช้ cache ของตัวเดียวกับงานโน้ต ไม่ดึงซ้ำ
+    finally:
+        services.db.close()
+
+
+def test_open_services_pinned_bot_check_in_a_note_job_pauses_the_queue(paths, fake_platform, tmp_path, monkeypatch):
+    """I-3: งานโน้ตเสร็จ (ไม่มีคอมเมนต์ปักหมุด) แต่คิวพักด้วยเบรกฉุกเฉินเหมือน E_BOT_CHECK จากงานอื่น"""
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+
+        def bot_check(video_id: str):
+            raise YtError("E_BOT_CHECK", "comments")
+
+        monkeypatch.setattr(services.extractor, "pinned_comment", bot_check)
+        assert services.queue.pause_state() is None
+        (job,) = services.queue.store.add([NewJob("88o5Sk8_m1Y", "note", {})])
+        ctx = _NoteCtx(job.id, tmp_path / "note-work", tmp_path / "note-out")
+        result = services.queue._handlers["note"](job, ctx)
+
+        (out,) = result.outputs
+        assert "คอมเมนต์ปักหมุด" not in (Path(out.root) / out.rel).read_text(encoding="utf-8")
+        pause = services.queue.pause_state()
+        assert pause is not None and pause.reason == "E_BOT_CHECK"
+    finally:
+        services.db.close()
+
+
+def test_run_app_passes_the_shared_pinned_service_to_the_api(paths, fake_platform, monkeypatch):
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, fake=True)
+    assert code == 0
+    assert isinstance(ctx.pinned, PinnedCommentService)
 
 
 def test_open_services_real_mode_wires_ffmpeg_tools(paths, fake_platform, monkeypatch):
@@ -1501,6 +1585,86 @@ def test_sweep_missing_folder_is_fine(paths):
             child.unlink()
         folder.rmdir()
         assert lifecycle.sweep_interrupted_outputs(store, root, [job_id]) == 0
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize(
+    ("name", "ours"),
+    [
+        (f"{TITLE}.note.md", True),  # งานโน้ต (owner preview round 2)
+        (f"{TITLE} (2).note.md", True),
+        (f"{TITLE}.note.md.part", True),
+        (f"{TITLE}.note.txt", True),  # รูปแบบเดียวกับซับ (".note" อยู่ตำแหน่งรหัสภาษา)
+        (f"{TITLE}.md", False),
+    ],
+)
+def test_toolkit_name_pattern_covers_note_outputs(name, ours):
+    assert bool(lifecycle.toolkit_name_pattern(TITLE).fullmatch(name)) is ours
+
+
+GROUP = "รวมคลิป ก/ข"
+
+
+def test_sweep_finds_leftovers_inside_group_folders(paths):
+    """งานจาก W3 (params.folder) ไฟล์อยู่ที่ <ผลลัพธ์>/<กลุ่ม>/<คลิป>/ ล้างไฟล์ค้างต้องเจอด้วย"""
+    db = Database(paths.db)
+    db.migrate()
+    store = JobStore(db)
+    root = (paths.data_root / "output").resolve()
+    try:
+        grouped = files.plan_output(root, TITLE, "aqz-KE-bpKQ", "", "mp4", GROUP).parent
+        plain = files.plan_output(root, TITLE, "aqz-KE-bpKQ", "", "mp4").parent
+        assert grouped.parent.name == "รวมคลิป กข"
+        done, note, video = store.add([
+            NewJob("aqz-KE-bpKQ", "note", {"folder": GROUP}, TITLE),
+            NewJob("aqz-KE-bpKQ", "note", {"folder": GROUP}, TITLE),
+            NewJob("aqz-KE-bpKQ", "video", {"folder": GROUP}, TITLE),
+        ])  # fmt: skip
+        grouped.mkdir(parents=True)
+        plain.mkdir(parents=True)
+        store.transition(done.id, "running")
+        (grouped / f"{TITLE}.note.md").write_bytes(b"")  # ผลลัพธ์ของงานที่เสร็จ (ว่างจริง) ห้ามลบ
+        rel = f"{grouped.parent.name}/{grouped.name}/{TITLE}.note.md"
+        store.transition(done.id, "done", outputs=(OutputFile(str(root), rel, 0, "note"),))
+        store.transition(note.id, "running")
+        store.transition(video.id, "running")
+        leftovers = [f"{TITLE} (2).note.md", f"{TITLE}.mp4"]
+        for name in leftovers:
+            (grouped / name).write_bytes(b"")
+        (grouped / f"{TITLE}.mp4.part").write_bytes(b"half")
+        (plain / f"{TITLE}.mp4").write_bytes(b"")  # โฟลเดอร์นอกกลุ่ม: ไม่ใช่ของงานเหล่านี้ ห้ามแตะ
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+
+        assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 3
+        assert sorted(p.name for p in grouped.iterdir()) == [f"{TITLE}.note.md"]
+        assert (plain / f"{TITLE}.mp4").exists()
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize(
+    ("raw", "folder_name"),
+    [("..", files.GROUP_FALLBACK), (" . ", files.GROUP_FALLBACK), ("CON", "_CON"), ("COM¹", "_COM¹")],
+)
+def test_sweep_uses_the_sanitised_group_name(paths, raw, folder_name):
+    """กลุ่มที่ทำความสะอาดแล้วกลายเป็นชื่อสำรองหรือ "_CON": ล้างไฟล์ค้างต้องหาโฟลเดอร์เดียวกับที่ตัวทำงานใช้"""
+    db = Database(paths.db)
+    db.migrate()
+    store = JobStore(db)
+    root = (paths.data_root / "output").resolve()
+    try:
+        clip = files.plan_output(root, TITLE, "aqz-KE-bpKQ", "", "mp4", raw).parent
+        assert clip.parent == root / folder_name
+        (job,) = store.add([NewJob("aqz-KE-bpKQ", "frames_zip", {"folder": raw}, TITLE)])
+        clip.mkdir(parents=True)
+        (clip / f"{TITLE} - frames.zip").write_bytes(b"")
+        store.transition(job.id, "running")
+        store.interrupt_running("หยุดกลางคัน")
+
+        assert lifecycle.sweep_interrupted_outputs(store, root, [job.id]) == 1
+        assert list(clip.iterdir()) == []
     finally:
         db.close()
 

@@ -1,4 +1,4 @@
-"""ตัวทำงานของแต่ละชนิดงานในคิว (M4): video, audio, subtitle, contact_sheet, frames_zip
+"""ตัวทำงานของแต่ละชนิดงานในคิว (M4): video, audio, subtitle, note, contact_sheet, frames_zip
 
 ตัวทำงานแค่เรียงขั้นตอน ไม่ตัดสินใจเรื่องคิว (ลองใหม่ พักคิว ยกเลิก เป็นของ core/queue.py):
 ดึงข้อมูลคลิป (cache) -> โหลด (extractor) -> จัดไฟล์สื่อ (ffmpeg) -> ย้ายเข้าโฟลเดอร์ผลลัพธ์ -> แหล่งที่มา.txt
@@ -6,6 +6,7 @@
 - ไฟล์ระหว่างทำทุกไฟล์อยู่ใน ctx.workdir (ตัวรันคิวลบทิ้งหลังงานจบ) ชื่อจริงในโฟลเดอร์ผลลัพธ์
   จองด้วย files.move_into_place เท่านั้น จึงไม่มีไฟล์ครึ่ง ๆ กลาง ๆ ค้างที่ชื่อจริง
 - log บอกแค่รหัสงานและ path สัมพัทธ์กับโฟลเดอร์ผลลัพธ์ (path เต็มมีชื่อผู้ใช้ Windows)
+- params.folder (งานจาก W3) = โฟลเดอร์กลุ่มคั่นระหว่างโฟลเดอร์ผลลัพธ์กับโฟลเดอร์ของคลิป (files.plan_output)
 core/ ไม่ import api/ หรือ platform/
 """
 
@@ -34,7 +35,7 @@ from .storyboard import get_storyboard
 from .yterrors import YtError
 
 if TYPE_CHECKING:
-    from .subtitles import SubtitleExport, SubtitleService
+    from .subtitles import NoteExport, SubtitleExport, SubtitleService
     from .videos import VideoService
 
 log = logging.getLogger("yttoolkit")
@@ -45,6 +46,7 @@ DEFAULT_MP3_KBPS = 192
 NO_AUDIO_SUFFIX = " (ไม่มีเสียง)"
 CONTACT_SHEET_SUFFIX = " - contact sheet"
 FRAMES_ZIP_SUFFIX = " - frames"
+NOTE_SUFFIX = ".note"  # โน้ต = "<ชื่อ>.note.md" (ชื่อเดียวกับที่ GET /videos/{id}/note ตั้ง)
 COVER_JPEG_QUALITY = 90
 # ยูทูปมีปัญหาชั่วคราว: ให้คิวลองใหม่ / พักคิว แทนการได้วิดีโอที่ไม่มีซับ
 _EMBED_RETRY_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK"})
@@ -63,6 +65,11 @@ class HandlerDeps:
     cache_root: Path
     now: Callable[[], datetime] = lambda: datetime.now(UTC)
     disk_free: Callable[[Path], int] = _default_disk_free
+    # ตัวดึงคอมเมนต์ปักหมุดของงานโน้ต (PinnedCommentService.get ตัวเดียวกับ API) None = โน้ตไม่มีหัวข้อนี้
+    pinned: Callable[[str], dict | None] | None = None
+    # เบรกฉุกเฉินของคิว (QueueRunner.brake) สำหรับ E_BOT_CHECK ที่ตัวทำงานกลืนไว้เองไม่โยนต่อ
+    # (คอมเมนต์ปักหมุดของงานโน้ต) open_services ต่อให้หลังสร้างคิว None = ไม่เบรก
+    on_bot_check: Callable[[], None] | None = None
 
 
 # ---------- ตัวช่วย ----------
@@ -107,6 +114,7 @@ class _Clip:
     info: dict  # VideoInfo (camelCase)
     title: str
     root: Path  # โฟลเดอร์ผลลัพธ์แบบ absolute ที่ resolve แล้ว
+    group: str | None = None  # params.folder ดิบ (files.plan_output ทำความสะอาดเอง) None = ไม่มีโฟลเดอร์กลุ่ม
 
     @property
     def meta(self) -> MediaMeta:
@@ -136,7 +144,18 @@ def _start(deps: HandlerDeps, job: Job, ctx: JobContext, report: _Reporter) -> _
     root = Path(ctx.output_root).resolve()
     files.ensure_output_root(root)
     ctx.check_cancelled()
-    return _Clip(job.video_id, info, title, root)
+    return _Clip(job.video_id, info, title, root, job_group(job.params))
+
+
+def job_group(params: Mapping[str, Any]) -> str | None:
+    """โฟลเดอร์กลุ่มของงาน (params.folder ดิบ) ไม่มี = None (lifecycle ใช้หาไฟล์ค้างด้วยกฎเดียวกัน)
+
+    API strip และตัดค่าว่างมาแล้ว ที่นี่กันข้อมูลงานแปลก ๆ อีกชั้น
+    """
+    folder = params.get("folder") if isinstance(params, Mapping) else None
+    if not isinstance(folder, str):
+        return None
+    return folder.strip() or None
 
 
 def _human_size(n: int) -> str:
@@ -257,7 +276,7 @@ def _finish(
 ) -> JobResult:
     """ย้ายไฟล์ที่เสร็จแล้วเข้าโฟลเดอร์ของคลิป เขียนแหล่งที่มา.txt แล้วคืนผลของงาน"""
     ctx.check_cancelled()
-    planned = files.plan_output(clip.root, clip.title, clip.video_id, suffix, ext)
+    planned = files.plan_output(clip.root, clip.title, clip.video_id, suffix, ext, clip.group)
     final = files.move_into_place(src, planned)
     rel = final.relative_to(clip.root).as_posix()
     _write_note(deps, ctx, clip, final.parent)
@@ -382,6 +401,88 @@ def _subtitle(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     return _finish(deps, ctx, clip, out, suffix=f".{lang}", ext=fmt, kind="subtitle")
 
 
+def _pinned_getter(deps: HandlerDeps, ctx: JobContext) -> Callable[[str], dict | None] | None:
+    """ตัวดึงคอมเมนต์ปักหมุดที่ไม่ทำให้งานโน้ตล้ม: YtError ให้ SubtitleService.note จัดการ (ไม่ใส่หัวข้อ)
+    พังแบบอื่น (ไม่คาดคิด) = ไม่มีคอมเมนต์ปักหมุด บันทึกแค่ชื่อชนิด error
+
+    E_BOT_CHECK: โน้ตยังเขียนต่อ แต่ต้องพักคิว (deps.on_bot_check) หนึ่งครั้งต่องาน เหมือนเจอ E_BOT_CHECK
+    จากงานอื่น ไม่งั้นงานโน้ตชุดใหญ่จะยิงยูทูปต่อทั้งที่ถูกขอยืนยันว่าไม่ใช่บอทอยู่
+    """
+    pinned = deps.pinned
+    if pinned is None:
+        return None
+    braked = False
+
+    def get(video_id: str) -> dict | None:
+        nonlocal braked
+        try:
+            return pinned(video_id)
+        except YtError as exc:
+            if exc.code == "E_BOT_CHECK" and not braked:
+                braked = True
+                _brake(deps, ctx)
+            raise
+        except Exception as exc:
+            log.warning("งาน %s ดึงคอมเมนต์ปักหมุดไม่ได้ (%s) โน้ตไม่มีหัวข้อนี้", ctx.job_id, type(exc).__name__)
+            return None
+
+    return get
+
+
+def _brake(deps: HandlerDeps, ctx: JobContext) -> None:
+    """แจ้งคิวให้เบรกฉุกเฉิน พลาดแค่บันทึก log (งานต้องเสร็จตามปกติ)"""
+    if deps.on_bot_check is None:
+        return
+    log.warning("งาน %s: ยูทูปขอยืนยันว่าไม่ใช่บอทตอนดึงคอมเมนต์ปักหมุด พักคิว", ctx.job_id)
+    try:
+        deps.on_bot_check()
+    except Exception as exc:
+        log.warning("งาน %s พักคิวไม่สำเร็จ (%s)", ctx.job_id, type(exc).__name__)
+
+
+def _build_note(
+    deps: HandlerDeps,
+    ctx: JobContext,
+    video_id: str,
+    track_id: str | None,
+    pinned: Callable[[str], dict | None] | None,
+) -> NoteExport:
+    """SubtitleService.note แบบเดียวกับ GET /videos/{id}/note (คอมเมนต์ปักหมุดพลาด = ไม่มีหัวข้อ งานไม่ล้ม)
+
+    เซสชันผู้ชมยังไม่พร้อม (ซับแปล) = รอแล้วลองอีกครั้งเดียว (เหมือนงานซับ)
+    แทร็กที่เลือกหายไปจากคลิปแล้ว (E_NO_SUBTITLES) = ใช้แทร็กที่เลือกให้เอง โน้ตยังมีข้อมูลคลิปครบ
+    pinned = ตัวดึงจาก _pinned_getter (ตัวเดียวทั้งงาน จึงเบรกคิวไม่เกินหนึ่งครั้งต่องาน)
+    """
+    try:
+        try:
+            return deps.subtitles.note(video_id, track_id, pinned=pinned)
+        except YtError as exc:
+            if exc.code != "E_SESSION_WARMING":
+                raise
+            ctx.wait(exc.retry_after or WARMING_WAIT_S)
+        return deps.subtitles.note(video_id, track_id, pinned=pinned)
+    except YtError as exc:
+        if exc.code != "E_NO_SUBTITLES" or track_id is None:
+            raise
+        log.info("งาน %s ไม่มีแทร็กซับที่เลือกแล้ว ใช้แทร็กที่เลือกให้เองแทน", ctx.job_id)
+    return _build_note(deps, ctx, video_id, None, pinned)
+
+
+def _note(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
+    """โน้ต .md ของคลิป (owner preview round 2): front matter + คำอธิบาย + chapter + คอมเมนต์ปักหมุด + ทรานสคริปต์
+    ลงโฟลเดอร์ของคลิปเป็น "<ชื่อ>.note.md" พร้อมแหล่งที่มา.txt เหมือนงานอื่น"""
+    report = _Reporter(ctx)
+    clip = _start(deps, job, ctx, report)
+    raw_track = job.params.get("trackId")
+    track_id = str(raw_track) if raw_track else None
+    result = _build_note(deps, ctx, clip.video_id, track_id, _pinned_getter(deps, ctx))
+    ctx.check_cancelled()
+    report.stage("writing")
+    out = Path(ctx.workdir) / "out.md"
+    out.write_bytes(result.data)
+    return _finish(deps, ctx, clip, out, suffix=NOTE_SUFFIX, ext="md", kind="note")
+
+
 def _frames(deps: HandlerDeps, clip: _Clip, ctx: JobContext, report: _Reporter) -> list[tuple[int, Path]]:
     """ไฟล์ภาพเฟรมโหมดเร็ว (storyboard ใน cache) เรียงตามเวลา"""
     report.stage("downloading_video")
@@ -432,6 +533,7 @@ def build_handlers(deps: HandlerDeps) -> dict[str, Handler]:
         "video": bind(_video),
         "audio": bind(_audio),
         "subtitle": bind(_subtitle),
+        "note": bind(_note),
         "contact_sheet": bind(_contact_sheet),
         "frames_zip": bind(_frames_zip),
     }

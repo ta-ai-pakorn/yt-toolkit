@@ -56,7 +56,8 @@ class AppContext:
     fake: bool = False  # โหมดข้อมูลปลอม (serve + YT_TOOLKIT_FAKE=1) หน้าตรวจสุขภาพจะบอกไว้
     # บริการซับของ M3 (run_app สร้างให้) ไม่มี = ไม่เปิด API ซับ
     subtitles: SubtitleService | None = None
-    # บริการคอมเมนต์ปักหมุด: router ข้อมูลคลิปสร้างให้ แล้ว router โน้ตใช้ตัวเดียวกัน (ใช้ cache ร่วมกัน)
+    # บริการคอมเมนต์ปักหมุด: run_app สร้างให้ (ตัวเดียวกับงานโน้ตในคิว) ไม่มี = router ข้อมูลคลิปสร้างให้
+    # router โน้ตและงานโน้ตใช้ตัวเดียวกัน (ใช้ cache ร่วมกัน)
     pinned: PinnedCommentService | None = None
     # บริการของ M4 (ไม่มี = ไม่เปิด API นั้น) settings = T2, events = T6, media = T5, queue = T11
     settings: SettingsStore | None = None

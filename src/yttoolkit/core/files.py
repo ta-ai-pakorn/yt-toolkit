@@ -2,6 +2,7 @@
 
 - โฟลเดอร์ของคลิป = `<outputDir>/<ชื่อคลิป> [<videoId>]/` ชื่อโฟลเดอร์ขึ้นกับ (root, title, video_id) เท่านั้น
   ทุกงานของคลิปเดียวกันจึงลงโฟลเดอร์เดียวกัน
+- งานจากหน้าเลือกหลายคลิป (W3) มีโฟลเดอร์กลุ่มคั่นกลาง: `<outputDir>/<ชื่อโฟลเดอร์>/<ชื่อคลิป> [<videoId>]/`
 - path เต็มต้องไม่เกิน 240 ตัวอักษร (เผื่อ " (99)" ไว้ต่อท้ายตอนชื่อซ้ำ)
 - แหล่งที่มา.txt: UTF-8 ไม่มี BOM ขึ้นบรรทัดแบบ CRLF มีไฟล์เดียวต่อโฟลเดอร์ เขียนทับเมื่อมีงานใหม่
 core/ ไม่ import api/ หรือ platform/
@@ -27,10 +28,16 @@ TITLE_MAX = 100
 TAIL_RESERVE = 30  # suffix + "." + ext ยาวไม่เกินนี้
 UNIQUE_RESERVE = 5  # " (99)"
 SOURCE_NOTE_NAME = "แหล่งที่มา.txt"
+GROUP_FALLBACK = "YT-Toolkit batch"  # ชื่อโฟลเดอร์กลุ่มที่ทำความสะอาดแล้วว่าง (เช่น "..")
 
 _MIN_TITLE = 8
 _FORBIDDEN = frozenset('\\/:*?"<>|')
-_RESERVED = frozenset({"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))})
+_RESERVED = frozenset({
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+    *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10)),
+    # Windows ถือเลขยกกำลัง ¹ ² ³ เป็นเลขพอร์ตด้วย (mkdir "COM¹" ไม่ได้)
+    *(f"{dev}{sup}" for dev in ("COM", "LPT") for sup in "¹²³"),
+})  # fmt: skip
 _WHITESPACE = re.compile(r"\s+")
 _BANGKOK = timezone(timedelta(hours=7))
 _CRLF = "\r\n"
@@ -76,20 +83,34 @@ def truncate_title(text: str, limit: int) -> str:
     return text[:cut].rstrip(". ")
 
 
-def plan_output(root: Path, title: str, video_id: str, suffix: str, ext: str) -> Path:
-    """path ปลายทางที่วางแผนไว้ (ยังไม่สร้างอะไร) ชื่อยาวเกินให้ตัดชื่อคลิป ถ้าไม่พอแม้แต่ 8 ตัวใช้ videoId แทน"""
+def group_folder_name(folder: str) -> str:
+    """ชื่อโฟลเดอร์กลุ่ม (W3 "ชื่อโฟลเดอร์") ที่ใช้เป็น path หนึ่งชั้นบน Windows ได้แน่นอน
+
+    ไม่เชื่อข้อความจากหน้าเว็บเป็น path: ตัวคั่น/อักขระต้องห้ามถูกตัด ".." และชื่อที่เหลือแต่จุด/ช่องว่าง
+    = GROUP_FALLBACK ชื่อสงวนของ Windows (CON, NUL ...) ได้ "_" นำหน้า ไม่มีจุด/ช่องว่างท้ายชื่อ
+    """
+    return safe_component(folder, GROUP_FALLBACK)
+
+
+def plan_output(root: Path, title: str, video_id: str, suffix: str, ext: str, group: str | None = None) -> Path:
+    """path ปลายทางที่วางแผนไว้ (ยังไม่สร้างอะไร) ชื่อยาวเกินให้ตัดชื่อคลิป ถ้าไม่พอแม้แต่ 8 ตัวใช้ videoId แทน
+
+    group = ชื่อโฟลเดอร์กลุ่มดิบจากงาน (params.folder) มี = `<root>/<กลุ่มที่ปลอดภัย>/<ชื่อคลิป> [<id>]/<ไฟล์>`
+    ชื่อกลุ่มไม่ถูกตัด: path ยาวเกินให้ตัดชื่อคลิปก่อน แล้วค่อยใช้ทางสำรองเดิม (videoId / E_OUTPUT_NOT_WRITABLE)
+    """
     tail = f"{suffix}.{ext}"
     assert _u16(tail) <= TAIL_RESERVE, "suffix + extension longer than TAIL_RESERVE"
+    base = root / group_folder_name(group) if group else root
     t = safe_component(title, video_id)
-    budget = PATH_LIMIT - (_u16(str(root)) + 1) - _u16(f" [{video_id}]") - 1 - TAIL_RESERVE - UNIQUE_RESERVE
+    budget = PATH_LIMIT - (_u16(str(base)) + 1) - _u16(f" [{video_id}]") - 1 - TAIL_RESERVE - UNIQUE_RESERVE
     cap = budget // 2
     short = ""
     if cap >= _MIN_TITLE:
         short = truncate_title(t, min(TITLE_MAX, cap))
     if short:
-        planned = root / f"{short} [{video_id}]" / f"{short}{tail}"
+        planned = base / f"{short} [{video_id}]" / f"{short}{tail}"
     else:
-        planned = root / video_id / f"{video_id}{tail}"
+        planned = base / video_id / f"{video_id}{tail}"
     if _u16(str(planned)) > PATH_LIMIT - UNIQUE_RESERVE:
         raise YtError("E_OUTPUT_NOT_WRITABLE", "path too long")
     return planned

@@ -58,7 +58,7 @@ CLOCK_SKEW = timedelta(minutes=5)
 PLAYLIST_LIMIT = 200
 # ประวัติ (C15): scope ที่รองรับ และลำดับชนิดงานใน outputs
 HISTORY_SCOPES = ("all", "opened")
-HISTORY_KIND_ORDER = ("video", "audio", "subtitle", "contact_sheet", "frames_zip")
+HISTORY_KIND_ORDER = ("video", "audio", "subtitle", "note", "contact_sheet", "frames_zip")
 # มิกซ์อัตโนมัติของยูทูปยาวได้ไม่รู้จบ เอาแค่ช่วงต้น (เจ้าของตัดสิน 2026-09-30)
 MIX_LIMIT = 25
 

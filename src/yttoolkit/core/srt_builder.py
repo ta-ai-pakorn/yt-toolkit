@@ -393,6 +393,11 @@ def _paragraphs(tokens: Sequence[Token]) -> list[str]:
 
 
 def to_txt(tokens: Sequence[Token]) -> str:
+    """ข้อความล้วนแบ่งย่อหน้าตามช่วงเงียบ (CRLF)
+
+    ไม่ได้ใช้ทำไฟล์ .txt แล้ว (owner preview round 2: ไฟล์ .txt = เนื้อเดียวกับ .srt) แต่ยังเป็นตัวอ้างอิงของ
+    toTxt ฝั่งเว็บ (ปุ่ม "คัดลอกข้อความ") ที่เทียบกับ golden <name>.txt และ builder-cases.json (srt-parity.test.ts)
+    """
     if not tokens:
         return ""
     return (CRLF + CRLF).join(_paragraphs(tokens)) + CRLF

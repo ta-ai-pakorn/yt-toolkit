@@ -354,12 +354,21 @@ def test_export_result_carries_title_and_lang(make):
     assert (result.title, result.lang) == (THAI_TITLE, "th")
 
 
-def test_export_txt_and_md(make):
+@pytest.mark.parametrize("preset", ["short", "medium", "long", "word"])
+def test_export_txt_is_the_srt_byte_for_byte(make, preset):
+    """owner preview round 2: .txt = เนื้อเดียวกับ .srt (cue ตามตัวเลือกความยาว CRLF UTF-8 ไม่มี BOM) ต่างแค่นามสกุล"""
     service, *_ = make()
-    txt = service.export(THAI, TRACK, "txt", PRESETS["medium"]).data
+    srt = service.export(THAI, TRACK, "srt", PRESETS[preset])
+    txt = service.export(THAI, TRACK, "txt", PRESETS[preset])
+    assert txt == srt
+    assert not txt.data.startswith(b"\xef\xbb\xbf")
+    assert txt.data.count(b"\n") == txt.data.count(b"\r\n") > 0
+    assert txt.data.startswith(b"1\r\n00:")
+
+
+def test_export_md(make):
+    service, *_ = make()
     md = service.export(THAI, TRACK, "md", PRESETS["medium"]).data.decode("utf-8")
-    assert not txt.startswith(b"\xef\xbb\xbf")
-    assert txt.count(b"\n") == txt.count(b"\r\n") > 0
     assert f"# {THAI_TITLE}" in md
     assert "https://www.youtube.com/watch?v=88o5Sk8_m1Y" in md
     assert md.count("\n") == md.count("\r\n")

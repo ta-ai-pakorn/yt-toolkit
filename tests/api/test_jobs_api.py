@@ -8,6 +8,7 @@ from urllib.parse import quote
 import pytest
 
 from yttoolkit.api.errors import redact_home
+from yttoolkit.api.jobs import ITEMS_MAX, ORDER_IDS_MAX
 from yttoolkit.core.db import Database
 from yttoolkit.core.events import Event, EventBus
 from yttoolkit.core.jobs import JobResult, JobStore, NewJob, OutputFile
@@ -67,7 +68,8 @@ class Env:
         self.spawn = ManualSpawn()
         self.settings = SettingsStore(self.db, tmp_path / "out")
         self.revealed: list[Path] = []
-        handlers = dict.fromkeys(("video", "audio", "subtitle", "contact_sheet", "frames_zip"), finished_handler)
+        handlers = dict.fromkeys(("video", "audio", "subtitle", "note", "contact_sheet", "frames_zip"),
+                                 finished_handler)
         self.runner = QueueRunner(self.store, self.bus, handlers, settings=self.settings, work_root=tmp_path / "work",
                                   rng=random.Random(1), spawn=self.spawn, redact=redact_home)
         self._make = make_client
@@ -171,9 +173,120 @@ def test_post_rejects_bad_items(env, item):
 
 def test_post_rejects_empty_and_oversized_lists(env):
     client = env.client()
+    assert ITEMS_MAX == 1200  # owner preview round 2: 200 คลิป x 6 งานจาก W3
     assert client.post("/api/jobs", json={"items": []}, headers=AUTH).status_code == 422
-    resp = client.post("/api/jobs", json={"items": [VALID_ITEMS[4]] * 501}, headers=AUTH)
+    resp = client.post("/api/jobs", json={"items": [VALID_ITEMS[4]] * (ITEMS_MAX + 1)}, headers=AUTH)
     assert resp.status_code == 422
+    assert env.store.pending_count() == 0
+
+
+def test_post_accepts_items_max(env):
+    client = env.client()
+    resp = client.post("/api/jobs", json={"items": [VALID_ITEMS[4]] * ITEMS_MAX}, headers=AUTH)
+    assert resp.status_code == 200
+    assert env.store.pending_count() == ITEMS_MAX
+
+
+def test_full_batches_do_not_overflow_a_listener(env):
+    """job.created ข่าวละงาน: ผู้ฟังที่ยังไม่ได้อ่าน (สตรีมข่าวของหน้าเว็บ) ต้องไม่หลุดแม้มีสองชุดเต็มติดกัน"""
+    assert EventBus.MAX_PENDING >= 4 * ITEMS_MAX
+    client = env.client()
+    for _ in range(2):
+        resp = client.post("/api/jobs", json={"items": [VALID_ITEMS[4]] * ITEMS_MAX}, headers=AUTH)
+        assert resp.status_code == 200
+    assert env.bus.subscriber_count == 1  # ยังไม่ถูกปิดกล่องเพราะค้างข่าวเกิน
+    created = [e for e in env.events() if e.name == "job.created"]
+    assert len(created) == 2 * ITEMS_MAX
+
+
+# ---------- params.folder (โฟลเดอร์กลุ่มของ W3) และงานโน้ต ----------
+
+FOLDER_ITEMS = [*VALID_ITEMS, {"videoId": "88o5Sk8_m1Y", "kind": "note", "params": {"trackId": "a.th-orig"}}]
+
+
+@pytest.mark.parametrize("item", FOLDER_ITEMS, ids=lambda item: item["kind"])
+def test_every_kind_accepts_folder_and_stores_it_stripped(env, item):
+    client = env.client()
+    body = {**item, "params": {**item["params"], "folder": "  คลิปสอน  ภาษาไทย  "}}
+    resp = client.post("/api/jobs", json={"items": [body]}, headers=AUTH)
+    assert resp.status_code == 200
+    job = resp.json()["jobs"][0]
+    assert job["params"]["folder"] == "คลิปสอน  ภาษาไทย"  # strip หัวท้ายเท่านั้น ข้างในเก็บตามที่ส่งมา
+    assert env.store.get(job["id"]).params["folder"] == "คลิปสอน  ภาษาไทย"
+
+
+@pytest.mark.parametrize("item", FOLDER_ITEMS, ids=lambda item: item["kind"])
+@pytest.mark.parametrize("folder", ["", "   ", "\t\n", None])
+def test_blank_folder_is_treated_as_absent(env, item, folder):
+    client = env.client()
+    body = {**item, "params": {**item["params"], "folder": folder}}
+    resp = client.post("/api/jobs", json={"items": [body]}, headers=AUTH)
+    assert resp.status_code == 200
+    assert "folder" not in resp.json()["jobs"][0]["params"]
+
+
+def test_folder_length_limit_counts_after_strip(env):
+    client = env.client()
+    item = VALID_ITEMS[4]
+    ok = {**item, "params": {**item["params"], "folder": "  " + "ก" * 80 + "  "}}
+    resp = client.post("/api/jobs", json={"items": [ok]}, headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json()["jobs"][0]["params"]["folder"] == "ก" * 80
+
+
+@pytest.mark.parametrize("item", FOLDER_ITEMS, ids=lambda item: item["kind"])
+def test_folder_longer_than_80_is_422(env, item):
+    client = env.client()
+    body = {**item, "params": {**item["params"], "folder": "a" * 81}}
+    resp = client.post("/api/jobs", json={"items": [VALID_ITEMS[3], body]}, headers=AUTH)
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "E_BAD_REQUEST"
+    assert env.store.pending_count() == 0
+
+
+@pytest.mark.parametrize("folder", [12, ["a"], {"a": 1}, True])
+def test_folder_must_be_text(env, folder):
+    client = env.client()
+    item = VALID_ITEMS[4]
+    body = {**item, "params": {**item["params"], "folder": folder}}
+    resp = client.post("/api/jobs", json={"items": [body]}, headers=AUTH)
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("params", "stored"),
+    [
+        ({}, {}),
+        ({"trackId": "a.th-orig"}, {"trackId": "a.th-orig"}),
+        ({"trackId": None, "folder": "รวมคลิป"}, {"folder": "รวมคลิป"}),
+    ],
+)
+def test_post_note_job(env, params, stored):
+    client = env.client(media=NoFfmpeg())  # โน้ตไม่ต้องมี ffmpeg
+    resp = client.post("/api/jobs", json={"items": [{"videoId": "88o5Sk8_m1Y", "kind": "note", "params": params}]},
+                       headers=AUTH)
+    assert resp.status_code == 200
+    job = resp.json()["jobs"][0]
+    assert job["kind"] == "note"
+    assert job["params"] == stored
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"trackId": "x.th"},
+        {"trackId": "o." + "a" * 65},
+        {"format": "md"},
+        {"options": SUB_OPTIONS},
+        {"folder": "b" * 81},
+    ],
+)
+def test_post_note_rejects_bad_params(env, params):
+    client = env.client()
+    resp = client.post("/api/jobs", json={"items": [{"videoId": "88o5Sk8_m1Y", "kind": "note", "params": params}]},
+                       headers=AUTH)
+    assert resp.status_code == 422
+    assert env.store.pending_count() == 0
 
 
 @pytest.mark.parametrize("media", [NoFfmpeg(), None])
@@ -305,6 +418,24 @@ def test_put_order_reorders(env):
     ids = [j["id"] for j in client.get("/api/jobs", params={"status": "queued"}).json()["jobs"]]
     assert ids == [c.id, b.id, a.id]
     assert client.put("/api/jobs/order", json={"ids": []}, headers=AUTH).status_code == 422
+
+
+def test_put_order_accepts_every_queued_id_of_several_full_batches(env):
+    """หน้าเว็บส่ง id queued ทั้งหมดทุกครั้งที่ลาก: สองชุดเต็มจาก W3 (2 x ITEMS_MAX) ต้องเรียงได้"""
+    assert ORDER_IDS_MAX >= 10 * ITEMS_MAX
+    jobs = env.add(2 * ITEMS_MAX)
+    ids = [job.id for job in jobs]
+    moved = [ids[-1], *ids[:-1]]  # ลากงานสุดท้ายขึ้นหัวคิว
+    client = env.client()
+    resp = client.put("/api/jobs/order", json={"ids": moved}, headers=AUTH)
+    assert resp.status_code == 200
+    assert [job.id for job in env.store.queued()] == moved
+
+
+def test_put_order_rejects_more_than_the_cap(env):
+    client = env.client()
+    ids = [MISSING_ID] * (ORDER_IDS_MAX + 1)
+    assert client.put("/api/jobs/order", json={"ids": ids}, headers=AUTH).status_code == 422
 
 
 # ---------- outputs ----------

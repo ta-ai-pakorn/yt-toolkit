@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 # งานที่ต้องดึงจากยูทูป (คิวเว้นช่วง 2-5 วินาทีระหว่างงานเหล่านี้) และงานที่ต้องมี ffmpeg
-YOUTUBE_KINDS = frozenset({"video", "audio", "subtitle", "frames_sharp"})
+YOUTUBE_KINDS = frozenset({"video", "audio", "subtitle", "note", "frames_sharp"})  # note: ซับ + คอมเมนต์ปักหมุด
 FFMPEG_KINDS = frozenset({"video", "audio"})
 
 DEFAULT_MAX_HEIGHT = 1080

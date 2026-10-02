@@ -197,9 +197,12 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
     cache_root = Path(cache_root)
     router = APIRouter()
     maps_yt_errors = yt_error_mapper(ctx_bot_check(ctx))
+    # run_app สร้างให้แล้ว (ตัวเดียวกับงานโน้ตในคิว) ไม่มี (เทส) = สร้างที่นี่
     # เรียกผ่าน lambda: extractor ทดสอบบางตัวไม่มี pinned_comment และไม่ต้องมีถ้าไม่ได้เรียก route นี้
-    pinned = PinnedCommentService(videos, lambda vid: extractor.pinned_comment(vid), cache_root)
-    ctx.pinned = pinned
+    pinned = ctx.pinned
+    if pinned is None:
+        pinned = PinnedCommentService(videos, lambda vid: extractor.pinned_comment(vid), cache_root)
+        ctx.pinned = pinned
 
     def storyboard_index(video_id: str) -> dict:
         return get_storyboard(video_id, videos, cache_root, extractor.fetch)
