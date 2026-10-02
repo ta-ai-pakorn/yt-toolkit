@@ -23,3 +23,10 @@ dub_clip = "8lpOfyoxcvU"  # "3 นาทีคดีดัง : 2499 บัน�
 thai_subs = "88o5Sk8_m1Y"  # "Thai Listening Practice | EP.1 | Beginner" 372 วิ, CC BY, th-orig, 144p-1080p
 # คลิปแนวตั้งยาว 60 วิ: เพดาน compat นับที่ด้านสั้น ต้องได้ 1080x1920 ไม่ใช่ 480p
 portrait_short = "IngFfl6DTqY"  # "nature 4K 698 ... Free Vertical Stream Scene Video" 60 วิ, CC BY, แนวตั้ง, avc1 ถึง 1080 ด้านสั้น
+
+[advanced]
+# M5 รอบ A (T15): คลิปของ tests/network/test_advanced_network.py · ตรวจ probe ซ้ำก่อนรันถ้าห่างหลายเดือน
+range_clip = "88o5Sk8_m1Y"       # 372 วิ มี a.th-orig: ช่วง 01:30-05:00 (AC-ADV-01) และฝังซับตามช่วง (AC-VID-10 ส่วนที่ 1)
+chapters_clip = "jNQXAC9IVRw"    # 19 วิ 3 chapter (AC-ADV-03 ใช้ 3 chapter: คลิปสั้นสุดที่มี chapter โหลดน้อย)
+no_sponsor_clip = "kwmHaXUAa0M"  # 10 วิ ไม่มีข้อมูล SponsorBlock (กรณี "ไม่มีข้อมูลจากชุมชน")
+sponsor_clip = ""                # พิธเลือกคลิปสั้นที่มีข้อมูล sponsor ก่อนรัน (ว่าง = ข้ามกรณีที่มีข้อมูลของ AC-ADV-04)
