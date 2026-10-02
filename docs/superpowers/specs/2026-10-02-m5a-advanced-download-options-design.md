@@ -142,3 +142,10 @@ All in the clip folder as today (`<output>/<clip [id]>/`), with `แหล่ง
 
 ## Out of scope (round A)
 Sharp frames (round B), cookies (round C), advanced options in W3, subtitle split by chapter, subtitle re-timing after SponsorBlock (v2), several ranges per download, decimal-second input.
+
+## Changes after approval
+Made during the build; the shipped code and PRD/BRD follow these, not the original text above.
+- **Owner ruling, SponsorBlock note texts (BRD #127, replaces §3.3):** no segments → **"ไม่มีข้อมูลจากชุมชน ไม่ได้ตัดโฆษณา"**; unreachable / error → **"ติดต่อ SponsorBlock ไม่ได้ ไม่ได้ตัดโฆษณา"**. "ได้คลิปเต็ม" was wrong when a range is also set (the result is the range, not the full clip). The hint under the switch in §1.3 is unchanged.
+- **Owner ruling, no-audio chapter folder (BRD #128, extends D4 and the §2 "Chapter split" row):** a chapter split of a video with "วิดีโอไม่มีเสียง" on goes to `<clip folder>/แยกตาม chapter (mp4, ไม่มีเสียง)/`; the file names inside are unchanged (`01 - <chapter title>.mp4`).
+- **Owner ruling, test fakes (BRD #126):** the fake cutter (`FakeMediaTools`) checks its inputs like the real ffmpeg cutter (shared `_check_cut`: fast mode takes one interval and mp4 only, etc.), so a test cannot pass with input the real cutter rejects.
+- **Deviation, SponsorBlock source (§3.3 "as a `Downloader` method"):** SponsorBlock is a separate `SponsorSource` protocol (`core/download.py`, `sponsor_segments(video_id, categories, duration_s)`), implemented by `YtDlpExtractor` and `FakeExtractor` in `core/extractor.py` and passed to the handlers as `HandlerDeps.sponsors`. Adding a method to the runtime-checkable `Downloader` protocol would have broken an existing isinstance test. yt_dlp is still imported only in `core/extractor.py`, and the privacy rules of §3.3 are unchanged.

@@ -10,8 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { fill, th } from "@/i18n/th"
-import { scaleBytes } from "@/lib/advanced-options"
-import { AUTO_QUALITY, buildVideoParams, qualityOptions, videoSizeEstimate, type QualityOption } from "@/lib/download-options"
+import { AUTO_QUALITY, buildVideoParams, keptVideoSize, qualityOptions, type QualityOption } from "@/lib/download-options"
 import { formatBytes } from "@/lib/format"
 import { useEnqueue } from "@/lib/jobs"
 import type { VideoInfo } from "@/lib/types"
@@ -118,14 +117,16 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
   // ความละเอียดสูงสุดเปิดอยู่: "อัตโนมัติ" = ภาพดีที่สุดของคลิป (อาจเป็น VP9/AV1) ไม่ใช่ "เปิดได้ทุกที่ 1080p"
   const autoLabel = state.maxQuality ? t.autoMax : fill(t.auto, { h: cap })
   const autoNotCompat = state.maxQuality && options.length > 0 && !options[0].compat
-  const labels = new Map<string, string>([[AUTO_QUALITY, autoLabel]])
-  for (const option of options) {
-    labels.set(option.value, optionLabel(option, videoSizeEstimate(video, option.value, state.noAudio, state.maxQuality, cap)))
-  }
 
   const tracks = subtitles.data ? embeddableTracks(subtitles.data.tracks, originalLanguage(subtitles.data.tracks, video.audio)) : []
   const chosenEmbed = resolveEmbed(choices.embedSubs, tracks)
   const advanced = useAdvancedChoice(video, "video", chosenEmbed !== null)
+  // ขนาดประมาณ (รายการคุณภาพ และข้อความใต้ปุ่ม) ย่อตามความยาวของช่วงที่ตั้ง (ตัดโฆษณา/แยก chapter = ไม่รู้ล่วงหน้า ใช้ขนาดเต็ม)
+  const estimate = (quality: string) => keptVideoSize(video, quality, state.noAudio, state.maxQuality, cap, advanced.keptS)
+  const labels = new Map<string, string>([[AUTO_QUALITY, autoLabel]])
+  for (const option of options) {
+    labels.set(option.value, optionLabel(option, estimate(option.value)))
+  }
   // แยกตาม chapter เปิดอยู่ = ไม่ฝังซับ (ใช้คู่กันไม่ได้ AC-VID-10 ส่วนที่ 2) ช่องฝังซับกดไม่ได้พร้อมเหตุผล
   const embedSubs = advanced.split ? null : chosenEmbed
   // รายการแทร็กยังไม่มา = ยังกดไม่ได้ (ไม่มีเหตุผลให้บอก) · มาแล้วไม่มีซับ หรือโหลดไม่สำเร็จ = กดไม่ได้พร้อมเหตุผล
@@ -137,8 +138,7 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
         ? t.embedNoSubs
         : null
   const embedDisabled = advanced.split || tracks.length === 0
-  // ขนาดประมาณย่อตามความยาวของช่วงที่ตั้ง (ตัดโฆษณา/แยก chapter = ไม่รู้ล่วงหน้า ใช้ขนาดเต็ม)
-  const size = scaleBytes(videoSizeEstimate(video, state.quality, state.noAudio, state.maxQuality, cap), video.durationS, advanced.keptS)
+  const size = estimate(state.quality)
 
   async function submit() {
     if (pending || !ready) return

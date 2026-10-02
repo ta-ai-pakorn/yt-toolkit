@@ -126,9 +126,9 @@ function AudioForm({ video, choices, choose }: Props) {
 
       <AudioLanguageSelect options={languages} value={state.audioLanguage} onChange={(audioLanguage) => choose({ audioLanguage })} />
 
-      {/* owner (M4 preview): ปุ่มหลักหน้าตาเดียวกับ "โหลด mp4" ในแท็บวิดีโอ พร้อมขนาดโดยประมาณ */}
       <AdvancedSection video={video} tab="audio" choice={advanced} embedSubsOn={false} />
 
+      {/* owner (M4 preview): ปุ่มหลักหน้าตาเดียวกับ "โหลด mp4" ในแท็บวิดีโอ พร้อมขนาดโดยประมาณ */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Button disabled={pending || !ready} focusableWhenDisabled onClick={() => void submit()}>
           {pending ? <Spinner aria-hidden /> : <Download aria-hidden />}

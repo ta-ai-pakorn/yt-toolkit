@@ -11,6 +11,7 @@ import {
   codecLabel,
   compatCap,
   DEFAULT_SPONSOR_CATEGORIES,
+  keptVideoSize,
   NO_ADVANCED,
   paramsFromSettings,
   qualityOptions,
@@ -22,6 +23,7 @@ import {
   wavBytes,
   wavMegabytes,
 } from "./download-options"
+import { scaleBytes } from "./advanced-options"
 import { audioLanguageName } from "./languages"
 import { PRESETS } from "./sub-options"
 import type { AudioFormat, Settings, VideoFormat, VideoInfo } from "./types"
@@ -245,6 +247,14 @@ describe("เพดานโหมดเปิดได้ทุกที่ต�
 
   it("เลือกแบบเองยังประมาณขนาดตามแบบนั้น", () => {
     expect(videoSizeEstimate(clip(), "298", true, false, 720)).toBe(150524867)
+  })
+
+  it("ขนาดในรายการคุณภาพย่อตามความยาวของช่วงที่ตั้ง เหมือนข้อความใต้ปุ่ม", () => {
+    const full = videoSizeEstimate(clip(), "298", true, false, 720)
+    expect(keptVideoSize(clip(), "298", true, false, 720, undefined)).toBe(full)
+    expect(keptVideoSize(clip(), "298", true, false, 720, 127)).toBe(scaleBytes(full, 635, 127))
+    expect(keptVideoSize(clip(), "298", true, false, 720, 127)).toBe(30104973)
+    expect(keptVideoSize(clip(), AUTO_QUALITY, true, false, 720, 127)).toBe(30104973)
   })
 
   it("คลิปแนวตั้งนับด้านสั้น: เพดาน 720 ตัด 1080x1920 ทิ้ง แต่เก็บ 720x1280", () => {

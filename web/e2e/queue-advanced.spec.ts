@@ -65,7 +65,7 @@ test("ตัดโฆษณาที่มีข้อมูล: ชื่อม
   expect(job.notes ?? []).toEqual([])
 })
 
-test("ไม่มีข้อมูลจากชุมชน: ได้คลิปเต็ม ชื่อปกติ และโน้ตสีเทาในแถวคิว", async ({ page, request }) => {
+test("ไม่มีข้อมูลจากชุมชน: ไม่ได้ตัดโฆษณา ชื่อปกติ และโน้ตสีเทาในแถวคิว", async ({ page, request }) => {
   const job = await done(request, { videoId: "ADSNODATA01", kind: "video", params: { ...VIDEO, sponsorblock: ["sponsor"] } })
   expect(names(job)).toEqual(["คลิปไม่มีข้อมูลโฆษณา.mp4"])
   expect(job.notes).toEqual([{ code: "SPONSORBLOCK_EMPTY", message: "ไม่มีข้อมูลจากชุมชน ไม่ได้ตัดโฆษณา" }])
@@ -75,7 +75,7 @@ test("ไม่มีข้อมูลจากชุมชน: ได้คล
   await expect(row).toContainText("คลิปไม่มีข้อมูลโฆษณา · ตัดโฆษณา")
 })
 
-test("ติดต่อ SponsorBlock ไม่ได้: งานสำเร็จ ได้คลิปเต็ม พร้อมโน้ต", async ({ request }) => {
+test("ติดต่อ SponsorBlock ไม่ได้: งานสำเร็จ ไม่ได้ตัดโฆษณา พร้อมโน้ต", async ({ request }) => {
   const job = await done(request, {
     videoId: "ADSOFFLINE1",
     kind: "audio",

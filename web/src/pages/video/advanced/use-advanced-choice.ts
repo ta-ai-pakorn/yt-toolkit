@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { fill, th } from "@/i18n/th"
@@ -97,28 +97,51 @@ export function revealRangeErrors(choice: AdvancedChoice, videoId: string, tab: 
   requestAnimationFrame(() => document.getElementById(fieldId(which, tab))?.focus())
 }
 
+const SPONSOR_MUTATION_KEY = ["settings", "sponsorblockDefault"] as const
+
 /**
- * ติ๊ก/เอาติ๊กหมวด SponsorBlock: บันทึกลงการตั้งค่า sponsorblockDefault (D3 จำข้ามคลิป) แบบเห็นผลทันที
- * บันทึกไม่สำเร็จ = คืนค่าเดิม + toast · หมวดสุดท้ายเอาติ๊กออกไม่ได้ (ผู้เรียกปิดช่องนั้นไว้ด้วย)
+ * การบันทึกหมวด SponsorBlock: คำขอเข้าแถวทีละคำขอ (scope เดียวกัน) ติ๊กเร็ว ๆ หลายช่องจึงไม่แซงกันจนติ๊กหาย
+ * เห็นผลทันที (onMutate) · ยังมีคำขอรออยู่ = ยังไม่เอาค่าจากเซิร์ฟเวอร์มาทับ (ช่องไม่เด้งกลับชั่วคราว)
  */
-export function useSponsorCategoryToggle(): (category: SponsorCategory, on: boolean, current: readonly SponsorCategory[]) => void {
-  const client = useQueryClient()
-  const mutation = useMutation({
-    mutationFn: (next: SponsorCategory[]) => patchSettings({ sponsorblockDefault: next }),
+export function sponsorToggleMutation(
+  client: QueryClient,
+  save: (next: SponsorCategory[]) => Promise<Settings> = (next) => patchSettings({ sponsorblockDefault: next }),
+) {
+  return {
+    mutationKey: SPONSOR_MUTATION_KEY,
+    scope: { id: "sponsorblockDefault" },
+    mutationFn: save,
     onMutate: async (next: SponsorCategory[]) => {
       await client.cancelQueries({ queryKey: SETTINGS_KEY })
       const previous = client.getQueryData<Settings>(SETTINGS_KEY)
       if (previous) client.setQueryData<Settings>(SETTINGS_KEY, { ...previous, sponsorblockDefault: next })
       return { previous }
     },
-    onError: (_error, _next, context) => {
+    onError: (_error: unknown, _next: SponsorCategory[], context: { previous: Settings | undefined } | undefined) => {
       if (context?.previous) client.setQueryData(SETTINGS_KEY, context.previous)
       toast.error(th.general.saveFailed)
     },
-    onSuccess: (saved) => client.setQueryData(SETTINGS_KEY, saved),
-  })
-  return (category, on, current) => {
-    const next = SPONSOR_CATEGORIES.filter((c) => (c === category ? on : current.includes(c)))
+    onSuccess: (saved: Settings) => {
+      if (client.isMutating({ mutationKey: SPONSOR_MUTATION_KEY }) <= 1) client.setQueryData(SETTINGS_KEY, saved)
+    },
+  }
+}
+
+/** หมวดที่จะบันทึกหลังติ๊ก/เอาติ๊ก คิดจากค่าล่าสุดในแคช (รวมที่ติ๊กไปแล้วแต่ยังบันทึกไม่เสร็จ) */
+export function nextSponsorCategories(client: QueryClient, category: SponsorCategory, on: boolean): SponsorCategory[] {
+  const current = sponsorCategories(client.getQueryData<Settings>(SETTINGS_KEY))
+  return SPONSOR_CATEGORIES.filter((c) => (c === category ? on : current.includes(c)))
+}
+
+/**
+ * ติ๊ก/เอาติ๊กหมวด SponsorBlock: บันทึกลงการตั้งค่า sponsorblockDefault (D3 จำข้ามคลิป) แบบเห็นผลทันที
+ * บันทึกไม่สำเร็จ = คืนค่าเดิม + toast · หมวดสุดท้ายเอาติ๊กออกไม่ได้ (ผู้เรียกปิดช่องนั้นไว้ด้วย)
+ */
+export function useSponsorCategoryToggle(): (category: SponsorCategory, on: boolean) => void {
+  const client = useQueryClient()
+  const mutation = useMutation(sponsorToggleMutation(client))
+  return (category, on) => {
+    const next = nextSponsorCategories(client, category, on)
     if (next.length > 0) mutation.mutate(next)
   }
 }

@@ -72,6 +72,14 @@ export function getPlayerState(): PlayerState {
   return state
 }
 
+/**
+ * เวลาที่ตัวเล่นอยู่ หรือกำลังจะไป (ขอเล่นจากเวลาหนึ่งไว้ระหว่างตัวเล่นกำลังโหลด) ใช้กับปุ่มตั้งจุดเริ่ม/จบ
+ * ไม่ให้กดระหว่างโหลดแล้วได้ 0:00
+ */
+export function markTimeMs(): number {
+  return state.pendingSeekMs ?? state.currentMs
+}
+
 /** ขอเล่น (จากเวลาที่ให้ หรือจากตำแหน่งปัจจุบัน) ตัวเล่นยังไม่โหลด = เริ่มโหลด แล้วเล่นเมื่อพร้อม */
 function request(ms: number | undefined, reel: PlayerState["reel"]): void {
   if (state.status === "error" && state.error !== "offline") {

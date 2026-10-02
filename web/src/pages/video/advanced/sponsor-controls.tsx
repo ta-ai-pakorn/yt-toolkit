@@ -35,7 +35,7 @@ export function SponsorControls({ tab, choice, embedSubsOn }: { tab: "video" | "
                 <Checkbox
                   checked={ticked}
                   disabled={ticked && categories.length === 1}
-                  onCheckedChange={(checked) => toggle(category, checked === true, categories)}
+                  onCheckedChange={(checked) => toggle(category, checked === true)}
                 />
                 {t.categories[category]}
               </label>
