@@ -1,7 +1,6 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { ExternalLink, ImageIcon, NotebookPen } from "lucide-react"
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -9,13 +8,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { fill, th } from "@/i18n/th"
-import { downloadFile } from "@/lib/download"
 import { youtubeWatchUrl } from "@/lib/format"
-import { notePath } from "@/lib/sub-options"
+import { useEnqueue } from "@/lib/jobs"
 import type { SubtitleTrack, VideoInfo } from "@/lib/types"
 import { useNarrowScreen } from "@/lib/use-narrow-screen"
 
-import { errorMessage } from "./errors"
 import { Lightbox } from "./lightbox"
 import { LoadError } from "./load-error"
 import { PlayerControls, PlayerSlot } from "./player/player-slot"
@@ -24,11 +21,18 @@ import { useSlotInView } from "./player/slot-visibility"
 import { useTrackWarming } from "./session-warming"
 import { StatTiles } from "./stats"
 import { subtitlesQuery } from "./subs-queries"
-import { useSubSettings } from "./subs-settings"
 import { trackInEffect, trackLabel } from "./track-label"
 import { useVideoParams } from "./url-state"
 
 const t = th.video
+
+/** ข้อความ toast ตอนส่งเข้าคิว (ชุดเดียวกับปุ่มโหลดอื่นของหน้า W2) */
+const ENQUEUE_MESSAGES = {
+  added: th.queue.added,
+  addedMany: th.queue.addedMany,
+  failed: th.queue.addFailed,
+  goHealth: th.queue.goHealth,
+}
 
 // จอกว้าง: ปก 288 px อยู่ซ้าย ข้อมูลทั้งหมดอยู่คอลัมน์ขวา (ทั้งตอนโหลดและตอนมีข้อมูลใช้ขนาดเดียวกัน ภาพไม่กระโดด)
 // จอแคบ (มือถือ): ปกเล็ก 128 px อยู่ข้างชื่อคลิป ส่วนอื่นเต็มความกว้างใต้ลงมา (คอลัมน์ข้อมูลเป็น contents ลูก ๆ จึงวางในกริดเอง)
@@ -79,7 +83,7 @@ function HeaderSkeleton() {
 }
 
 /**
- * แทร็กซับที่ใช้อยู่ (แทร็กใน URL หรือแทร็กเริ่มต้นของคลิป) สำหรับป้ายที่หัวคลิปและโน้ต .md
+ * แทร็กซับที่ใช้อยู่ (แทร็กใน URL หรือแทร็กเริ่มต้นของคลิป) สำหรับป้ายที่หัวคลิปและงานโน้ต .md
  * ยังโหลดรายการแทร็กไม่เสร็จ โหลดไม่สำเร็จ หรือไม่มีแทร็กที่ใช้อยู่ = null (ไม่แสดงป้าย โน้ตใช้แทร็กเริ่มต้นของ backend)
  */
 function useTrack(videoId: string | undefined): SubtitleTrack | null {
@@ -188,24 +192,22 @@ function YoutubeLink({ videoId }: { videoId: string }) {
 
 /**
  * "บันทึกเป็นโน้ต (.md)": ไฟล์ Markdown ของคลิป (ข้อมูลคลิป คำอธิบาย chapter คอมเมนต์ปักหมุด ทรานสคริปต์) สำหรับ Obsidian หรือแอพจดโน้ต
- * ใช้แทร็กและความยาวซับชุดเดียวกับไฟล์ซับในแท็บซับ · ปุ่มรอง (หน้านี้ไม่มีปุ่มหลักสีเหลือง)
- * ระหว่างเตรียมไฟล์มีวงหมุน กดซ้ำไม่ได้แต่ยังโฟกัสได้ · ผิดพลาด = toast ข้อความไทยจาก backend
+ * owner round 2: ส่งงาน "note" เข้าคิว (ไม่ได้โหลดผ่านเบราว์เซอร์แล้ว) ไฟล์ลงโฟลเดอร์ของคลิปเหมือนไฟล์อื่น และขึ้นในคิว/ประวัติ
+ * ใช้แทร็กที่ใช้อยู่ (ไม่มี = backend ใช้แทร็กเริ่มต้นของคลิป) · ปุ่มรอง (หน้านี้ไม่มีปุ่มหลักสีเหลือง)
+ * ระหว่างส่งมีวงหมุน กดซ้ำไม่ได้แต่ยังโฟกัสได้ · toast มาตรฐานของคิว (เพิ่มเข้าคิวแล้ว / เพิ่มเข้าคิวไม่สำเร็จ)
  */
 function NoteButton({ videoId, trackId }: { videoId: string; trackId: string | null }) {
-  const { options } = useSubSettings()
+  const { enqueue } = useEnqueue(ENQUEUE_MESSAGES)
+  // สถานะของปุ่มเอง (ไม่ใช้ pending ของ react-query ที่อัปเดตช้ากว่าหนึ่งจังหวะ): กดรัว ๆ ก็ส่งงานเดียว
   const [busy, setBusy] = useState(false)
-  // ซับแปลของแทร็กนี้กำลังรอเซสชัน (นับถอยหลังอยู่): โน้ตจะได้ error เดียวกัน จึงกดไม่ได้จนโหลดซับเสร็จ
+  // ซับแปลของแทร็กนี้กำลังรอเซสชัน (นับถอยหลังอยู่): งานโน้ตจะได้ error เดียวกัน จึงกดไม่ได้จนโหลดซับเสร็จ
   const warming = useTrackWarming(videoId, trackId)
 
   async function save() {
     if (busy || warming) return
     setBusy(true)
-    const id = toast.loading(t.note.preparing)
     try {
-      await downloadFile(notePath(videoId, trackId, options), `${videoId}.note.md`)
-      toast.dismiss(id)
-    } catch (error) {
-      toast.error(errorMessage(error, t.note.failed), { id })
+      await enqueue([{ videoId, kind: "note", params: trackId ? { trackId } : {} }])
     } finally {
       setBusy(false)
     }

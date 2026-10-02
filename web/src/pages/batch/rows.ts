@@ -1,12 +1,6 @@
+import { fill, th } from "@/i18n/th"
 import { paramsFromSettings } from "@/lib/download-options"
-import type {
-  NewJob,
-  PlaylistEntry,
-  ResolveItem,
-  Settings,
-  SubExportFormat,
-  SubOptions,
-} from "@/lib/types"
+import type { NewJob, PlaylistEntry, ResolveItem, Settings, SubOptions } from "@/lib/types"
 
 import type { BatchSource } from "./path"
 
@@ -64,7 +58,7 @@ export function clipRows(
     } else if (item.kind === "playlist") {
       hasPlaylists = true
     } else if (isClip(item) && item.videoId && !seen.has(item.videoId) && clips < MAX_BATCH_ROWS) {
-      // ไม่เกิน 200 คลิป (FR-IN-3): งานวิดีโอ/เสียง + ซับ ต่อคลิปจึงไม่เกินขีด 500 งานต่อคำขอ
+      // ไม่เกิน 200 คลิป (FR-IN-3): งานต่อคลิปไม่เกิน 6 งาน (หลัก + ไฟล์เพิ่มเติม 5 อย่าง) จึงไม่เกินขีด 1200 งานต่อคำขอ
       seen.add(item.videoId)
       clips += 1
       const row: BatchRow = { videoId: item.videoId }
@@ -108,33 +102,86 @@ export function headerState(selectable: number, selected: number): "all" | "some
 }
 
 export type WhatChoice = "video" | "audio" | "none"
-export type SubChoice = SubExportFormat | "none"
-export type BatchChoice = { what: WhatChoice; sub: SubChoice }
 
-/** ส่งเข้าคิวได้ = เลือกอย่างน้อย 1 คลิป และเลือกวิดีโอ เสียง หรือซับอย่างน้อยหนึ่งอย่าง */
-export function canSubmit(count: number, choice: BatchChoice): boolean {
-  return count > 0 && (choice.what !== "none" || choice.sub !== "none")
+/** ไฟล์เพิ่มเติมของแต่ละคลิป (ติ๊กได้หลายอย่าง ค่าเริ่มต้นไม่ติ๊กเลย) */
+export type ExtraChoice = "srt" | "txt" | "note" | "contactSheet" | "framesZip"
+
+/** ลำดับของช่องติ๊กบนหน้า และลำดับงานของแต่ละคลิป (ต่อจากงานวิดีโอ/เสียง) */
+export const EXTRAS: readonly ExtraChoice[] = ["srt", "txt", "note", "contactSheet", "framesZip"]
+
+export type BatchChoice = { what: WhatChoice; extras: ReadonlySet<ExtraChoice> }
+
+/** ชื่อโฟลเดอร์กลุ่มยาวได้ไม่เกินกี่ตัวอักษร (หลังตัดช่องว่างหัวท้าย) ตรงกับ backend */
+export const FOLDER_MAX = 80
+
+/** นับตัวอักษรแบบเดียวกับ backend (Python นับ code point ไม่ใช่ UTF-16) */
+const charCount = (text: string) => Array.from(text).length
+
+/** ชื่อโฟลเดอร์ใช้ได้ = ตัดช่องว่างหัวท้ายแล้วยาว 1..80 ตัวอักษร */
+export function folderValid(folder: string): boolean {
+  const length = charCount(folder.trim())
+  return length > 0 && length <= FOLDER_MAX
+}
+
+const pad = (n: number) => String(n).padStart(2, "0")
+
+/** เวลาท้ายชื่อโฟลเดอร์เริ่มต้น: YYYY-MM-DD HH.mm ตามเวลาเครื่อง (ใช้จุดแทน : เพราะ Windows ห้ามใช้ : ในชื่อโฟลเดอร์) */
+export function folderStamp(now: Date): string {
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  return `${date} ${pad(now.getHours())}.${pad(now.getMinutes())}`
 }
 
 /**
- * งานที่จะส่งเข้าคิว ทีละคลิปตามลำดับในตาราง: งานวิดีโอหรือเสียงหนึ่งงาน (ค่าจากการตั้งค่า) ตามด้วยงานซับหนึ่งงาน
- * (ตัวเลือกความยาวซับปัจจุบันของแท็บซับ ไม่ระบุแทร็ก = backend ใช้แทร็กเริ่มต้นของคลิป) · มีชื่อก็ส่งชื่อไปด้วย
+ * ชื่อโฟลเดอร์เริ่มต้นของหน้า W3: มาจากเพลย์ลิสต์ = ชื่อเพลย์ลิสต์ (ยาวเกิน 80 ตัวอักษรตัดท้าย)
+ * วางหลายลิงก์ หรือเพลย์ลิสต์ไม่มีชื่อ = "หลายคลิป YYYY-MM-DD HH.mm" (`openedAt` = เวลาที่เปิดหน้า)
+ */
+export function defaultFolder(playlistTitle: string | undefined, openedAt: Date): string {
+  const title = playlistTitle?.trim() ?? ""
+  if (title !== "") return Array.from(title).slice(0, FOLDER_MAX).join("").trim()
+  return fill(th.batch.folderDefault, { date: folderStamp(openedAt) })
+}
+
+/** ส่งเข้าคิวได้ = เลือกอย่างน้อย 1 คลิป · เลือกวิดีโอ/เสียง หรือติ๊กไฟล์เพิ่มเติมอย่างน้อยหนึ่งอย่าง · และชื่อโฟลเดอร์ใช้ได้ */
+export function canSubmit(count: number, choice: BatchChoice, folder: string): boolean {
+  return count > 0 && (choice.what !== "none" || choice.extras.size > 0) && folderValid(folder)
+}
+
+/** ค่าของงานไฟล์เพิ่มเติมแต่ละอย่าง (ซับไม่ระบุแทร็ก = backend ใช้แทร็กเริ่มต้นของคลิป · ภาพใช้ค่าเริ่มต้น) */
+function extraJob(extra: ExtraChoice, subOptions: SubOptions, folder: string): Pick<NewJob, "kind" | "params"> {
+  switch (extra) {
+    case "srt":
+    case "txt":
+      return { kind: "subtitle", params: { format: extra, options: subOptions, folder } }
+    case "note":
+      return { kind: "note", params: { folder } }
+    case "contactSheet":
+      return { kind: "contact_sheet", params: { source: "fast", columns: 5, folder } }
+    case "framesZip":
+      return { kind: "frames_zip", params: { source: "fast", folder } }
+  }
+}
+
+/**
+ * งานที่จะส่งเข้าคิว ทีละคลิปตามลำดับในตาราง: งานวิดีโอหรือเสียง (ค่าจากการตั้งค่า) แล้วไฟล์เพิ่มเติมตามลำดับ
+ * .srt → .txt → โน้ต → ภาพรวมเฟรม → ภาพเฟรมทั้งหมด (ไม่ขึ้นกับลำดับที่ติ๊ก) · ซับใช้ความยาวซับปัจจุบันของแท็บซับ
+ * ทุกงานมี `folder` (ตัดช่องว่างหัวท้ายแล้ว) = ไฟล์ของทุกคลิปอยู่ในโฟลเดอร์กลุ่มเดียวกัน · มีชื่อคลิปก็ส่งชื่อไปด้วย
  */
 export function buildBatchJobs(
   clips: readonly BatchRow[],
   choice: BatchChoice,
+  folder: string,
   settings: Settings,
   subOptions: SubOptions
 ): NewJob[] {
+  const group = folder.trim()
+  const extras = EXTRAS.filter((extra) => choice.extras.has(extra))
   const jobs: NewJob[] = []
   for (const clip of clips) {
     const base = clip.title ? { videoId: clip.videoId, title: clip.title } : { videoId: clip.videoId }
     if (choice.what !== "none") {
-      jobs.push({ ...base, kind: choice.what, params: paramsFromSettings(choice.what, settings) })
+      jobs.push({ ...base, kind: choice.what, params: { ...paramsFromSettings(choice.what, settings), folder: group } })
     }
-    if (choice.sub !== "none") {
-      jobs.push({ ...base, kind: "subtitle", params: { format: choice.sub, options: subOptions } })
-    }
+    for (const extra of extras) jobs.push({ ...base, ...extraJob(extra, subOptions, group) })
   }
   return jobs
 }

@@ -8,12 +8,17 @@ import {
   buildBatchJobs,
   canSubmit,
   clipRows,
+  defaultFolder,
+  folderStamp,
+  folderValid,
   headerState,
   isExpired,
   MAX_BATCH_ROWS,
   parseBatchSource,
   playlistRows,
   selectedRows,
+  type BatchChoice,
+  type ExtraChoice,
 } from "./rows"
 
 const video = (videoId: string): ResolveItem => ({ input: `https://youtu.be/${videoId}`, kind: "video", videoId })
@@ -41,6 +46,9 @@ const settings = {
   audioLanguage: "original",
   concurrency: 2,
 } as Settings
+
+const EXTRA_ALL: ExtraChoice[] = ["srt", "txt", "note", "contactSheet", "framesZip"]
+const choice = (what: BatchChoice["what"], ...extras: ExtraChoice[]): BatchChoice => ({ what, extras: new Set(extras) })
 
 describe("clipRows", () => {
   it("เอาคลิปกับลิงก์กำกวม ไม่ซ้ำรหัส ตามลำดับที่เจอครั้งแรก", () => {
@@ -162,50 +170,125 @@ describe("การเลือก", () => {
     expect(headerState(0, 0)).toBe("none")
   })
 
-  it("ส่งเข้าคิวได้เมื่อมีคลิปและเลือกอย่างน้อยหนึ่งอย่าง", () => {
-    expect(canSubmit(2, { what: "video", sub: "none" })).toBe(true)
-    expect(canSubmit(2, { what: "none", sub: "srt" })).toBe(true)
-    expect(canSubmit(0, { what: "video", sub: "srt" })).toBe(false)
-    expect(canSubmit(2, { what: "none", sub: "none" })).toBe(false)
+  it("ส่งเข้าคิวได้เมื่อมีคลิป เลือกอย่างน้อยหนึ่งอย่าง และมีชื่อโฟลเดอร์", () => {
+    expect(canSubmit(2, choice("video"), "งาน")).toBe(true)
+    expect(canSubmit(2, choice("none", "srt"), "งาน")).toBe(true)
+    expect(canSubmit(2, choice("none", "framesZip"), "งาน")).toBe(true)
+    expect(canSubmit(0, choice("video", "srt"), "งาน")).toBe(false)
+    expect(canSubmit(2, choice("none"), "งาน")).toBe(false)
+  })
+
+  it("ชื่อโฟลเดอร์ว่าง (หลังตัดช่องว่าง) หรือยาวเกิน 80 ตัวอักษร = ส่งไม่ได้", () => {
+    expect(canSubmit(2, choice("video"), "")).toBe(false)
+    expect(canSubmit(2, choice("video"), "   ")).toBe(false)
+    expect(canSubmit(2, choice("video"), "ก".repeat(81))).toBe(false)
+    expect(canSubmit(2, choice("video"), ` ${"ก".repeat(80)} `)).toBe(true)
+  })
+})
+
+describe("ชื่อโฟลเดอร์", () => {
+  // เวลาเครื่อง 2 ต.ค. 2026 09:05 (เดือนและนาทีหลักเดียวต้องเติม 0)
+  const openedAt = new Date(2026, 9, 2, 9, 5, 42)
+
+  it("เวลาท้ายชื่อเป็น YYYY-MM-DD HH.mm ตามเวลาเครื่อง (ไม่มี : ที่ Windows ห้ามใช้)", () => {
+    expect(folderStamp(openedAt)).toBe("2026-10-02 09.05")
+    expect(folderStamp(new Date(2026, 0, 31, 23, 59))).toBe("2026-01-31 23.59")
+  })
+
+  it("วางหลายลิงก์ = 'หลายคลิป <เวลาที่เปิดหน้า>'", () => {
+    expect(defaultFolder(undefined, openedAt)).toBe("หลายคลิป 2026-10-02 09.05")
+  })
+
+  it("เพลย์ลิสต์ = ชื่อเพลย์ลิสต์ (ตัดช่องว่างหัวท้าย) · ไม่มีชื่อ = แบบหลายคลิป", () => {
+    expect(defaultFolder("  รวมคลิปสอนทำอาหาร  ", openedAt)).toBe("รวมคลิปสอนทำอาหาร")
+    expect(defaultFolder("", openedAt)).toBe("หลายคลิป 2026-10-02 09.05")
+    expect(defaultFolder("   ", openedAt)).toBe("หลายคลิป 2026-10-02 09.05")
+  })
+
+  it("ชื่อเพลย์ลิสต์ยาวเกิน 80 ตัวอักษรตัดท้ายให้พอดี (นับแบบ backend ไม่ผ่าอีโมจิครึ่งตัว)", () => {
+    const long = `${"😀".repeat(79)}ab`
+    const folder = defaultFolder(long, openedAt)
+    expect(Array.from(folder)).toHaveLength(80)
+    expect(folder.endsWith("😀a")).toBe(true)
+    expect(folderValid(folder)).toBe(true)
   })
 })
 
 describe("buildBatchJobs", () => {
   const clips = [{ videoId: "aaaaaaaaaaa", title: "คลิป A" }, { videoId: "bbbbbbbbbbb" }]
   const options = PRESETS.long
+  const FOLDER = "รวมคลิป"
 
   it("เสียง + .srt = งานเสียงตามด้วยงานซับ ทีละคลิป · ซับไม่ระบุแทร็ก", () => {
-    const jobs = buildBatchJobs(clips, { what: "audio", sub: "srt" }, settings, options)
+    const jobs = buildBatchJobs(clips, choice("audio", "srt"), FOLDER, settings, options)
     expect(jobs.map((j) => `${j.videoId}:${j.kind}`)).toEqual([
       "aaaaaaaaaaa:audio",
       "aaaaaaaaaaa:subtitle",
       "bbbbbbbbbbb:audio",
       "bbbbbbbbbbb:subtitle",
     ])
-    expect(jobs[0].params).toEqual({ format: "mp3", mp3Kbps: 192, splitChapters: false, audioLanguage: "original" })
-    expect(jobs[1].params).toEqual({ format: "srt", options })
+    expect(jobs[0].params).toEqual({
+      format: "mp3",
+      mp3Kbps: 192,
+      splitChapters: false,
+      audioLanguage: "original",
+      folder: FOLDER,
+    })
+    expect(jobs[1].params).toEqual({ format: "srt", options, folder: FOLDER })
     expect("trackId" in jobs[1].params).toBe(false)
   })
 
+  it("ลำดับต่อคลิป: หลัก → .srt → .txt → โน้ต → ภาพรวมเฟรม → ภาพเฟรมทั้งหมด ไม่ขึ้นกับลำดับที่ติ๊ก", () => {
+    const all = choice("video", "framesZip", "note", "txt", "contactSheet", "srt")
+    const jobs = buildBatchJobs(clips, all, FOLDER, settings, options)
+    const perClip = ["video", "subtitle:srt", "subtitle:txt", "note", "contact_sheet", "frames_zip"]
+    const label = (j: (typeof jobs)[number]) =>
+      j.kind === "subtitle" && "format" in j.params ? `subtitle:${String(j.params.format)}` : j.kind
+    expect(jobs.map((j) => `${j.videoId}:${label(j)}`)).toEqual([
+      ...perClip.map((k) => `aaaaaaaaaaa:${k}`),
+      ...perClip.map((k) => `bbbbbbbbbbb:${k}`),
+    ])
+  })
+
+  it("ไฟล์เพิ่มเติมแต่ละอย่างได้ค่าของงานที่ถูก (ซับใช้ความยาวซับปัจจุบัน ไม่ระบุแทร็ก · ภาพใช้ค่าเริ่มต้น)", () => {
+    const jobs = buildBatchJobs([clips[1]], choice("none", ...EXTRA_ALL), FOLDER, settings, options)
+    expect(jobs).toEqual([
+      { videoId: "bbbbbbbbbbb", kind: "subtitle", params: { format: "srt", options, folder: FOLDER } },
+      { videoId: "bbbbbbbbbbb", kind: "subtitle", params: { format: "txt", options, folder: FOLDER } },
+      { videoId: "bbbbbbbbbbb", kind: "note", params: { folder: FOLDER } },
+      { videoId: "bbbbbbbbbbb", kind: "contact_sheet", params: { source: "fast", columns: 5, folder: FOLDER } },
+      { videoId: "bbbbbbbbbbb", kind: "frames_zip", params: { source: "fast", folder: FOLDER } },
+    ])
+  })
+
+  it("ทุกงานมี folder เดียวกัน (ตัดช่องว่างหัวท้ายแล้ว)", () => {
+    const jobs = buildBatchJobs(clips, choice("video", ...EXTRA_ALL), "  งานลูกค้า A  ", settings, options)
+    expect(jobs).toHaveLength(12)
+    for (const job of jobs) expect(job.params).toMatchObject({ folder: "งานลูกค้า A" })
+  })
+
   it("ชื่อที่รู้ส่งไปด้วย ที่ไม่รู้ไม่มีคีย์ title", () => {
-    const jobs = buildBatchJobs(clips, { what: "video", sub: "none" }, settings, options)
-    expect(jobs[0].title).toBe("คลิป A")
-    expect("title" in jobs[1]).toBe(false)
+    const jobs = buildBatchJobs(clips, choice("video", "note"), FOLDER, settings, options)
+    expect(jobs.map((j) => j.title)).toEqual(["คลิป A", "คลิป A", undefined, undefined])
+    expect("title" in jobs[2]).toBe(false)
   })
 
   it("วิดีโอใช้ค่าจากการตั้งค่า (compat-720 = maxHeight 720)", () => {
-    const [job] = buildBatchJobs(clips, { what: "video", sub: "none" }, settings, options)
+    const [job] = buildBatchJobs(clips, choice("video"), FOLDER, settings, options)
     expect(job.kind).toBe("video")
-    expect(job.params).toMatchObject({ maxQuality: false, maxHeight: 720, noAudio: false })
+    expect(job.params).toMatchObject({ maxQuality: false, maxHeight: 720, noAudio: false, folder: FOLDER })
   })
 
-  it("ซับอย่างเดียว = งานซับอย่างเดียว · ไม่เอาทั้งคู่ = ไม่มีงาน", () => {
-    expect(buildBatchJobs(clips, { what: "none", sub: "md" }, settings, options).map((j) => j.kind)).toEqual(["subtitle", "subtitle"])
-    expect(buildBatchJobs(clips, { what: "none", sub: "none" }, settings, options)).toEqual([])
+  it("ไฟล์เพิ่มเติมอย่างเดียว = ไม่มีงานหลัก · ไม่เลือกอะไรเลย = ไม่มีงาน", () => {
+    expect(buildBatchJobs(clips, choice("none", "txt"), FOLDER, settings, options).map((j) => j.kind)).toEqual([
+      "subtitle",
+      "subtitle",
+    ])
+    expect(buildBatchJobs(clips, choice("none"), FOLDER, settings, options)).toEqual([])
   })
 
-  it("200 คลิป x 2 งาน ไม่เกินขีด 500 งานต่อคำขอ", () => {
+  it("200 คลิป x 6 งาน = 1200 งาน ไม่เกินขีดต่อคำขอของ backend", () => {
     const many = Array.from({ length: 200 }, (_, i) => ({ videoId: `vid${String(i).padStart(8, "0")}` }))
-    expect(buildBatchJobs(many, { what: "video", sub: "srt" }, settings, options)).toHaveLength(400)
+    expect(buildBatchJobs(many, choice("video", ...EXTRA_ALL), FOLDER, settings, options)).toHaveLength(1200)
   })
 })
