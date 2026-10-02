@@ -564,7 +564,7 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     subtitle, sub_notes = _embedded_subtitle(deps, ctx, clip, params, span)
     ads, ad_notes = _sponsor_segments(deps, ctx, clip, params)
     ctx.check_cancelled()
-    factor = CUT_DISK_FACTOR if split or span is not None or ads is not None else DISK_FACTOR
+    factor = CUT_DISK_FACTOR if split or span is not None or bool(ads) else DISK_FACTOR
 
     def choose(raw: dict) -> DownloadChoice:
         return _disk_checked(video_choice(raw, params), (clip.root, workdir), deps.disk_free, factor=factor)
@@ -624,7 +624,7 @@ def _audio(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     split = bool(params.get("splitChapters"))
     ads, ad_notes = _sponsor_segments(deps, ctx, clip, params)
     ctx.check_cancelled()
-    factor = CUT_DISK_FACTOR if split or span is not None or ads is not None else DISK_FACTOR
+    factor = CUT_DISK_FACTOR if split or span is not None or bool(ads) else DISK_FACTOR
 
     def choose(raw: dict) -> DownloadChoice:
         return _disk_checked(audio_choice(raw, params), (clip.root, workdir), deps.disk_free, factor=factor)

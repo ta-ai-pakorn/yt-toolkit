@@ -31,6 +31,7 @@ from yttoolkit.core.download import (
     DownloadHooks,
     DownloadResult,
     SponsorBlockError,
+    audio_choice,
     video_choice,
 )
 from yttoolkit.core.extractor import FakeExtractor
@@ -1257,6 +1258,19 @@ def test_cutting_needs_three_times_the_download_size(env):
     with pytest.raises(YtError) as info:
         env.run("video", BBB, video_params(range=RANGE))
     assert info.value.code == "E_DISK_FULL" and info.value.params == {"size": "804 MB"}
+
+
+@pytest.mark.parametrize("kind", ["video", "audio"])
+def test_sponsorblock_without_data_needs_only_twice_the_download_size(env, kind):
+    params = video_params(sponsorblock=["sponsor"]) if kind == "video" else audio_params("m4a", sponsorblock=["sponsor"])
+    choose = video_choice if kind == "video" else audio_choice
+    expected = choose(env.fake.probe(BBB), params).expected_bytes
+    env.free = expected * 2 + expected // 2  # >= 2 x expected, < 3 x expected
+    result, _ = run_with(env, StubSponsors(), kind, BBB, params)
+    assert result.notes == ("SPONSORBLOCK_EMPTY",)
+    with pytest.raises(YtError) as info:
+        run_with(env, StubSponsors(ADS), kind, BBB, params)
+    assert info.value.code == "E_DISK_FULL"
 
 
 def test_cancel_while_cutting_leaves_nothing(env):
