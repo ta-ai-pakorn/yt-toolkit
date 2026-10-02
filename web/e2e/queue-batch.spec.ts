@@ -157,7 +157,7 @@ test("ไม่เลือกอะไร หรือเอาคลิปอ�
   const all = page.getByRole("checkbox", { name: "เลือกทั้งหมด", exact: true })
   const hint = HINT
 
-  // ค่าเริ่มต้น: วิดีโอ + ซับไม่เอา = ส่งได้
+  // ค่าเริ่มต้น: วิดีโอ + ไม่ติ๊กไฟล์เพิ่มเติม = ส่งได้
   await expect(submitButton(page, 3)).not.toHaveAttribute("aria-disabled", "true")
   await expect(page.getByText(hint)).toHaveCount(0)
 
