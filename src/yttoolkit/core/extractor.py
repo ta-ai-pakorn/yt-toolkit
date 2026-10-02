@@ -18,7 +18,7 @@ import re
 import shutil
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -27,7 +27,7 @@ from urllib.parse import parse_qs
 import httpx
 
 from .cancel import JobCancelled
-from .download import DownloadChoice, DownloadHooks, DownloadResult
+from .download import DownloadChoice, DownloadHooks, DownloadResult, SponsorBlockError, SponsorSegment
 from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix_id
 from .visitor_session import VisitorSession
 from .yterrors import YtError, classify
@@ -313,6 +313,20 @@ class _PathHidingLogger(_YtDlpLogger):
 _MEDIA_GLOB = "media.*"
 # Q2: ยูทูปไม่ส่งไฟล์ (4xx ที่ไม่ใช่ 429) ตอนโหลด -> ดึงข้อมูลใหม่ (ลิงก์ใหม่) แล้วโหลดอีกรอบเดียว
 _REFUSED_ATTEMPTS = 2
+_SPONSORBLOCK_RETRIES = 1  # ลองซ้ำครั้งเดียวพอ: ติดต่อไม่ได้ก็ยังได้คลิปเต็มพร้อมโน้ต
+
+
+def _sponsor_from_chapters(chapters: object, categories: Sequence[str]) -> list[SponsorSegment]:
+    """sponsorblock_chapters ของ SponsorBlockPP -> [(startMs, endMs, หมวด)] เฉพาะแบบ "skip" ของหมวดที่ขอ"""
+    wanted = set(categories)
+    found: list[SponsorSegment] = []
+    for chapter in chapters if isinstance(chapters, list) else []:
+        if not isinstance(chapter, dict) or chapter.get("type") != "skip" or chapter.get("category") not in wanted:
+            continue
+        start, end = chapter.get("start_time"), chapter.get("end_time")
+        if isinstance(start, int | float) and isinstance(end, int | float) and end > start:
+            found.append((round(start * 1000), round(end * 1000), str(chapter["category"])))
+    return sorted(found)
 
 
 def _yt_error(exc: BaseException) -> YtError:
@@ -587,6 +601,27 @@ class YtDlpExtractor:
             raise YtError("E_UNKNOWN", f"{type(exc).__name__}: {exc}") from exc
         return pinned_from_comment(first)
 
+    def sponsor_segments(
+        self, video_id: str, categories: Sequence[str], duration_s: float | None
+    ) -> list[SponsorSegment]:
+        """ช่วงโฆษณาจาก SponsorBlock ผ่าน SponsorBlockPP ของ yt-dlp (ส่งแค่ hash 4 ตัวแรกของ video id)
+
+        ไม่ใช้เซสชันผู้ชม (ไม่ใช่ยูทูป) · ไม่รู้ความยาวคลิป = SponsorBlockError (ตัวกรองของ yt-dlp ต้องใช้)
+        พังแบบไหนก็ได้ SponsorBlockError ที่บอกแค่ชื่อชนิด error (ไม่มีข้อมูลผู้ใช้ใน log)
+        """
+        _check_video_id(video_id)
+        if not duration_s:
+            raise SponsorBlockError("duration unknown")
+        from yt_dlp.postprocessor.sponsorblock import SponsorBlockPP
+
+        try:
+            with self._ydl({**_PROBE_OPTS, "extractor_retries": _SPONSORBLOCK_RETRIES}) as ydl:
+                pp = SponsorBlockPP(ydl, list(categories))
+                _, info = pp.run({"id": video_id, "extractor_key": "Youtube", "duration": duration_s})
+        except Exception as exc:
+            raise SponsorBlockError(type(exc).__name__) from exc
+        return _sponsor_from_chapters(info.get("sponsorblock_chapters"), categories)
+
     def download(
         self,
         video_id: str,
@@ -685,7 +720,7 @@ class YtDlpExtractor:
 
 
 class FakeExtractor:
-    """อ่านจาก fixtures_root: probe/<id>.json, playlist/<id>.json, storyboard/<ชื่อไฟล์>
+    """อ่านจาก fixtures_root: probe/<id>.json, playlist/<id>.json, storyboard/<ชื่อไฟล์>, sponsorblock/<id>.json
 
     ใช้กฎ id เดียวกับ YtDlpExtractor (ผิดรูปแบบ = E_INVALID_INPUT)
     หาไฟล์จากชื่อไฟล์ก่อน ถ้าไม่เจอจึงหาไฟล์ที่ฟิลด์ "id" ตรงกัน (เช่น live_upcoming.json มี id UPCOMINGLV1)
@@ -887,6 +922,21 @@ class FakeExtractor:
             raise YtError(str(doc["error"]), f"fake: คอมเมนต์ของ {video_id} ตั้งให้พลาด")
         comment = doc.get("comment")
         return dict(comment) if isinstance(comment, dict) else None
+
+    def sponsor_segments(
+        self, video_id: str, categories: Sequence[str], duration_s: float | None
+    ) -> list[SponsorSegment]:
+        """sponsorblock/<id>.json: {"segments": [[startMs, endMs, หมวด], ...]} | {"error": ...} ไม่มีไฟล์ = []"""
+        self.calls.append(("sponsor_segments", video_id))
+        _check_video_id(video_id)
+        path = self.root / "sponsorblock" / f"{video_id}.json"
+        if not path.is_file():
+            return []
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        if doc.get("error"):
+            raise SponsorBlockError(f"fake: {doc['error']}")
+        wanted = set(categories)
+        return sorted((int(s), int(e), str(c)) for s, e, c in doc.get("segments") or [] if c in wanted)
 
     def _parse_repeat(self, raw: str | None, ext: str, error: YtError) -> int | None:
         if raw is None:

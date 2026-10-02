@@ -49,6 +49,11 @@ C14 = {
             "probeAs": BBB, "title": "คลิปที่ยูทูปไม่ส่งไฟล์", "steps": 6, "stepMs": 120,
             "failAtStep": 0, "error": "E_YT_REFUSED", "failTimes": 99,
         },
+        "RANGECLIP01": {"probeAs": BBB, "title": "คลิปช่วงเวลา"},
+        "ADSCUTCLIP1": {"probeAs": BBB, "title": "คลิปมีช่วงโฆษณา"},
+        "ADSNODATA01": {"probeAs": BBB, "title": "คลิปไม่มีข้อมูลโฆษณา"},
+        "ADSOFFLINE1": {"probeAs": BBB, "title": "คลิปที่ติดต่อ SponsorBlock ไม่ได้"},
+        "CHAPTERS001": {"probeAs": "jNQXAC9IVRw", "title": "คลิปมี 3 chapter"},
     },
 }
 

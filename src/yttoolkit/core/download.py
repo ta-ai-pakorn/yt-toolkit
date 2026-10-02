@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -44,6 +44,23 @@ class DownloadResult:
     path: Path  # ไฟล์สื่อใน workdir
     info: dict  # info ของ yt-dlp (sanitize แล้ว) จากการดึงข้อมูลรอบนี้
     choice: DownloadChoice
+
+
+SponsorSegment = tuple[int, int, str]  # (startMs, endMs, หมวด) บนเส้นเวลาของคลิป
+
+
+class SponsorBlockError(Exception):
+    """ติดต่อ SponsorBlock ไม่ได้หรือคำตอบใช้ไม่ได้ ไม่ใช่ YtError โดยตั้งใจ:
+    ห้ามทำให้คิวลองใหม่ (E_NETWORK) หรือพักคิว (E_BOT_CHECK) งานยังได้คลิปเต็มพร้อมโน้ต"""
+
+
+@runtime_checkable
+class SponsorSource(Protocol):
+    def sponsor_segments(
+        self, video_id: str, categories: Sequence[str], duration_s: float | None
+    ) -> list[SponsorSegment]:
+        """ช่วงที่ผู้ชมมาร์กไว้ตามหมวดที่เลือก (ไม่มีข้อมูล = []) ติดต่อไม่ได้ = SponsorBlockError"""
+        ...
 
 
 @runtime_checkable

@@ -7,6 +7,11 @@
     "SLOWDOWNLD4": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปโหลดช้า 4", "steps": 40, "stepMs": 250},
     "BOTCHECKDL1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปติดบอท", "steps": 6, "stepMs": 120, "failAtStep": 2, "error": "E_BOT_CHECK", "failTimes": 1},
     "NETRETRYDL1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปเน็ตหลุด", "steps": 6, "stepMs": 120, "failAtStep": 1, "error": "E_NETWORK", "failTimes": 1},
-    "REFUSEDDL01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปที่ยูทูปไม่ส่งไฟล์", "steps": 6, "stepMs": 120, "failAtStep": 0, "error": "E_YT_REFUSED", "failTimes": 99}
+    "REFUSEDDL01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปที่ยูทูปไม่ส่งไฟล์", "steps": 6, "stepMs": 120, "failAtStep": 0, "error": "E_YT_REFUSED", "failTimes": 99},
+    "RANGECLIP01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปช่วงเวลา"},
+    "ADSCUTCLIP1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปมีช่วงโฆษณา"},
+    "ADSNODATA01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปไม่มีข้อมูลโฆษณา"},
+    "ADSOFFLINE1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปที่ติดต่อ SponsorBlock ไม่ได้"},
+    "CHAPTERS001": {"probeAs": "jNQXAC9IVRw", "title": "คลิปมี 3 chapter"}
   }
 }
