@@ -895,6 +895,41 @@ def test_pinned_failure_never_fails_the_note_job(env, error):
     assert result.notes == ()
 
 
+@pytest.mark.parametrize("params", [{"trackId": "a.th-orig"}, {}, {"trackId": "o.xx"}], ids=["track", "default", "gone"])
+def test_pinned_bot_check_brakes_the_queue_once_and_still_writes_the_note(env, params):
+    """I-3: โน้ตยังเสร็จ (ไม่มีหัวข้อคอมเมนต์) แต่คิวต้องเบรกฉุกเฉินหนึ่งครั้ง งานโน้ตชุดใหญ่จะได้ไม่ยิงยูทูปต่อ"""
+    brakes: list[str] = []
+    pinned = PinnedRecorder(error=YtError("E_BOT_CHECK", "comments"))
+    deps = replace(env.deps, pinned=pinned, on_bot_check=lambda: brakes.append("brake"))
+    result, _ = env.run("note", THAI, params, deps=deps)
+
+    assert brakes == ["brake"]
+    assert output_path(result).is_file()
+    assert "คอมเมนต์ปักหมุด" not in output_path(result).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("error", [YtError("E_NETWORK", "x"), RuntimeError("boom")], ids=["network", "runtime"])
+def test_other_pinned_failures_do_not_brake(env, error):
+    brakes: list[str] = []
+    deps = replace(env.deps, pinned=PinnedRecorder(error=error), on_bot_check=lambda: brakes.append("brake"))
+    result, _ = env.run("note", THAI, {}, deps=deps)
+
+    assert brakes == []
+    assert output_path(result).is_file()
+
+
+def test_failing_brake_hook_does_not_fail_the_note_job(env, caplog):
+    def broken() -> None:
+        raise RuntimeError("queue gone")
+
+    deps = replace(env.deps, pinned=PinnedRecorder(error=YtError("E_BOT_CHECK", "x")), on_bot_check=broken)
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        result, _ = env.run("note", THAI, {}, deps=deps)
+
+    assert output_path(result).is_file()
+    assert "RuntimeError" in caplog.text
+
+
 def test_note_job_on_clip_without_subtitles_still_writes_the_note(env):
     result, _ = env.run("note", BBB, {}, deps=replace(env.deps, pinned=PinnedRecorder(None)))
 

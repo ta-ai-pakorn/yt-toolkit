@@ -67,6 +67,9 @@ class HandlerDeps:
     disk_free: Callable[[Path], int] = _default_disk_free
     # ตัวดึงคอมเมนต์ปักหมุดของงานโน้ต (PinnedCommentService.get ตัวเดียวกับ API) None = โน้ตไม่มีหัวข้อนี้
     pinned: Callable[[str], dict | None] | None = None
+    # เบรกฉุกเฉินของคิว (QueueRunner.brake) สำหรับ E_BOT_CHECK ที่ตัวทำงานกลืนไว้เองไม่โยนต่อ
+    # (คอมเมนต์ปักหมุดของงานโน้ต) open_services ต่อให้หลังสร้างคิว None = ไม่เบรก
+    on_bot_check: Callable[[], None] | None = None
 
 
 # ---------- ตัวช่วย ----------
@@ -400,15 +403,24 @@ def _subtitle(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
 
 def _pinned_getter(deps: HandlerDeps, ctx: JobContext) -> Callable[[str], dict | None] | None:
     """ตัวดึงคอมเมนต์ปักหมุดที่ไม่ทำให้งานโน้ตล้ม: YtError ให้ SubtitleService.note จัดการ (ไม่ใส่หัวข้อ)
-    พังแบบอื่น (ไม่คาดคิด) = ไม่มีคอมเมนต์ปักหมุด บันทึกแค่ชื่อชนิด error"""
+    พังแบบอื่น (ไม่คาดคิด) = ไม่มีคอมเมนต์ปักหมุด บันทึกแค่ชื่อชนิด error
+
+    E_BOT_CHECK: โน้ตยังเขียนต่อ แต่ต้องพักคิว (deps.on_bot_check) หนึ่งครั้งต่องาน เหมือนเจอ E_BOT_CHECK
+    จากงานอื่น ไม่งั้นงานโน้ตชุดใหญ่จะยิงยูทูปต่อทั้งที่ถูกขอยืนยันว่าไม่ใช่บอทอยู่
+    """
     pinned = deps.pinned
     if pinned is None:
         return None
+    braked = False
 
     def get(video_id: str) -> dict | None:
+        nonlocal braked
         try:
             return pinned(video_id)
-        except YtError:
+        except YtError as exc:
+            if exc.code == "E_BOT_CHECK" and not braked:
+                braked = True
+                _brake(deps, ctx)
             raise
         except Exception as exc:
             log.warning("งาน %s ดึงคอมเมนต์ปักหมุดไม่ได้ (%s) โน้ตไม่มีหัวข้อนี้", ctx.job_id, type(exc).__name__)
@@ -417,13 +429,30 @@ def _pinned_getter(deps: HandlerDeps, ctx: JobContext) -> Callable[[str], dict |
     return get
 
 
-def _build_note(deps: HandlerDeps, ctx: JobContext, video_id: str, track_id: str | None) -> NoteExport:
+def _brake(deps: HandlerDeps, ctx: JobContext) -> None:
+    """แจ้งคิวให้เบรกฉุกเฉิน พลาดแค่บันทึก log (งานต้องเสร็จตามปกติ)"""
+    if deps.on_bot_check is None:
+        return
+    log.warning("งาน %s: ยูทูปขอยืนยันว่าไม่ใช่บอทตอนดึงคอมเมนต์ปักหมุด พักคิว", ctx.job_id)
+    try:
+        deps.on_bot_check()
+    except Exception as exc:
+        log.warning("งาน %s พักคิวไม่สำเร็จ (%s)", ctx.job_id, type(exc).__name__)
+
+
+def _build_note(
+    deps: HandlerDeps,
+    ctx: JobContext,
+    video_id: str,
+    track_id: str | None,
+    pinned: Callable[[str], dict | None] | None,
+) -> NoteExport:
     """SubtitleService.note แบบเดียวกับ GET /videos/{id}/note (คอมเมนต์ปักหมุดพลาด = ไม่มีหัวข้อ งานไม่ล้ม)
 
     เซสชันผู้ชมยังไม่พร้อม (ซับแปล) = รอแล้วลองอีกครั้งเดียว (เหมือนงานซับ)
     แทร็กที่เลือกหายไปจากคลิปแล้ว (E_NO_SUBTITLES) = ใช้แทร็กที่เลือกให้เอง โน้ตยังมีข้อมูลคลิปครบ
+    pinned = ตัวดึงจาก _pinned_getter (ตัวเดียวทั้งงาน จึงเบรกคิวไม่เกินหนึ่งครั้งต่องาน)
     """
-    pinned = _pinned_getter(deps, ctx)
     try:
         try:
             return deps.subtitles.note(video_id, track_id, pinned=pinned)
@@ -436,7 +465,7 @@ def _build_note(deps: HandlerDeps, ctx: JobContext, video_id: str, track_id: str
         if exc.code != "E_NO_SUBTITLES" or track_id is None:
             raise
         log.info("งาน %s ไม่มีแทร็กซับที่เลือกแล้ว ใช้แทร็กที่เลือกให้เองแทน", ctx.job_id)
-    return _build_note(deps, ctx, video_id, None)
+    return _build_note(deps, ctx, video_id, None, pinned)
 
 
 def _note(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
@@ -446,7 +475,7 @@ def _note(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     clip = _start(deps, job, ctx, report)
     raw_track = job.params.get("trackId")
     track_id = str(raw_track) if raw_track else None
-    result = _build_note(deps, ctx, clip.video_id, track_id)
+    result = _build_note(deps, ctx, clip.video_id, track_id, _pinned_getter(deps, ctx))
     ctx.check_cancelled()
     report.stage("writing")
     out = Path(ctx.workdir) / "out.md"

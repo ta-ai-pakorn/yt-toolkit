@@ -353,6 +353,9 @@ def test_move_across_devices_failed_copy_cleans_up(tmp_path, monkeypatch):
         ("nul.txt", "_nul.txt"),
         ("Com1", "_Com1"),
         ("CONIN$", "_CONIN$"),
+        ("COM¹", "_COM¹"),
+        ("lpt³.txt", "_lpt³.txt"),
+        ("COM0", "COM0"),  # Windows สร้างได้ ไม่ใช่ชื่อสงวน
         ("ชื่อ...", "ชื่อ"),
         ("ชื่อ .  ", "ชื่อ"),
         ('ทดสอบ: "A" <1>?*|', "ทดสอบ A 1"),
@@ -364,6 +367,15 @@ def test_group_folder_name_is_one_safe_component(raw, expected):
     assert name == expected
     assert not set('\\/:*?"<>|') & set(name)
     assert name not in (".", "..") and not name.endswith((".", " "))
+
+
+@pytest.mark.parametrize("dev", ["COM", "LPT", "com", "Lpt"])
+@pytest.mark.parametrize("sup", ["¹", "²", "³"])
+def test_superscript_device_names_are_reserved_for_titles_too(tmp_path, dev, sup):
+    name = f"{dev}{sup}"
+    assert files.safe_component(name, ID) == f"_{name}"
+    p = files.plan_output(tmp_path, name, ID, "", "mp4")
+    assert p.parent.name == f"_{name} [{ID}]" and p.name == f"_{name}.mp4"
 
 
 def test_plan_output_with_group_layout(tmp_path):

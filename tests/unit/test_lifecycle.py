@@ -22,6 +22,7 @@ from yttoolkit.core.media import FakeMediaTools, FfmpegTools
 from yttoolkit.core.queue import QueueRunner
 from yttoolkit.core.settings import SettingsStore
 from yttoolkit.core.videos import VideoService
+from yttoolkit.core.yterrors import YtError
 from yttoolkit.runstate import RunInfo
 
 
@@ -1252,6 +1253,28 @@ def test_open_services_note_job_shares_the_pinned_service(paths, fake_platform, 
         services.db.close()
 
 
+def test_open_services_pinned_bot_check_in_a_note_job_pauses_the_queue(paths, fake_platform, tmp_path, monkeypatch):
+    """I-3: งานโน้ตเสร็จ (ไม่มีคอมเมนต์ปักหมุด) แต่คิวพักด้วยเบรกฉุกเฉินเหมือน E_BOT_CHECK จากงานอื่น"""
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+
+        def bot_check(video_id: str):
+            raise YtError("E_BOT_CHECK", "comments")
+
+        monkeypatch.setattr(services.extractor, "pinned_comment", bot_check)
+        assert services.queue.pause_state() is None
+        (job,) = services.queue.store.add([NewJob("88o5Sk8_m1Y", "note", {})])
+        ctx = _NoteCtx(job.id, tmp_path / "note-work", tmp_path / "note-out")
+        result = services.queue._handlers["note"](job, ctx)
+
+        (out,) = result.outputs
+        assert "คอมเมนต์ปักหมุด" not in (Path(out.root) / out.rel).read_text(encoding="utf-8")
+        pause = services.queue.pause_state()
+        assert pause is not None and pause.reason == "E_BOT_CHECK"
+    finally:
+        services.db.close()
+
+
 def test_run_app_passes_the_shared_pinned_service_to_the_api(paths, fake_platform, monkeypatch):
     code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, fake=True)
     assert code == 0
@@ -1617,6 +1640,31 @@ def test_sweep_finds_leftovers_inside_group_folders(paths):
         assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 3
         assert sorted(p.name for p in grouped.iterdir()) == [f"{TITLE}.note.md"]
         assert (plain / f"{TITLE}.mp4").exists()
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize(
+    ("raw", "folder_name"),
+    [("..", files.GROUP_FALLBACK), (" . ", files.GROUP_FALLBACK), ("CON", "_CON"), ("COM¹", "_COM¹")],
+)
+def test_sweep_uses_the_sanitised_group_name(paths, raw, folder_name):
+    """กลุ่มที่ทำความสะอาดแล้วกลายเป็นชื่อสำรองหรือ "_CON": ล้างไฟล์ค้างต้องหาโฟลเดอร์เดียวกับที่ตัวทำงานใช้"""
+    db = Database(paths.db)
+    db.migrate()
+    store = JobStore(db)
+    root = (paths.data_root / "output").resolve()
+    try:
+        clip = files.plan_output(root, TITLE, "aqz-KE-bpKQ", "", "mp4", raw).parent
+        assert clip.parent == root / folder_name
+        (job,) = store.add([NewJob("aqz-KE-bpKQ", "frames_zip", {"folder": raw}, TITLE)])
+        clip.mkdir(parents=True)
+        (clip / f"{TITLE} - frames.zip").write_bytes(b"")
+        store.transition(job.id, "running")
+        store.interrupt_running("หยุดกลางคัน")
+
+        assert lifecycle.sweep_interrupted_outputs(store, root, [job.id]) == 1
+        assert list(clip.iterdir()) == []
     finally:
         db.close()
 

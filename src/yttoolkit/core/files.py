@@ -35,6 +35,8 @@ _FORBIDDEN = frozenset('\\/:*?"<>|')
 _RESERVED = frozenset({
     "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
     *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10)),
+    # Windows ถือเลขยกกำลัง ¹ ² ³ เป็นเลขพอร์ตด้วย (mkdir "COM¹" ไม่ได้)
+    *(f"{dev}{sup}" for dev in ("COM", "LPT") for sup in "¹²³"),
 })  # fmt: skip
 _WHITESPACE = re.compile(r"\s+")
 _BANGKOK = timezone(timedelta(hours=7))

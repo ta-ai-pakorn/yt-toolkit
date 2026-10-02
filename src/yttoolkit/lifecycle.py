@@ -309,6 +309,8 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
             redact=redact_home,
             **delays,
         )
+        # ตัวทำงานอ่าน deps ตอนรันงาน: E_BOT_CHECK ที่งานโน้ตกลืนไว้ (คอมเมนต์ปักหมุด) ยังพักคิวได้
+        deps.on_bot_check = queue.brake
     except BaseException:
         db.close()
         raise

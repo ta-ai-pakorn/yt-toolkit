@@ -8,7 +8,7 @@ from urllib.parse import quote
 import pytest
 
 from yttoolkit.api.errors import redact_home
-from yttoolkit.api.jobs import ITEMS_MAX
+from yttoolkit.api.jobs import ITEMS_MAX, ORDER_IDS_MAX
 from yttoolkit.core.db import Database
 from yttoolkit.core.events import Event, EventBus
 from yttoolkit.core.jobs import JobResult, JobStore, NewJob, OutputFile
@@ -185,6 +185,18 @@ def test_post_accepts_items_max(env):
     resp = client.post("/api/jobs", json={"items": [VALID_ITEMS[4]] * ITEMS_MAX}, headers=AUTH)
     assert resp.status_code == 200
     assert env.store.pending_count() == ITEMS_MAX
+
+
+def test_full_batches_do_not_overflow_a_listener(env):
+    """job.created ข่าวละงาน: ผู้ฟังที่ยังไม่ได้อ่าน (สตรีมข่าวของหน้าเว็บ) ต้องไม่หลุดแม้มีสองชุดเต็มติดกัน"""
+    assert EventBus.MAX_PENDING >= 4 * ITEMS_MAX
+    client = env.client()
+    for _ in range(2):
+        resp = client.post("/api/jobs", json={"items": [VALID_ITEMS[4]] * ITEMS_MAX}, headers=AUTH)
+        assert resp.status_code == 200
+    assert env.bus.subscriber_count == 1  # ยังไม่ถูกปิดกล่องเพราะค้างข่าวเกิน
+    created = [e for e in env.events() if e.name == "job.created"]
+    assert len(created) == 2 * ITEMS_MAX
 
 
 # ---------- params.folder (โฟลเดอร์กลุ่มของ W3) และงานโน้ต ----------
@@ -406,6 +418,24 @@ def test_put_order_reorders(env):
     ids = [j["id"] for j in client.get("/api/jobs", params={"status": "queued"}).json()["jobs"]]
     assert ids == [c.id, b.id, a.id]
     assert client.put("/api/jobs/order", json={"ids": []}, headers=AUTH).status_code == 422
+
+
+def test_put_order_accepts_every_queued_id_of_several_full_batches(env):
+    """หน้าเว็บส่ง id queued ทั้งหมดทุกครั้งที่ลาก: สองชุดเต็มจาก W3 (2 x ITEMS_MAX) ต้องเรียงได้"""
+    assert ORDER_IDS_MAX >= 10 * ITEMS_MAX
+    jobs = env.add(2 * ITEMS_MAX)
+    ids = [job.id for job in jobs]
+    moved = [ids[-1], *ids[:-1]]  # ลากงานสุดท้ายขึ้นหัวคิว
+    client = env.client()
+    resp = client.put("/api/jobs/order", json={"ids": moved}, headers=AUTH)
+    assert resp.status_code == 200
+    assert [job.id for job in env.store.queued()] == moved
+
+
+def test_put_order_rejects_more_than_the_cap(env):
+    client = env.client()
+    ids = [MISSING_ID] * (ORDER_IDS_MAX + 1)
+    assert client.put("/api/jobs/order", json={"ids": ids}, headers=AUTH).status_code == 422
 
 
 # ---------- outputs ----------

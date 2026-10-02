@@ -28,7 +28,9 @@ if TYPE_CHECKING:
     from ..core.queue import QueueRunner
 
 ITEMS_MAX = 1200  # 200 คลิป x 6 งาน (W3: หลัก + srt + txt + โน้ต + ภาพรวมเฟรม + zip)
-ORDER_IDS_MAX = 1000
+# PUT /jobs/order: หน้าเว็บส่ง id ของงาน queued "ทั้งหมด" ทุกครั้งที่ลากเรียง จึงต้องรับได้หลายชุดใหญ่ที่ค้างคิว
+# (ชุดเดียวจาก W3 ก็ได้ ITEMS_MAX งาน) เรียงใหม่เป็น O(n) ในหนึ่ง transaction
+ORDER_IDS_MAX = 10 * ITEMS_MAX
 LIST_LIMIT_DEFAULT = 50
 LIST_LIMIT_MAX = 200
 TITLE_MAX_CHARS = 500
