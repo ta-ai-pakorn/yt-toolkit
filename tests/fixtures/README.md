@@ -8,7 +8,7 @@
 ผล `extract_info(download=False)` ที่ตัดให้เหลือเฉพาะฟิลด์ที่แอพอ่าน
 
 - `aqz-KE-bpKQ.json`: ข้อมูลจริงของ Big Buck Bunny (635 วินาที, storyboard sb0..sb3)
-- `jNQXAC9IVRw.json`: ข้อมูลจริงของ "Me at the zoo" (19 วินาที, ไม่มี storyboard, มี chapters)
+- `jNQXAC9IVRw.json`: ข้อมูลจริงของ "Me at the zoo" (19 วินาที, ไม่มี storyboard) ยกเว้น `chapters` 3 รายการ (Intro / The cool thing / End) ที่**เขียนเองเป็นข้อมูลทดสอบ** คลิปจริงไม่มี chapter
 - `live_upcoming.json`: ข้อมูลสังเคราะห์ `live_status: is_upcoming` `FakeExtractor` หาไฟล์นี้จาก id `UPCOMINGLV1` ในไฟล์ (id ต้องผ่านกฎ 11 ตัวเดียวกับของจริง)
 
 ฟิลด์ที่เก็บ:
