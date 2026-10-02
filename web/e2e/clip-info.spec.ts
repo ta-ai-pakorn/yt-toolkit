@@ -3,10 +3,11 @@ import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page, type Route } from "@playwright/test"
 
 import { installFakeYT } from "./fake-yt"
+import { mockEnqueue } from "./queue-helpers"
 
 // owner round 2-4 (หน้าเว็บ): ช่องตัวเลข · แท็บข้อมูลคลิป (คำอธิบาย chapter ช่วงที่คนดูซ้ำ คอมเมนต์ปักหมุด แท็ก)
 // · บันทึกเป็นโน้ต · เปิดในยูทูป · ภาพปกขนาดใหญ่ · หัวคลิปแบบกระชับ (สูงคงที่)
-// ข้อมูลใหม่ของ backend (stats, tags, categories, mostReplayed, /pinned-comment, /note) จำลองด้วย page.route
+// ข้อมูลใหม่ของ backend (stats, tags, categories, mostReplayed, /pinned-comment) จำลองด้วย page.route · ส่งงานโน้ตเข้าคิว = mockEnqueue
 // ข้อมูลส่วนอื่นมาจาก backend โหมด fake ตามปกติ
 
 const BBB = "aqz-KE-bpKQ"
@@ -431,108 +432,83 @@ test.describe("แท็บข้อมูลคลิป: คอมเมนต
   })
 })
 
+// owner round 2: ปุ่มโน้ตส่งงาน "note" เข้าคิว (ไม่โหลดผ่านเบราว์เซอร์แล้ว) · spec นี้อยู่ในโปรเจกต์ chromium จึง mock POST /api/jobs เสมอ
+// ไฟล์โน้ตจริงจาก backend ปลอมตรวจใน queue-files.spec.ts (โปรเจกต์ queue)
 test.describe("บันทึกเป็นโน้ต (.md)", () => {
-  const NOTE = "---\ntitle: \"ทดสอบ\"\nsource: YT Toolkit\n---\n\n# ทดสอบ\n"
-
-  /** จำลอง /note: จดคำขอ แล้วตอบไฟล์ .md พร้อมชื่อไฟล์ภาษาไทย (filename*) */
-  async function mockNote(page: Page, videoId: string) {
-    const requests: URL[] = []
-    await page.route(`**/api/videos/${videoId}/note?*`, (route) => {
-      requests.push(new URL(route.request().url()))
-      return route.fulfill({
-        body: NOTE,
-        headers: {
-          "Content-Type": "text/markdown; charset=utf-8",
-          "Content-Disposition": `attachment; filename="note.md"; filename*=UTF-8''${encodeURIComponent("คลิปทดสอบ.note.md")}`,
-        },
-      })
+  /** นับคำขอ GET /note เดิม (หน้าเว็บต้องไม่เรียกแล้ว) และไฟล์ที่เบราว์เซอร์โหลด */
+  function watchOldPath(page: Page) {
+    const seen = { note: 0, downloads: 0 }
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.endsWith("/note")) seen.note += 1
     })
-    return requests
+    page.on("download", () => (seen.downloads += 1))
+    return seen
   }
 
-  test("ปุ่มรองในหัวคลิป (ไม่ใช่ปุ่มหลักสีเหลือง) · ชี้แล้วมีคำอธิบายว่าใช้กับ Obsidian หรือแอพจดโน้ต", async ({ page }) => {
+  test("ปุ่มรองในหัวคลิป (ไม่ใช่ปุ่มหลักสีเหลือง) · ชี้แล้วมีคำอธิบายว่าส่งเข้าคิวและใช้กับ Obsidian หรือแอพจดโน้ต", async ({ page }) => {
     await page.goto(`/v/${THAI}`)
     const button = page.getByRole("button", { name: NOTE_BUTTON })
     await expect(button).toBeVisible()
     await expect(button).toHaveClass(/bg-secondary/)
     await expect(button).not.toHaveClass(/bg-primary/)
     await button.hover()
-    await expect(page.getByText(/Obsidian หรือแอพจดโน้ตอื่น/)).toBeVisible()
+    await expect(page.getByText(/ส่งเข้าคิวแล้วไฟล์จะอยู่ในโฟลเดอร์ของคลิป เปิดใน Obsidian หรือแอพจดโน้ตอื่นได้/)).toBeVisible()
     // หน้า W2 ยังไม่มีปุ่มหลักสีเหลือง
     await expect(page.locator('[data-slot="button"].bg-primary')).toHaveCount(0)
   })
 
-  test("โหลดโน้ตด้วยแทร็กที่ใช้อยู่และความยาวซับกลาง (ค่าเริ่มต้น) · ได้ไฟล์ชื่อตามที่ backend ส่ง เนื้อหาตรงตัว", async ({ page }) => {
-    const requests = await mockNote(page, THAI)
+  test("ส่งงานโน้ตเข้าคิวด้วยแทร็กที่ใช้อยู่ · toast 'เพิ่มเข้าคิวแล้ว' · ไม่มีไฟล์โหลดผ่านเบราว์เซอร์ ไม่เรียก /note", async ({ page }) => {
+    const queue = await mockEnqueue(page)
+    const seen = watchOldPath(page)
     await page.goto(`/v/${THAI}`)
     // รอป้ายแทร็ก = รายการแทร็กโหลดเสร็จแล้ว
     await expect(page.getByText("ซับ: ไทย (อัตโนมัติ)")).toBeVisible()
-    const downloading = page.waitForEvent("download")
     await page.getByRole("button", { name: NOTE_BUTTON }).click()
-    const download = await downloading
-    expect(download.suggestedFilename()).toBe("คลิปทดสอบ.note.md")
-    const bytes = await download.createReadStream().then(async (stream) => {
-      const chunks: Buffer[] = []
-      for await (const chunk of stream) chunks.push(chunk as Buffer)
-      return Buffer.concat(chunks)
-    })
-    expect(bytes.toString("utf8")).toBe(NOTE)
-    expect(requests).toHaveLength(1)
-    expect(requests[0].search).toBe("?trackId=a.th-orig&maxChars=25&lines=1&minMs=1200&maxMs=5000&mode=chars")
-  })
-
-  test("เลือก 'ทีละคำ' ที่แท็บซับ → โน้ตใช้ค่าเดียวกับไฟล์ซับ (mode=tokens, tokensPerCue=1)", async ({ page }) => {
-    const requests = await mockNote(page, THAI)
-    await page.goto(`/v/${THAI}?tab=subs`)
-    const word = page.getByRole("button", { name: "ทีละคำ", exact: true })
-    await word.click()
-    await expect(word).toHaveAttribute("aria-pressed", "true")
-    const downloading = page.waitForEvent("download")
-    await page.getByRole("button", { name: NOTE_BUTTON }).click()
-    await downloading
-    expect(requests[0].search).toBe(
-      "?trackId=a.th-orig&maxChars=15&lines=1&minMs=800&maxMs=3000&mode=tokens&tokensPerCue=1",
-    )
+    await expect.poll(() => queue.bodies.length).toBe(1)
+    await expect(page.getByText("เพิ่มเข้าคิวแล้ว").first()).toBeVisible()
+    // งานคลิปเดียว: ไม่มี folder (ไฟล์อยู่ในโฟลเดอร์ของคลิปตามเดิม) และไม่มีความยาวซับ
+    expect(queue.bodies[0]).toEqual([{ videoId: THAI, kind: "note", params: { trackId: "a.th-orig" } }])
+    await expect(page.getByRole("button", { name: NOTE_BUTTON })).toBeEnabled()
+    expect(seen).toEqual({ note: 0, downloads: 0 })
   })
 
   test("คลิปที่ไม่มีซับ: ไม่ส่ง trackId (backend ข้ามส่วนทรานสคริปต์เอง)", async ({ page }) => {
-    const requests = await mockNote(page, BBB)
+    const queue = await mockEnqueue(page)
     await page.goto(`/v/${BBB}?tab=subs`)
     await expect(page.getByText("คลิปนี้ไม่มีซับ")).toBeVisible()
-    const downloading = page.waitForEvent("download")
     await page.getByRole("button", { name: NOTE_BUTTON }).click()
-    await downloading
-    expect(requests[0].searchParams.has("trackId")).toBe(false)
-    expect(requests[0].searchParams.get("mode")).toBe("chars")
+    await expect.poll(() => queue.bodies.length).toBe(1)
+    expect(queue.bodies[0]).toEqual([{ videoId: BBB, kind: "note", params: {} }])
   })
 
-  test("โหลดไม่สำเร็จ: toast ข้อความไทยจาก envelope ไม่ได้ไฟล์ JSON · ระหว่างรอขึ้น 'กำลังเตรียมโน้ต…' และกดซ้ำไม่ได้", async ({
+  test("ระหว่างส่งมีวงหมุนและกดซ้ำไม่ได้ (ส่งงานเดียว) · ส่งไม่สำเร็จ = toast ข้อความไทยจาก backend แล้วปุ่มกลับมากดได้", async ({
     page,
   }) => {
     let release = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
     let calls = 0
-    await page.route(`**/api/videos/${THAI}/note?*`, async (route) => {
+    await page.route("**/api/jobs", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback()
       calls += 1
       await gate
       await route.fulfill({
-        status: 503,
-        json: envelope("E_TRANSLATION_BLOCKED", "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน"),
+        status: 500,
+        json: envelope("E_INTERNAL", "ส่งเข้าคิวไม่ได้ในตอนนี้"),
       })
     })
-    let downloads = 0
-    page.on("download", () => (downloads += 1))
-    await page.goto(`/v/${THAI}?track=t.en`)
+    const seen = watchOldPath(page)
+    await page.goto(`/v/${THAI}`)
+    await expect(page.getByText("ซับ: ไทย (อัตโนมัติ)")).toBeVisible()
     const button = page.getByRole("button", { name: NOTE_BUTTON })
     await button.click()
-    await expect(page.getByText("กำลังเตรียมโน้ต…")).toBeVisible()
+    await expect(button.locator('[data-slot="spinner"]')).toBeVisible()
     await expect(button).toHaveAttribute("aria-disabled", "true")
     await button.click({ force: true })
     release()
-    await expect(page.getByText("ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน")).toBeVisible()
+    await expect(page.getByText("ส่งเข้าคิวไม่ได้ในตอนนี้")).toBeVisible()
     await expect(button).not.toHaveAttribute("aria-disabled", "true")
     expect(calls).toBe(1)
-    expect(downloads).toBe(0)
+    expect(seen).toEqual({ note: 0, downloads: 0 })
   })
 })
 
@@ -928,7 +904,8 @@ async function seriousViolations(page: Page) {
     .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))
 }
 
-// review M-8: รอยต่อกับ backend ปลอมจริง (ไม่ mock /pinned-comment และ /note) ล็อกว่ารูปแบบคำตอบตรงกับที่หน้าเว็บอ่าน
+// review M-8: รอยต่อกับ backend ปลอมจริง (ไม่ mock /pinned-comment) ล็อกว่ารูปแบบคำตอบตรงกับที่หน้าเว็บอ่าน
+// (ไฟล์โน้ตจริงย้ายไปตรวจผ่านคิวใน queue-files.spec.ts: owner round 2 หน้าเว็บไม่เรียก /note แล้ว)
 test.describe("รอยต่อกับ backend (ไม่ mock)", () => {
   const OWNER = "OWNERTHSUB1"
 
@@ -964,26 +941,5 @@ test.describe("รอยต่อกับ backend (ไม่ mock)", () => {
     await expect(badge).toHaveAttribute("data-author", "viewer")
     await expect(badge).toHaveText("ผู้เขียน: ผู้ชม")
     await expect(pinnedRegion(page).getByRole("button", { name: "คัดลอกคอมเมนต์ปักหมุด" })).toBeVisible()
-  })
-
-  test("โน้ต: backend ปลอมส่งไฟล์ .md (LF) ชื่อไทย มี front matter แท็กแบบ Obsidian และทรานสคริปต์", async ({ page }) => {
-    await page.goto(`/v/${THAI}`)
-    await expect(page.getByText("ซับ: ไทย (อัตโนมัติ)")).toBeVisible()
-    const downloading = page.waitForEvent("download")
-    await page.getByRole("button", { name: NOTE_BUTTON }).click()
-    const download = await downloading
-    expect(download.suggestedFilename()).toBe("Thai Listening Practice EP.1 Beginner.note.md")
-    const text = await download.createReadStream().then(async (stream) => {
-      const chunks: Buffer[] = []
-      for await (const chunk of stream) chunks.push(chunk as Buffer)
-      return Buffer.concat(chunks).toString("utf8")
-    })
-    expect(text.startsWith('---\ntitle: "Thai Listening Practice | EP.1 | Beginner"\n')).toBe(true)
-    expect(text).not.toContain("\r")
-    expect(text).toContain("\nsource: YT Toolkit\n---\n")
-    expect(text).toContain("\n## ทรานสคริปต์\n")
-    const tags = text.match(/^tags: \[(.*)\]$/m)?.[1] ?? ""
-    // แท็กไม่มีช่องว่างข้างใน (Obsidian ใช้ไม่ได้) ทุกอันอยู่ในเครื่องหมายคำพูด
-    for (const tag of tags.split(", ").filter(Boolean)) expect(tag).toMatch(/^"[^\s"]+"$/)
   })
 })

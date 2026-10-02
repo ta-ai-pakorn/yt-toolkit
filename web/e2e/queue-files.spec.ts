@@ -5,7 +5,8 @@ import type { Job, JobKind } from "../src/lib/types"
 import { enqueue, waitForJob } from "./queue-helpers"
 
 // M4 งาน 16: ไฟล์ซับ ภาพรวมเฟรม และ .zip ผ่านคิวจริง (project "queue" backend ปลอมของตัวเอง)
-// ใช้คลิปของไฟล์นี้เท่านั้น (C14): 88o5Sk8_m1Y, OWNERTHSUB1 (ซับ) · aqz-KE-bpKQ (ภาพรวมเฟรมและ zip)
+// owner round 2: โน้ต .md ของปุ่ม "บันทึกเป็นโน้ต (.md)" เป็นงาน "note" ในคิวแล้ว (ย้ายเทสรอยต่อไฟล์โน้ตมาจาก clip-info.spec.ts)
+// ใช้คลิปของไฟล์นี้เท่านั้น (C14): 88o5Sk8_m1Y, OWNERTHSUB1 (ซับ โน้ต) · aqz-KE-bpKQ (ภาพรวมเฟรมและ zip)
 // ปุ่มในหน้าเว็บส่ง payload จริงเข้า backend จริง (ไม่มี mock) แล้วรอจนงานเสร็จและอ่านไฟล์ที่ได้
 
 const THAI = "88o5Sk8_m1Y"
@@ -53,8 +54,8 @@ test.describe("ไฟล์ซับ ภาพรวมเฟรม และ zi
     expect(bytes.toString("utf8").startsWith("1\r\n00:00:00,120 --> ")).toBe(true)
   })
 
-  test("ไฟล์โน้ต/ซับ .md ของคลิปที่มีซับเจ้าของคลิป (OWNERTHSUB1) เสร็จ และได้ไฟล์ .md", async ({ request }) => {
-    // payload เดียวกับที่ปุ่ม "โหลด .md" ส่ง (ความยาวซับกลาง) ส่งผ่าน API เพื่อไม่ต้องพึ่งการเลือกแทร็กเริ่มต้นของหน้านี้
+  test("ซับรูปแบบ .md (ผ่าน API) ของคลิปที่มีซับเจ้าของคลิป (OWNERTHSUB1) เสร็จ และได้ไฟล์ .md", async ({ request }) => {
+    // owner round 2: หน้าเว็บไม่มีปุ่ม "โหลด .md" ในแท็บซับแล้ว แต่ backend ยังรับ format "md" (ส่งตรงผ่าน API)
     const [queued] = await enqueue(request, [
       {
         videoId: OWNER,
@@ -75,6 +76,36 @@ test.describe("ไฟล์ซับ ภาพรวมเฟรม และ zi
     expect(text).toContain(`https://www.youtube.com/watch?v=${OWNER}`)
     expect(text).toContain("## [00:00]")
     expect(text.indexOf(`watch?v=${OWNER}`)).toBeLessThan(text.indexOf("## [00:00]"))
+  })
+
+  test("'บันทึกเป็นโน้ต (.md)' ส่งงาน note เข้าคิว → เสร็จ · ไฟล์ .note.md (LF) ในโฟลเดอร์ของคลิป มี front matter แท็กแบบ Obsidian และทรานสคริปต์", async ({
+    page,
+    request,
+  }) => {
+    await page.goto(`/v/${THAI}`)
+    // รอป้ายแทร็ก = รายการแทร็กโหลดเสร็จแล้ว (งานโน้ตใช้แทร็กที่ใช้อยู่)
+    await expect(page.getByText("ซับ: ไทย (อัตโนมัติ)")).toBeVisible()
+    let downloads = 0
+    page.on("download", () => (downloads += 1))
+    const posted = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/jobs" && response.request().method() === "POST",
+    )
+    await page.getByRole("button", { name: "บันทึกเป็นโน้ต (.md)" }).click()
+    const sent = (await posted).request().postDataJSON() as { items: { videoId: string; kind: string; params: object }[] }
+    expect(sent.items).toEqual([{ videoId: THAI, kind: "note", params: { trackId: "a.th-orig" } }])
+    await expect(page.getByText(ADDED).first()).toBeVisible()
+
+    const job = await finished(request, THAI, "note")
+    expect(job.outputs?.[0].name.endsWith(".note.md")).toBe(true)
+    const text = (await (await output(request, job)).body()).toString("utf8")
+    expect(text.startsWith('---\ntitle: "Thai Listening Practice | EP.1 | Beginner"\n')).toBe(true)
+    expect(text).not.toContain("\r")
+    expect(text).toContain("\nsource: YT Toolkit\n---\n")
+    expect(text).toContain("\n## ทรานสคริปต์\n")
+    const tags = text.match(/^tags: \[(.*)\]$/m)?.[1] ?? ""
+    // แท็กไม่มีช่องว่างข้างใน (Obsidian ใช้ไม่ได้) ทุกอันอยู่ในเครื่องหมายคำพูด
+    for (const tag of tags.split(", ").filter(Boolean)) expect(tag).toMatch(/^"[^\s"]+"$/)
+    expect(downloads).toBe(0)
   })
 
   test("'โหลดภาพรวมเฟรม' ส่งงานเข้าคิว → เสร็จ · ไฟล์เป็น image/jpeg", async ({ page, request }) => {

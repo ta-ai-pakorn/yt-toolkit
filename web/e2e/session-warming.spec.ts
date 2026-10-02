@@ -8,7 +8,7 @@ const TRACK = "t.en"
 const URL = `/v/${THAI}?tab=subs&track=${TRACK}`
 const BLOCKED = "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน"
 const USE_ORIGINAL = "ใช้ซับภาษาต้นฉบับ"
-const EXPORT_BUTTONS = ["โหลด .srt", "โหลด .txt", "โหลด .md", "คัดลอกข้อความ"]
+const EXPORT_BUTTONS = ["โหลด .srt", "โหลด .txt", "คัดลอกข้อความ"]
 const NOTE_BUTTON = "บันทึกเป็นโน้ต (.md)"
 const PREVIEW = "ตัวอย่าง 5 ซับแรก"
 

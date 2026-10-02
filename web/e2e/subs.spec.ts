@@ -179,7 +179,7 @@ test.describe("แท็บซับ", () => {
     await expect(trackValue(page)).toHaveText("ไทย (อัตโนมัติ)")
   })
 
-  test("'โหลด .srt/.txt/.md' ส่งงานเข้าคิว: payload ครบ (แทร็ก รูปแบบ ความยาวซับกลาง) + toast 'เพิ่มเข้าคิวแล้ว' · ไม่มีไฟล์โหลดผ่านเบราว์เซอร์", async ({
+  test("'โหลด .srt/.txt' ส่งงานเข้าคิว: payload ครบ (แทร็ก รูปแบบ ความยาวซับกลาง) + toast 'เพิ่มเข้าคิวแล้ว' · ไม่มีไฟล์โหลดผ่านเบราว์เซอร์ · ไม่มีปุ่ม 'โหลด .md' แล้ว", async ({
     page,
   }) => {
     const queue = await mockEnqueue(page)
@@ -187,7 +187,10 @@ test.describe("แท็บซับ", () => {
     page.on("download", () => (downloads += 1))
     await openSubs(page, THAI)
     const group = page.getByRole("group", { name: "โหลดซับ" })
-    for (const [index, format] of ["srt", "txt", "md"].entries()) {
+    // owner round 2: เหลือสองปุ่ม (โน้ต .md อยู่ที่ปุ่ม "บันทึกเป็นโน้ต (.md)" ของหัวคลิป)
+    await expect(group.getByRole("button")).toHaveText(["โหลด .srt", "โหลด .txt"])
+    await expect(page.getByRole("button", { name: "โหลด .md" })).toHaveCount(0)
+    for (const [index, format] of ["srt", "txt"].entries()) {
       await group.getByRole("button", { name: `โหลด .${format}` }).click()
       await expect.poll(() => queue.bodies.length).toBe(index + 1)
       await expect(page.getByText("เพิ่มเข้าคิวแล้ว").first()).toBeVisible()
@@ -195,7 +198,7 @@ test.describe("แท็บซับ", () => {
       await expect(group.getByRole("button", { name: `โหลด .${format}` })).toBeEnabled()
     }
     expect(queue.bodies.map((items) => items[0].params)).toEqual(
-      ["srt", "txt", "md"].map((format) => ({
+      ["srt", "txt"].map((format) => ({
         trackId: "a.th-orig",
         format,
         options: { maxChars: 25, lines: 1, minMs: 1200, maxMs: 5000, mode: "chars" },
@@ -258,7 +261,7 @@ test.describe("แท็บซับ", () => {
     await expect(page.getByText(NO_SUBS)).toBeVisible()
     await expect(trackSelect(page)).toBeVisible()
     // แทร็กที่ไม่มีข้อความ: โหลดไฟล์และคัดลอกไม่ได้
-    for (const name of ["โหลด .srt", "โหลด .txt", "โหลด .md", "คัดลอกข้อความ"]) {
+    for (const name of ["โหลด .srt", "โหลด .txt", "คัดลอกข้อความ"]) {
       await expect(page.getByRole("button", { name })).toBeDisabled()
     }
   })
@@ -332,7 +335,7 @@ test.describe("แท็บซับ", () => {
 
 const BLOCKED = "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน"
 const USE_ORIGINAL = "ใช้ซับภาษาต้นฉบับ"
-const EXPORT_BUTTONS = ["โหลด .srt", "โหลด .txt", "โหลด .md", "คัดลอกข้อความ"]
+const EXPORT_BUTTONS = ["โหลด .srt", "โหลด .txt", "คัดลอกข้อความ"]
 const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: true })
 const panel = (page: Page, name: string) => page.getByRole("tabpanel", { name, exact: true })
 
