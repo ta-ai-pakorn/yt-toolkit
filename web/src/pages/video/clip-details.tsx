@@ -289,8 +289,9 @@ export function ClipInfoPanel({ video }: { video: VideoInfo | undefined }) {
   const empty = !has.description && !has.chapters && !has.replayed && !has.pinned && !has.tags
   const emptyNote = <p className="py-2 text-sm text-muted-foreground">{t.info.empty}</p>
 
-  // เครดิตอยู่บนสุดของคอลัมน์ซ้าย (เหนือคำอธิบาย) · ไม่มีส่วนอื่นเลย = "คลิปนี้ไม่มีข้อมูลเพิ่มเติม" อยู่ใต้เครดิต
+  // owner (M4 preview): เครดิตอยู่ใต้คำอธิบายในคอลัมน์ซ้าย · ไม่มีส่วนอื่นเลย = "คลิปนี้ไม่มีข้อมูลเพิ่มเติม" อยู่ใต้เครดิต
   const left: ReactNode[] = []
+  if (has.description) left.push(<DescriptionSection key="description" description={video.description ?? ""} />)
   if (has.credit) {
     left.push(
       <CreditSection key="credit" video={video}>
@@ -298,7 +299,6 @@ export function ClipInfoPanel({ video }: { video: VideoInfo | undefined }) {
       </CreditSection>,
     )
   }
-  if (has.description) left.push(<DescriptionSection key="description" description={video.description ?? ""} />)
   const right: ReactNode[] = []
   // owner round 6: Chapter อยู่คอลัมน์ขวา เหนือช่วงที่คนดูซ้ำบ่อย (คอลัมน์เดียว: คำอธิบาย, Chapter, ดูซ้ำบ่อย, ...)
   if (has.chapters) right.push(<ChapterSection key="chapters" chapters={video.chapters} />)

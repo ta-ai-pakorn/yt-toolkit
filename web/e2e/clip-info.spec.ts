@@ -87,7 +87,7 @@ const tile = (page: Page, name: string | RegExp) => page.getByRole("list", { nam
 const gotoInfo = (page: Page, videoId: string) => page.goto(`/v/${videoId}?tab=info`)
 
 /** ลำดับที่อ่าน (และลำดับ Tab) ของแท็บข้อมูลคลิปที่มีครบทุกส่วน ทั้งจอกว้างและจอแคบ (owner round 5) */
-const INFO_ORDER = [CREDIT_TITLE, "คำอธิบาย", /^Chapter \(/, REPLAYED_TITLE, PINNED_TITLE, /^แท็ก \(/].map(String)
+const INFO_ORDER = ["คำอธิบาย", CREDIT_TITLE, /^Chapter \(/, REPLAYED_TITLE, PINNED_TITLE, /^แท็ก \(/].map(String)
 
 /** หัวข้อของส่วนในแท็บข้อมูลคลิปตามลำดับใน DOM (ส่วนที่เป็น pattern แปลงเป็นสตริงของ pattern ให้เทียบกับ INFO_ORDER ได้) */
 async function infoSectionOrder(page: Page): Promise<string[]> {
@@ -219,13 +219,14 @@ test.describe("แท็บข้อมูลคลิป: เครดิต (A
   const CHANNEL = "ช่องทดสอบ"
   const LINE = `ที่มา: ${TITLE} — ${CHANNEL} (YouTube) https://youtu.be/${ZOO}`
 
-  test("ส่วน 'เครดิต' (h2) อยู่บนสุดของแท็บ แสดงบรรทัดที่มา · ปุ่ม 'คัดลอกเครดิต' เป็นปุ่มรอง ไม่ใช่ปุ่มหลักสีเหลือง", async ({ page }) => {
+  test("ส่วน 'เครดิต' (h2) อยู่ใต้คำอธิบาย แสดงบรรทัดที่มา · ปุ่ม 'คัดลอกเครดิต' เป็นปุ่มรอง ไม่ใช่ปุ่มหลักสีเหลือง", async ({ page }) => {
     await withVideo(page, ZOO, { title: TITLE, channel: CHANNEL })
     await gotoInfo(page, ZOO)
     await expect(page.getByRole("heading", { level: 2, name: CREDIT_TITLE, exact: true })).toBeVisible()
     await expect(creditRegion(page).getByText(LINE, { exact: true })).toBeVisible()
-    // หัวข้อแรกของแท็บคือเครดิต
-    expect((await infoSectionOrder(page))[0]).toBe(CREDIT_TITLE)
+    // owner (M4 preview): เครดิตอยู่ถัดจากคำอธิบาย
+    const order = await infoSectionOrder(page)
+    expect(order.indexOf(CREDIT_TITLE)).toBe(order.indexOf("คำอธิบาย") + 1)
     const copy = creditRegion(page).getByRole("button", { name: COPY_CREDIT, exact: true })
     await expect(copy).toHaveText(COPY_CREDIT)
     await expect(copy).not.toHaveClass(/bg-primary/)
@@ -744,16 +745,16 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     await mockPinned(page, ZOO, (route) => route.fulfill({ json: { comment: { text: "ปักหมุด", byUploader: true } } }))
     await tab(page, INFO_TAB).click()
     await expect(pinnedRegion(page).getByText("ปักหมุด", { exact: true })).toBeVisible()
-    for (const name of [COPY_CREDIT, "คัดลอกคำอธิบาย", "คัดลอก chapter", "คัดลอกช่วงที่คนดูซ้ำบ่อย", "คัดลอกคอมเมนต์ปักหมุด", "คัดลอกแท็ก"]) {
+    for (const name of ["คัดลอกคำอธิบาย", COPY_CREDIT, "คัดลอก chapter", "คัดลอกช่วงที่คนดูซ้ำบ่อย", "คัดลอกคอมเมนต์ปักหมุด", "คัดลอกแท็ก"]) {
       const box = await page.getByRole("button", { name, exact: true }).boundingBox()
       expect(box?.height ?? 0, name).toBeGreaterThanOrEqual(44)
     }
     const order = await Promise.all(
-      [creditRegion(page), descriptionRegion(page), chapterRegion(page), replayedRegion(page), pinnedRegion(page), tagsRegion(page)].map(
+      [descriptionRegion(page), creditRegion(page), chapterRegion(page), replayedRegion(page), pinnedRegion(page), tagsRegion(page)].map(
         async (region) => (await region.boundingBox())?.y ?? -1,
       ),
     )
-    // จอ 360 px คอลัมน์เดียว: เครดิต → คำอธิบาย → Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก ทั้งตำแหน่งบนจอและลำดับใน DOM
+    // จอ 360 px คอลัมน์เดียว: คำอธิบาย → เครดิต → Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก ทั้งตำแหน่งบนจอและลำดับใน DOM
     expect([...order].sort((a, b) => a - b)).toEqual(order)
     expect(new Set(order).size).toBe(order.length)
     expect(await infoSectionOrder(page)).toEqual(INFO_ORDER)
@@ -862,7 +863,7 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     }
   }
 
-  test("จอกว้าง 1280 px แท็บข้อมูลคลิป: ซ้าย เครดิต → คำอธิบาย · ขวา Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก (owner round 6)", async ({
+  test("จอกว้าง 1280 px แท็บข้อมูลคลิป: ซ้าย คำอธิบาย → เครดิต · ขวา Chapter → ช่วงดูซ้ำ → คอมเมนต์ปักหมุด → แท็ก (owner round 6)", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -883,10 +884,10 @@ test.describe("หัวคลิปแบบกระชับ (สูงคง
     expect(y(replayed)).toBeLessThan(y(pinned))
     expect(y(pinned)).toBeLessThan(y(tags))
     expect(x(chapters)).toBeGreaterThan(x(description) + (description?.width ?? 0))
-    // เครดิตอยู่บนสุดของคอลัมน์ซ้าย (เหนือคำอธิบาย คอลัมน์เดียวกัน) · คอลัมน์ขวาเริ่มบรรทัดเดียวกับเครดิต
+    // owner (M4 preview): เครดิตอยู่ใต้คำอธิบาย (คอลัมน์เดียวกัน) · คอลัมน์ขวาเริ่มบรรทัดเดียวกับคำอธิบาย
     expect(Math.abs(x(credit) - x(description))).toBeLessThan(2)
-    expect(y(credit)).toBeLessThan(y(description))
-    expect(Math.abs(y(chapters) - y(credit))).toBeLessThan(2)
+    expect(y(description)).toBeLessThan(y(credit))
+    expect(Math.abs(y(chapters) - y(description))).toBeLessThan(2)
     // ลำดับใน DOM (= ลำดับ Tab) ตรงกับลำดับที่อ่าน: คอลัมน์ซ้ายก่อน แล้วคอลัมน์ขวา
     expect(await infoSectionOrder(page)).toEqual(INFO_ORDER)
   })

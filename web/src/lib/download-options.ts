@@ -196,6 +196,28 @@ export function videoSizeEstimate(
   return picked.sizeBytes + Math.round(((abr * 1000) / 8) * video.durationS)
 }
 
+/**
+ * ขนาดไฟล์เสียง m4a / mp3 โดยประมาณ (ไบต์) · m4a = บิตเรตของแทร็ก AAC ภาษาที่เลือก ("original" = ต้นฉบับ
+ * ไม่มีภาษานั้น = แทร็กที่ backend น่าจะเลือก) · mp3 = บิตเรตที่เลือก · ไม่รู้บิตเรต = undefined
+ */
+export function audioSizeEstimate(
+  video: VideoInfo,
+  format: "m4a" | "mp3",
+  mp3Kbps: number,
+  audioLanguage: string
+): number | undefined {
+  const bytesAt = (kbps: number) => Math.round(((kbps * 1000) / 8) * video.durationS)
+  if (format === "mp3") return bytesAt(mp3Kbps)
+  const aac = video.audio.filter((a) => a.acodec.startsWith("mp4a"))
+  const matches = aac.filter((a) => (audioLanguage === "original" ? a.isOriginal : a.language === audioLanguage))
+  const best = matches.reduce<AudioFormat | undefined>(
+    (top, a) => (top === undefined || (a.abrKbps ?? 0) > (top.abrKbps ?? 0) ? a : top),
+    undefined
+  )
+  const abr = (best ?? likelyAudio(video.audio))?.abrKbps
+  return abr === undefined ? undefined : bytesAt(abr)
+}
+
 /** เวลาโดยประมาณ (นาที) ของการโหลดหลายคลิป: คลิปละ ~35 วินาที แบ่งตามจำนวนงานพร้อมกัน อย่างน้อย 1 นาที */
 export function batchMinutes(count: number, concurrency: number): number {
   return Math.max(1, Math.ceil((count * 35) / concurrency / 60))

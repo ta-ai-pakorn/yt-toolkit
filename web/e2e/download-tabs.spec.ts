@@ -24,7 +24,7 @@ const THAI = "88o5Sk8_m1Y"
 const TAB_LIST = "เครื่องมือของคลิปนี้"
 const TAB_NAMES = ["ภาพเฟรม", "วิดีโอ", "เสียง", "ซับ", "ทรานสคริปต์", "ข้อมูลคลิป"]
 const DOWNLOAD_MP4 = "โหลด mp4"
-const DOWNLOAD_AUDIO = "โหลดเสียง"
+const DOWNLOAD_AUDIO = "โหลด m4a"
 const LANGUAGE = "ภาษาเสียง"
 const EMBED = "ฝังซับ (เปิด/ปิดได้)"
 const ADDED = "เพิ่มเข้าคิวแล้ว"
@@ -43,7 +43,9 @@ const combobox = (page: Page, name: string) => page.getByRole("combobox", { name
 // toHaveText ของทั้งปุ่มจึงได้ "…▼" อ่านจาก SelectValue แทน
 const selectedValue = (page: Page, name: string) => combobox(page, name).locator('[data-slot="select-value"]')
 const downloadMp4 = (page: Page) => page.getByRole("button", { name: DOWNLOAD_MP4, exact: true })
-const downloadAudio = (page: Page) => page.getByRole("button", { name: DOWNLOAD_AUDIO, exact: true })
+/** ปุ่มหลักของแท็บเสียง ชื่อตามรูปแบบไฟล์ที่เลือก ("โหลด m4a" / "โหลด mp3" / "โหลด wav") */
+const downloadAudio = (page: Page, format: "m4a" | "mp3" | "wav" = "m4a") =>
+  page.getByRole("button", { name: format === "m4a" ? DOWNLOAD_AUDIO : `โหลด ${format}`, exact: true })
 const tooltip = (page: Page) => page.locator('[data-slot="tooltip-content"]')
 // ข้อความในแผงของแท็บ (Tooltip อยู่นอกแผง จึงไม่ปนกัน)
 const panelText = (page: Page, text: string) => page.getByRole("tabpanel").getByText(text, { exact: true })
@@ -104,14 +106,17 @@ test.describe("W2 แท็บวิดีโอและเสียง: แถ
     await expect(downloadAudio(page)).toBeVisible()
   })
 
-  test("หน้านี้มีปุ่มหลักสีเหลืองปุ่มเดียวคือ 'โหลด mp4' · แท็บเสียงไม่มีปุ่มหลัก ('โหลดเสียง' เป็นปุ่มรอง)", async ({ page }) => {
+  test("แต่ละแท็บมีปุ่มหลักสีเหลืองปุ่มเดียว: 'โหลด mp4' · แท็บเสียง 'โหลด m4a/mp3/wav' ตามรูปแบบที่เลือก พร้อมขนาดโดยประมาณ", async ({ page }) => {
     await openTab(page, BBB, "video")
     const primary = page.locator("[data-slot=button].bg-primary")
     await expect(primary).toHaveCount(1)
     await expect(primary).toHaveText(DOWNLOAD_MP4)
     await tab(page, "เสียง").click()
-    await expect(downloadAudio(page)).toHaveClass(/bg-secondary/)
-    await expect(primary).toHaveCount(0)
+    await expect(primary).toHaveCount(1)
+    await expect(primary).toHaveText(DOWNLOAD_AUDIO)
+    await expect(page.getByText(/^ขนาดประมาณ \d/)).toBeVisible()
+    await page.getByRole("button", { name: "mp3", exact: true }).click()
+    await expect(primary).toHaveText("โหลด mp3")
   })
 
   test("คีย์บอร์ด: Tab จากแท็บวิดีโอไปช่อง 'คุณภาพ' ทันที (แผงไม่เป็นจุด Tab เพิ่ม)", async ({ page }) => {
@@ -150,13 +155,13 @@ test.describe("W2 แท็บวิดีโอ", () => {
     await expect(combobox(page, LANGUAGE)).toHaveCount(0)
   })
 
-  test("เปิด 'ไม่เอาเสียง' → ส่ง noAudio: true · ช่องภาษาเสียงกดไม่ได้ พร้อมเหตุผลใต้ช่องและใน Tooltip · ไม่จำข้ามการโหลดหน้าใหม่", async ({
+  test("เปิด 'วิดีโอไม่มีเสียง' → ส่ง noAudio: true · ช่องภาษาเสียงกดไม่ได้ พร้อมเหตุผลใต้ช่องและใน Tooltip · ไม่จำข้ามการโหลดหน้าใหม่", async ({
     page,
   }) => {
-    const reason = "ปิด 'ไม่เอาเสียง' ก่อนถึงจะเลือกภาษาเสียงได้"
+    const reason = "ปิด 'วิดีโอไม่มีเสียง' ก่อนถึงจะเลือกภาษาเสียงได้"
     const { bodies } = await mockEnqueue(page)
     await openTab(page, DUB, "video")
-    const noAudio = page.getByRole("switch", { name: "ไม่เอาเสียง" })
+    const noAudio = page.getByRole("switch", { name: "วิดีโอไม่มีเสียง" })
     await expect(combobox(page, LANGUAGE)).toBeEnabled()
     await expect(panelText(page, reason)).toHaveCount(0)
     await noAudio.click()
@@ -174,11 +179,11 @@ test.describe("W2 แท็บวิดีโอ", () => {
     await expect(combobox(page, LANGUAGE)).toBeEnabled()
   })
 
-  test("คลิปไม่มีเสียงเลย → 'ไม่เอาเสียง' เปิดอยู่และกดไม่ได้ · ส่ง noAudio: true", async ({ page }) => {
+  test("คลิปไม่มีเสียงเลย → 'วิดีโอไม่มีเสียง' เปิดอยู่และกดไม่ได้ · ส่ง noAudio: true", async ({ page }) => {
     await withVideo(page, BBB, { audio: [] })
     const { bodies } = await mockEnqueue(page)
     await openTab(page, BBB, "video")
-    const noAudio = page.getByRole("switch", { name: "ไม่เอาเสียง" })
+    const noAudio = page.getByRole("switch", { name: "วิดีโอไม่มีเสียง" })
     await expect(noAudio).toBeChecked()
     await expect(noAudio).toBeDisabled()
     await downloadMp4(page).click()
@@ -341,10 +346,12 @@ test.describe("W2 แท็บเสียง", () => {
     ])
   })
 
-  test("AC-AUD-04: BBB เลือก wav → 'ไฟล์ไม่บีบอัด ขนาดประมาณ 112 MB'", async ({ page }) => {
+  test("AC-AUD-04: BBB เลือก wav → 'ไฟล์ไม่บีบอัด…' และ 'ขนาดประมาณ 112 MB' ข้างปุ่ม 'โหลด wav'", async ({ page }) => {
     await openTab(page, BBB, "audio")
     await page.getByRole("button", { name: "wav", exact: true }).click()
-    await expect(page.getByText("ไฟล์ไม่บีบอัด ขนาดประมาณ 112 MB", { exact: true })).toBeVisible()
+    await expect(page.getByText("ไฟล์ไม่บีบอัด ใหญ่กว่า m4a หลายเท่า", { exact: true })).toBeVisible()
+    await expect(page.getByText("ขนาดประมาณ 112 MB", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "โหลด wav", exact: true })).toBeVisible()
     await expect(combobox(page, "คุณภาพ mp3")).toHaveCount(0)
   })
 
@@ -357,7 +364,7 @@ test.describe("W2 แท็บเสียง", () => {
     await combobox(page, "คุณภาพ mp3").click()
     await expect(page.getByRole("option")).toHaveText(["128 kbps", "192 kbps", "320 kbps"])
     await page.keyboard.press("Escape")
-    await downloadAudio(page).click()
+    await downloadAudio(page, "mp3").click()
     await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
     const params = bodies[0][0].params as AudioJobParams
     expect(bodies[0][0].kind).toBe("audio")
@@ -379,7 +386,7 @@ test.describe("W2 แท็บวิดีโอและเสียง: กา
 
   test("แท็บวิดีโอที่ช่องภาษาและฝังซับกดไม่ได้ ไม่มีปัญหาระดับ serious/critical", async ({ page }) => {
     await openTab(page, DUB, "video")
-    await page.getByRole("switch", { name: "ไม่เอาเสียง" }).click()
+    await page.getByRole("switch", { name: "วิดีโอไม่มีเสียง" }).click()
     await expect(combobox(page, LANGUAGE)).toBeDisabled()
     expect(await seriousViolations(page)).toEqual([])
   })

@@ -79,7 +79,7 @@ test("เสียง m4a ของคลิปพากย์ เลือก�
   await page.getByRole("option", { name: "อังกฤษ (สหรัฐอเมริกา)" }).click()
   await expect(language.locator('[data-slot="select-value"]')).toHaveText("อังกฤษ (สหรัฐอเมริกา)")
 
-  const created = await submitAndGetJob(page, "โหลดเสียง")
+  const created = await submitAndGetJob(page, "โหลด m4a")
   expect(created).toMatchObject({ videoId: DUB, kind: "audio", params: { format: "m4a", audioLanguage: "en-US" } })
 
   const done = await waitForJob(request, (job) => job.id === created.id && job.status === "done", { timeout: 30_000 })

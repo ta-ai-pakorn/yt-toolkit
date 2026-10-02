@@ -1,4 +1,4 @@
-import { Music } from "lucide-react"
+import { Download } from "lucide-react"
 import { useId } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -6,7 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Spinner } from "@/components/ui/spinner"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { fill, th } from "@/i18n/th"
-import { buildAudioParams, wavMegabytes } from "@/lib/download-options"
+import { audioSizeEstimate, buildAudioParams, wavBytes } from "@/lib/download-options"
+import { formatBytes } from "@/lib/format"
 import { useEnqueue } from "@/lib/jobs"
 import type { VideoInfo } from "@/lib/types"
 
@@ -40,12 +41,11 @@ function AudioForm({ video, choices, choose }: Props) {
   const { enqueue, pending } = useEnqueue(ENQUEUE_MESSAGES)
 
   const source = wavSourceTrack(video.audio)
-  const hint =
-    state.audioFormat === "m4a"
-      ? t.m4aHint
-      : state.audioFormat === "mp3"
-        ? t.mp3Hint
-        : fill(t.wavSize, { mb: wavMegabytes(video.durationS, source?.sampleRate, source?.channels) })
+  const hint = state.audioFormat === "m4a" ? t.m4aHint : state.audioFormat === "mp3" ? t.mp3Hint : t.wavHint
+  const size =
+    state.audioFormat === "wav"
+      ? wavBytes(video.durationS, source?.sampleRate, source?.channels)
+      : audioSizeEstimate(video, state.audioFormat, state.mp3Kbps, state.audioLanguage)
 
   async function submit() {
     if (pending) return
@@ -111,11 +111,15 @@ function AudioForm({ video, choices, choose }: Props) {
 
       <AudioLanguageSelect options={languages} value={state.audioLanguage} onChange={(audioLanguage) => choose({ audioLanguage })} />
 
-      <div>
-        <Button variant="secondary" disabled={pending} focusableWhenDisabled onClick={() => void submit()}>
-          {pending ? <Spinner aria-hidden /> : <Music aria-hidden />}
-          {t.download}
+      {/* owner (M4 preview): ปุ่มหลักหน้าตาเดียวกับ "โหลด mp4" ในแท็บวิดีโอ พร้อมขนาดโดยประมาณ */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Button disabled={pending} focusableWhenDisabled onClick={() => void submit()}>
+          {pending ? <Spinner aria-hidden /> : <Download aria-hidden />}
+          {fill(t.download, { format: state.audioFormat })}
         </Button>
+        {size !== undefined && (
+          <span className="text-sm text-muted-foreground">{fill(th.download.video.estimate, { size: formatBytes(size) })}</span>
+        )}
       </div>
     </DownloadCard>
   )
@@ -123,7 +127,7 @@ function AudioForm({ video, choices, choose }: Props) {
 
 /**
  * แท็บเสียง: m4a (แนะนำ) / mp3 (เลือกบิตเรต) / wav (บอกขนาดโดยประมาณ) และภาษาเสียง (ค่าเดียวกับแท็บวิดีโอ)
- * แล้วกด "โหลดเสียง" (ปุ่มรอง) ส่งงานเข้าคิว · รอข้อมูลคลิป = Skeleton · คลิปไม่มีเสียงให้โหลด = Empty
+ * แล้วกด "โหลด m4a/mp3/wav" (ปุ่มหลัก) ส่งงานเข้าคิว · รอข้อมูลคลิป = Skeleton · คลิปไม่มีเสียงให้โหลด = Empty
  */
 export function AudioPanel({ video, ...rest }: Omit<Props, "video"> & { video: VideoInfo | undefined }) {
   if (!video) return <DownloadSkeleton title={t.title} />

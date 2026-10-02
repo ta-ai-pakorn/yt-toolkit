@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   AUTO_QUALITY,
   audioLanguageOptions,
+  audioSizeEstimate,
   batchMinutes,
   buildAudioParams,
   buildVideoParams,
@@ -429,6 +430,18 @@ describe("ขนาดไฟล์และเวลา", () => {
     expect(wavMegabytes(635)).toBe(112)
     expect(wavBytes(10, 48000, 1)).toBe(960_000)
     expect(wavMegabytes(635, 48000, 2)).toBe(122)
+  })
+
+  it("ขนาดเสียง m4a/mp3 โดยประมาณ: m4a = บิตเรตสูงสุดของแทร็ก AAC ภาษาที่เลือก · mp3 = บิตเรตที่เลือก", () => {
+    // BBB ไม่มีแทร็กที่บอกว่าต้นฉบับ: ใช้ AAC บิตเรตสูงสุด (140, 129 kbps) × 635 วินาที
+    expect(audioSizeEstimate(clip(), "m4a", 192, "original")).toBe(Math.round(((129 * 1000) / 8) * 635))
+    expect(audioSizeEstimate(clip(), "mp3", 128, "original")).toBe(Math.round(((128 * 1000) / 8) * 635))
+    // คลิปพากย์: ต้นฉบับไทย = 140-1 (129 kbps ไม่ใช่ 139-1 49 kbps) · เลือก en-US = 140-0
+    const dub = clip({ audio: DUB_AUDIO })
+    expect(audioSizeEstimate(dub, "m4a", 192, "original")).toBe(Math.round(((129 * 1000) / 8) * 635))
+    expect(audioSizeEstimate(dub, "m4a", 192, "en-US")).toBe(Math.round(((129 * 1000) / 8) * 635))
+    // ไม่รู้บิตเรต = ไม่บอกขนาด
+    expect(audioSizeEstimate(clip({ audio: [{ formatId: "140", isOriginal: true, acodec: "mp4a.40.2" }] }), "m4a", 192, "original")).toBeUndefined()
   })
 
   it("batchMinutes: คลิปละ ~35 วินาที แบ่งตามจำนวนงานพร้อมกัน อย่างน้อย 1 นาที", () => {

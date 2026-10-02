@@ -497,10 +497,10 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(tab(page, "ภาพเฟรม")).toBeFocused()
   })
 
-  test("คีย์บอร์ด: แท็บข้อมูลคลิป → คัดลอกเครดิต → คัดลอกคำอธิบาย → คัดลอก chapter → ปุ่มเวลาของ chapter ทีละตอน (แผงไม่เป็นจุด Tab เพิ่ม)", async ({
+  test("คีย์บอร์ด: แท็บข้อมูลคลิป → คัดลอกคำอธิบาย → คัดลอกเครดิต → คัดลอก chapter → ปุ่มเวลาของ chapter ทีละตอน (แผงไม่เป็นจุด Tab เพิ่ม)", async ({
     page,
   }) => {
-    // M4 T16: ส่วนเครดิตอยู่บนสุดของแท็บ ปุ่ม "คัดลอกเครดิต" จึงเป็นจุด Tab แรก
+    // owner (M4 preview): เครดิตอยู่ใต้คำอธิบาย ปุ่ม "คัดลอกเครดิต" จึงตามหลัง "คัดลอกคำอธิบาย"
     // ไม่มีแท็ก ไม่มีช่วงดูซ้ำ และไม่มีคอมเมนต์ปักหมุด (ส่วนคอมเมนต์ไม่มีปุ่ม): ลำดับ Tab ไม่ขึ้นกับข้อมูลในชุดทดสอบ
     await withVideo(page, ZOO, { tags: [], mostReplayed: undefined, stats: undefined })
     await page.route(`**/api/videos/${ZOO}/pinned-comment`, (route) => route.fulfill({ json: { comment: null } }))
@@ -508,8 +508,8 @@ test.describe("W2 คำอธิบายและ chapter ในแท็บ�
     await expect(page.getByText("ไม่มีคอมเมนต์ปักหมุด")).toBeVisible()
     await tab(page, "ข้อมูลคลิป").focus()
     for (const name of [
-      "คัดลอกเครดิต",
       "คัดลอกคำอธิบาย",
+      "คัดลอกเครดิต",
       "คัดลอก chapter",
       "เล่นจาก 00:00:00",
       "เล่นจาก 00:00:05",
