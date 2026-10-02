@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from .note import build_note
-from .srt_builder import SubOptions, Token, build_cues, md_sections, to_md, to_srt
+from .srt_builder import SubOptions, Token, build_cues, clamp_cues, md_sections, range_tokens, to_md, to_srt
 from .subparse import PARSER_VERSION, ParsedTrack, SubParseError, parse_json3, parse_vtt
 from .tracks import TRACK_ID, Track, default_track_id, find_track, list_tracks, original_language, tracks_payload
 from .yterrors import YtError
@@ -220,20 +220,29 @@ class SubtitleService:
 
     # ---------- ไฟล์ ----------
 
-    def export(self, video_id: str, track_id: str, fmt: str, opts: SubOptions) -> SubtitleExport:
+    def export(
+        self, video_id: str, track_id: str, fmt: str, opts: SubOptions, range_ms: tuple[int, int] | None = None
+    ) -> SubtitleExport:
         """ไฟล์ซับแบบ srt/txt/md (CRLF, UTF-8 ไม่มี BOM) ชื่อไฟล์ router ตั้งเองจาก title + lang
 
         txt = เนื้อเดียวกับ srt ทุกไบต์ (เจ้าของตัดสิน owner preview round 2: ต่างกันแค่นามสกุล)
+        range_ms = (start, end) เฉพาะ srt/txt: ซับของช่วงนั้นนับเวลาใหม่จาก 0 (AC-SUB-10) md + ช่วง = ValueError
         opts ต้องผ่านการตรวจมาแล้ว (options_from_dict) โหมด tokens ที่ไม่มี tokens_per_cue = ValueError
         """
         if fmt not in FORMATS:
             raise ValueError(f"format must be one of {FORMATS}")
+        if range_ms is not None and fmt == "md":
+            raise ValueError("range works with srt and txt only")
         info = self._videos.get(video_id, peek=True)
         track = self._track(video_id, track_id)
         tokens: list[Token] = list(self._parsed(video_id, track).tokens)
         title = str(info.get("title") or "")
         if fmt in ("srt", "txt"):
-            text = to_srt(build_cues(tokens, opts))
+            if range_ms is None:
+                text = to_srt(build_cues(tokens, opts))
+            else:
+                start, end = range_ms
+                text = to_srt(clamp_cues(build_cues(range_tokens(tokens, start, end), opts), end - start))
         else:
             text = to_md(tokens, title=title, video_id=video_id, chapters=_chapter_ms(info))
         return SubtitleExport(title, track.lang, text.encode("utf-8"))
