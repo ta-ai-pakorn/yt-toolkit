@@ -172,3 +172,10 @@ Big Buck Bunny © Blender Foundation | www.bigbuckbunny.org
 - `OWNERTHSUB1` เป็นข้อมูลสังเคราะห์ที่โปรเจกต์เขียนเอง (ไม่มีข้อความของบุคคลที่สาม)
 - ไม่ได้เก็บซับของคลิป TED ไว้ในรีโป (ซับ TED เป็น CC BY-NC-ND) เทสเครือข่ายเปิดคลิปจริงได้โดยไม่เก็บอะไรลงรีโป
 - ข้อมูลทั้งหมดใช้ในเทสเท่านั้น รีโปเป็นแบบส่วนตัว
+
+## sponsorblock/ (M5 รอบ A)
+ช่วงโฆษณาปลอมของ `FakeExtractor.sponsor_segments` ต่อคลิป: `{"segments": [[startMs, endMs, "หมวด"], ...]}` หรือ `{"error": "..."}` (= ติดต่อ SponsorBlock ไม่ได้) · ไม่มีไฟล์ = ไม่มีข้อมูลจากชุมชน
+- `ADSCUTCLIP1.json` intro 0-12 วิ, sponsor 60-90 วิ, outro 600-635 วิ (คลิปปลอมที่ probe เป็น aqz-KE-bpKQ 635 วิ)
+- `ADSOFFLINE1.json` ติดต่อไม่ได้ · `ADSNODATA01` ไม่มีไฟล์ = ไม่มีข้อมูล
+
+คลิปปลอมของ M5 รอบ A ใน `downloads/behaviors.json`: RANGECLIP01, ADSCUTCLIP1, ADSNODATA01, ADSOFFLINE1 (probe เป็น aqz-KE-bpKQ) และ CHAPTERS001 (probe เป็น jNQXAC9IVRw 3 chapter) ใช้ใน web/e2e/queue-advanced.spec.ts เท่านั้น
