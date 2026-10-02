@@ -480,3 +480,42 @@ def test_chapter_output_fits_the_path_limit(tmp_path):
     path = files.plan_chapter_output(tmp_path, "ก" * 300, ID, "mp4", None, index=12, total=30, chapter_title="ข" * 300)
     assert len(str(path)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
     assert path.name.startswith("12 - ข") and path.name.endswith(".mp4")
+
+
+# ---------- owner ruling 2026-10-02: วิดีโอไม่มีเสียงที่แยก chapter อยู่โฟลเดอร์ย่อยของตัวเอง ----------
+
+
+def test_no_audio_chapter_folder_name(tmp_path):
+    assert files.chapter_dir_name("mp4", no_audio=True) == "แยกตาม chapter (mp4, ไม่มีเสียง)"
+    assert files.chapter_dir_name("mp4") == "แยกตาม chapter (mp4)"
+    path = files.plan_chapter_output(tmp_path, "คลิป", ID, "mp4", None, index=1, total=3,
+                                     chapter_title="Intro: part 1", no_audio=True)  # fmt: skip
+    assert path.parent.name == "แยกตาม chapter (mp4, ไม่มีเสียง)"
+    assert path.parent.parent == files.plan_output(tmp_path, "คลิป", ID, "", "mp4").parent
+    assert path.name == "01 - Intro part 1.mp4"
+    with_sound = files.plan_chapter_output(tmp_path, "คลิป", ID, "mp4", None, index=1, total=3,
+                                           chapter_title="Intro: part 1")  # fmt: skip
+    assert with_sound.parent.name == "แยกตาม chapter (mp4)" and with_sound.name == path.name
+
+
+def test_no_audio_chapter_output_fits_the_path_limit(tmp_path):
+    path = files.plan_chapter_output(tmp_path, "ก" * 300, ID, "mp4", None, index=12, total=30,
+                                     chapter_title="ข" * 300, no_audio=True)  # fmt: skip
+    assert len(str(path)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
+    assert path.name.startswith("12 - ข") and path.parent.name.endswith(", ไม่มีเสียง)")
+
+
+@pytest.mark.parametrize("total", [99, 999])
+def test_no_audio_chapter_folder_fits_wherever_the_full_no_audio_file_fits(total):
+    """ทุกความยาวของโฟลเดอร์ผลลัพธ์ที่ไฟล์เต็มแบบไม่มีเสียงชื่อยาวสุด (ช่วงเวลา + ตัดโฆษณา) วางได้
+    ไฟล์ chapter ของงานไม่มีเสียงก็วางได้ (ชื่อโฟลเดอร์ย่อยยาวขึ้นไม่ทำให้งานล้มเพราะ path ยาว)"""
+    longest = " (ไม่มีเสียง) (100.00.00-100.05.00) (ตัดโฆษณา)"
+    for size in range(3, files.PATH_LIMIT):
+        root = Path("C:/" + "r" * (size - 3))
+        try:
+            files.plan_output(root, "ก" * 300, ID, longest, "mp4")
+        except YtError:
+            continue
+        path = files.plan_chapter_output(root, "ก" * 300, ID, "mp4", None, index=total, total=total,
+                                         chapter_title="ข" * 300, no_audio=True)  # fmt: skip
+        assert len(str(path)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT

@@ -407,15 +407,17 @@ def _finish_chapters(
     ext: str,
     kind: str,
     notes: Iterable[str],
+    no_audio: bool = False,
 ) -> JobResult:
     """ย้ายไฟล์ของทุก chapter เข้า "<โฟลเดอร์ของคลิป>/แยกตาม chapter (<ext>)/" ตามลำดับ (D4) แล้วเขียน
-    แหล่งที่มา.txt ที่โฟลเดอร์ของคลิป ผลของงาน = ทุกไฟล์ตามลำดับ chapter"""
+    แหล่งที่มา.txt ที่โฟลเดอร์ของคลิป ผลของงาน = ทุกไฟล์ตามลำดับ chapter
+    วิดีโอไม่มีเสียง (no_audio) = โฟลเดอร์ย่อย "แยกตาม chapter (mp4, ไม่มีเสียง)" ไม่ปนกับชุดที่มีเสียง"""
     ctx.check_cancelled()
     outputs: list[OutputFile] = []
     for path, part in made:
         planned = files.plan_chapter_output(
             clip.root, clip.title, clip.video_id, ext, clip.group,
-            index=part.index, total=part.total, chapter_title=part.title,
+            index=part.index, total=part.total, chapter_title=part.title, no_audio=no_audio,
         )  # fmt: skip
         final = files.move_into_place(path, planned)
         rel = final.relative_to(clip.root).as_posix()
@@ -587,7 +589,7 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
                           has_audio=has_audio, finalize=finalize)  # fmt: skip
             report.stage("writing")
             notes = (*result.choice.notes, *sub_notes)
-            return _finish_chapters(deps, ctx, clip, made, ext="mp4", kind="video", notes=notes)
+            return _finish_chapters(deps, ctx, clip, made, ext="mp4", kind="video", notes=notes, no_audio=no_audio)
         split_notes = ("NO_CHAPTERS",)
     cut = _cut(deps, ctx, clip, result, report, span=span, ads=ads, target="mp4", has_audio=has_audio)
     cover = _cover(deps, clip, ctx)

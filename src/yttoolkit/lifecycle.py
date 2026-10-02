@@ -71,6 +71,11 @@ _UNIQUE = r"(?: \((?:[2-9]|[1-9][0-9])\))?"  # " (2)" ... " (99)" จาก file
 # ไฟล์ในโฟลเดอร์ย่อย "แยกตาม chapter (<ext>)": "<NN> - <ชื่อ>.<ext>" หรือ "<NN>.<ext>" (files.plan_chapter_output)
 _CHAPTER_EXTS = ("mp4", "m4a", "mp3", "wav")
 _CHAPTER_FILE = re.compile(rf"\d{{2,3}}(?: - .+)?{_UNIQUE}\.(?:{'|'.join(_CHAPTER_EXTS)})(?:\.part)?")
+# + "แยกตาม chapter (mp4, ไม่มีเสียง)" ของวิดีโอไม่มีเสียง (owner ruling 2026-10-02)
+_CHAPTER_DIRS = (
+    *(files.chapter_dir_name(ext) for ext in _CHAPTER_EXTS),
+    files.chapter_dir_name("mp4", no_audio=True),
+)
 # stop รอแอพปิดเองไม่เกินเท่านี้ก่อน kill ต้องนานกว่า หยุดคิว + uvicorn รอ request ค้าง (มีเทสคุม)
 STOP_WAIT_S = 10.0
 STOP_POLL_S = 0.1
@@ -400,8 +405,8 @@ def sweep_interrupted_outputs(store: JobStore, output_root: Path, job_ids: Itera
             if folder not in seen:
                 seen.add(folder)
                 removed += _sweep_folder(folder, toolkit_name_pattern(prefix), keep)
-                for ext in _CHAPTER_EXTS:
-                    chapters = folder / files.chapter_dir_name(ext)
+                for name in _CHAPTER_DIRS:
+                    chapters = folder / name
                     removed += _sweep_folder(chapters, _CHAPTER_FILE, keep)
                     _remove_if_empty(chapters)
     return removed
