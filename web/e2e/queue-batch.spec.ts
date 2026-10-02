@@ -7,9 +7,10 @@ import { expect, test, type Page } from "@playwright/test"
 
 import type { Job } from "../src/lib/types"
 
-import { cancelJobsFor, listJobs, resumeQueue } from "./queue-helpers"
+import { cancelJobsFor, listJobs, mockEnqueue, resumeQueue } from "./queue-helpers"
 
 // M4 งาน 19 (โปรเจกต์ queue): หน้า W3 เลือกคลิป แล้วส่งเข้าคิวจริงบน backend โหมด fake
+// owner round 2: "ไฟล์เพิ่มเติม" เป็นช่องติ๊กหลายอย่าง (แทนตัวเลือก "ซับ") และมีช่อง "ชื่อโฟลเดอร์" ที่ทุกงานส่งไปเป็น folder
 // คลิปของ spec นี้ (C14): VTTFALLBAK1, NOORIGSUB01, LONGTHAI1hr (รายการหลายลิงก์) และเพลย์ลิสต์ PLfakeplaylist250 (กล่องถามเท่านั้น ไม่ส่ง)
 
 const CLIPS = ["VTTFALLBAK1", "NOORIGSUB01", "LONGTHAI1hr"] as const
@@ -30,6 +31,13 @@ const tableRows = (page: Page) => page.locator("tbody tr")
 const rowChecks = (page: Page) => page.locator("tbody").getByRole("checkbox")
 const submitButton = (page: Page, n: number) => page.getByRole("button", { name: `ส่งเข้าคิว ${n} คลิป`, exact: true })
 const isEnqueue = (url: string, method: string) => new URL(url).pathname === "/api/jobs" && method === "POST"
+const extras = (page: Page) => page.getByRole("group", { name: "ไฟล์เพิ่มเติม", exact: true })
+const extra = (page: Page, name: string) => extras(page).getByRole("checkbox", { name, exact: true })
+const folderBox = (page: Page) => page.getByRole("textbox", { name: "ชื่อโฟลเดอร์", exact: true })
+const HINT = "เลือกคลิป เลือกสิ่งที่จะโหลดอย่างน้อยหนึ่งอย่าง และตั้งชื่อโฟลเดอร์"
+const EXTRA_NAMES = ["ซับ (.srt)", "ซับ (.txt)", "โน้ต (.md)", "ภาพรวมเฟรม", "ภาพเฟรมทั้งหมด (.zip)"]
+// ชื่อโฟลเดอร์เริ่มต้นของรายการหลายลิงก์: "หลายคลิป YYYY-MM-DD HH.mm" (เวลาเครื่องตอนเปิดหน้า)
+const MULTI_DEFAULT = /^หลายคลิป \d{4}-\d{2}-\d{2} \d{2}\.\d{2}$/
 
 async function paste(page: Page, text: string) {
   await page.goto("/")
@@ -68,7 +76,7 @@ test.beforeEach(async ({ request }) => {
   await cancelJobsFor(request, [...CLIPS])
 })
 
-test("วาง 3 คลิป + ลิงก์เสีย → W3 มี 3 แถวเลือกได้ + 1 แถวแดง · เสียง + .srt → 6 งานเข้าคิวและเสร็จ (คลิปไม่มีแทร็กเริ่มต้น = 'คลิปนี้ไม่มีซับ')", async ({
+test("วาง 3 คลิป + ลิงก์เสีย → W3 มี 3 แถวเลือกได้ + 1 แถวแดง · เสียง + ซับ (.srt) → 6 งานเข้าคิว (มี folder ทุกงาน) และเสร็จ (คลิปไม่มีแทร็กเริ่มต้น = 'คลิปนี้ไม่มีซับ')", async ({
   page,
   request,
 }) => {
@@ -89,11 +97,13 @@ test("วาง 3 คลิป + ลิงก์เสีย → W3 มี 3 แ
 
   await page.getByRole("combobox", { name: "โหลดอะไร", exact: true }).click()
   await page.getByRole("option", { name: "เสียง", exact: true }).click()
-  await page.getByRole("group", { name: "ซับ", exact: true }).getByRole("button", { name: ".srt", exact: true }).click()
-  await expect(page.getByRole("group", { name: "ซับ", exact: true }).getByRole("button", { name: ".srt" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  // ไฟล์เพิ่มเติม: ค่าเริ่มต้นไม่ติ๊กเลย
+  await expect(extras(page).getByRole("checkbox")).toHaveCount(5)
+  for (const name of EXTRA_NAMES) await expect(extra(page, name)).not.toBeChecked()
+  await extra(page, "ซับ (.srt)").click()
+  await expect(extra(page, "ซับ (.srt)")).toBeChecked()
+  await expect(folderBox(page)).toHaveValue(MULTI_DEFAULT)
+  const folder = await folderBox(page).inputValue()
 
   const posted = page.waitForResponse((response) => isEnqueue(response.url(), response.request().method()))
   await submitButton(page, 3).click()
@@ -105,6 +115,7 @@ test("วาง 3 คลิป + ลิงก์เสีย → W3 มี 3 แ
   expect(sent.map((item) => `${item.videoId}:${item.kind}`)).toEqual(CLIPS.flatMap((id) => [`${id}:audio`, `${id}:subtitle`]))
   for (const item of sent) {
     expect(item.title).toBe(fixtureTitle(item.videoId))
+    expect(item.params).toMatchObject({ folder })
     if (item.kind === "subtitle") {
       expect(item.params).toMatchObject({ format: "srt" })
       expect("trackId" in item.params).toBe(false)
@@ -144,7 +155,7 @@ test("ไม่เลือกอะไร หรือเอาคลิปอ�
   })
   await openBatchFromList(page)
   const all = page.getByRole("checkbox", { name: "เลือกทั้งหมด", exact: true })
-  const hint = "เลือกคลิป และเลือกวิดีโอ เสียง หรือซับอย่างน้อยหนึ่งอย่าง"
+  const hint = HINT
 
   // ค่าเริ่มต้น: วิดีโอ + ซับไม่เอา = ส่งได้
   await expect(submitButton(page, 3)).not.toHaveAttribute("aria-disabled", "true")
@@ -170,7 +181,7 @@ test("ไม่เลือกอะไร หรือเอาคลิปอ�
   // aria-disabled = Playwright ถือว่ากดไม่ได้ ต้อง force เพื่อลองกดจริง (ผู้ใช้กดได้ แต่ต้องไม่มีอะไรเกิดขึ้น)
   await none.click({ force: true })
 
-  // เลือกทั้งหมดอีกครั้ง แต่ "โหลดอะไร" = ไม่เอา และซับ = ไม่เอา
+  // เลือกทั้งหมดอีกครั้ง แต่ "โหลดอะไร" = ไม่เอา และไม่ติ๊กไฟล์เพิ่มเติม
   await all.click()
   await expect(all).toBeChecked()
   await page.getByRole("combobox", { name: "โหลดอะไร", exact: true }).click()
@@ -179,12 +190,53 @@ test("ไม่เลือกอะไร หรือเอาคลิปอ�
   await expect(nothing).toHaveAttribute("aria-disabled", "true")
   await expect(page.getByText(hint)).toBeVisible()
   await nothing.click({ force: true })
-  // ซับอย่างเดียวก็ส่งได้
-  await page.getByRole("group", { name: "ซับ", exact: true }).getByRole("button", { name: ".txt", exact: true }).click()
+  // ไฟล์เพิ่มเติมอย่างเดียวก็ส่งได้
+  await extra(page, "ซับ (.txt)").click()
   await expect(nothing).not.toHaveAttribute("aria-disabled", "true")
   await expect(page.getByText(hint)).toHaveCount(0)
 
+  // ชื่อโฟลเดอร์ว่าง (หรือมีแต่ช่องว่าง) = ส่งไม่ได้ · ตั้งชื่อแล้วส่งได้อีก
+  await folderBox(page).fill("   ")
+  await expect(nothing).toHaveAttribute("aria-disabled", "true")
+  await expect(page.getByText(hint)).toBeVisible()
+  await nothing.click({ force: true })
+  await folderBox(page).fill("งานลูกค้า")
+  await expect(nothing).not.toHaveAttribute("aria-disabled", "true")
+
   expect(requests).toEqual([])
+})
+
+test("ติ๊กไฟล์เพิ่มเติมครบ 5 อย่าง + แก้ชื่อโฟลเดอร์ → ลำดับงานต่อคลิป หลัก → .srt → .txt → โน้ต → ภาพรวมเฟรม → ภาพเฟรม zip · ทุกงานมี folder ที่แก้ (ตัดช่องว่างแล้ว) · mock ไม่มีงานจริง", async ({
+  page,
+}) => {
+  const queue = await mockEnqueue(page)
+  await openBatchFromList(page)
+  // ติ๊กสลับลำดับ: ลำดับงานไม่ขึ้นกับลำดับที่ติ๊ก
+  for (const name of [...EXTRA_NAMES].reverse()) await extra(page, name).click()
+  for (const name of EXTRA_NAMES) await expect(extra(page, name)).toBeChecked()
+  // ชื่อโฟลเดอร์ยาวได้ไม่เกิน 80 ตัวอักษร
+  await expect(folderBox(page)).toHaveAttribute("maxlength", "80")
+  await folderBox(page).fill("  งานลูกค้า A  ")
+  await submitButton(page, 3).click()
+  await expect.poll(() => queue.bodies.length).toBe(1)
+  const items = queue.bodies[0]
+  const kindOf = (item: (typeof items)[number]) =>
+    item.kind === "subtitle" && "format" in item.params ? `subtitle:${String(item.params.format)}` : item.kind
+  const perClip = ["video", "subtitle:srt", "subtitle:txt", "note", "contact_sheet", "frames_zip"]
+  expect(items.map((item) => `${item.videoId}:${kindOf(item)}`)).toEqual(CLIPS.flatMap((id) => perClip.map((k) => `${id}:${k}`)))
+  for (const item of items) expect(item.params).toMatchObject({ folder: "งานลูกค้า A" })
+  const ofFirst = items.filter((item) => item.videoId === CLIPS[0])
+  // ซับทั้งสองไฟล์ใช้ความยาวซับชุดเดียวกัน (ค่าปัจจุบันของแท็บซับ) และไม่ระบุแทร็ก
+  const subOptions = "options" in ofFirst[1].params ? ofFirst[1].params.options : undefined
+  expect(subOptions).toMatchObject({ mode: expect.any(String) as unknown })
+  expect(ofFirst.map((item) => item.params).slice(1)).toEqual([
+    { format: "srt", options: subOptions, folder: "งานลูกค้า A" },
+    { format: "txt", options: subOptions, folder: "งานลูกค้า A" },
+    { folder: "งานลูกค้า A" },
+    { source: "fast", columns: 5, folder: "งานลูกค้า A" },
+    { source: "fast", folder: "งานลูกค้า A" },
+  ])
+  await expect(page.getByText("เพิ่มเข้าคิวแล้ว 18 งาน").first()).toBeVisible()
 })
 
 test("เพลย์ลิสต์ PLfakeplaylist250 → W3 มี 200 แถว · ส่งเข้าคิวถามยืนยัน 'ส่ง 200 คลิปเข้าคิว?' · 'ยกเลิก' = ไม่มีงานเกิดขึ้น", async ({
@@ -201,6 +253,8 @@ test("เพลย์ลิสต์ PLfakeplaylist250 → W3 มี 200 แถ�
   await expect(page).toHaveURL(new RegExp(`/batch\\?src=[^&]+&playlist=${PLAYLIST_ID}$`))
   await expect(rowChecks(page)).toHaveCount(200)
   await expect(page.getByRole("status").filter({ hasText: "ทั้งหมด 200 คลิป" })).toHaveText("ทั้งหมด 200 คลิป · เลือกแล้ว 200 คลิป")
+  // เพลย์ลิสต์: ชื่อโฟลเดอร์เริ่มต้น = ชื่อเพลย์ลิสต์
+  await expect(folderBox(page)).toHaveValue("เพลย์ลิสต์ทดสอบ 250 คลิป")
 
   await submitButton(page, 200).click()
   const dialog = page.getByRole("alertdialog")
@@ -243,6 +297,11 @@ test("จอ 640 px (ซูม 200%): ไม่มีแถบเลื่อน
   await openBatchFromList(page)
   await noOverflow()
   await expect(submitButton(page, 3)).toBeVisible()
+  // ช่องติ๊กไฟล์เพิ่มเติมและช่องชื่อโฟลเดอร์อยู่ในความกว้างของจอ
+  for (const box of [extras(page), folderBox(page)]) {
+    const rect = await box.boundingBox()
+    expect((rect?.x ?? 0) + (rect?.width ?? 0)).toBeLessThanOrEqual(640)
+  }
 
   await paste(page, PLAYLIST_URL)
   await resultRows(page).first().getByRole("link", { name: OPEN_BATCH, exact: true }).click()

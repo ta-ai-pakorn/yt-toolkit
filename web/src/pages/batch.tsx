@@ -38,6 +38,7 @@ import {
   CONFIRM_ABOVE,
   buildBatchJobs,
   clipRows,
+  defaultFolder,
   isExpired,
   parseBatchSource,
   playlistRows,
@@ -170,7 +171,12 @@ function BatchBody({ source, results }: BodyProps) {
 
   // ค่าเริ่มต้นเลือกทั้งหมด: เก็บเฉพาะคลิปที่ผู้ใช้เอาออก
   const [deselected, setDeselected] = useState<ReadonlySet<string>>(new Set())
-  const [choice, setChoice] = useState<BatchChoice>({ what: "video", sub: "none" })
+  const [choice, setChoice] = useState<BatchChoice>(() => ({ what: "video", extras: new Set() }))
+  // ชื่อโฟลเดอร์กลุ่ม: null = ผู้ใช้ยังไม่แก้ ใช้ค่าเริ่มต้น (ชื่อเพลย์ลิสต์ หรือ "หลายคลิป <เวลาที่เปิดหน้า>")
+  // ชื่อเพลย์ลิสต์มาทีหลัง (รอข้อมูลเพลย์ลิสต์) แต่ช่องนี้แสดงหลังโหลดเสร็จเท่านั้น ผู้ใช้จึงเห็นค่าเริ่มต้นที่ถูกเสมอ
+  const [openedAt] = useState(() => new Date())
+  const [folderDraft, setFolderDraft] = useState<string | null>(null)
+  const folder = folderDraft ?? defaultFolder(playlistSource ? playlist.data?.title : undefined, openedAt)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const nothingId = useId()
 
@@ -178,7 +184,7 @@ function BatchBody({ source, results }: BodyProps) {
   const clips = selectedRows(rows, deselected)
   const count = clips.length
   const ready = settings.data !== undefined
-  const allowed = canSubmit(count, choice)
+  const allowed = canSubmit(count, choice, folder)
 
   function toggle(videoId: string) {
     setDeselected((previous) => {
@@ -194,7 +200,7 @@ function BatchBody({ source, results }: BodyProps) {
 
   async function send() {
     if (!settings.data) return
-    await enqueue(buildBatchJobs(clips, choice, settings.data, subOptions))
+    await enqueue(buildBatchJobs(clips, choice, folder, settings.data, subOptions))
   }
 
   function submit() {
@@ -240,7 +246,7 @@ function BatchBody({ source, results }: BodyProps) {
       ) : (
         <>
           <div className="flex flex-col gap-4 rounded-xl border p-4">
-            <BatchOptions choice={choice} onChange={setChoice} />
+            <BatchOptions choice={choice} onChange={setChoice} folder={folder} onFolderChange={setFolderDraft} />
             <div className="flex flex-col gap-2">
               {/* aria-disabled แทน disabled เพื่อให้โฟกัสยังอยู่ที่ปุ่ม (submit() กันการกดเองอยู่แล้ว) */}
               <Button

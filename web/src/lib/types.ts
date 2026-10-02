@@ -167,7 +167,7 @@ export type SubExportFormat = "srt" | "txt" | "md"
 
 // ---------- M4 งานในคิว (สัญญา C2) ----------
 
-export type JobKind = "video" | "audio" | "subtitle" | "frames_sharp" | "contact_sheet" | "frames_zip"
+export type JobKind = "video" | "audio" | "subtitle" | "frames_sharp" | "contact_sheet" | "frames_zip" | "note"
 
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
 
@@ -210,7 +210,13 @@ export type JobPatch = { id: string } & { [K in keyof Omit<Job, "id">]?: Job[K] 
 
 // ---------- ค่าของงานแต่ละชนิด (สัญญา C3) ----------
 
-export type VideoJobParams = {
+/**
+ * โฟลเดอร์กลุ่ม (owner round 2): ทุกชนิดงานส่ง `folder` ได้ = ไฟล์ไปอยู่ใน <โฟลเดอร์ผลลัพธ์>/<folder>/<คลิป [id]>/
+ * หน้า W3 ส่งทุกงาน · หน้า W2 (คลิปเดียว) ไม่ส่ง · backend ตัดช่องว่างหัวท้าย ยาว 1..80 ตัว และทำให้เป็นชื่อโฟลเดอร์ที่ปลอดภัยเอง
+ */
+export type GroupFolder = { folder?: string }
+
+export type VideoJobParams = GroupFolder & {
   /** ไม่มีคีย์ = เลือกให้อัตโนมัติ */
   formatId?: string
   maxQuality: boolean
@@ -225,20 +231,29 @@ export type VideoJobParams = {
   subOptions?: SubOptions
 }
 
-export type AudioJobParams = {
+export type AudioJobParams = GroupFolder & {
   format: "m4a" | "mp3" | "wav"
   mp3Kbps?: 128 | 192 | 320
   splitChapters: false
   audioLanguage: string
 }
 
-export type SubtitleJobParams = { trackId?: string; format: SubExportFormat; options: SubOptions }
+export type SubtitleJobParams = GroupFolder & { trackId?: string; format: SubExportFormat; options: SubOptions }
 
-export type ContactSheetJobParams = { source: "fast"; columns: 5 }
+export type ContactSheetJobParams = GroupFolder & { source: "fast"; columns: 5 }
 
-export type FramesZipJobParams = { source: "fast" }
+export type FramesZipJobParams = GroupFolder & { source: "fast" }
 
-export type JobParams = VideoJobParams | AudioJobParams | SubtitleJobParams | ContactSheetJobParams | FramesZipJobParams
+/** โน้ต .md ของคลิป (ข้อมูลคลิป คำอธิบาย chapter คอมเมนต์ปักหมุด ทรานสคริปต์) · ไม่มี trackId = backend ใช้แทร็กเริ่มต้นของคลิป */
+export type NoteJobParams = GroupFolder & { trackId?: string }
+
+export type JobParams =
+  | VideoJobParams
+  | AudioJobParams
+  | SubtitleJobParams
+  | ContactSheetJobParams
+  | FramesZipJobParams
+  | NoteJobParams
 
 export type NewJob = { videoId: string; kind: Exclude<JobKind, "frames_sharp">; params: JobParams; title?: string }
 
