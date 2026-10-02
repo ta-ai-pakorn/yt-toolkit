@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext } from "@playwright/test"
 
 import type { Job, NewJob } from "../src/lib/types"
 
-import { enqueue, openQueueSheet, waitForJob } from "./queue-helpers"
+import { cancelJobsFor, enqueue, openQueueSheet, resumeQueue, waitForJob } from "./queue-helpers"
 
 /**
  * M5 รอบ A กับ backend โหมด fake ตัวจริง (โปรเจกต์ queue): งานจริงของคลิปปลอมใน tests/fixtures/downloads/behaviors.json
@@ -10,12 +10,22 @@ import { enqueue, openQueueSheet, waitForJob } from "./queue-helpers"
  * ข้อความโน้ต SponsorBlock ตามมติ owner 2026-10-02: "ไม่ได้ตัดโฆษณา" (ไม่ใช่ "ได้คลิปเต็ม" เพราะตั้งช่วงเวลาร่วมด้วยได้)
  */
 
+const CLIPS = ["RANGECLIP01", "CHAPTERS001", "ADSCUTCLIP1", "ADSNODATA01", "ADSOFFLINE1"]
+
 const VIDEO = { maxQuality: false, splitChapters: false, noAudio: false, audioLanguage: "original" }
 
 async function done(request: APIRequestContext, item: NewJob): Promise<Job> {
   const [job] = await enqueue(request, [item])
   return waitForJob(request, (j) => j.id === job.id && j.status === "done", { timeout: 30_000 })
 }
+
+// backend ของโปรเจกต์ queue ใช้ร่วมกับ spec อื่น (queue-flow เบรกคิวและรันงานช้า): ปลดเบรกและเคลียร์งานค้างของคลิปเหล่านี้ก่อนทุกเทส
+// test.setTimeout(60 วิ) ให้เกินเวลารองาน 30 วิ: ถ้ารองานไม่ทัน จะได้ข้อความ "งานที่เห็นล่าสุด" ของ waitForJob ไม่ใช่แค่ timeout เปล่า
+test.beforeEach(async ({ request }) => {
+  test.setTimeout(60_000)
+  await resumeQueue(request)
+  await cancelJobsFor(request, CLIPS)
+})
 
 const names = (job: Job) => (job.outputs ?? []).map((output) => output.name)
 
