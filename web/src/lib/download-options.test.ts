@@ -6,13 +6,18 @@ import {
   audioSizeEstimate,
   batchMinutes,
   buildAudioParams,
+  buildSubtitleParams,
   buildVideoParams,
   codecLabel,
   compatCap,
+  DEFAULT_SPONSOR_CATEGORIES,
+  NO_ADVANCED,
   paramsFromSettings,
   qualityOptions,
   resolution,
   resolveAudioLanguage,
+  SPONSOR_CATEGORIES,
+  sponsorCategories,
   videoSizeEstimate,
   wavBytes,
   wavMegabytes,
@@ -629,5 +634,73 @@ describe("paramsFromSettings", () => {
       splitChapters: false,
       audioLanguage: "original",
     })
+  })
+})
+
+describe("M5-A: ตัวเลือกขั้นสูงใน params", () => {
+  const base = {
+    quality: AUTO_QUALITY,
+    maxQuality: false,
+    noAudio: false,
+    audioLanguage: "original",
+    embedSubs: null,
+    subOptions: PRESETS.medium,
+  }
+  const range = { startMs: 90_000, endMs: 300_000 }
+
+  it("ไม่มีตัวเลือกขั้นสูง = params เหมือน M4 ทุกคีย์", () => {
+    expect(buildVideoParams({ ...base, advanced: NO_ADVANCED })).toEqual(buildVideoParams(base))
+  })
+
+  it("ช่วงเวลาและตัดโฆษณาไปกับงานวิดีโอ", () => {
+    expect(buildVideoParams({ ...base, advanced: { splitChapters: false, range, sponsorblock: ["sponsor", "filler"] } })).toEqual({
+      maxQuality: false,
+      noAudio: false,
+      audioLanguage: "original",
+      splitChapters: false,
+      range,
+      sponsorblock: ["sponsor", "filler"],
+    })
+  })
+
+  it("แยก chapter = ไม่ส่งฝังซับ (ใช้คู่กันไม่ได้ AC-VID-10 ส่วนที่ 2)", () => {
+    expect(buildVideoParams({ ...base, embedSubs: "o.th", advanced: { splitChapters: true } })).toEqual({
+      maxQuality: false,
+      noAudio: false,
+      audioLanguage: "original",
+      splitChapters: true,
+    })
+  })
+
+  it("งานเสียงรับตัวเลือกเดียวกัน · ตัดโฆษณาที่ไม่มีหมวด = ไม่ส่ง", () => {
+    expect(buildAudioParams({ format: "mp3", mp3Kbps: 192, audioLanguage: "original", advanced: { splitChapters: true } })).toEqual({
+      format: "mp3",
+      mp3Kbps: 192,
+      splitChapters: true,
+      audioLanguage: "original",
+    })
+    expect(buildAudioParams({ format: "m4a", mp3Kbps: 192, audioLanguage: "th", advanced: { splitChapters: false, range, sponsorblock: [] } })).toEqual({
+      format: "m4a",
+      splitChapters: false,
+      audioLanguage: "th",
+      range,
+    })
+  })
+
+  it("งานซับส่งเฉพาะช่วงเวลา", () => {
+    expect(buildSubtitleParams({ trackId: "a.th-orig", format: "srt", options: PRESETS.medium, range })).toEqual({
+      trackId: "a.th-orig",
+      format: "srt",
+      options: PRESETS.medium,
+      range,
+    })
+    expect(buildSubtitleParams({ trackId: "a.th-orig", format: "txt", options: PRESETS.medium, range: null })).not.toHaveProperty("range")
+  })
+
+  it("หมวด SponsorBlock จากการตั้งค่า: เฉพาะหมวดที่รู้จักตามลำดับหน้าเว็บ · ว่างหรือยังไม่โหลด = 3 หมวดเริ่มต้น", () => {
+    expect(SPONSOR_CATEGORIES).toEqual(["sponsor", "selfpromo", "interaction", "intro", "outro", "preview", "filler", "music_offtopic"])
+    expect(sponsorCategories(undefined)).toEqual([...DEFAULT_SPONSOR_CATEGORIES])
+    expect(sponsorCategories({ sponsorblockDefault: ["filler", "sponsor", "bogus"] })).toEqual(["sponsor", "filler"])
+    expect(sponsorCategories({ sponsorblockDefault: [] })).toEqual(["sponsor", "selfpromo", "interaction"])
   })
 })
