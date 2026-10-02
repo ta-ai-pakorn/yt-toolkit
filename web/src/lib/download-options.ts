@@ -1,5 +1,6 @@
 import { fill } from "@/i18n/th"
 
+import { scaleBytes } from "./advanced-options"
 import { audioLanguageName } from "./languages"
 
 import type {
@@ -198,6 +199,21 @@ export function videoSizeEstimate(
   if (noAudio) return picked.sizeBytes
   const abr = likelyAudio(video.audio)?.abrKbps ?? 0
   return picked.sizeBytes + Math.round(((abr * 1000) / 8) * video.durationS)
+}
+
+/**
+ * ขนาดไฟล์วิดีโอโดยประมาณ ย่อตามความยาวของช่วงที่ตั้ง (keptS ไม่มี = ทั้งคลิป) · ใช้ทั้งรายการคุณภาพ
+ * และข้อความใต้ปุ่มโหลด ให้สองที่บอกขนาดตรงกัน
+ */
+export function keptVideoSize(
+  video: VideoInfo,
+  quality: string,
+  noAudio: boolean,
+  maxQuality: boolean,
+  cap: CompatCap,
+  keptS: number | undefined
+): number | undefined {
+  return scaleBytes(videoSizeEstimate(video, quality, noAudio, maxQuality, cap), video.durationS, keptS)
 }
 
 /**

@@ -8,7 +8,7 @@ import { fill, th } from "@/i18n/th"
 import { formatDuration } from "@/lib/format"
 
 import { advancedActions } from "../advanced/advanced-store"
-import { getPlayerState } from "./player-store"
+import { markTimeMs } from "./player-store"
 
 const t = th.advanced
 
@@ -27,9 +27,9 @@ export function markRange(videoId: string, which: "start" | "end", ms: number): 
 
 type Props = { videoId: string; size?: "sm" | "xs"; className?: string }
 
-/** ปุ่ม "ตั้งจุดเริ่ม" / "ตั้งจุดจบ" ใต้ตัวเล่นและบนตัวเล่นลอย: ใช้เวลาที่ตัวเล่นอยู่ตอนนี้ */
+/** ปุ่ม "ตั้งจุดเริ่ม" / "ตั้งจุดจบ" ใต้ตัวเล่นและบนตัวเล่นลอย: ใช้เวลาที่ตัวเล่นอยู่ตอนนี้ (กำลังโหลด = เวลาที่ขอเล่นไว้) */
 export function RangeMarkButtons({ videoId, size = "sm", className }: Props) {
-  const mark = (which: "start" | "end") => markRange(videoId, which, getPlayerState().currentMs)
+  const mark = (which: "start" | "end") => markRange(videoId, which, markTimeMs())
   return (
     <div data-slot="range-marks" className={cn("flex flex-wrap items-center gap-1", className)}>
       <Button variant="outline" size={size} onClick={() => mark("start")}>
