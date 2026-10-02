@@ -158,6 +158,44 @@ def test_ensure_output_root_not_writable(tmp_path):
     assert err.value.code == "E_OUTPUT_NOT_WRITABLE"
 
 
+def test_ensure_output_root_two_jobs_at_once_both_pass(tmp_path):
+    # สองงานเริ่มพร้อมกันต้องไม่ลบไฟล์ทดสอบของกันและกัน (เดิมชื่อซ้ำตาม pid ทำให้งานหนึ่งพัง)
+    rounds = 200
+    barrier = threading.Barrier(2)
+    failures: list[str] = []
+
+    def worker():
+        for _ in range(rounds):
+            barrier.wait()
+            try:
+                files.ensure_output_root(tmp_path)
+            except YtError as err:
+                failures.append(err.code)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert failures == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ensure_output_root_probe_names_are_unique(tmp_path, monkeypatch):
+    seen: list[str] = []
+    original = Path.write_bytes
+
+    def spy(self, data):
+        seen.append(self.name)
+        return original(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", spy)
+    files.ensure_output_root(tmp_path)
+    files.ensure_output_root(tmp_path)
+    assert len(seen) == 2 and seen[0] != seen[1]
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_credit_line():
     assert files.credit_line("ก", "ข", ID) == f"ที่มา: ก — ข (YouTube) https://youtu.be/{ID}"
 
