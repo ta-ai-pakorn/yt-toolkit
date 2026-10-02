@@ -402,3 +402,39 @@ test.describe("W2 แท็บวิดีโอและเสียง: กา
     })
   }
 })
+
+test.describe("W2 กับค่าตั้ง (M4 follow-up)", () => {
+  /** ตอบ GET /api/settings ด้วยค่าตั้งของ backend ที่แก้บางช่อง (ไม่แก้การตั้งค่าจริง) delayMs = ตอบช้า */
+  async function withSettings(page: Page, patch: Record<string, unknown>, delayMs = 0) {
+    await page.route("**/api/settings", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback()
+      const response = await route.fetch()
+      if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs))
+      await route.fulfill({ response, json: { ...((await response.json()) as object), ...patch } })
+    })
+  }
+
+  for (const [videoDefault, maxHeight] of [["compat-1080", undefined], ["compat-720", 720], ["max", undefined]] as const) {
+    test(`ค่าตั้ง ${videoDefault}: ส่ง maxHeight ${maxHeight ?? "(ไม่ส่ง)"}`, async ({ page }) => {
+      const { bodies } = await mockEnqueue(page)
+      await withSettings(page, { videoDefault })
+      await openTab(page, BBB, "video")
+      await downloadMp4(page).click()
+      await expect.poll(() => bodies.length).toBe(1)
+      const params = bodies[0][0].params as VideoJobParams
+      if (maxHeight === undefined) expect(params).not.toHaveProperty("maxHeight")
+      else expect(params.maxHeight).toBe(maxHeight)
+    })
+  }
+
+  test("ปุ่มโหลดรอจนค่าตั้งมาถึง แล้วจึงใช้เพดานของค่าตั้ง", async ({ page }) => {
+    const { bodies } = await mockEnqueue(page)
+    await withSettings(page, { videoDefault: "compat-720" }, 1500)
+    await page.goto(`/v/${BBB}?tab=video`)
+    await expect(downloadMp4(page)).toBeDisabled()
+    await expect(downloadMp4(page)).toBeEnabled({ timeout: 5000 })
+    await downloadMp4(page).click()
+    await expect.poll(() => bodies.length).toBe(1)
+    expect((bodies[0][0].params as VideoJobParams).maxHeight).toBe(720)
+  })
+})

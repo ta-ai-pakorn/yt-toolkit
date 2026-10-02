@@ -6,11 +6,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Spinner } from "@/components/ui/spinner"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { fill, th } from "@/i18n/th"
+import { scaleBytes } from "@/lib/advanced-options"
 import { audioSizeEstimate, buildAudioParams, wavBytes } from "@/lib/download-options"
 import { formatBytes } from "@/lib/format"
 import { useEnqueue } from "@/lib/jobs"
 import type { VideoInfo } from "@/lib/types"
 
+import { AdvancedSection } from "../advanced/advanced-section"
+import { revealRangeErrors, useAdvancedChoice } from "../advanced/use-advanced-choice"
 import { AudioLanguageSelect, SELECT_CONTENT, SELECT_TRIGGER } from "./audio-language-select"
 import {
   AUDIO_FORMATS,
@@ -37,19 +40,31 @@ function AudioForm({ video, choices, choose }: Props) {
   const formatLabelId = useId()
   const formatHintId = useId()
   const bitrateLabelId = useId()
-  const { state, languages, remember } = useDownloadState(video, choices)
+  const { state, languages, remember, ready } = useDownloadState(video, choices)
   const { enqueue, pending } = useEnqueue(ENQUEUE_MESSAGES)
+  // แยก chapter ถูกกันด้วยการฝังซับที่เลือกไว้ในแท็บวิดีโอ (ค่าชุดเดียวกันทุกแท็บ)
+  const advanced = useAdvancedChoice(video, "audio", choices.embedSubs != null)
 
   const source = wavSourceTrack(video.audio)
   const hint = state.audioFormat === "m4a" ? t.m4aHint : state.audioFormat === "mp3" ? t.mp3Hint : t.wavHint
-  const size =
+  const fullSize =
     state.audioFormat === "wav"
       ? wavBytes(video.durationS, source?.sampleRate, source?.channels)
       : audioSizeEstimate(video, state.audioFormat, state.mp3Kbps, state.audioLanguage)
+  const size = scaleBytes(fullSize, video.durationS, advanced.keptS)
 
   async function submit() {
-    if (pending) return
-    const params = buildAudioParams({ format: state.audioFormat, mp3Kbps: state.mp3Kbps, audioLanguage: state.audioLanguage })
+    if (pending || !ready) return
+    if (advanced.invalid) {
+      revealRangeErrors(advanced, video.videoId, "audio")
+      return
+    }
+    const params = buildAudioParams({
+      format: state.audioFormat,
+      mp3Kbps: state.mp3Kbps,
+      audioLanguage: state.audioLanguage,
+      advanced: advanced.params,
+    })
     const ok = await enqueue([{ videoId: video.videoId, kind: "audio", params, title: video.title }])
     if (ok) remember(audioPrefsPatch(state, languages))
   }
@@ -112,10 +127,12 @@ function AudioForm({ video, choices, choose }: Props) {
       <AudioLanguageSelect options={languages} value={state.audioLanguage} onChange={(audioLanguage) => choose({ audioLanguage })} />
 
       {/* owner (M4 preview): ปุ่มหลักหน้าตาเดียวกับ "โหลด mp4" ในแท็บวิดีโอ พร้อมขนาดโดยประมาณ */}
+      <AdvancedSection video={video} tab="audio" choice={advanced} embedSubsOn={false} />
+
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <Button disabled={pending} focusableWhenDisabled onClick={() => void submit()}>
+        <Button disabled={pending || !ready} focusableWhenDisabled onClick={() => void submit()}>
           {pending ? <Spinner aria-hidden /> : <Download aria-hidden />}
-          {fill(t.download, { format: state.audioFormat })}
+          {advanced.label(fill(t.download, { format: state.audioFormat }))}
         </Button>
         {size !== undefined && (
           <span className="text-sm text-muted-foreground">{fill(th.download.video.estimate, { size: formatBytes(size) })}</span>
