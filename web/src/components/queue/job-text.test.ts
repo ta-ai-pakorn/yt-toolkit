@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest"
 
 import { mergeJobPatch } from "@/lib/jobs"
+import { PRESETS } from "@/lib/sub-options"
 import type { Job } from "@/lib/types"
 
 import {
   formatEta,
   formatPercent,
   formatSpeed,
+  jobChoice,
   jobTitle,
   pausedCountdown,
   pausedRemainingMs,
   progressLine,
   retryText,
+  stageText,
 } from "./job-text"
 
 function job(over: Partial<Job> = {}): Job {
@@ -119,5 +122,30 @@ describe("progressLine", () => {
     expect(progressLine(job({ status: "queued" }))).toBe("รอคิว")
     expect(progressLine(job({ status: "done" }))).toBe("")
     expect(progressLine(job({ status: "failed" }))).toBe("")
+  })
+})
+
+describe("M5-A: ชื่องานต่อท้ายตัวเลือก (spec 3.5) และขั้นตอนใหม่", () => {
+  it("ช่วงเวลา · แยก chapter · ตัดโฆษณา", () => {
+    const range = { startMs: 90_000, endMs: 300_000 }
+    expect(
+      jobTitle(job({ params: { maxQuality: false, splitChapters: false, noAudio: false, audioLanguage: "original", range, sponsorblock: ["sponsor"] } })),
+    ).toBe("คลิปทดสอบ · ช่วง 1:30-5:00 · ตัดโฆษณา")
+    expect(jobTitle(job({ kind: "audio", params: { format: "m4a", splitChapters: true, audioLanguage: "original" } }))).toBe(
+      "คลิปทดสอบ · แยก chapter",
+    )
+    expect(
+      jobTitle(job({ kind: "subtitle", params: { trackId: "a.th-orig", format: "srt", options: PRESETS.medium, range: { startMs: 3_750_000, endMs: 3_900_000 } } })),
+    ).toBe("คลิปทดสอบ · ช่วง 1:02:30-1:05:00")
+    expect(jobChoice({ source: "fast" })).toBe("")
+    expect(jobTitle({ title: "", videoId: "aqz-KE-bpKQ" })).toBe("aqz-KE-bpKQ")
+  })
+
+  it("ขั้นตอนตัดช่วง ตัดโฆษณา แยก chapter", () => {
+    expect(stageText("cutting")).toBe("กำลังตัดช่วง")
+    expect(stageText("cutting_ads")).toBe("กำลังตัดโฆษณา")
+    expect(stageText("splitting:3/12")).toBe("กำลังแยก chapter 3/12")
+    expect(stageText("writing")).toBe("บันทึกไฟล์")
+    expect(progressLine(job({ stage: "splitting:2/5", progress: 0.5 }))).toBe("กำลังแยก chapter 2/5 · 50%")
   })
 })

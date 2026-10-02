@@ -171,7 +171,16 @@ export type JobKind = "video" | "audio" | "subtitle" | "frames_sharp" | "contact
 
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
 
-export type JobStage = "probing" | "downloading_video" | "downloading_audio" | "merging" | "converting" | "writing"
+export type JobStage =
+  | "probing"
+  | "downloading_video"
+  | "downloading_audio"
+  | "merging"
+  | "converting"
+  | "writing"
+  | "cutting"
+  | "cutting_ads"
+  | `splitting:${number}/${number}`
 
 export type JobError = { code: string; message: string; detail?: string | null }
 
