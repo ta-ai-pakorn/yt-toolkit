@@ -2036,3 +2036,19 @@ def test_sweep_cleans_chapter_subfolders(paths):
         assert not empty.exists()
     finally:
         db.close()
+
+
+def test_open_services_gives_the_handlers_the_sponsorblock_source(paths, fake_platform, monkeypatch):
+    captured = {}
+    real = lifecycle.build_handlers
+
+    def spy(deps):
+        captured["deps"] = deps
+        return real(deps)
+
+    monkeypatch.setattr(lifecycle, "build_handlers", spy)
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        assert captured["deps"].sponsors is services.extractor
+    finally:
+        services.db.close()

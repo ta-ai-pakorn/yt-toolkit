@@ -43,8 +43,8 @@ NOTES = {
     "NO_SUBTITLES": "คลิปนี้ไม่มีซับ",
     "EMBED_SUBS_SKIPPED": "ฝังซับไม่สำเร็จ ได้ไฟล์วิดีโอที่ไม่มีซับ",
     "QUALITY_FALLBACK": "คุณภาพที่เลือกไม่มีแล้ว ใช้คุณภาพที่ใกล้ที่สุดแทน",
-    "SPONSORBLOCK_EMPTY": "ไม่มีข้อมูลจากชุมชน ได้คลิปเต็ม",
-    "SPONSORBLOCK_UNREACHABLE": "ติดต่อ SponsorBlock ไม่ได้ ได้คลิปเต็ม",
+    "SPONSORBLOCK_EMPTY": "ไม่มีข้อมูลจากชุมชน ไม่ได้ตัดโฆษณา",
+    "SPONSORBLOCK_UNREACHABLE": "ติดต่อ SponsorBlock ไม่ได้ ไม่ได้ตัดโฆษณา",
     "NO_CHAPTERS": "คลิปนี้ไม่มี chapter ได้ไฟล์เต็ม",
 }
 # ตัวเลือกขั้นสูงของงานโหลด (M5 รอบ A) ที่ API ตรวจและตัวทำงานใช้ร่วมกัน

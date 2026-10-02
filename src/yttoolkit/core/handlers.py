@@ -8,6 +8,7 @@
 - log บอกแค่รหัสงานและ path สัมพัทธ์กับโฟลเดอร์ผลลัพธ์ (path เต็มมีชื่อผู้ใช้ Windows)
 - params.folder (งานจาก W3) = โฟลเดอร์กลุ่มคั่นระหว่างโฟลเดอร์ผลลัพธ์กับโฟลเดอร์ของคลิป (files.plan_output)
 - M5 รอบ A: โหลดทั้งคลิปแล้วตัดช่วงเวลา/โฆษณาด้วย ffmpeg (core/media.cut) ก่อนขั้นจัดไฟล์เดิม
+  หรือแยกไฟล์ละ chapter ลงโฟลเดอร์ย่อยของคลิป (วิดีโอตัดแบบเร็ว เสียงตัดแบบแม่นยำ)
 core/ ไม่ import api/ หรือ platform/
 """
 
@@ -26,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from PIL import Image
 
 from . import files
-from .advanced import ADS_SUFFIX, Interval, keep_intervals, kept_ms, range_suffix
+from .advanced import ADS_SUFFIX, ChapterPart, Interval, chapter_parts, keep_intervals, kept_ms, range_suffix
 from .download import (
     DownloadChoice,
     Downloader,
@@ -38,8 +39,8 @@ from .download import (
     video_choice,
 )
 from .frames import contact_sheet, frames_zip
-from .jobs import MIN_RANGE_MS, Handler, Job, JobContext, JobResult, OutputFile
-from .media import CutTarget, MediaMeta, MediaTools, SubtitleInput, iso639_2
+from .jobs import MIN_RANGE_MS, Handler, Job, JobContext, JobResult, OutputFile, split_stage
+from .media import CutMode, CutTarget, MediaMeta, MediaTools, SubtitleInput, iso639_2
 from .srt_builder import SubOptions, options_from_dict
 from .storyboard import FOLDER as STORYBOARD_FOLDER
 from .storyboard import get_storyboard
@@ -82,7 +83,7 @@ class HandlerDeps:
     # เบรกฉุกเฉินของคิว (QueueRunner.brake) สำหรับ E_BOT_CHECK ที่ตัวทำงานกลืนไว้เองไม่โยนต่อ
     # (คอมเมนต์ปักหมุดของงานโน้ต) open_services ต่อให้หลังสร้างคิว None = ไม่เบรก
     on_bot_check: Callable[[], None] | None = None
-    # ที่มาของช่วงโฆษณา (C4 ตัว extractor) lifecycle ต่อให้ None = ติดต่อ SponsorBlock ไม่ได้ (ได้คลิปเต็มพร้อมโน้ต)
+    # ที่มาของช่วงโฆษณา (C4 ตัว extractor) lifecycle ต่อให้ None = ติดต่อ SponsorBlock ไม่ได้ (ไม่ได้ตัดโฆษณา มีโน้ต)
     sponsors: SponsorSource | None = None
 
 
@@ -234,12 +235,12 @@ def _sponsor_segments(
         return None, ()
     source = deps.sponsors
     if source is None:
-        log.info("งาน %s ไม่มีตัวดึงข้อมูล SponsorBlock ได้คลิปเต็ม", ctx.job_id)
+        log.info("งาน %s ไม่มีตัวดึงข้อมูล SponsorBlock ไม่ได้ตัดโฆษณา", ctx.job_id)
         return None, ("SPONSORBLOCK_UNREACHABLE",)
     try:
         found = source.sponsor_segments(clip.video_id, [str(c) for c in categories], clip.meta.duration_s)
     except SponsorBlockError as exc:
-        log.info("งาน %s ติดต่อ SponsorBlock ไม่ได้ (%s) ได้คลิปเต็ม", ctx.job_id, exc)
+        log.info("งาน %s ติดต่อ SponsorBlock ไม่ได้ (%s) ไม่ได้ตัดโฆษณา", ctx.job_id, exc)
         return None, ("SPONSORBLOCK_UNREACHABLE",)
     return [(start, end) for start, end, _ in found], ()
 
@@ -334,6 +335,95 @@ def _cut(
     result.path.unlink(missing_ok=True)  # ไฟล์ที่โหลดมาไม่ใช้แล้ว คืนที่ว่างก่อนขั้นจัดไฟล์
     suffix = (range_suffix(*span) if span is not None else "") + (ADS_SUFFIX if ads_cut else "")
     return _Cut(out, suffix, kept_ms(keep) / 1000, notes)
+
+
+def _ignore_progress(_fraction: float | None) -> None:
+    """ขั้นจัดไฟล์ของแต่ละ chapter สั้นมาก แถบคิวแสดงเฉพาะความคืบหน้าของการตัด"""
+
+
+def _chapter_start(chapter: Mapping[str, Any]) -> float:
+    """เวลาเริ่มของ chapter สำหรับเรียงลำดับ อ่านไม่ได้ = ไว้ท้ายสุด (chapter_parts ข้ามให้เอง)"""
+    value = chapter.get("startS")
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        return math.inf
+    return float(value)
+
+
+def _chapters(clip: _Clip, result: DownloadResult) -> list[ChapterPart]:
+    """chapter ของคลิป (VideoInfo จาก cache) เรียงตามเวลาเริ่ม ปลายสุดท้ายไม่เกินความยาวจริงของไฟล์ที่โหลด
+    ไม่ถึง 2 chapter = []"""
+    total = _duration_ms(result.info, clip)
+    if not total:
+        return []
+    chapters = [c for c in (clip.info.get("chapters") or []) if isinstance(c, Mapping)]
+    return chapter_parts(sorted(chapters, key=_chapter_start), total)
+
+
+def _split(
+    deps: HandlerDeps,
+    ctx: JobContext,
+    clip: _Clip,
+    result: DownloadResult,
+    report: _Reporter,
+    parts: list[ChapterPart],
+    *,
+    ext: str,
+    target: CutTarget,
+    mode: CutMode,
+    has_audio: bool,
+    finalize: Callable[[Path, Path, MediaMeta], None],
+) -> list[tuple[Path, ChapterPart]]:
+    """ไฟล์ละ chapter ใน workdir ตามลำดับ (D2/D6): ตัดช่วงของ chapter แล้วจัดไฟล์ (ปก ชื่อ chapter ลำดับ n/total)
+    ไฟล์ทั้งหมดย้ายเข้าที่พร้อมกันตอนจบ (ยกเลิกกลางทาง = ไม่มีไฟล์ไหนเข้าโฟลเดอร์ผลลัพธ์)"""
+    workdir = Path(ctx.workdir)
+    made: list[tuple[Path, ChapterPart]] = []
+    for part in parts:
+        ctx.check_cancelled()
+        report.stage(split_stage(part.index, part.total))
+        cut = workdir / f"part-{part.index:03d}.cut.{target}"
+        deps.media.cut(result.path, cut, [(part.start_ms, part.end_ms)], mode=mode, target=target,
+                       has_audio=has_audio, cancel=ctx.cancelled, on_progress=report.fraction)  # fmt: skip
+        ctx.check_cancelled()
+        out = workdir / f"part-{part.index:03d}.{ext}"
+        meta = replace(
+            clip.meta,
+            title=part.title or f"chapter {part.index}",
+            duration_s=(part.end_ms - part.start_ms) / 1000,
+            track=f"{part.index}/{part.total}",
+        )
+        finalize(cut, out, meta)
+        cut.unlink(missing_ok=True)
+        made.append((out, part))
+    result.path.unlink(missing_ok=True)
+    return made
+
+
+def _finish_chapters(
+    deps: HandlerDeps,
+    ctx: JobContext,
+    clip: _Clip,
+    made: list[tuple[Path, ChapterPart]],
+    *,
+    ext: str,
+    kind: str,
+    notes: Iterable[str],
+) -> JobResult:
+    """ย้ายไฟล์ของทุก chapter เข้า "<โฟลเดอร์ของคลิป>/แยกตาม chapter (<ext>)/" ตามลำดับ (D4) แล้วเขียน
+    แหล่งที่มา.txt ที่โฟลเดอร์ของคลิป ผลของงาน = ทุกไฟล์ตามลำดับ chapter"""
+    ctx.check_cancelled()
+    outputs: list[OutputFile] = []
+    for path, part in made:
+        planned = files.plan_chapter_output(
+            clip.root, clip.title, clip.video_id, ext, clip.group,
+            index=part.index, total=part.total, chapter_title=part.title,
+        )  # fmt: skip
+        final = files.move_into_place(path, planned)
+        rel = final.relative_to(clip.root).as_posix()
+        log.info("งาน %s บันทึกไฟล์ %s", ctx.job_id, rel)
+        outputs.append(OutputFile(root=str(clip.root), rel=rel, size_bytes=final.stat().st_size, kind=kind))
+    clip_folder = files.plan_output(clip.root, clip.title, clip.video_id, "", ext, clip.group).parent
+    _write_note(deps, ctx, clip, clip_folder)
+    return JobResult(outputs=tuple(outputs), notes=_unique(notes), title=clip.title or None)
 
 
 def _hooks(deps: HandlerDeps, ctx: JobContext, report: _Reporter) -> DownloadHooks:
@@ -468,10 +558,11 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     params = job.params
     workdir = Path(ctx.workdir)
     span = _job_range(params, clip)
+    split = bool(params.get("splitChapters"))
     subtitle, sub_notes = _embedded_subtitle(deps, ctx, clip, params, span)
     ads, ad_notes = _sponsor_segments(deps, ctx, clip, params)
     ctx.check_cancelled()
-    factor = CUT_DISK_FACTOR if span is not None or ads is not None else DISK_FACTOR
+    factor = CUT_DISK_FACTOR if split or span is not None or ads is not None else DISK_FACTOR
 
     def choose(raw: dict) -> DownloadChoice:
         return _disk_checked(video_choice(raw, params), (clip.root, workdir), deps.disk_free, factor=factor)
@@ -480,6 +571,24 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     ctx.check_cancelled()
     no_audio = bool(params.get("noAudio"))
     has_audio = not no_audio and _has_audio_stream(result.info)
+    split_notes: tuple[str, ...] = ()
+    if split:
+        parts = _chapters(clip, result)
+        if parts:
+            cover = _cover(deps, clip, ctx)
+
+            def finalize(src: Path, dst: Path, meta: MediaMeta) -> None:
+                deps.media.finalize_mp4(
+                    src, dst, meta, cover=cover, subtitle=None, audio_language=result.choice.audio_language,
+                    cancel=ctx.cancelled, on_progress=_ignore_progress, no_audio=no_audio,
+                )  # fmt: skip
+
+            made = _split(deps, ctx, clip, result, report, parts, ext="mp4", target="mp4", mode="fast",
+                          has_audio=has_audio, finalize=finalize)  # fmt: skip
+            report.stage("writing")
+            notes = (*result.choice.notes, *sub_notes)
+            return _finish_chapters(deps, ctx, clip, made, ext="mp4", kind="video", notes=notes)
+        split_notes = ("NO_CHAPTERS",)
     cut = _cut(deps, ctx, clip, result, report, span=span, ads=ads, target="mp4", has_audio=has_audio)
     cover = _cover(deps, clip, ctx)
     ctx.check_cancelled()
@@ -497,7 +606,7 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
         no_audio=no_audio,
     )
     suffix = (NO_AUDIO_SUFFIX if no_audio else "") + cut.suffix
-    notes = (*result.choice.notes, *sub_notes, *ad_notes, *cut.notes)
+    notes = (*result.choice.notes, *sub_notes, *ad_notes, *cut.notes, *split_notes)
     return _finish(deps, ctx, clip, out, suffix=suffix, ext="mp4", kind="video", notes=notes)
 
 
@@ -510,15 +619,39 @@ def _audio(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
         raise YtError("E_UNKNOWN", f"audio format {fmt!r}")
     workdir = Path(ctx.workdir)
     span = _job_range(params, clip)
+    split = bool(params.get("splitChapters"))
     ads, ad_notes = _sponsor_segments(deps, ctx, clip, params)
     ctx.check_cancelled()
-    factor = CUT_DISK_FACTOR if span is not None or ads is not None else DISK_FACTOR
+    factor = CUT_DISK_FACTOR if split or span is not None or ads is not None else DISK_FACTOR
 
     def choose(raw: dict) -> DownloadChoice:
         return _disk_checked(audio_choice(raw, params), (clip.root, workdir), deps.disk_free, factor=factor)
 
     result = deps.downloader.download(clip.video_id, choose, workdir, _hooks(deps, ctx, report))
     ctx.check_cancelled()
+    split_notes: tuple[str, ...] = ()
+    if split:
+        parts = _chapters(clip, result)
+        if parts:
+            cover = None if fmt == "wav" else _cover(deps, clip, ctx)
+            kbps = int(params.get("mp3Kbps") or DEFAULT_MP3_KBPS)
+            language = result.choice.audio_language
+
+            def finalize(src: Path, dst: Path, meta: MediaMeta) -> None:
+                common: dict[str, Any] = {"audio_language": language, "cancel": ctx.cancelled,
+                                          "on_progress": _ignore_progress}  # fmt: skip
+                if fmt == "wav":
+                    deps.media.to_wav(src, dst, meta, **common)
+                elif fmt == "mp3":
+                    deps.media.to_mp3(src, dst, meta, kbps=kbps, cover=cover, **common)
+                else:
+                    deps.media.finalize_m4a(src, dst, meta, cover=cover, **common)
+
+            made = _split(deps, ctx, clip, result, report, parts, ext=fmt, target="m4a" if fmt == "m4a" else "wav",
+                          mode="exact", has_audio=True, finalize=finalize)  # fmt: skip
+            report.stage("writing")
+            return _finish_chapters(deps, ctx, clip, made, ext=fmt, kind="audio", notes=result.choice.notes)
+        split_notes = ("NO_CHAPTERS",)
     # m4a ตัดเป็น m4a · mp3/wav ตัดเป็น wav (PCM ตัดได้ตรงตัวอย่างเสียง) แล้วแปลงต่อครั้งเดียว
     target: CutTarget = "m4a" if fmt == "m4a" else "wav"
     cut = _cut(deps, ctx, clip, result, report, span=span, ads=ads, target=target, has_audio=True)
@@ -540,7 +673,7 @@ def _audio(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
             report.stage("writing")
             deps.media.finalize_m4a(cut.path, out, meta, cover=cover, **common)
     report.stage("writing")
-    notes = (*result.choice.notes, *ad_notes, *cut.notes)
+    notes = (*result.choice.notes, *ad_notes, *cut.notes, *split_notes)
     return _finish(deps, ctx, clip, out, suffix=cut.suffix, ext=fmt, kind="audio", notes=notes)
 
 
@@ -690,7 +823,7 @@ def _frames_zip(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
 
 
 def build_handlers(deps: HandlerDeps) -> dict[str, Handler]:
-    """ตัวทำงานของทุกชนิดงานใน M4 (frames_sharp เป็นงาน M5 ยังไม่มี)"""
+    """ตัวทำงานของทุกชนิดงานใน M4 + ตัวเลือกขั้นสูงของ M5 รอบ A (frames_sharp เป็นงานรอบ B ยังไม่มี)"""
 
     def bind(fn: Callable[[HandlerDeps, Job, JobContext], JobResult]) -> Handler:
         def handler(job: Job, ctx: JobContext) -> JobResult:

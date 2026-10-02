@@ -305,6 +305,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
             subtitles=subtitles,
             cache_root=paths.cache,
             pinned=pinned.get,
+            sponsors=extractor,  # type: ignore[arg-type]  # ทั้งตัวจริงและตัวปลอมมี sponsor_segments (C4)
         )
         delays = {"delay_range": FAKE_DELAY_RANGE} if fake else {}
         queue = QueueRunner(

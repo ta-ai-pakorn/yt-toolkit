@@ -353,6 +353,6 @@ def test_is_stage_and_split_stage_bounds():
 
 
 def test_m5a_notes_are_verbatim():
-    assert NOTES["SPONSORBLOCK_EMPTY"] == "ไม่มีข้อมูลจากชุมชน ได้คลิปเต็ม"
-    assert NOTES["SPONSORBLOCK_UNREACHABLE"] == "ติดต่อ SponsorBlock ไม่ได้ ได้คลิปเต็ม"
+    assert NOTES["SPONSORBLOCK_EMPTY"] == "ไม่มีข้อมูลจากชุมชน ไม่ได้ตัดโฆษณา"
+    assert NOTES["SPONSORBLOCK_UNREACHABLE"] == "ติดต่อ SponsorBlock ไม่ได้ ไม่ได้ตัดโฆษณา"
     assert NOTES["NO_CHAPTERS"] == "คลิปนี้ไม่มี chapter ได้ไฟล์เต็ม"
