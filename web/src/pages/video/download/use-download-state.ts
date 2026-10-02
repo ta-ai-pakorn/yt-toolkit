@@ -50,10 +50,12 @@ export const AUDIO_FORMATS: readonly AudioFormatChoice[] = ["m4a", "mp3", "wav"]
 /**
  * คุณภาพเริ่มต้นจากค่าที่จำไว้ (จำเป็นความสูงของภาพ ไม่ใช่ formatId): ตัวเลือกที่สูงเท่ากัน โดยเลือกแบบเปิดได้ทุกที่ (H.264)
  * ก่อน แล้วค่อยตามลำดับของ qualityOptions (fps มากสุดก่อน) · ไม่มีความสูงนั้น หรือจำว่า "auto" = "auto"
+ * cap (โหมดเปิดได้ทุกที่): ความสูงที่จำไว้เกินเพดาน = ใช้ความสูงที่เพดานแทน ไม่กลายเป็น "อัตโนมัติ" เงียบ ๆ (M4 follow-up)
  */
-export function qualityForHeight(options: readonly QualityOption[], height: DownloadPrefs["quality"]): string {
+export function qualityForHeight(options: readonly QualityOption[], height: DownloadPrefs["quality"], cap?: number): string {
   if (height === AUTO_QUALITY) return AUTO_QUALITY
-  const same = options.filter((option) => option.height === height)
+  const wanted = cap === undefined ? height : Math.min(height, cap)
+  const same = options.filter((option) => option.height === wanted)
   return (same.find((option) => option.compat) ?? same[0])?.value ?? AUTO_QUALITY
 }
 
@@ -88,7 +90,7 @@ export function resolveDownloadState(
   const quality =
     chosen !== undefined && (chosen === AUTO_QUALITY || options.some((option) => option.value === chosen))
       ? chosen
-      : qualityForHeight(options, prefs.quality)
+      : qualityForHeight(options, prefs.quality, maxQuality ? undefined : cap)
   const chosenLanguage = choices.audioLanguage
   const audioLanguage =
     chosenLanguage !== undefined && languages?.some((option) => option.value === chosenLanguage)
@@ -196,5 +198,7 @@ export function useDownloadState(video: VideoInfo, choices: DownloadChoices) {
   // ยังไม่โหลดการตั้งค่า = เพดาน 1080
   const cap = compatCap(settings.data)
   const state = resolveDownloadState(prefs, video, languages, choices, cap)
-  return { state, languages, remember, cap }
+  // M4 follow-up: กดโหลดก่อนค่าตั้งมาถึงเคยใช้เพดาน 1080 · ปุ่มโหลดรอจนค่าตั้งโหลดเสร็จ (หรือโหลดไม่สำเร็จ = ใช้ค่าเริ่มต้น)
+  const ready = !settings.isPending
+  return { state, languages, remember, cap, ready }
 }

@@ -6,7 +6,11 @@ import type {
   AudioFormat,
   AudioJobParams,
   Settings,
+  SponsorCategory,
+  SubExportFormat,
   SubOptions,
+  SubtitleJobParams,
+  TimeRange,
   VideoFormat,
   VideoInfo,
   VideoJobParams,
@@ -223,6 +227,40 @@ export function batchMinutes(count: number, concurrency: number): number {
   return Math.max(1, Math.ceil((count * 35) / concurrency / 60))
 }
 
+/** หมวด SponsorBlock ทั้ง 8 แบบตามลำดับที่หน้าเว็บแสดง (ตรงกับ core/jobs.SPONSORBLOCK_CATEGORIES) */
+export const SPONSOR_CATEGORIES: readonly SponsorCategory[] = [
+  "sponsor",
+  "selfpromo",
+  "interaction",
+  "intro",
+  "outro",
+  "preview",
+  "filler",
+  "music_offtopic",
+]
+
+/** หมวดที่ติ๊กไว้เมื่อยังไม่เคยเลือกเอง (ค่าเริ่มต้นของการตั้งค่า sponsorblockDefault) */
+export const DEFAULT_SPONSOR_CATEGORIES: readonly SponsorCategory[] = ["sponsor", "selfpromo", "interaction"]
+
+/** หมวดที่ติ๊กไว้จากการตั้งค่า (D3 จำข้ามคลิป): เฉพาะหมวดที่รู้จัก เรียงตาม SPONSOR_CATEGORIES · ว่างหรือยังไม่โหลด = ค่าเริ่มต้น */
+export function sponsorCategories(s: Pick<Settings, "sponsorblockDefault"> | undefined): SponsorCategory[] {
+  const saved = new Set(s?.sponsorblockDefault ?? [])
+  const known = SPONSOR_CATEGORIES.filter((category) => saved.has(category))
+  return known.length > 0 ? known : [...DEFAULT_SPONSOR_CATEGORIES]
+}
+
+/** ตัวเลือกขั้นสูงที่ไปกับงานวิดีโอ/เสียง (M5 รอบ A) · ไม่มีหมวดโฆษณา = ไม่ตัดโฆษณา */
+export type AdvancedParams = { range?: TimeRange; splitChapters: boolean; sponsorblock?: SponsorCategory[] }
+
+/** ไม่ใช้ตัวเลือกขั้นสูง (W3 และค่าเริ่มต้นของตัวสร้าง params) */
+export const NO_ADVANCED: AdvancedParams = { splitChapters: false }
+
+/** ใส่ช่วงเวลาและหมวดโฆษณาลง params (เฉพาะที่มีค่า) */
+function addAdvanced(params: { range?: TimeRange; sponsorblock?: SponsorCategory[] }, advanced: AdvancedParams): void {
+  if (advanced.range) params.range = advanced.range
+  if (advanced.sponsorblock && advanced.sponsorblock.length > 0) params.sponsorblock = [...advanced.sponsorblock]
+}
+
 /**
  * ค่าของงานวิดีโอจากตัวเลือกในแท็บวิดีโอ: "auto" = ไม่ส่ง formatId · ฝังซับ = ส่งรหัสแทร็กพร้อมค่าความยาวซับ
  * · เพดาน 720 (compatCap) และไม่เปิดความละเอียดสูงสุด = ส่ง maxHeight 720 ให้ backend (เพดาน 1080 = ไม่ส่ง เป็นค่าเริ่มต้นของ backend)
@@ -235,19 +273,23 @@ export function buildVideoParams(input: {
   audioLanguage: string
   embedSubs: string | null
   subOptions: SubOptions
+  advanced?: AdvancedParams
 }): VideoJobParams {
+  const advanced = input.advanced ?? NO_ADVANCED
   const params: VideoJobParams = {
     maxQuality: input.maxQuality,
-    splitChapters: false,
+    splitChapters: advanced.splitChapters,
     noAudio: input.noAudio,
     audioLanguage: input.audioLanguage,
   }
   if (input.compatCap === 720 && !input.maxQuality) params.maxHeight = 720
   if (input.quality !== AUTO_QUALITY) params.formatId = input.quality
-  if (input.embedSubs !== null) {
+  // แยกตาม chapter ใช้คู่กับฝังซับไม่ได้ (backend ตอบ 422): ไม่ส่งฝังซับเลย
+  if (input.embedSubs !== null && !advanced.splitChapters) {
     params.embedSubs = input.embedSubs
     params.subOptions = input.subOptions
   }
+  addAdvanced(params, advanced)
   return params
 }
 
@@ -256,13 +298,28 @@ export function buildAudioParams(input: {
   format: "m4a" | "mp3" | "wav"
   mp3Kbps: 128 | 192 | 320
   audioLanguage: string
+  advanced?: AdvancedParams
 }): AudioJobParams {
+  const advanced = input.advanced ?? NO_ADVANCED
   const params: AudioJobParams = {
     format: input.format,
-    splitChapters: false,
+    splitChapters: advanced.splitChapters,
     audioLanguage: input.audioLanguage,
   }
   if (input.format === "mp3") params.mp3Kbps = input.mp3Kbps
+  addAdvanced(params, advanced)
+  return params
+}
+
+/** ค่าของงานซับ (แท็บซับ) · มีช่วงเวลา = ซับเฉพาะช่วงนั้นนับเวลาใหม่จาก 0 (AC-SUB-10) */
+export function buildSubtitleParams(input: {
+  trackId: string
+  format: SubExportFormat
+  options: SubOptions
+  range?: TimeRange | null
+}): SubtitleJobParams {
+  const params: SubtitleJobParams = { trackId: input.trackId, format: input.format, options: input.options }
+  if (input.range) params.range = input.range
   return params
 }
 
