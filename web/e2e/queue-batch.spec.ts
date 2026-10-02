@@ -48,6 +48,15 @@ async function openBatchFromList(page: Page) {
 }
 
 async function seriousViolations(page: Page) {
+  // รอแอนิเมชันที่มีจุดจบ (toast จางเข้า, กล่องเปิด) ให้จบก่อน: axe วัดสีตอนโปร่งแสงแล้วได้ค่าต่ำเกินจริง
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  )
   const results = await new AxeBuilder({ page }).analyze()
   return results.violations
     .filter((v) => v.impact === "serious" || v.impact === "critical")

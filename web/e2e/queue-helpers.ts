@@ -157,7 +157,7 @@ export async function openQueueSheet(page: Page): Promise<Locator> {
       el
         .getAnimations({ subtree: true })
         .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
-        .map((a) => a.finished),
+        .map((a) => a.finished.catch(() => undefined)),
     ),
   )
   return sheet
