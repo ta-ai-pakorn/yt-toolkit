@@ -118,7 +118,7 @@ def test_messages_are_verbatim_prd_copy() -> None:
 
 
 def test_m4_messages_are_verbatim_c11_copy() -> None:
-    assert MESSAGES["E_FFMPEG_MISSING"] == 'ยังไม่มีโปรแกรมแปลงไฟล์ (ffmpeg) กด "โหลดใหม่" ในหน้าตรวจสุขภาพ'
+    assert MESSAGES["E_FFMPEG_MISSING"] == 'ยังไม่มีโปรแกรมแปลงไฟล์ (ffmpeg) กด "โหลด ffmpeg ใหม่" ในหน้าตรวจสุขภาพ'
     assert MESSAGES["E_DISK_FULL"] == "พื้นที่ไม่พอ ต้องมีว่างอย่างน้อย {size}"
     assert MESSAGES["E_OUTPUT_NOT_WRITABLE"] == "บันทึกลงโฟลเดอร์นี้ไม่ได้ ลองเปลี่ยนโฟลเดอร์ในหน้าตั้งค่า"
     assert MESSAGES["E_INTERRUPTED"] == "งานหยุดกลางคันเพราะปิดโปรแกรม"
