@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Captions, Copy, Download, ExternalLink, Flame, ImageIcon, ImageOff, Link2, Play } from "lucide-react"
+import { Captions, ChevronFirst, ChevronLast, Copy, Download, ExternalLink, Flame, ImageIcon, ImageOff, Link2, Play } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { toast } from "sonner"
 
@@ -27,6 +27,7 @@ import { LoadError } from "./load-error"
 import { replayedFrameIndexes } from "./most-replayed"
 import { nowPlayingFrame } from "./playback-sync"
 import { playerActions, usePlayerValue } from "./player/player-store"
+import { markRange } from "./player/range-mark-buttons"
 import { ReplayedMark } from "./replayed-mark"
 import { storyboardQuery } from "./queries"
 import { subtitlesQuery } from "./subs-queries"
@@ -271,6 +272,14 @@ function FrameTile({ frame, frames, frameIndex, videoId, highlighted, replayed, 
         <ContextMenuItem onClick={playHere}>
           <Play aria-hidden />
           {t.playFrom}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => markRange(videoId, "start", frame.tMs)}>
+          <ChevronFirst aria-hidden />
+          {th.advanced.frameStart}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => markRange(videoId, "end", frame.tMs)}>
+          <ChevronLast aria-hidden />
+          {th.advanced.frameEnd}
         </ContextMenuItem>
         {onViewSubs && (
           <ContextMenuItem onClick={onViewSubs}>
