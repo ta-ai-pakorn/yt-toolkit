@@ -228,6 +228,28 @@ def test_output_status(tmp_path):
     assert tools.output_status(blocker / "sub").status == "error"
 
 
+def test_output_status_two_checks_at_once_both_ok(tmp_path):
+    # หน้าตรวจสุขภาพสองคำขอพร้อมกัน: ไฟล์ทดสอบชื่อไม่ซ้ำกัน จึงไม่ลบของอีกฝั่งจนฟ้องว่าเขียนไม่ได้
+    import threading
+
+    out = tmp_path / "out"
+    barrier = threading.Barrier(2)
+    results: list[str] = []
+
+    def check() -> None:
+        for _ in range(100):
+            barrier.wait()
+            results.append(tools.output_status(out).status)
+
+    threads = [threading.Thread(target=check) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results.count("ok") == 200
+    assert list(out.iterdir()) == []
+
+
 def test_network_status():
     assert tools.network_status(lambda url: 200).status == "ok"
 

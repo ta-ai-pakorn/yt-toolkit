@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 import zipfile
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -214,7 +215,8 @@ def disk_status(path: Path) -> ToolStatus:
 def output_status(output_dir: Path) -> ToolStatus:
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
-        probe = output_dir / ".yt-toolkit-write-test"
+        # ชื่อไม่ซ้ำต่อครั้ง: หน้าตรวจสุขภาพสองคำขอพร้อมกันจะไม่ลบไฟล์ทดสอบของกันและกัน
+        probe = output_dir / f".yt-toolkit-write-test-{uuid.uuid4().hex}"
         probe.write_bytes(b"")
         probe.unlink()
     except OSError:
