@@ -262,6 +262,14 @@ def _check_intervals(intervals: Sequence[tuple[int, int]]) -> list[tuple[int, in
     return clean
 
 
+def _check_cut(intervals: Sequence[tuple[int, int]], mode: CutMode, target: CutTarget) -> list[tuple[int, int]]:
+    """กฎเดียวกันทั้งตัวจริง (cut_args) และตัวปลอม: ใช้ผิดในโหมดปลอมก็พังเหมือนของจริง"""
+    clean = _check_intervals(intervals)
+    if mode == "fast" and (target != "mp4" or len(clean) != 1):
+        raise ValueError("fast cut takes exactly one interval of an mp4")
+    return clean
+
+
 def cut_args(
     ffmpeg: str,
     src: Path,
@@ -279,11 +287,9 @@ def cut_args(
     - exact อื่น ๆ: แต่ละช่วงเป็น input ของตัวเอง (-ss ก่อน -i = seek แม่นยำเมื่อเข้ารหัสใหม่) แล้วต่อด้วย concat
       mp4 = H.264 + AAC (หรือไม่มีเสียง) · m4a = AAC · wav = PCM (ให้ to_mp3/to_wav แปลงต่อ)
     """
-    clean = _check_intervals(intervals)
+    clean = _check_cut(intervals, mode, target)
     head = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"]
     if mode == "fast":
-        if target != "mp4" or len(clean) != 1:
-            raise ValueError("fast cut takes exactly one interval of an mp4")
         ((s, e),) = clean
         maps = ["-map", "0:v:0"] + (["-map", "0:a?"] if has_audio else [])
         return head + ["-ss", _seconds(s), "-t", _seconds(e - s), "-i", str(src)] + maps + [
@@ -634,7 +640,7 @@ class FakeMediaTools:
         cancel: Callable[[], bool],
         on_progress: Callable[[float | None], None],
     ) -> None:
-        clean = _check_intervals(intervals)
+        clean = _check_cut(intervals, mode, target)
         if cancel():
             raise JobCancelled()
         self.cuts.append(CutCall(src.name, dst.name, tuple(clean), mode, target, has_audio))

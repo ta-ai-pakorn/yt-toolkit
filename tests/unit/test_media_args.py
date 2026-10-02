@@ -369,3 +369,22 @@ def test_fake_cut_records_and_copies(tmp_path: Path) -> None:
     with pytest.raises(JobCancelled):
         fake.cut(src, tmp_path / "x.mp4", [(0, 1000)], mode="fast", target="mp4", has_audio=True,
                  cancel=lambda: True, on_progress=seen.append)
+
+
+@pytest.mark.parametrize(
+    ("intervals", "target"),
+    [([(0, 1000)], "m4a"), ([(0, 1000)], "wav"), ([(0, 1000), (2000, 3000)], "mp4")],
+)
+def test_fake_cut_rejects_what_the_real_cutter_rejects(tmp_path: Path, intervals, target) -> None:
+    # ตัวปลอมต้องพังเหมือนตัวจริง ไม่งั้น handler ที่เรียกผิดจะผ่านเทสในโหมดปลอม
+    with pytest.raises(ValueError) as real:
+        cut_args(FF, SRC, DST, intervals, mode="fast", target=target, has_audio=True)
+    fake = FakeMediaTools(MEDIA_ROOT)
+    src = tmp_path / "media.mp4"
+    src.write_bytes(b"video")
+    dst = tmp_path / f"cut.{target}"
+    with pytest.raises(ValueError) as faked:
+        fake.cut(src, dst, intervals, mode="fast", target=target, has_audio=True,
+                 cancel=lambda: False, on_progress=lambda _: None)
+    assert str(faked.value) == str(real.value) == "fast cut takes exactly one interval of an mp4"
+    assert fake.cuts == [] and not dst.exists()
