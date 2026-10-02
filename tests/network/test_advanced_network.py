@@ -3,9 +3,10 @@
 
 ต้องได้รับอนุญาตจากพิธก่อนรัน: โหลดไฟล์จริงจากยูทูป (240p) ลง temp ลบทิ้งเมื่อทุกเทสผ่าน
 ประมาณการ 30-60 MB รวม: คลิป 372 วิ โหลดเต็ม 3 รอบ (ไฟล์เต็มไว้เทียบเฟรม, ไฟล์ตัดช่วง, ไฟล์ฝังซับ) รอบละราว 8-15 MB
-คลิป 19 วิ ของ AC-ADV-03 (วิดีโอ + เสียง) และคลิป 10 วิ ของ AC-ADV-04 โหลดไม่ถึง 2 MB (ตัวเลขนี้ประมาณจากความละเอียด ยังไม่ได้วัดจริง)
+คลิป chapter ของ AC-ADV-03 (วิดีโอ + เสียง ขนาดขึ้นกับคลิปที่พิธเลือก) และคลิป 10 วิ ของ AC-ADV-04 ที่ไม่มีข้อมูล โหลดไม่ถึง 2 MB (ตัวเลขนี้ประมาณ ยังไม่ได้วัดจริง)
 รันเองด้วย: uv run pytest -m network -q tests/network/test_advanced_network.py -s
 id ของคลิปอยู่ใน tests/network_videos.toml ([advanced]) · sponsor_clip ว่าง = ข้ามกรณีที่มีข้อมูลของ SponsorBlock
+chapters_clip ว่าง = ข้าม AC-ADV-03 (พิธต้องเลือกคลิปจริงที่มี chapter ≥ 3 ก่อน)
 ยูทูปตอบ 429 หรือขอยืนยันว่าไม่ใช่บอท = เทสตก ให้รายงานผล ห้ามแก้เทสให้หลวมลง
 """
 
@@ -174,7 +175,9 @@ def test_ac_adv_01_range_is_frame_exact(env: Env) -> None:
 
 
 def test_ac_adv_03_chapter_split_video_and_mp3(env: Env) -> None:
-    clip = CLIPS["chapters_clip"]
+    clip = CLIPS.get("chapters_clip") or ""
+    if not clip:
+        pytest.skip("พิธเลือกคลิปสาธารณะที่มี chapter อย่างน้อย 3 อัน ใส่ id ใน tests/network_videos.toml [advanced] chapters_clip ก่อนรัน")
     chapters = env.videos.get(clip)["chapters"]
     assert len(chapters) >= 3
     video = env.run("video", clip, {**VIDEO, "splitChapters": True})
