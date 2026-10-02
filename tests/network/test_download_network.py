@@ -19,6 +19,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import time
 import tomllib
 from collections.abc import Callable, Iterator
@@ -99,6 +100,12 @@ class JobCtx:
         self.check_cancelled()
 
 
+def _say(text: str) -> None:
+    """พิมพ์ลงคอนโซลโดยไม่ล้มเมื่อชื่อคลิปมีอักขระที่ code page ของ Windows ไม่มี (เช่นอีโมจิ)"""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(text.encode(encoding, "replace").decode(encoding))
+
+
 @dataclass
 class Run:
     result: JobResult
@@ -177,7 +184,7 @@ class Env:
             assert path.stat().st_size == out.size_bytes
             self.runs[key] = Run(result, path, ffprobe_json(path), took)
             self.timings.append(f"{kind} {video_id} {path.suffix} {took:.1f}s {path.stat().st_size // 1024}KB")
-            print(f"{kind} {video_id} {params}: {took:.1f}s -> {path.name} ({path.stat().st_size // 1024} KB)")
+            _say(f"{kind} {video_id} {params}: {took:.1f}s -> {path.name} ({path.stat().st_size // 1024} KB)")
         return self.runs[key]
 
 
