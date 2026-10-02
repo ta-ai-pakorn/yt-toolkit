@@ -1994,3 +1994,45 @@ def test_closed_browser_tab_reset_does_not_reach_app_log(paths, root_logger):
     text = (paths.logs / "app.log").read_text(encoding="utf-8")
     assert "_call_connection_lost" not in text
     assert "Exception in callback other()" in text
+
+
+@pytest.mark.parametrize(
+    ("name", "ours"),
+    [
+        (f"{TITLE} (01.30-05.00).mp4", True),
+        (f"{TITLE} (1.02.30-1.05.00) (2).m4a", True),
+        (f"{TITLE} (ตัดโฆษณา).mp3", True),
+        (f"{TITLE} (ไม่มีเสียง) (01.30-05.00) (ตัดโฆษณา).mp4.part", True),
+        (f"{TITLE} (01.30-05.00).th.srt", True),
+        (f"{TITLE} (01.30-05.00) (3).en-US.txt", True),
+        ("Big (10.00.00-10.05.00) (ตัดโฆษณา).mp4", True),  # stem shortened by files.plan_output (C2)
+        ("Big.mp4", False),  # a shortened stem only with a range or ads suffix
+        (f"{TITLE} (1.30-5.00).mp4", False),  # minutes need 2 digits when there are no hours
+        (f"{TITLE} (ตัดโฆษณา) (01.30-05.00).mp4", False),  # wrong order
+        (f"x{TITLE} (01.30-05.00).mp4", False),
+        (f"{TITLE} (01.30-05.00).docx", False),
+    ],
+)
+def test_toolkit_name_pattern_covers_m5a_names(name, ours):
+    assert bool(lifecycle.toolkit_name_pattern(TITLE).fullmatch(name)) is ours
+
+
+def test_sweep_cleans_chapter_subfolders(paths):
+    db, store, root, folder, job_id = _sweep_env(paths)
+    try:
+        chapters = folder / files.chapter_dir_name("mp4")
+        chapters.mkdir()
+        (chapters / "01 - Intro.mp4").write_bytes(b"real chapter")  # ไฟล์ที่ย้ายเสร็จแล้วก่อนโปรแกรมดับ: เก็บไว้
+        (chapters / "02 - The cool thing.mp4").write_bytes(b"")  # จองชื่อไว้แล้วดับ
+        (chapters / "03.mp4.part").write_bytes(b"half")
+        (chapters / "notes.txt").write_bytes(b"")  # ไฟล์ของผู้ใช้
+        empty = folder / files.chapter_dir_name("mp3")
+        empty.mkdir()
+        (empty / "01 - a.mp3").write_bytes(b"")
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, root, stranded) == 3
+        assert sorted(p.name for p in chapters.iterdir()) == ["01 - Intro.mp4", "notes.txt"]
+        assert not empty.exists()
+    finally:
+        db.close()
