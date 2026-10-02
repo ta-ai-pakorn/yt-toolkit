@@ -1337,3 +1337,71 @@ def test_range_outside_the_clip_fails_before_downloading(env):
         env.run("video", BBB, video_params(range={"startMs": 700_000, "endMs": 710_000}))
     assert info.value.code == "E_UNKNOWN"
     assert env.downloader.choices == []
+
+
+# ---------- M5 รอบ A: แยกไฟล์ตาม chapter ----------
+
+ZOO_TITLE = "Me at the zoo"
+ZOO_NAMES = ["01 - Intro", "02 - The cool thing", "03 - End"]
+
+
+def test_video_chapter_split(env):
+    result, ctx = env.run("video", ZOO, video_params(splitChapters=True))
+    assert [c.intervals for c in env.media.cuts] == [((0, 5_000),), ((5_000, 17_000),), ((17_000, 19_000),)]
+    assert {(c.mode, c.target, c.has_audio) for c in env.media.cuts} == {("fast", "mp4", True)}
+    assert [s for s in ctx.stages if s.startswith("splitting")] == ["splitting:1/3", "splitting:2/3", "splitting:3/3"]
+    clip_folder = env.planned(ZOO, ZOO_TITLE, "", "mp4").parent
+    paths = [Path(o.root) / o.rel for o in result.outputs]
+    assert [p.name for p in paths] == [f"{n}.mp4" for n in ZOO_NAMES]
+    assert {p.parent for p in paths} == {clip_folder / "แยกตาม chapter (mp4)"}
+    assert all(p.is_file() for p in paths) and {o.kind for o in result.outputs} == {"video"}
+    assert (clip_folder / files.SOURCE_NOTE_NAME).is_file()
+    metas = [kwargs["meta"] for name, kwargs in env.media.calls if name == "finalize_mp4"]
+    assert [(m.title, m.track, m.duration_s) for m in metas] == [
+        ("Intro", "1/3", 5.0), ("The cool thing", "2/3", 12.0), ("End", "3/3", 2.0)]
+    assert result.notes == ()
+
+
+@pytest.mark.parametrize(
+    ("fmt", "target", "method"),
+    [("m4a", "m4a", "finalize_m4a"), ("mp3", "wav", "to_mp3"), ("wav", "wav", "to_wav")],
+)
+def test_audio_chapter_split_is_exact(env, fmt, target, method):
+    result, _ = env.run("audio", ZOO, audio_params(fmt, splitChapters=True))
+    assert [(c.mode, c.target) for c in env.media.cuts] == [("exact", target)] * 3
+    assert [Path(o.rel).name for o in result.outputs] == [f"{n}.{fmt}" for n in ZOO_NAMES]
+    assert {Path(o.rel).parent.name for o in result.outputs} == {f"แยกตาม chapter ({fmt})"}
+    assert [name for name, _ in env.media.calls] == [method] * 3
+
+
+def test_chapter_split_on_a_clip_without_chapters_gives_the_full_file(env):
+    result, ctx = env.run("video", BBB, video_params(splitChapters=True))
+    assert env.media.cuts == [] and not any(s.startswith("splitting") for s in ctx.stages)
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, "", "mp4")
+    assert result.notes == ("NO_CHAPTERS",)
+
+
+def test_second_chapter_split_gets_numbered_copies(env):
+    env.run("video", ZOO, video_params(splitChapters=True))
+    again, _ = env.run("video", ZOO, video_params(splitChapters=True))
+    assert Path(again.outputs[0].rel).name == "01 - Intro (2).mp4"
+
+
+def test_chapters_out_of_order_are_split_by_start_time(env, monkeypatch):
+    real = env.videos.get
+
+    def reversed_chapters(video_id: str, **kwargs: Any) -> dict:
+        info = dict(real(video_id, **kwargs))
+        info["chapters"] = list(reversed(info["chapters"]))
+        return info
+
+    monkeypatch.setattr(env.videos, "get", reversed_chapters)
+    result, _ = env.run("video", ZOO, video_params(splitChapters=True))
+    assert [c.intervals for c in env.media.cuts] == [((0, 5_000),), ((5_000, 17_000),), ((17_000, 19_000),)]
+    assert [Path(o.rel).name for o in result.outputs] == [f"{n}.mp4" for n in ZOO_NAMES]
+
+
+def test_cancel_during_the_chapter_split_leaves_nothing(env):
+    with pytest.raises(JobCancelled):
+        env.run("video", ZOO, video_params(splitChapters=True), cancel_on="splitting:2/3")
+    assert folders(env.out) == []
