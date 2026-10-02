@@ -364,6 +364,24 @@ def build_cues(tokens: Sequence[Token], opts: SubOptions) -> list[Cue]:
     return [Cue(d.start_ms, d.end_ms, _lines(d.tokens, opts)) for d in drafts]
 
 
+# ---------- ช่วงเวลา (M5 รอบ A, AC-SUB-10) ฝั่ง TS มี rangeTokens / clampCues ที่ต้องได้ผลตรงกันทุกตัว ----------
+
+
+def range_tokens(tokens: Sequence[Token], start_ms: int, end_ms: int) -> list[Token]:
+    """คำที่จุดกึ่งกลางอยู่ในช่วง [start, end) (เทียบแบบจำนวนเต็ม 2*start <= s+e < 2*end)
+    เวลาที่คร่อมขอบถูกตัดให้อยู่ในช่วง แล้วเลื่อนให้ช่วงเริ่มที่ 0 (ทำก่อนสร้างซับ)"""
+    return [
+        Token(tok.t, max(tok.s, start_ms) - start_ms, min(tok.e, end_ms) - start_ms)
+        for tok in tokens
+        if 2 * start_ms <= tok.s + tok.e < 2 * end_ms
+    ]
+
+
+def clamp_cues(cues: Sequence[Cue], limit_ms: int) -> list[Cue]:
+    """ซับสุดท้ายที่ถูกยืดตามเวลาขั้นต่ำต้องไม่เลยปลายช่วง (AC-SUB-10: จบ <= ความยาวช่วง)"""
+    return [Cue(c.start_ms, min(c.end_ms, limit_ms), c.lines) for c in cues]
+
+
 # ---------- outputs (CRLF, ไม่มี BOM: ผู้เรียก encode เป็น utf-8 เอง) ----------
 
 

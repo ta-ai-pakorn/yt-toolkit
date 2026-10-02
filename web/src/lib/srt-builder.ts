@@ -276,6 +276,25 @@ export function buildCues(tokens: readonly SubToken[], o: SubOptions): Cue[] {
   return drafts.map((d) => ({ startMs: d.startMs, endMs: d.endMs, lines: splitLines(m, d.from, d.to, o) }))
 }
 
+/**
+ * ช่วงเวลา (M5 รอบ A, AC-SUB-10): คำที่จุดกึ่งกลางอยู่ใน [startMs, endMs) (เทียบแบบจำนวนเต็ม 2*start <= s+e < 2*end)
+ * เวลาที่คร่อมขอบถูกตัดให้อยู่ในช่วง แล้วเลื่อนให้ช่วงเริ่มที่ 0 · ตรงกับ range_tokens ฝั่ง Python ทุกตัว
+ */
+export function rangeTokens(tokens: readonly SubToken[], startMs: number, endMs: number): SubToken[] {
+  const out: SubToken[] = []
+  for (const tok of tokens) {
+    const twiceMid = tok.s + tok.e
+    if (twiceMid < 2 * startMs || twiceMid >= 2 * endMs) continue
+    out.push({ t: tok.t, s: Math.max(tok.s, startMs) - startMs, e: Math.min(tok.e, endMs) - startMs })
+  }
+  return out
+}
+
+/** ซับที่ถูกยืดตามเวลาขั้นต่ำต้องไม่เลยปลายช่วง (ตรงกับ clamp_cues ฝั่ง Python) */
+export function clampCues(cues: readonly Cue[], limitMs: number): Cue[] {
+  return cues.map((cue) => ({ startMs: cue.startMs, endMs: Math.min(cue.endMs, limitMs), lines: cue.lines }))
+}
+
 // ---------- outputs (CRLF, ไม่มี BOM) ----------
 
 const pad = (n: number, width: number) => String(n).padStart(width, "0")
