@@ -2029,11 +2029,37 @@ def test_sweep_cleans_chapter_subfolders(paths):
         empty = folder / files.chapter_dir_name("mp3")
         empty.mkdir()
         (empty / "01 - a.mp3").write_bytes(b"")
+        # owner ruling 2026-10-02: chapter ของวิดีโอไม่มีเสียงอยู่โฟลเดอร์ย่อยของตัวเอง
+        silent = folder / files.chapter_dir_name("mp4", no_audio=True)
+        silent.mkdir()
+        (silent / "01 - Intro.mp4").write_bytes(b"real silent chapter")
+        (silent / "02 - The cool thing (2).mp4").write_bytes(b"")
+        (silent / "03 - End.mp4.part").write_bytes(b"half")
+        other = folder.parent / "อีกคลิป" / files.chapter_dir_name("mp4", no_audio=True)  # คลิปอื่น: ไม่แตะ
+        other.mkdir(parents=True)
+        (other / "01 - x.mp4").write_bytes(b"")
         stranded = [job.id for job in store.running()]
         store.interrupt_running("หยุดกลางคัน")
-        assert lifecycle.sweep_interrupted_outputs(store, root, stranded) == 3
+        assert lifecycle.sweep_interrupted_outputs(store, root, stranded) == 5
         assert sorted(p.name for p in chapters.iterdir()) == ["01 - Intro.mp4", "notes.txt"]
         assert not empty.exists()
+        assert sorted(p.name for p in silent.iterdir()) == ["01 - Intro.mp4"]
+        assert (other / "01 - x.mp4").exists()
+    finally:
+        db.close()
+
+
+def test_sweep_removes_an_emptied_no_audio_chapter_folder(paths):
+    db, store, root, folder, job_id = _sweep_env(paths)
+    try:
+        silent = folder / files.chapter_dir_name("mp4", no_audio=True)
+        silent.mkdir()
+        (silent / "01 - Intro.mp4").write_bytes(b"")
+        (silent / "02.mp4.part").write_bytes(b"half")
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, root, stranded) == 2
+        assert not silent.exists()
     finally:
         db.close()
 

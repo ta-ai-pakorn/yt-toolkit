@@ -28,6 +28,8 @@ TITLE_MAX = 100
 TAIL_RESERVE = 30  # suffix + "." + ext ยาวไม่เกินนี้ (งบที่จองไว้ให้โฟลเดอร์ของคลิป ไม่เปลี่ยนตั้งแต่ M4)
 TAIL_MAX = 60  # M5: ส่วนต่อท้าย (ไม่มีเสียง) + ช่วงเวลา + (ตัดโฆษณา) + นามสกุล ยาวได้ถึงนี้ (ส่วนเกิน TAIL_RESERVE ตัดจากชื่อไฟล์)
 CHAPTER_DIR = "แยกตาม chapter ({ext})"  # D4: โฟลเดอร์ย่อยของไฟล์แยกตาม chapter ในโฟลเดอร์ของคลิป
+# owner ruling 2026-10-02: chapter ของวิดีโอไม่มีเสียงแยกโฟลเดอร์ ไม่ปนกับชุดที่มีเสียง (ชื่อไฟล์ข้างในเหมือนกัน)
+CHAPTER_DIR_NO_AUDIO = "แยกตาม chapter ({ext}, ไม่มีเสียง)"
 UNIQUE_RESERVE = 5  # " (99)"
 SOURCE_NOTE_NAME = "แหล่งที่มา.txt"
 GROUP_FALLBACK = "YT-Toolkit batch"  # ชื่อโฟลเดอร์กลุ่มที่ทำความสะอาดแล้วว่าง (เช่น "..")
@@ -122,19 +124,31 @@ def plan_output(root: Path, title: str, video_id: str, suffix: str, ext: str, gr
     return planned
 
 
-def chapter_dir_name(ext: str) -> str:
-    return CHAPTER_DIR.format(ext=ext)
+def chapter_dir_name(ext: str, *, no_audio: bool = False) -> str:
+    """ชื่อโฟลเดอร์ย่อยของไฟล์แยกตาม chapter เช่น แยกตาม chapter (mp4) หรือ แยกตาม chapter (mp4, ไม่มีเสียง)"""
+    return (CHAPTER_DIR_NO_AUDIO if no_audio else CHAPTER_DIR).format(ext=ext)
 
 
 def plan_chapter_output(
-    root: Path, title: str, video_id: str, ext: str, group: str | None, *, index: int, total: int, chapter_title: str
+    root: Path,
+    title: str,
+    video_id: str,
+    ext: str,
+    group: str | None,
+    *,
+    index: int,
+    total: int,
+    chapter_title: str,
+    no_audio: bool = False,
 ) -> Path:
     """ไฟล์ของ chapter ที่ index: <โฟลเดอร์ของคลิป>/แยกตาม chapter (<ext>)/<NN> - <ชื่อ chapter>.<ext>
+    no_audio (วิดีโอไม่มีเสียง) = โฟลเดอร์ย่อย "แยกตาม chapter (<ext>, ไม่มีเสียง)" ชื่อไฟล์ข้างในแบบเดียวกัน
 
     NN 2 หลัก (3 หลักเมื่อมี 100 chapter ขึ้นไป) ชื่อ chapter ทำความสะอาดแบบชื่อคลิป ว่าง = "chapter <n>"
     ตัดชื่อ chapter ให้ path ไม่เกิน 240 ไม่เหลือที่เลย = "<NN>.<ext>" ยังยาวเกิน = E_OUTPUT_NOT_WRITABLE
     """
-    folder = plan_output(root, title, video_id, "", ext, group).parent / chapter_dir_name(ext)
+    clip_folder = plan_output(root, title, video_id, "", ext, group).parent
+    folder = clip_folder / chapter_dir_name(ext, no_audio=no_audio)
     number = f"{index:0{3 if total >= 100 else 2}d}"
     name = safe_component(chapter_title, f"chapter {index}")
     budget = PATH_LIMIT - UNIQUE_RESERVE - (_u16(str(folder)) + 1) - _u16(f"{number} - ") - _u16(f".{ext}")

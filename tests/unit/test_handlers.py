@@ -1387,6 +1387,21 @@ def test_second_chapter_split_gets_numbered_copies(env):
     assert Path(again.outputs[0].rel).name == "01 - Intro (2).mp4"
 
 
+def test_no_audio_chapter_split_goes_to_its_own_folder(env):
+    """owner ruling 2026-10-02: ไม่ปนกับไฟล์ chapter ที่มีเสียงของคลิปเดียวกัน ชื่อไฟล์ข้างในเหมือนเดิม"""
+    with_sound, _ = env.run("video", ZOO, video_params(splitChapters=True))
+    silent, _ = env.run("video", ZOO, video_params(splitChapters=True, noAudio=True))
+    clip_folder = env.planned(ZOO, ZOO_TITLE, "", "mp4").parent
+    silent_paths = [Path(o.root) / o.rel for o in silent.outputs]
+    assert [p.name for p in silent_paths] == [f"{n}.mp4" for n in ZOO_NAMES]
+    assert {p.parent for p in silent_paths} == {clip_folder / "แยกตาม chapter (mp4, ไม่มีเสียง)"}
+    assert all(p.is_file() for p in silent_paths)
+    assert {(Path(o.root) / o.rel).parent for o in with_sound.outputs} == {clip_folder / "แยกตาม chapter (mp4)"}
+    assert {c.has_audio for c in env.media.cuts[3:]} == {False}
+    assert {kwargs["no_audio"] for name, kwargs in env.media.calls[3:] if name == "finalize_mp4"} == {True}
+    assert (clip_folder / files.SOURCE_NOTE_NAME).is_file()
+
+
 def test_chapters_out_of_order_are_split_by_start_time(env, monkeypatch):
     real = env.videos.get
 
