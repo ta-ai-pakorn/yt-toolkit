@@ -1779,3 +1779,54 @@ def test_stop_installs_home_filter_on_app_log(paths, fake_platform, root_logger)
     assert len(_app_log_filters(*root_logger)) == 1
     lifecycle.stop(paths, fake_platform, out=lambda m: None)
     assert len(_app_log_filters(*root_logger)) == 1  # เรียกซ้ำไม่ใส่ซ้ำ
+
+
+# ---------- เสียงรบกวนใน app.log: แท็บที่ต่อ SSE ถูกปิด ----------
+
+_LOST = "Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)"
+
+
+def _reset_error() -> ConnectionResetError:
+    return ConnectionResetError(10054, "An existing connection was forcibly closed by the remote host")
+
+
+def _record(name: str, message: str, exc: BaseException | None) -> logging.LogRecord:
+    exc_info = (type(exc), exc, None) if exc is not None else None
+    return logging.LogRecord(name, logging.ERROR, __file__, 1, message, (), exc_info)
+
+
+def test_connection_reset_filter_drops_only_the_asyncio_connection_lost_reset():
+    noise = lifecycle.ConnectionResetNoiseFilter()
+    handle = "handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>"
+    assert not noise.filter(_record("asyncio", f"{_LOST}\n{handle}", _reset_error()))
+    # อย่างอื่นต้องยังลง log ตามปกติ
+    assert noise.filter(_record("asyncio", _LOST, OSError("disk")))
+    assert noise.filter(_record("asyncio", "Exception in callback other()", _reset_error()))
+    assert noise.filter(_record("asyncio", _LOST, None))
+    assert noise.filter(_record("yttoolkit", _LOST, _reset_error()))
+
+
+def test_setup_file_logging_installs_noise_filter_once(paths, root_logger):
+    lifecycle.setup_file_logging(paths)
+    lifecycle.setup_file_logging(paths)
+    root, before = root_logger
+    (handler,) = [h for h in root.handlers if h not in before]
+    assert sum(isinstance(f, lifecycle.ConnectionResetNoiseFilter) for f in handler.filters) == 1
+
+
+def test_closed_browser_tab_reset_does_not_reach_app_log(paths, root_logger):
+    import asyncio
+
+    lifecycle.setup_file_logging(paths)
+    loop = asyncio.new_event_loop()
+    try:
+        # สิ่งที่ proactor ของ Windows รายงานเมื่อแท็บที่ต่อ SSE ถูกปิด (ผ่านตัวจัดการ error ปกติของ asyncio)
+        loop.call_exception_handler({"message": _LOST, "exception": _reset_error()})
+        loop.call_exception_handler({"message": "Exception in callback other()", "exception": _reset_error()})
+    finally:
+        loop.close()
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+    text = (paths.logs / "app.log").read_text(encoding="utf-8")
+    assert "_call_connection_lost" not in text
+    assert "Exception in callback other()" in text

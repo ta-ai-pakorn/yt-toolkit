@@ -82,6 +82,17 @@ def test_finalize_mp4_without_extras(tmp_path: Path) -> None:
     assert _streams(info, "audio") == []
 
 
+def test_finalize_mp4_no_audio_strips_audio_from_a_muxed_source(tmp_path: Path) -> None:
+    dst = tmp_path / "out.mp4"
+    _tools().finalize_mp4(
+        MEDIA / "video.mp4", dst, META, cover=None, subtitle=None, audio_language=None, no_audio=True,
+        cancel=_never, on_progress=_ignore,
+    )  # fmt: skip
+    info = ffprobe_json(dst)
+    assert len(_streams(info, "video")) == 1
+    assert _streams(info, "audio") == []
+
+
 def test_finalize_m4a_keeps_aac_and_has_cover_and_title(tmp_path: Path) -> None:
     dst = tmp_path / "out.m4a"
     _tools().finalize_m4a(

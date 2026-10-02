@@ -44,6 +44,7 @@ CREATE TABLE jobs (
   finished_at   TEXT
 );
 CREATE INDEX jobs_status_position ON jobs(status, position);
+CREATE INDEX IF NOT EXISTS jobs_video ON jobs(video_id, status);
 """
 
 _SCHEMA = f"""

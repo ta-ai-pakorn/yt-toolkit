@@ -265,6 +265,30 @@ def test_start_creates_workdir_and_publishes_running(runner_factory, tmp_path):
     assert patch["status"] == "running" and patch["startedAt"]
 
 
+def test_job_created_is_published_before_a_concurrent_tick_can_start_the_job(runner_factory):
+    # เว็บทิ้ง job.updated ของงานที่ยังไม่เคยเห็น job.created ถ้าตัวจัดคิวแทรกเริ่มงานก่อนข่าว created
+    # แถวจะค้างเป็น "รอคิว" จำลองจังหวะนั้น: ตอนจะประกาศ job.created ให้อีกเธรดเรียก tick แทรกเข้ามา
+    r, spawn, h = runner_factory(concurrency=1)
+    original = r.bus.publish
+    ticker: list[threading.Thread] = []
+
+    def publish(name: str, data: dict) -> None:
+        if name == "job.created" and not ticker:
+            thread = threading.Thread(target=r.tick)
+            ticker.append(thread)
+            thread.start()
+            thread.join(0.5)  # ถ้าคิวยังถือ lock อยู่ tick จะรอจน enqueue เสร็จ
+        original(name, data)
+
+    r.bus.publish = publish  # type: ignore[method-assign]
+    (job,) = r.enqueue(jobs_of("contact_sheet", 1))
+    ticker[0].join(5)
+    names = [e.name for e in r.bus_events() if e.data.get("id") == job.id]
+    assert names[0] == "job.created"
+    assert "job.updated" in names
+    spawn.run_all()
+
+
 def test_done_records_outputs_notes_title_and_removes_workdir(runner_factory, tmp_path):
     r, spawn, h = runner_factory()
     (job,) = r.enqueue(jobs_of("video", 1))

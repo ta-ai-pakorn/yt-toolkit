@@ -68,6 +68,15 @@ export function patchSearch(search: URLSearchParams, patch: VideoParamsPatch): s
 }
 
 /**
+ * ที่อยู่ของคลิปอื่น (ปุ่มก่อนหน้า/ถัดไป): อยู่แท็บเดิมตาม search ที่ส่งมา แต่ไม่พาแทร็กซับ เวลา
+ * และตัวกรองของคลิปนี้ไปด้วย (คลิปอื่นมีแทร็กคนละชุด)
+ */
+export function clipPathFrom(videoId: string, search: string): string {
+  const { tab } = readVideoParams(new URLSearchParams(search))
+  return `/v/${videoId}${tab !== DEFAULT_TAB ? `?tab=${tab}` : ""}`
+}
+
+/**
  * สถานะของหน้าคลิป (แท็บ แทร็กซับ เวลา ตัวกรองดูซ้ำบ่อย) ที่เก็บใน URL: update ใช้ replace เสมอ
  * ปุ่มย้อนกลับจากหน้าคลิปจึงกลับหน้า W1 ในก้าวเดียว ไม่ไล่ย้อนทีละแท็บ (กติกา breadcrumb ของ M2)
  */

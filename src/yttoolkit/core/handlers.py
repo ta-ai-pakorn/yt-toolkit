@@ -316,6 +316,7 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
         audio_language=result.choice.audio_language,
         cancel=ctx.cancelled,
         on_progress=report.fraction,
+        no_audio=bool(params.get("noAudio")),
     )
     suffix = NO_AUDIO_SUFFIX if params.get("noAudio") else ""
     notes = (*result.choice.notes, *sub_notes)

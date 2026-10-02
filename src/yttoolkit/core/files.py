@@ -15,6 +15,7 @@ import re
 import shutil
 import threading
 import unicodedata
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -161,7 +162,8 @@ def move_into_place(src: Path, planned: Path) -> Path:
 
 def ensure_output_root(root: Path) -> None:
     """สร้างโฟลเดอร์ปลายทางและลองเขียนไฟล์เล็กๆ ถ้าไม่ได้ให้ E_OUTPUT_NOT_WRITABLE"""
-    probe = root / f".yttoolkit-write-test-{os.getpid()}"
+    # ชื่อไม่ซ้ำกันทุกครั้ง: งานหลายงานเริ่มพร้อมกันได้ ถ้าชื่อซ้ำ งานหนึ่งจะลบไฟล์ทดสอบของอีกงานทิ้ง
+    probe = root / f".yttoolkit-write-test-{uuid.uuid4().hex}"
     try:
         root.mkdir(parents=True, exist_ok=True)
         probe.write_bytes(b"")

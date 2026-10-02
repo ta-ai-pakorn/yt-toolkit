@@ -410,6 +410,29 @@ def test_v1_database_migrates_and_keeps_rows(tmp_path):
     db.close()
 
 
+def _jobs_video_index_columns(db: Database) -> list[str]:
+    return [r["name"] for r in db.execute("PRAGMA index_info(jobs_video)")]
+
+
+def test_fresh_database_has_jobs_video_index(tmp_path):
+    # คำค้นงานตามคลิป (หน้าประวัติ ป้ายสถานะ และรอบล้างแคช) ไม่ต้องไล่ทั้งตาราง
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    assert _jobs_video_index_columns(db) == ["video_id", "status"]
+    db.close()
+
+
+def test_v1_migration_adds_jobs_video_index(tmp_path):
+    raw = sqlite3.connect(tmp_path / "app.db")
+    raw.executescript(V1_JOBS)
+    raw.commit()
+    raw.close()
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    assert _jobs_video_index_columns(db) == ["video_id", "status"]
+    db.close()
+
+
 def test_v1_migration_failure_rolls_back(tmp_path, monkeypatch):
     raw = sqlite3.connect(tmp_path / "app.db")
     raw.executescript(V1_JOBS)

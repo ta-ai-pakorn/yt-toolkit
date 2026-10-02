@@ -304,7 +304,7 @@ test.describe("W2 แท็บวิดีโอ", () => {
   })
 
   test("ไม่มี ffmpeg (409 E_FFMPEG_MISSING) → toast ข้อความไทยพร้อมปุ่ม 'ไปหน้าตรวจสุขภาพ' ที่พาไปหน้าตรวจสุขภาพ", async ({ page }) => {
-    const message = 'ยังไม่มีโปรแกรมแปลงไฟล์ (ffmpeg) กด "โหลดใหม่" ในหน้าตรวจสุขภาพ'
+    const message = 'ยังไม่มีโปรแกรมแปลงไฟล์ (ffmpeg) กด "โหลด ffmpeg ใหม่" ในหน้าตรวจสุขภาพ'
     await page.route("**/api/jobs", (route) => {
       if (route.request().method() !== "POST") return route.fallback()
       return route.fulfill({

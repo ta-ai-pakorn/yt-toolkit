@@ -71,6 +71,7 @@ class MediaTools(Protocol):
         audio_language: str | None,
         cancel: Callable[[], bool],
         on_progress: Callable[[float | None], None],
+        no_audio: bool = False,
     ) -> None: ...
 
     def finalize_m4a(
@@ -137,7 +138,10 @@ def mp4_args(
     cover: Path | None,
     subtitle: SubtitleInput | None,
     audio_language: str | None,
+    no_audio: bool = False,
 ) -> list[str]:
+    """no_audio = ทิ้งเสียงทุกแทร็ก: format วิดีโอที่เลือก (bv*) อาจเป็นไฟล์ที่มีเสียงติดมา
+    แต่ไฟล์ "(ไม่มีเสียง)" ต้องไม่มีเสียงจริงๆ"""
     args = _head(ffmpeg, src)
     next_index = 1
     cover_idx = sub_idx = None
@@ -148,17 +152,19 @@ def mp4_args(
     if subtitle is not None:
         args += ["-i", str(subtitle.path)]
         sub_idx = next_index
-    args += ["-map", "0:v:0", "-map", "0:a?"]
+    args += ["-map", "0:v:0"] if no_audio else ["-map", "0:v:0", "-map", "0:a?"]
     if sub_idx is not None:
         args += ["-map", f"{sub_idx}:0"]
     if cover_idx is not None:
         args += ["-map", f"{cover_idx}:0"]
     args += ["-c", "copy"]
+    if no_audio:
+        args += ["-an"]
     if subtitle is not None:
         args += ["-c:s", "mov_text", "-metadata:s:s:0", f"language={subtitle.language}", "-disposition:s:0", "default"]
     if cover is not None:
         args += ["-disposition:v:1", "attached_pic"]
-    args += _meta_args(meta) + _audio_lang(audio_language)
+    args += _meta_args(meta) + ([] if no_audio else _audio_lang(audio_language))
     args += ["-movflags", "+faststart", str(dst)]
     return args
 
@@ -355,12 +361,13 @@ class FfmpegTools:
         audio_language: str | None,
         cancel: Callable[[], bool],
         on_progress: Callable[[float | None], None],
+        no_audio: bool = False,
     ) -> None:
         if subtitle is not None:
             subtitle = replace(subtitle, path=subtitle.path.resolve())
         args = mp4_args(
             self._require(), src.resolve(), dst.resolve(), meta,
-            cover=self._abs(cover), subtitle=subtitle, audio_language=audio_language,
+            cover=self._abs(cover), subtitle=subtitle, audio_language=audio_language, no_audio=no_audio,
         )  # fmt: skip
         self._run(args, meta, cancel, on_progress)
 
@@ -450,6 +457,7 @@ class FakeMediaTools:
         audio_language: str | None,
         cancel: Callable[[], bool],
         on_progress: Callable[[float | None], None],
+        no_audio: bool = False,
     ) -> None:
         self._copy(src, dst, cancel, on_progress)
 

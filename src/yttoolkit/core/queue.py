@@ -438,10 +438,12 @@ class QueueRunner:
     # ---------- คำสั่งจากหน้าเว็บ ----------
 
     def enqueue(self, items: Sequence[NewJob]) -> list[Job]:
+        # ประกาศ job.created ขณะยังถือ lock: ตัวจัดคิวเริ่มงานได้ต้องรอ lock ข่าว running จึงมาหลัง created เสมอ
+        # (เว็บทิ้ง job.updated ของงานที่ยังไม่รู้จัก) ลำดับ lock คิว -> bus เหมือนจุดอื่น
         with self._lock:
             jobs = self.store.add(items)
-        for job in jobs:
-            self._bus.publish("job.created", self.job_api(job))
+            for job in jobs:
+                self._bus.publish("job.created", self.job_api(job))
         self._wake.set()
         return jobs
 

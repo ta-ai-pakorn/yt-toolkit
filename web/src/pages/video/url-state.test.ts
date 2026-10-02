@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { patchSearch, readVideoParams, VIDEO_TABS } from "./url-state"
+import { clipPathFrom, patchSearch, readVideoParams, VIDEO_TABS } from "./url-state"
 
 const params = (q: string) => new URLSearchParams(q)
 
@@ -113,5 +113,19 @@ describe("patchSearch", () => {
 
   it("ค่าที่ผิดรูปใน URL เดิมถูกล้างเมื่อ patch", () => {
     expect(patchSearch(params("tab=weird&at=abc"), { trackId: "o.th" })).toBe("?track=o.th")
+  })
+})
+
+describe("clipPathFrom (ปุ่มก่อนหน้า/ถัดไป)", () => {
+  it("คลิปถัดไปอยู่แท็บเดิมตาม URL ตอนกด ไม่พาแทร็กซับ เวลา และตัวกรองไปด้วย", () => {
+    expect(clipPathFrom("jNQXAC9IVRw", "?tab=subs&track=a.th-orig&at=90500")).toBe("/v/jNQXAC9IVRw?tab=subs")
+    expect(clipPathFrom("jNQXAC9IVRw", "?tab=transcript")).toBe("/v/jNQXAC9IVRw?tab=transcript")
+    expect(clipPathFrom("jNQXAC9IVRw", "?tab=video&replayed=1")).toBe("/v/jNQXAC9IVRw?tab=video")
+  })
+
+  it("แท็บภาพเฟรมหรือแท็บที่ไม่รู้จักไม่ขึ้นใน URL", () => {
+    expect(clipPathFrom("jNQXAC9IVRw", "")).toBe("/v/jNQXAC9IVRw")
+    expect(clipPathFrom("jNQXAC9IVRw", "?tab=frames&replayed=1")).toBe("/v/jNQXAC9IVRw")
+    expect(clipPathFrom("jNQXAC9IVRw", "?tab=weird")).toBe("/v/jNQXAC9IVRw")
   })
 })

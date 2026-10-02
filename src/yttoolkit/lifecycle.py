@@ -117,6 +117,26 @@ class HomePathFilter(logging.Filter):
         return True
 
 
+class ConnectionResetNoiseFilter(logging.Filter):
+    """ทิ้งเฉพาะรายงาน ConnectionResetError ของ asyncio ตอนปิดการเชื่อมต่อ (_call_connection_lost)
+
+    บน Windows ทุกครั้งที่ปิดแท็บที่ต่อสตรีมข่าว (SSE) อยู่ proactor ของ asyncio จะรายงาน
+    "[WinError 10054]" เป็น error พร้อม traceback ซึ่งไม่ใช่ปัญหา แต่ทำให้ app.log รกจนหาปัญหาจริงยาก
+    รายงานอื่นของ asyncio (และ ConnectionResetError จากที่อื่น) ยังลง log ตามปกติ
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "asyncio" or not record.exc_info:
+            return True
+        if not isinstance(record.exc_info[1], ConnectionResetError):
+            return True
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        return "_call_connection_lost" not in message
+
+
 def _app_log_handlers(paths: Paths) -> list[logging.Handler]:
     target = os.path.abspath(paths.logs / "app.log")
     return [
@@ -124,16 +144,17 @@ def _app_log_handlers(paths: Paths) -> list[logging.Handler]:
     ]
 
 
-def install_home_filter(paths: Paths) -> None:
-    """ใส่ HomePathFilter ให้ handler ของ app.log ที่ตั้งไว้แล้ว (เรียกซ้ำได้ ไม่ใส่ซ้ำ)"""
+def install_log_filters(paths: Paths) -> None:
+    """ใส่ HomePathFilter และ ConnectionResetNoiseFilter ให้ handler ของ app.log ที่ตั้งไว้แล้ว (เรียกซ้ำได้ ไม่ใส่ซ้ำ)"""
     for handler in _app_log_handlers(paths):
-        if not any(isinstance(f, HomePathFilter) for f in handler.filters):
-            handler.addFilter(HomePathFilter())
+        for kind in (ConnectionResetNoiseFilter, HomePathFilter):
+            if not any(isinstance(f, kind) for f in handler.filters):
+                handler.addFilter(kind())
 
 
 def setup_file_logging(paths: Paths) -> None:
     setup_file_log(paths)  # เรียกซ้ำได้ (__main__ ตั้งไว้ก่อน import lifecycle แล้ว) ไม่เกิด handler ซ้ำ
-    install_home_filter(paths)
+    install_log_filters(paths)
     if sys.stdout is None or sys.stderr is None:  # แอพที่เปิดแบบไม่มีหน้าต่างดำจะไม่มี console
         stream = open(paths.logs / "console.log", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
         sys.stdout = sys.stdout or stream
@@ -791,7 +812,7 @@ def stop(
 ) -> int:
     paths = paths or default_paths()
     plat = plat or current()
-    install_home_filter(paths)  # __main__ ตั้ง app.log ให้ stop แล้ว log ของ stop ก็ต้องไม่มีโฟลเดอร์ผู้ใช้
+    install_log_filters(paths)  # __main__ ตั้ง app.log ให้ stop แล้ว log ของ stop ก็ต้องไม่มีโฟลเดอร์ผู้ใช้
     try:
         return _stop(paths, plat, post=post, ask=ask, sleep=sleep, out=out)
     except LockFileError as error:
