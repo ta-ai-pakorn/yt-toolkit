@@ -588,6 +588,7 @@ describe("paramsFromSettings", () => {
     subCustom: PRESETS.medium,
     concurrency: 2,
     sponsorblockDefault: ["sponsor", "selfpromo", "interaction"],
+    autoSharpFrames: true,
     theme: "system",
     filenameStyle: "title",
     cookies: { enabled: false, source: null, warningAccepted: false },
