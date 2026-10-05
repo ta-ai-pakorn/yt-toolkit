@@ -80,6 +80,8 @@ export function headerLayout(o: { on: boolean; narrow: boolean; portrait: boolea
 
 export type KeyLike = {
   key: string
+  /** ตำแหน่งปุ่มจริง: เลย์เอาต์ภาษาไทยกดปุ่ม T ได้ตัวอักษรไทยใน key แต่ code ยังเป็น "KeyT" */
+  code?: string
   ctrlKey: boolean
   altKey: boolean
   metaKey: boolean
@@ -98,11 +100,11 @@ export function isEditableTarget(target: unknown): boolean {
 }
 
 /**
- * ปุ่ม T / t สลับโหมดเมื่อ: เริ่มเล่นแล้วและจอไม่แคบ (canToggle) · ไม่มีกล่องหรือเมนูเปิดอยู่ · ไม่ได้พิมพ์อยู่ในช่องกรอก
+ * ปุ่ม T / t (หรือปุ่มตำแหน่ง KeyT บนเลย์เอาต์อื่น เช่นภาษาไทย) สลับโหมดเมื่อ: เริ่มเล่นแล้วและจอไม่แคบ (canToggle) · ไม่มีกล่องหรือเมนูเปิดอยู่ · ไม่ได้พิมพ์อยู่ในช่องกรอก
  * · ไม่กด Ctrl/Alt/Meta · ไม่ใช่การกดค้าง · Shift ไม่นับ (Shift+T ได้ "T" ซึ่ง spec ให้ใช้ได้)
  */
 export function theaterKeyAllowed(event: KeyLike, ctx: { canToggle: boolean; overlayOpen: boolean }): boolean {
-  if (event.key !== "t" && event.key !== "T") return false
+  if (event.key !== "t" && event.key !== "T" && event.code !== "KeyT") return false
   if (!ctx.canToggle || ctx.overlayOpen) return false
   if (event.ctrlKey || event.altKey || event.metaKey || event.repeat || event.defaultPrevented) return false
   return !isEditableTarget(event.target)
@@ -112,15 +114,19 @@ export function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
 }
 
+
 export type TransitionDoc = {
   documentElement: { setAttribute(name: string, value: string): void; removeAttribute(name: string): void }
-  startViewTransition?: (update: () => void) => { finished: Promise<unknown> }
+  startViewTransition?: (update: () => void) => { finished: Promise<unknown>; ready?: Promise<unknown>; updateCallbackDone?: Promise<unknown> }
 }
+
+/** เฉพาะการสลับล่าสุดเท่านั้นที่เอา SWITCHING_ATTR ออกได้ (การสลับก่อนหน้าที่เพิ่งจบทีหลังต้องไม่ลบของใหม่) */
+let latestSwitch = 0
 
 /**
  * สลับเลย์เอาต์ (spec 1.3): มี document.startViewTransition และ animate = ทำผ่าน View Transition (ชื่อของช่องตัวเล่นกับคอลัมน์ข้อมูล
  * ใส่ด้วย SWITCHING_ATTR เฉพาะระหว่างนั้น) · ไม่มี API, ผู้ใช้ขอลดการเคลื่อนไหว หรือตัวเล่นลอยอยู่ (animate false) = สลับทันที
- * apply ต้องอัปเดต DOM ให้เสร็จในตัว (React: flushSync) ภาพหลังสลับจึงถูกจับหลัง DOM เปลี่ยนแล้ว
+ * apply ต้องอัปเดต DOM ให้เสร็จในตัว (React: flushSync) ภาพหลังสลับจึงถูกจับหลัง DOM เปลี่ยนแล้ว · apply ทำงานครั้งเดียวเสมอ
  */
 export function runLayoutTransition(apply: () => void, env: { doc: TransitionDoc; animate: boolean }): void {
   const start = env.doc.startViewTransition
@@ -129,12 +135,25 @@ export function runLayoutTransition(apply: () => void, env: { doc: TransitionDoc
     return
   }
   const root = env.doc.documentElement
-  const clear = () => root.removeAttribute(SWITCHING_ATTR)
+  const token = ++latestSwitch
+  const clear = () => {
+    if (token === latestSwitch) root.removeAttribute(SWITCHING_ATTR)
+  }
+  let applied = false
+  const applyOnce = () => {
+    if (applied) return
+    applied = true
+    apply()
+  }
   root.setAttribute(SWITCHING_ATTR, "")
   try {
-    start.call(env.doc, apply).finished.then(clear, clear)
+    const transition = start.call(env.doc, applyOnce)
+    // ถูกข้ามหรือยกเลิก: ready / updateCallbackDone reject ได้ ต้องรับไว้ไม่ให้เป็น "Uncaught (in promise)"
+    transition.ready?.catch(() => undefined)
+    transition.updateCallbackDone?.catch(() => undefined)
+    transition.finished.then(clear, clear)
   } catch {
     clear()
-    apply()
+    applyOnce()
   }
 }

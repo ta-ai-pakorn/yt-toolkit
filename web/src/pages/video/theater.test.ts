@@ -86,6 +86,7 @@ describe("ค่าที่จำไว้", () => {
   })
 })
 
+// fmt(สูง, กว้าง): ลำดับ height ก่อน width
 const fmt = (height: number, width?: number) => ({ formatId: `f${height}x${width ?? 0}`, height, width, fps: 30, vcodec: "avc1", compat: true })
 
 describe("isPortraitVideo", () => {
@@ -96,6 +97,12 @@ describe("isPortraitVideo", () => {
     expect(isPortraitVideo({ video: [fmt(1920)] })).toBe(false)
     expect(isPortraitVideo({ video: [fmt(1080, 1920), fmt(1280, 720)] })).toBe(true)
     expect(isPortraitVideo({ video: [fmt(1080, 1080)] })).toBe(false)
+    // สูงเท่ากัน: ตัวที่กว้างกว่าชนะ
+    expect(isPortraitVideo({ video: [fmt(1920, 1080), fmt(1920, 2000)] })).toBe(false)
+    expect(isPortraitVideo({ video: [fmt(1920, 2000), fmt(1920, 1080)] })).toBe(false)
+    expect(isPortraitVideo({ video: [fmt(1920, 1080), fmt(1920, 1000)] })).toBe(true)
+    // ตัวที่สูงที่สุดไม่รู้ความกว้าง (แม้ตัวที่เตี้ยกว่าจะรู้) = ไม่ใช่แนวตั้ง
+    expect(isPortraitVideo({ video: [fmt(1920), fmt(1280, 720)] })).toBe(false)
   })
 })
 
@@ -138,6 +145,13 @@ describe("ปุ่ม T", () => {
     }
   })
 
+  it("เลย์เอาต์ภาษาไทย: key เป็นตัวอักษรไทยแต่ code เป็น KeyT = สลับได้", () => {
+    expect(theaterKeyAllowed(key({ key: "ะ", code: "KeyT" }), ready)).toBe(true)
+    expect(theaterKeyAllowed(key({ key: "y", code: "KeyY" }), ready)).toBe(false)
+    expect(theaterKeyAllowed(key({ key: "ะ", code: "KeyT", ctrlKey: true }), ready)).toBe(false)
+    expect(theaterKeyAllowed(key({ key: "ะ", code: "KeyT", target: { tagName: "INPUT" } }), ready)).toBe(false)
+  })
+
   it("พิมพ์อยู่ในช่องกรอก = ไม่สลับ", () => {
     for (const target of [{ tagName: "INPUT" }, { tagName: "textarea" }, { tagName: "SELECT" }, { tagName: "DIV", isContentEditable: true }]) {
       expect(isEditableTarget(target)).toBe(true)
@@ -147,6 +161,9 @@ describe("ปุ่ม T", () => {
     expect(isEditableTarget({ tagName: "BUTTON" })).toBe(false)
   })
 })
+
+// เทสรันใน node แต่ tsconfig ของเว็บไม่มี @types/node: ประกาศเฉพาะส่วนที่ใช้
+const nodeProcess = (globalThis as unknown as { process: { on(event: string, fn: () => void): void; off(event: string, fn: () => void): void } }).process
 
 describe("runLayoutTransition", () => {
   function fakeDoc(withApi: boolean, fail = false) {
@@ -198,5 +215,66 @@ describe("runLayoutTransition", () => {
     runLayoutTransition(() => undefined, { doc, animate: true })
     settle()
     await vi.waitFor(() => expect(attrs.has(SWITCHING_ATTR)).toBe(false))
+  })
+
+  it("ready / updateCallbackDone ถูก reject (transition ถูกข้าม) ก็ไม่เกิด unhandled rejection และเอาชื่อออก", async () => {
+    const unhandled = vi.fn()
+    nodeProcess.on("unhandledRejection", unhandled)
+    try {
+      const attrs = new Map<string, string>()
+      const doc: TransitionDoc = {
+        documentElement: { setAttribute: (name, value) => void attrs.set(name, value), removeAttribute: (name) => void attrs.delete(name) },
+        startViewTransition: (update) => {
+          update()
+          return {
+            finished: Promise.reject(new Error("skipped")),
+            ready: Promise.reject(new Error("skipped")),
+            updateCallbackDone: Promise.reject(new Error("skipped")),
+          }
+        },
+      }
+      runLayoutTransition(() => undefined, { doc, animate: true })
+      await vi.waitFor(() => expect(attrs.has(SWITCHING_ATTR)).toBe(false))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      nodeProcess.off("unhandledRejection", unhandled)
+    }
+  })
+
+  it("สลับสองครั้งติดกัน: ครั้งแรกจบทีหลังครั้งที่สองเริ่ม ชื่อยังอยู่จนครั้งที่สองจบ", async () => {
+    const attrs = new Map<string, string>()
+    const settles: Array<() => void> = []
+    const doc: TransitionDoc = {
+      documentElement: { setAttribute: (name, value) => void attrs.set(name, value), removeAttribute: (name) => void attrs.delete(name) },
+      startViewTransition: (update) => {
+        update()
+        return { finished: new Promise<void>((resolve) => settles.push(resolve)) }
+      },
+    }
+    runLayoutTransition(() => undefined, { doc, animate: true })
+    runLayoutTransition(() => undefined, { doc, animate: true })
+    settles[0]()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(attrs.has(SWITCHING_ATTR)).toBe(true)
+    settles[1]()
+    await vi.waitFor(() => expect(attrs.has(SWITCHING_ATTR)).toBe(false))
+  })
+
+  it("apply ทำงานครั้งเดียว: startViewTransition โยนก่อนเรียก callback = ทำเองหนึ่งครั้ง · เรียก callback แล้วโยน = ยังหนึ่งครั้ง", () => {
+    for (const callFirst of [false, true]) {
+      const attrs = new Map<string, string>()
+      const doc: TransitionDoc = {
+        documentElement: { setAttribute: (name, value) => void attrs.set(name, value), removeAttribute: (name) => void attrs.delete(name) },
+        startViewTransition: (update) => {
+          if (callFirst) update()
+          throw new Error("boom")
+        },
+      }
+      const apply = vi.fn()
+      runLayoutTransition(apply, { doc, animate: true })
+      expect(apply).toHaveBeenCalledOnce()
+      expect(attrs.has(SWITCHING_ATTR)).toBe(false)
+    }
   })
 })
