@@ -44,6 +44,35 @@ describe("captureStore", () => {
   })
 })
 
+describe("flash และ view ที่ค้างอยู่", () => {
+  it("consumeFlash ใช้ครั้งเดียว · ภาพใหม่กว่า (n ไม่ตรง) ไม่ถูกลบ", () => {
+    captureStore.flash({ videoId: BBB, id: "c_1" })
+    captureStore.consumeFlash(1)
+    expect(captureStore.get().flash).toBeNull()
+    captureStore.flash({ videoId: BBB, id: "c_2" })
+    captureStore.consumeFlash(1)
+    expect(captureStore.get().flash).toMatchObject({ id: "c_2", n: 2 })
+  })
+
+  it("dropOtherClips ทิ้ง view/flash ของคลิปอื่น เก็บของคลิปนี้ · dropFlash ทิ้งเฉพาะของคลิปนั้น", () => {
+    captureStore.view({ videoId: "OTHER000001", id: "c_9" })
+    captureStore.flash({ videoId: "OTHER000001", id: "c_9" })
+    captureStore.dropOtherClips(BBB)
+    expect(captureStore.get().viewing).toBeNull()
+    expect(captureStore.get().flash).toBeNull()
+    captureStore.view({ videoId: BBB, id: "c_1" })
+    captureStore.flash({ videoId: BBB, id: "c_1" })
+    captureStore.dropOtherClips(BBB)
+    expect(captureStore.get().viewing).toEqual({ videoId: BBB, id: "c_1" })
+    expect(captureStore.get().flash).toMatchObject({ videoId: BBB })
+    captureStore.dropFlash("OTHER000001")
+    expect(captureStore.get().flash).not.toBeNull()
+    captureStore.dropFlash(BBB)
+    expect(captureStore.get().flash).toBeNull()
+    expect(captureStore.get().viewing).not.toBeNull()
+  })
+})
+
 describe("runCapture", () => {
   it("ปัดเวลา ส่งครั้งเดียว เติมลงแถบตามเวลา กระพริบ และ toast มีปุ่ม ดูภาพ", async () => {
     const client = new QueryClient()

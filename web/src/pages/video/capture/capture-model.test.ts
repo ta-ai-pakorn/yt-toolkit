@@ -9,6 +9,7 @@ import {
   captureTimeMs,
   clockTime,
   focusAfterDelete,
+  revealScrollLeft,
   stripKeyTarget,
 } from "./capture-model"
 
@@ -85,5 +86,15 @@ describe("ชื่อและลิงก์โหลดภาพ", () => {
     expect(captureDownloadUrl("/api/cache/x/captures/c_1.jpg?v=9")).toBe("/api/cache/x/captures/c_1.jpg?v=9&download=1")
     expect(captureDownloadUrl("/a.jpg")).toBe("/a.jpg?download=1")
     expect(captureFileName(125_400)).toBe("frame_00-02-05.jpg")
+  })
+})
+
+describe("revealScrollLeft", () => {
+  it("เห็นอยู่แล้ว = ไม่ขยับ · อยู่ซ้าย/ขวานอกกรอบ = เลื่อนแค่พอให้เห็น", () => {
+    const view = { viewLeft: 100, viewWidth: 300 }
+    expect(revealScrollLeft({ ...view, itemLeft: 150, itemWidth: 96 })).toBe(100)
+    expect(revealScrollLeft({ ...view, itemLeft: 40, itemWidth: 96 })).toBe(40)
+    expect(revealScrollLeft({ ...view, itemLeft: 380, itemWidth: 96 })).toBe(176)
+    expect(revealScrollLeft({ viewLeft: 0, viewWidth: 300, itemLeft: -5, itemWidth: 96 })).toBe(0)
   })
 })

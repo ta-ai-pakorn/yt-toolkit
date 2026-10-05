@@ -21,11 +21,18 @@ import { youtubeWatchUrl } from "@/lib/format"
 import type { Capture } from "@/lib/types"
 import { cn } from "cn"
 
-import { errorMessage } from "../errors"
+import { errorMessage, hasCode } from "../errors"
 import { Lightbox } from "../lightbox"
 import { playerActions } from "../player/player-store"
 import { capturesKey, capturesQuery, deleteCapture, revealCaptures, withoutCapture } from "./capture-api"
-import { captureClock, captureDownloadUrl, captureFileName, focusAfterDelete, stripKeyTarget } from "./capture-model"
+import {
+  captureClock,
+  captureDownloadUrl,
+  captureFileName,
+  focusAfterDelete,
+  revealScrollLeft,
+  stripKeyTarget,
+} from "./capture-model"
 import { captureStore, useCaptureUi } from "./capture-store"
 
 /** wrap = ภาพตัดขึ้นบรรทัด (แบบปกติ จอแคบ แนวตั้ง) · row = แถวเดียวเลื่อนได้ (โรงภาพยนตร์แนวนอน) */
@@ -77,6 +84,7 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
   const [deleting, setDeleting] = useState(false)
   const [lastViewed, setLastViewed] = useState<Capture | null>(null)
   const buttons = useRef(new Map<string, HTMLButtonElement>())
+  const listRef = useRef<HTMLUListElement>(null)
   const afterDelete = useRef<string | null>(null)
   const headingId = useId()
 
@@ -87,18 +95,43 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
   const shown = current ?? lastViewed
   const tabStop = Math.min(active, Math.max(0, list.length - 1))
 
-  // ภาพที่เพิ่งถ่าย (หรือถ่ายซ้ำเวลาเดิม): เลื่อนให้เห็นแล้วกระพริบกรอบสั้น ๆ (ลดการเคลื่อนไหว = ไม่กระพริบ)
+  // คำสั่งเปิดภาพ/กระพริบที่ค้างของคลิปอื่นไม่ใช่ของแถบนี้ · แถบหายไป = กระพริบที่ยังไม่ได้ใช้ของคลิปนี้ไม่ต้องรอ
+  useEffect(() => {
+    captureStore.dropOtherClips(videoId)
+    return () => captureStore.dropFlash(videoId)
+  }, [videoId])
+
+  // ขอเปิดภาพที่ไม่มีในรายการแล้ว (โหลดรายการเสร็จแล้วยังไม่พบ เช่นถูกลบไปแล้ว) = เลิกค้างไว้ ไม่เปิดให้ตอนเข้ามาดูครั้งหลัง
+  const settled = captures.data !== undefined && !captures.isFetching
+  useEffect(() => {
+    if (settled && viewing !== null && viewIndex < 0) captureStore.closeView()
+  }, [settled, viewing, viewIndex])
+
+  // ภาพที่เพิ่งถ่าย (หรือถ่ายซ้ำเวลาเดิม): เลื่อนเฉพาะแถวภาพนี้ให้เห็น (ไม่เลื่อนทั้งหน้า) แล้วกระพริบกรอบสั้น ๆ
+  // (ลดการเคลื่อนไหว = ไม่กระพริบ) ใช้ครั้งเดียว: ยังไม่เห็นภาพในรายการ = รอรายการอัปเดตแล้วค่อยทำ
   useEffect(() => {
     if (flash === null) return
     const node = buttons.current.get(flash.id)
     if (!node) return
-    node.scrollIntoView({ block: "nearest", inline: "nearest" })
+    captureStore.consumeFlash(flash.n)
+    const row = listRef.current
+    if (row && row.scrollWidth > row.clientWidth) {
+      const box = node.getBoundingClientRect()
+      const rowBox = row.getBoundingClientRect()
+      const left = revealScrollLeft({
+        itemLeft: box.left - rowBox.left + row.scrollLeft,
+        itemWidth: box.width,
+        viewLeft: row.scrollLeft,
+        viewWidth: row.clientWidth,
+      })
+      if (left !== row.scrollLeft) row.scrollTo({ left, behavior: reducedMotion() ? "auto" : "smooth" })
+    }
     if (reducedMotion() || typeof node.animate !== "function") return
     node.animate(
       [{ boxShadow: "0 0 0 3px var(--primary)" }, { boxShadow: "0 0 0 0 transparent" }],
       { duration: 1200, easing: "ease-out" },
     )
-  }, [flash])
+  }, [flash, captures.data])
 
   if (list.length === 0) return null
 
@@ -136,7 +169,16 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
     const removed = confirming
     setDeleting(true)
     try {
-      await deleteCapture(videoId, removed.id)
+      try {
+        await deleteCapture(videoId, removed.id)
+      } catch (error) {
+        // ภาพหายไปแล้ว (ถูกลบจากที่อื่น) = ถือว่าลบสำเร็จ · พลาดแบบอื่น = แจ้งแล้วโหลดรายการใหม่ให้ตรงกับของจริง
+        if (!hasCode(error, "E_NOT_FOUND")) {
+          toast.error(errorMessage(error, th.errors.unknown))
+          void client.invalidateQueries({ queryKey: capturesKey(videoId) })
+          return
+        }
+      }
       const next = focusAfterDelete(list.map((c) => c.id), removed.id)
       afterDelete.current = next
       client.setQueryData<Capture[]>(capturesKey(videoId), (old) => withoutCapture(old, removed.id))
@@ -145,8 +187,6 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
       toast.success(th.capture.deleted)
       // กล่องยืนยันกับภาพใหญ่ปิดพร้อมกัน: หลังแอนิเมชันปิดจบ โฟกัสภาพถัดไป (ไม่เหลือภาพ = ปุ่มถ่ายภาพ / ชื่อคลิป)
       window.setTimeout(() => ((next !== null ? buttons.current.get(next) : undefined) ?? fallbackFocus())?.focus(), 200)
-    } catch (error) {
-      toast.error(errorMessage(error, th.errors.unknown))
     } finally {
       setDeleting(false)
     }
@@ -173,6 +213,7 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
         </Button>
       </div>
       <ul
+        ref={listRef}
         aria-labelledby={headingId}
         onKeyDown={onKeyDown}
         className={cn("flex gap-2 p-[3px]", layout === "row" ? "overflow-x-auto" : "flex-wrap")}

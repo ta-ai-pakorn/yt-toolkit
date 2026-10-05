@@ -16,6 +16,8 @@ export type CaptureUiState = {
 const INITIAL: CaptureUiState = { busy: false, viewing: null, flash: null }
 
 let state: CaptureUiState = INITIAL
+// เลขกระพริบเดินหน้าอย่างเดียว (ใช้แล้วลบ flash ทิ้ง ก็ยังไม่ซ้ำกับครั้งก่อน)
+let flashSeq = 0
 const listeners = new Set<() => void>()
 
 function set(patch: Partial<CaptureUiState>): void {
@@ -45,7 +47,22 @@ export const captureStore = {
     if (state.viewing) set({ viewing: null })
   },
   flash(target: CaptureTarget): void {
-    set({ flash: { ...target, n: (state.flash?.n ?? 0) + 1 } })
+    flashSeq += 1
+    set({ flash: { ...target, n: flashSeq } })
+  },
+  /** กระพริบแล้ว = ใช้ครั้งเดียว (แถบที่ถูกวาดใหม่ภายหลังจะไม่กระพริบภาพเก่าซ้ำ) · n ไม่ตรง = มีภาพใหม่กว่า ไม่แตะ */
+  consumeFlash(n: number): void {
+    if (state.flash?.n === n) set({ flash: null })
+  },
+  /** แถบของคลิป videoId ถูกวาดแล้ว: คำสั่งเปิดภาพ/กระพริบที่ค้างของคลิปอื่นไม่ใช่ของแถบนี้ ทิ้งเสีย (กดปุ่ม "ดูภาพ" ช้าจะได้ไม่เปิดภาพตอนเข้ามาดูครั้งหลัง) */
+  dropOtherClips(videoId: string): void {
+    const viewing = state.viewing && state.viewing.videoId !== videoId ? null : state.viewing
+    const flash = state.flash && state.flash.videoId !== videoId ? null : state.flash
+    if (viewing !== state.viewing || flash !== state.flash) set({ viewing, flash })
+  },
+  /** แถบของคลิป videoId หายไป: กระพริบที่ยังไม่ได้ใช้ของคลิปนี้ไม่ต้องรอ */
+  dropFlash(videoId: string): void {
+    if (state.flash?.videoId === videoId) set({ flash: null })
   },
 }
 
@@ -61,5 +78,6 @@ export function useCaptureUi<T>(select: (s: CaptureUiState) => T): T {
 /** ทดสอบเท่านั้น */
 export function __resetCaptureStoreForTests(): void {
   state = INITIAL
+  flashSeq = 0
   for (const listener of listeners) listener()
 }

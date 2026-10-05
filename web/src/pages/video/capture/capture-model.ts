@@ -79,3 +79,13 @@ export function captureDownloadUrl(url: string): string {
 export function captureFileName(ms: number): string {
   return `frame_${formatTimecode(ms).replaceAll(":", "-")}.jpg`
 }
+
+/**
+ * เลื่อนแถวภาพ (แนวนอน) ให้เห็นภาพที่เพิ่งถ่าย โดยไม่เลื่อนทั้งหน้า: คืนค่า scrollLeft ใหม่ของแถว
+ * item/view = ตำแหน่งซ้ายและความกว้างในพิกัดเนื้อหาของแถว (ภาพ) และพื้นที่ที่มองเห็นอยู่ (scrollLeft + clientWidth)
+ */
+export function revealScrollLeft(o: { itemLeft: number; itemWidth: number; viewLeft: number; viewWidth: number }): number {
+  if (o.itemLeft < o.viewLeft) return Math.max(0, o.itemLeft)
+  const overflow = o.itemLeft + o.itemWidth - (o.viewLeft + o.viewWidth)
+  return overflow > 0 ? o.viewLeft + overflow : o.viewLeft
+}

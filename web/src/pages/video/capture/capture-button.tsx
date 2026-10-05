@@ -1,5 +1,5 @@
 import { Camera } from "lucide-react"
-import type { ComponentProps } from "react"
+import { useId, type ComponentProps } from "react"
 
 import { Button } from "@/components/ui/button"
 import { ContextMenuItem } from "@/components/ui/context-menu"
@@ -21,6 +21,7 @@ type Props = { videoId: string; variant?: "row" | "dock" }
 export function CaptureButton({ videoId, variant = "row" }: Props) {
   const { busy, block, capture } = useCapture(videoId)
   const reason = blockTooltip(block)
+  const reasonId = useId()
   const label = busy ? th.capture.busy : th.capture.button
   const dock = variant === "dock"
   const props: ComponentProps<typeof Button> = {
@@ -38,19 +39,24 @@ export function CaptureButton({ videoId, variant = "row" }: Props) {
       {dock ? null : label}
     </>
   )
+  // โครงเดียวกันเสมอ (เหตุผลเปลี่ยนแล้วปุ่มที่โฟกัสอยู่ไม่ถูกสร้างใหม่): ไม่มี tooltip ให้แสดง = ปิด tooltip
   const tip = reason ?? (dock ? label : null)
-  if (tip === null) {
-    return (
-      <Button {...props} data-slot="capture-button">
-        {content}
-      </Button>
-    )
-  }
   return (
-    <Tooltip>
-      <TooltipTrigger render={<Button {...props} data-slot="capture-button" />}>{content}</TooltipTrigger>
-      <TooltipContent>{tip}</TooltipContent>
-    </Tooltip>
+    <>
+      <Tooltip disabled={tip === null}>
+        <TooltipTrigger
+          render={<Button {...props} aria-describedby={reason !== null ? reasonId : undefined} data-slot="capture-button" />}
+        >
+          {content}
+        </TooltipTrigger>
+        <TooltipContent>{tip}</TooltipContent>
+      </Tooltip>
+      {reason !== null && (
+        <span id={reasonId} className="sr-only">
+          {reason}
+        </span>
+      )}
+    </>
   )
 }
 
