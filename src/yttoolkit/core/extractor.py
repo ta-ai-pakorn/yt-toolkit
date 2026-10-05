@@ -767,6 +767,10 @@ class YtDlpExtractor:
         except HTTPError as exc:
             detail = f"HTTP Error {exc.status}"
             code = classify(detail)
+            try:
+                exc.close()  # คืนการเชื่อมต่อของคำตอบที่ error ถืออยู่ (ปิดไม่ได้ก็ไม่บัง error เดิม)
+            except Exception:
+                pass
             raise YtError("E_NETWORK" if code == "E_UNKNOWN" else code, detail) from exc
         except RequestError as exc:
             raise YtError("E_NETWORK", type(exc).__name__) from exc

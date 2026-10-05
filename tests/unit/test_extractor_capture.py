@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+from http.cookiejar import CookieJar
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
@@ -184,6 +185,29 @@ def test_real_http_errors_map_without_the_url(ydl: type[CaptureYDL], tmp_path: P
     assert not dest.exists()
 
 
+def test_real_closes_the_response_held_by_an_http_error(ydl: type[CaptureYDL], tmp_path: Path) -> None:
+    response = Response(io.BytesIO(b""), MEDIA_URL, {}, status=503)
+    ydl.fail = HTTPError(response)
+    with pytest.raises(YtError):
+        YtDlpExtractor().fetch_frame_piece(BBB, 0, None, tmp_path / "p.mp4")
+    assert response.closed
+
+
+def test_real_a_failing_close_does_not_mask_the_error(
+    ydl: type[CaptureYDL], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    error = HTTPError(Response(io.BytesIO(b""), MEDIA_URL, {}, status=429))
+
+    def broken_close() -> None:
+        raise OSError("close failed")
+
+    monkeypatch.setattr(error, "close", broken_close)
+    ydl.fail = error
+    with pytest.raises(YtError) as info:
+        YtDlpExtractor().fetch_frame_piece(BBB, 0, None, tmp_path / "p.mp4")
+    assert info.value.code == "E_BOT_CHECK" and info.value.detail == "HTTP Error 429"
+
+
 def test_real_connection_errors_are_network_errors(ydl: type[CaptureYDL], tmp_path: Path) -> None:
     ydl.fail = TransportError("connection reset by media.invalid")
     with pytest.raises(YtError) as info:
@@ -212,3 +236,51 @@ def test_real_rejects_a_bad_video_id(ydl: type[CaptureYDL], tmp_path: Path) -> N
     with pytest.raises(YtError) as info:
         YtDlpExtractor().fetch_frame_piece("../etc", 0, None, tmp_path / "p.mp4")
     assert info.value.code == "E_INVALID_INPUT" and ydl.instances == []
+
+
+def test_real_probe_returning_nothing_is_unknown(ydl: type[CaptureYDL], tmp_path: Path) -> None:
+    ydl.info = None
+    with pytest.raises(YtError) as info:
+        YtDlpExtractor().fetch_frame_piece(BBB, 0, None, tmp_path / "p.mp4")
+    assert info.value.code == "E_UNKNOWN"
+    assert ydl.instances[0].requests == []
+
+
+def test_real_a_short_segment_read_is_a_network_error(ydl: type[CaptureYDL], tmp_path: Path) -> None:
+    data, index = _index()
+    last = index.sidx.refs[-1]
+    ydl.body = data[: last.offset + last.size - 10]  # ท่อนสุดท้ายขาดท้าย 10 ไบต์ (หัวไฟล์ยังอ่านครบ)
+    dest = tmp_path / "p.mp4"
+    with pytest.raises(YtError) as info:
+        YtDlpExtractor().fetch_frame_piece(BBB, 3_500, None, dest)
+    assert info.value.code == "E_NETWORK" and info.value.detail == "short read"
+    assert len(ydl.instances[0].requests) == 2
+    assert not dest.exists()
+
+
+class _SpySession:
+    """แทน VisitorSession: jar ก้อนเดียว (เหมือน test_extractor.py)"""
+
+    def __init__(self, folder: Path) -> None:
+        self.path = folder / "visitor-session.txt"
+        self._jar = CookieJar()
+        self.saved: list[object] = []
+
+    def jar(self) -> object:
+        return self._jar
+
+    def save(self, source: object = None) -> None:
+        self.saved.append(source)
+
+
+def test_real_probe_uses_the_visitor_session(ydl: type[CaptureYDL], tmp_path: Path) -> None:
+    session = _SpySession(tmp_path)
+    YtDlpExtractor(session=session).fetch_frame_piece(BBB, 0, None, tmp_path / "p.mp4")  # type: ignore[arg-type]
+    (inst,) = ydl.instances
+    assert inst.params["cookiefile"] == str(tmp_path / "visitor-session.txt")
+    assert inst.__dict__["cookiejar"] is session.jar()
+
+
+def test_real_without_a_session_passes_no_cookiefile(ydl: type[CaptureYDL], tmp_path: Path) -> None:
+    YtDlpExtractor().fetch_frame_piece(BBB, 0, None, tmp_path / "p.mp4")
+    assert "cookiefile" not in ydl.instances[0].params
