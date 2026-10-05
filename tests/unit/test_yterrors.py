@@ -22,7 +22,7 @@ CLASSIFIER_CODES = {
 # รหัสที่เพิ่งมีใน MESSAGES แต่ PRD ข้อ 7 ยังไม่มีแถว (ว่าง = ทุกรหัสมีแถวใน PRD แล้ว)
 # M4 (C11) เพิ่มแถว E_JOB_STATE และ E_YT_REFUSED แล้ว รหัสใหม่ที่ยังไม่มีแถวให้ใส่ที่นี่ชั่วคราว
 # (มีแถวแล้วจะถูกตรวจทันที และ test_prd_pending_codes_have_no_prd_row เตือนให้ลบออกจากชุด)
-PRD_PENDING: set[str] = {"E_CAPTURE_UNSUPPORTED", "E_CAPTURE_BUSY", "E_QUEUE_PAUSED"}
+PRD_PENDING: set[str] = set()
 PRD = Path(__file__).resolve().parents[2] / "PRD.md"
 
 
