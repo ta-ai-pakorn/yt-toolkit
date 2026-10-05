@@ -20,6 +20,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import parse_qs
@@ -36,6 +37,7 @@ from .download import (
     SponsorSegment,
     media_facts,
 )
+from .frame_piece import PieceInfo, fetch_piece, pick_capture_format, piece_info, read_index, write_piece
 from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix_id
 from .visitor_session import VisitorSession
 from .yterrors import YtError, classify
@@ -56,6 +58,8 @@ _PROBE_OPTS = {
 FETCH_TIMEOUT = 10  # วินาที ต่อทุกช่วงของคำขอ (เชื่อมต่อ/ส่ง/รอ/อ่าน) เท่ากับ httpx.get(timeout=10) แบบเดิม
 # แผ่น storyboard โหลดพร้อมกันได้ถึง 8 แผ่น (storyboard.build) เก็บการเชื่อมต่อไว้ใช้ซ้ำ ไม่ต้องจับมือ TLS ใหม่ทุกแผ่น
 _FETCH_LIMITS = httpx.Limits(max_connections=16, max_keepalive_connections=8)
+# ข้อเท็จจริงของชิ้นภาพจาก fixture ของตัวปลอม (testsrc 1920x1080 SDR) M5 รอบ B2
+_FAKE_CAPTURE_FORMAT = {"format_id": "fake-capture", "width": 1920, "height": 1080, "dynamic_range": "SDR"}
 _PLAYLIST_OPTS = {
     "quiet": True,
     "no_warnings": True,
@@ -717,6 +721,68 @@ class YtDlpExtractor:
         except Exception as exc:
             raise _yt_error(exc) from exc
 
+    def fetch_frame_piece(self, video_id: str, t_ms: int, max_short_side: int | None, dest: Path) -> PieceInfo:
+        """ภาพคมตรงจุด (M5 รอบ B2 spec 3.1) โดยไม่โหลดทั้งคลิป
+
+        1. probe ใหม่ (ค่าตั้ง probe + เซสชันผู้ชม): ข้อมูลที่เก็บไว้ไม่มีลิงก์สื่อ และลิงก์ที่ยูทูปเซ็นไว้หมดอายุได้
+        2. เลือก mp4 ภาพอย่างเดียวผ่าน https (frame_piece.pick_capture_format) ไม่มี = E_CAPTURE_UNSUPPORTED
+        3. โหลดหัวไฟล์ (64 KB) อ่าน sidx แล้วโหลดเฉพาะท่อนที่มี t_ms ด้วยคำขอแบบ Range ผ่านตัวส่งคำขอของ yt-dlp
+           (spike 2026-10-05: --download-sections และ ffmpeg ที่ต่อลิงก์ยูทูปตรง ๆ ค้าง)
+           คำตอบที่ไม่ใช่ HTTP 206 (เซิร์ฟเวอร์ไม่สน Range แล้วส่งทั้งไฟล์ 200) = E_NETWORK ไม่ใช้ข้อมูลนั้น
+        4. เขียน init + ท่อนนั้นลง dest
+        error: HTTP 429 = E_BOT_CHECK · 4xx อื่น = E_YT_REFUSED · 5xx และเน็ตหลุด = E_NETWORK
+        รายละเอียดของ error และ log ไม่มีลิงก์สื่อ (มีลายเซ็น) หัวคำขอ หรือ path: log บอกแค่ id, format และจำนวนไบต์
+        """
+        _check_video_id(video_id)
+        from yt_dlp.networking import Request
+        from yt_dlp.networking.exceptions import HTTPError, RequestError
+        from yt_dlp.utils import YoutubeDLError
+
+        fetched = 0
+        try:
+            with self._ydl(_PROBE_OPTS, with_session=True) as ydl:
+                raw = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+                if raw is None:
+                    raise YtError("E_UNKNOWN", f"yt-dlp ไม่คืนข้อมูลสำหรับ {video_id}")
+                fmt = pick_capture_format(check_live(ydl.sanitize_info(raw)), max_short_side)
+                if fmt is None:
+                    raise YtError("E_CAPTURE_UNSUPPORTED", f"{video_id}: no video-only mp4 over https")
+                media_url = str(fmt["url"])
+                headers = {str(k): str(v) for k, v in (fmt.get("http_headers") or {}).items()}
+
+                def read_range(first: int, last: int) -> bytes:
+                    nonlocal fetched
+                    request = Request(media_url, headers={**headers, "Range": f"bytes={first}-{last}"})
+                    with ydl.urlopen(request) as response:
+                        if response.status != 206:
+                            raise YtError("E_NETWORK", f"range not honoured (HTTP {response.status})")
+                        data = response.read(last - first + 1)
+                    fetched += len(data)
+                    return data
+
+                index = read_index(read_range)
+                piece, ref = fetch_piece(read_range, index, t_ms)
+        except YtError:
+            raise
+        except HTTPError as exc:
+            detail = f"HTTP Error {exc.status}"
+            code = classify(detail)
+            try:
+                exc.close()  # คืนการเชื่อมต่อของคำตอบที่ error ถืออยู่ (ปิดไม่ได้ก็ไม่บัง error เดิม)
+            except Exception:
+                pass
+            raise YtError("E_NETWORK" if code == "E_UNKNOWN" else code, detail) from exc
+        except RequestError as exc:
+            raise YtError("E_NETWORK", type(exc).__name__) from exc
+        except YoutubeDLError as exc:
+            message = _ANSI.sub("", str(exc)) or type(exc).__name__
+            raise YtError(classify(message), message) from exc
+        except Exception as exc:
+            raise YtError("E_UNKNOWN", f"{type(exc).__name__}: {exc}") from exc
+        write_piece(dest, piece)
+        log.info("ถ่ายภาพคม %s: format %s โหลด %d ไบต์", video_id, fmt.get("format_id"), fetched)
+        return piece_info(fmt, dest, index.sidx, ref)
+
     def _extract(self, url: str, opts: dict, *, with_session: bool = False) -> dict:
         """เรียก yt-dlp แล้วแปลงทุกความผิดพลาดเป็น YtError (ห้ามมี exception ดิบหลุดออกไป)"""
         from yt_dlp.utils import YoutubeDLError
@@ -747,6 +813,7 @@ class FakeExtractor:
 
     งานโหลด (download) ทำตาม behaviors (C14 ค่าตั้งต้น <fixtures_root>/downloads/behaviors.json):
     จำนวนขั้น เวลาต่อขั้น และ error ที่ตั้งไว้ต่อคลิป แล้วคัดลอกไฟล์จาก media/ ไม่ใช้ ffmpeg ไม่ต่อเน็ต
+    ภาพคมตรงจุด (fetch_frame_piece) ตัดชิ้นจาก capture/piece.mp4 ตาม "captureError" ใน behaviors (M5 รอบ B2)
     """
 
     PRIVATE_ID = "PRIVATEVID1"
@@ -756,6 +823,7 @@ class FakeExtractor:
     _REPEAT_RANGE = range(1, 51)
     _DEFAULT_BEHAVIOR = {"steps": 6, "stepMs": 120}
     _FAKE_SPEED_BPS = 2_000_000  # ความเร็วสมมติที่รายงานทุกขั้น
+    CAPTURE_FIXTURE = Path("capture") / "piece.mp4"  # M5 รอบ B2: ชิ้นภาพของ fetch_frame_piece
 
     def __init__(self, fixtures_root: Path, *, behaviors: Path | None = None) -> None:
         self.root = Path(fixtures_root)
@@ -842,6 +910,29 @@ class FakeExtractor:
             _clear_media(workdir)
             raise
         return DownloadResult(path=workdir / target, info=info, choice=choice, media=self._media_of(conf))
+
+    def fetch_frame_piece(self, video_id: str, t_ms: int, max_short_side: int | None, dest: Path) -> PieceInfo:
+        """C6 ตัวปลอม (M5 รอบ B2): probe เหมือนตัวจริง (คลิปส่วนตัว/ไม่มี/ไลฟ์ได้ error เดียวกัน) แล้วตัดชิ้นจาก
+        <fixtures_root>/capture/piece.mp4 ด้วยตัวอ่าน sidx ตัวจริง ไม่ต่อเน็ต ไม่สนเพดานความละเอียด (1920x1080 เสมอ)
+        fixture ยาว 4 วินาที: เวลาของคลิปวนด้วย t_ms % ความยาว แล้วเลื่อนเวลาเริ่มท่อนกลับเป็นเวลาของคลิป
+        "captureError" ของคลิปใน behaviors.json = โยน YtError รหัสนั้น (ไม่เขียนไฟล์)
+        """
+        self.calls.append(("fetch_frame_piece", video_id))
+        self.probe(video_id)
+        error = self._behavior(video_id).get("captureError")
+        if error:
+            raise YtError(str(error), f"fake: capture of {video_id} set to fail")
+        data = (self.root / self.CAPTURE_FIXTURE).read_bytes()
+
+        def read_range(first: int, last: int) -> bytes:
+            return data[first : last + 1]
+
+        index = read_index(read_range)
+        local = t_ms % index.sidx.end_ms
+        piece, ref = fetch_piece(read_range, index, local)
+        write_piece(dest, piece)
+        info = piece_info(_FAKE_CAPTURE_FORMAT, dest, index.sidx, ref)
+        return replace(info, segment_start_ms=t_ms - (local - info.segment_start_ms))
 
     @staticmethod
     def _media_of(conf: dict) -> MediaFacts | None:
