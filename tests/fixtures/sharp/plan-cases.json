@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {"name": "same-times-as-is", "durationS": 635, "intervalS": null, "fast": {"stepMs": 4961, "count": 128},
+     "expect": {"count": 128, "first": 0, "last": 630047, "intervalS": null, "raised": false}},
+    {"name": "same-times-exactly-200", "durationS": 1000, "intervalS": null, "fast": {"stepMs": 5000, "count": 200},
+     "expect": {"count": 200, "first": 0, "last": 995000, "intervalS": null, "raised": false}},
+    {"name": "same-times-over-200", "durationS": 3600, "intervalS": null, "fast": {"stepMs": 10000, "count": 360},
+     "expect": {"count": 200, "first": 0, "last": 3582000, "intervalS": 18, "raised": true}},
+    {"name": "custom-7", "durationS": 635, "intervalS": 7, "fast": null,
+     "expect": {"count": 91, "first": 0, "last": 630000, "intervalS": 7, "raised": false}},
+    {"name": "custom-2-raised-to-4", "durationS": 635, "intervalS": 2, "fast": {"stepMs": 4961, "count": 128},
+     "expect": {"count": 159, "first": 0, "last": 632000, "intervalS": 4, "raised": true}},
+    {"name": "custom-exactly-200", "durationS": 400, "intervalS": 2, "fast": null,
+     "expect": {"count": 200, "first": 0, "last": 398000, "intervalS": 2, "raised": false}},
+    {"name": "custom-201-raised-to-3", "durationS": 401, "intervalS": 2, "fast": null,
+     "expect": {"count": 134, "first": 0, "last": 399000, "intervalS": 3, "raised": true}},
+    {"name": "no-storyboard-19s", "durationS": 19, "intervalS": null, "fast": null,
+     "expect": {"count": 19, "first": 0, "last": 18000, "intervalS": 1, "raised": false,
+                "times": [0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000, 14000, 15000, 16000, 17000, 18000]}},
+    {"name": "no-storyboard-10h", "durationS": 36000, "intervalS": null, "fast": null,
+     "expect": {"count": 100, "first": 0, "last": 35640000, "intervalS": 360, "raised": false}},
+    {"name": "near-the-end", "durationS": 10, "intervalS": 3, "fast": null,
+     "expect": {"count": 4, "first": 0, "last": 9000, "intervalS": 3, "raised": false, "times": [0, 3000, 6000, 9000]}},
+    {"name": "interval-longer-than-clip", "durationS": 5, "intervalS": 3600, "fast": null,
+     "expect": {"count": 1, "first": 0, "last": 0, "intervalS": 3600, "raised": false, "times": [0]}},
+    {"name": "one-second-clip", "durationS": 1, "intervalS": null, "fast": null,
+     "expect": {"count": 1, "first": 0, "last": 0, "intervalS": 1, "raised": false, "times": [0]}},
+    {"name": "every-second-of-a-long-clip", "durationS": 100000, "intervalS": 1, "fast": null,
+     "expect": {"count": 200, "first": 0, "last": 99500000, "intervalS": 500, "raised": true}}
+  ]
+}
