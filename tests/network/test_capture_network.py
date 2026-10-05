@@ -13,6 +13,7 @@ id ของคลิปอยู่ใน tests/network_videos.toml ([capture])
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -85,7 +86,7 @@ def _first_frame(path: Path) -> tuple[float, float]:
     """(เวลาแสดงผลของเฟรมแรกในไฟล์ (วินาที), ความยาวหนึ่งเฟรม (วินาที)) จาก ffprobe"""
     out = subprocess.run(
         [_ffprobe(), "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#8",
-         "-show_entries", "frame=pts_time,pkt_pts_time,best_effort_timestamp_time:stream=avg_frame_rate",
+         "-show_entries", "frame=pts_time,pkt_pts_time,best_effort_timestamp_time:stream=avg_frame_rate,r_frame_rate",
          "-of", "json", str(path)],
         capture_output=True,
         check=True,
@@ -97,8 +98,17 @@ def _first_frame(path: Path) -> tuple[float, float]:
         if (t := f.get("pts_time") or f.get("pkt_pts_time") or f.get("best_effort_timestamp_time")) is not None
     ]
     assert times, "ffprobe ไม่คืนเวลาของเฟรมแรก"
-    period = 1 / Fraction(doc["streams"][0]["avg_frame_rate"])
-    return min(times), float(period)
+    return min(times), float(1 / _frame_rate(doc["streams"][0]))
+
+
+def _frame_rate(stream: dict) -> Fraction:
+    """อัตราเฟรมของสตรีม: avg_frame_rate ก่อน · ffprobe ตอบ 0/0 ได้ (ชิ้นแบบแบ่งท่อนที่อ่านด้วย -read_intervals) = ใช้ r_frame_rate"""
+    for key in ("avg_frame_rate", "r_frame_rate"):
+        text = str(stream.get(key) or "0/0")
+        num, _, den = text.partition("/")
+        if int(num or 0) > 0 and int(den or 1) > 0:
+            return Fraction(int(num), int(den or 1))
+    raise AssertionError(f"ffprobe ไม่บอกอัตราเฟรม (avg_frame_rate={stream.get('avg_frame_rate')}, r_frame_rate={stream.get('r_frame_rate')})")
 
 
 def _assert_piece_starts_at_segment(piece: PieceInfo) -> None:
@@ -184,7 +194,8 @@ def test_frame_from_the_piece_matches_the_whole_file_near_a_segment_boundary(wor
 
     whole = _download_whole(extractor, video_id, piece.format_id, work / "whole")
     _, period = _first_frame(piece.path)
-    next_frame_ms = round(period * 1000)
+    # ceil: ffmpeg ให้เฟรมแรกที่เวลา >= t จึงต้องเลื่อนเกินช่วงหนึ่งเฟรม (เช่น 33.33 ms) ถึงได้เฟรมอื่นแน่ ๆ (round/floor = 33 อาจได้เฟรมเดิม)
+    next_frame_ms = math.ceil(period * 1000)
     cases = [
         ("start", start, piece),
         ("start+100ms", start + 100, piece),
