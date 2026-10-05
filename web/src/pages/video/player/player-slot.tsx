@@ -323,6 +323,7 @@ export function PlayerSlot({
  * แถวใต้ตัวเล่นในหัวคลิป: แถบไทม์ไลน์ + "ช่วง i จาก n" + ปุ่มตั้งจุดเริ่ม/จบ (M5 รอบ A) กับปุ่มหยุด (ตอนเล่นช่วงไฮไลต์)
  * มีเฉพาะหลังเริ่มเล่นและตัวเล่นอยู่ในหัวคลิป (ลอยอยู่ = ไม่มี สถานะช่วงไฮไลต์ไปอยู่บนตัวเล่นลอยแทน)
  * ก่อนเล่นไม่จองที่ไว้ หัวคลิปก่อนเล่นจึงสูงเท่ากันทุกคลิป (ปุ่มช่วงไฮไลต์อยู่ในแถวปุ่มของหัวคลิป)
+ * ยกเว้นหัวคลิปส่ง actions มาตอนตัวเล่นไม่ได้เล่น (M5 รอบ B2: ปิดตัวเล่นตอนอยู่ในโหมดโรงภาพยนตร์) = แถวที่มีแค่ปุ่มเหล่านั้น
  */
 export function PlayerControls({
   video,
@@ -344,7 +345,19 @@ export function PlayerControls({
   const durationMs = Math.max(0, video.durationS) * 1000
   const timeline = durationMs > 0
   // ลอยอยู่ (เริ่มเล่นแล้วแต่ช่องพ้นจอ) = ไม่มีแถวนี้ · เงื่อนไขเดียวกับ docked ของ PlayerSlot
-  if (!active || !started || !inView || !(timeline || reel)) return null
+  if (!inView) return null
+  if (!active || !started) {
+    // ตัวเล่นไม่ได้เล่นอยู่ (เช่นปิดตัวเล่นตอนอยู่ในโหมดโรงภาพยนตร์): เหลือเฉพาะปุ่มเพิ่มจากหัวคลิป (ถ้ามี) ไม่มีไทม์ไลน์หรือปุ่มตั้งจุด
+    if (!actions) return null
+    return (
+      <div data-slot="player-controls" className={cn("flex flex-col gap-2", className)}>
+        <div data-slot="player-actions" className="flex flex-wrap items-center gap-1">
+          {actions}
+        </div>
+      </div>
+    )
+  }
+  if (!(timeline || reel)) return null
   return <ControlsRow video={video} durationMs={timeline ? durationMs : 0} className={className} actions={actions} />
 }
 

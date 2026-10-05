@@ -173,6 +173,52 @@ test("คลิปแนวตั้ง: ตัวเล่นสูง 80% ข�
   const bar = (await page.getByRole("slider", { name: "ตำแหน่งในคลิป" }).boundingBox())!
   expect(bar.x).toBeGreaterThan(box.x + box.width - 1)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+
+  // แถวใต้ตัวเล่นย้ายคอลัมน์ทุกครั้งที่สลับ: โฟกัสต้องอยู่ที่ปุ่มสลับต่อ (ไม่หลุดไป "ดูภาพปก" จน Enter ครั้งที่สองเปิดภาพปก)
+  await toggle(page).focus()
+  await page.keyboard.press("Enter")
+  await expect(header(page)).toHaveAttribute("data-layout", "compact")
+  await expect(toggle(page)).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(header(page)).toHaveAttribute("data-layout", "theater-tall")
+  await expect(toggle(page)).toBeFocused()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+})
+
+test("ปิดตัวเล่นลอยตอนขยายอยู่: เลย์เอาต์คงเดิม ยังย่อกลับได้ด้วยปุ่มและปุ่ม T", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await open(page, BBB)
+  await play(page)
+  await expect(header(page)).toHaveAttribute("data-layout", "theater-wide")
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBeGreaterThan(1500)
+  await page.evaluate(() => window.scrollTo(0, 2000))
+  await dock(page).getByRole("button", { name: "ปิดตัวเล่น", exact: true }).click()
+  await expect(iframe(page)).toHaveCount(0)
+  await page.evaluate(() => window.scrollTo(0, 0))
+
+  await expect(header(page)).toHaveAttribute("data-layout", "theater-wide")
+  await expect(toggle(page)).toHaveText("ย่อตัวเล่น (T)")
+  await heading(page).click()
+  await page.keyboard.press("t")
+  await expect(header(page)).toHaveAttribute("data-layout", "compact")
+  expect(await stored(page)).toBe("0")
+  // ย่อแล้วไม่มีปุ่มจนกว่าจะกด ▶ อีกครั้ง (เหมือนก่อนเล่น) และ T ไม่ทำงาน
+  await expect(toggle(page)).toHaveCount(0)
+  await page.keyboard.press("t")
+  await expect(header(page)).toHaveAttribute("data-layout", "compact")
+
+  // กด ▶ อีกครั้ง (ค่าที่จำไว้ = แบบปกติ) แล้วขยายด้วยปุ่ม · ปิดอีกรอบแล้วย่อด้วยคีย์บอร์ด: โฟกัสไปที่ ▶ ไม่หลุดไป body
+  await play(page)
+  await toggle(page).click()
+  await expect(header(page)).toHaveAttribute("data-layout", "theater-wide")
+  await page.evaluate(() => window.scrollTo(0, 2000))
+  await dock(page).getByRole("button", { name: "ปิดตัวเล่น", exact: true }).click()
+  await expect(iframe(page)).toHaveCount(0)
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await toggle(page).focus()
+  await page.keyboard.press("Enter")
+  await expect(header(page)).toHaveAttribute("data-layout", "compact")
+  await expect(page.getByRole("button", { name: "เล่นคลิป", exact: true })).toBeFocused()
 })
 
 test("จอแคบ 600 px: แบบปกติเสมอ ไม่มีปุ่ม และปุ่ม T ไม่ทำงาน", async ({ page }) => {
@@ -215,13 +261,17 @@ test("ตัวเล่นลอยในโหมดโรงภาพยน�
 })
 
 for (const scheme of ["light", "dark"] as const) {
-  test(`axe ไม่มีปัญหาร้ายแรงในโหมดโรงภาพยนตร์ (${scheme}) · 640 px ไม่ล้นแนวนอน`, async ({ page }) => {
-    await page.emulateMedia({ colorScheme: scheme })
-    await page.setViewportSize({ width: 640, height: 800 })
-    await open(page, BBB)
-    await play(page)
-    await expect(header(page)).toHaveAttribute("data-layout", "theater-wide")
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
-    expect(await seriousViolations(page)).toEqual([])
-  })
+  for (const portrait of [false, true]) {
+    const layout = portrait ? "theater-tall" : "theater-wide"
+    test(`axe ไม่มีปัญหาร้ายแรงในโหมดโรงภาพยนตร์ ${layout} (${scheme}) · 640 px ไม่ล้นแนวนอน`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme })
+      await page.setViewportSize({ width: 640, height: 800 })
+      if (portrait) await asPortrait(page, BBB)
+      await open(page, BBB)
+      await play(page)
+      await expect(header(page)).toHaveAttribute("data-layout", layout)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+      expect(await seriousViolations(page)).toEqual([])
+    })
+  }
 }
