@@ -18,6 +18,7 @@ SETTING_KEYS = {
     "concurrency",
     "sponsorblockDefault",
     "autoSharpFrames",
+    "captureQuality",
     "theme",
     "filenameStyle",
     "cookies",
@@ -158,3 +159,11 @@ def test_health_reports_the_settings_folder(make_client, db, tmp_path):
     assert body["output"]["path"] == str(tmp_path / "chosen")
     store.patch({"outputDir": str(tmp_path / "moved")})
     assert make_client(settings=store).get("/api/health").json()["output"]["path"] == str(tmp_path / "moved")
+
+
+def test_capture_quality_round_trips(client):
+    resp = client.patch("/api/settings", json={"captureQuality": "720"}, headers=AUTH)
+    assert resp.status_code == 200 and resp.json()["captureQuality"] == "720"
+    bad = client.patch("/api/settings", json={"captureQuality": "480"}, headers=AUTH)
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == "E_BAD_REQUEST"
+    assert client.get("/api/settings").json()["captureQuality"] == "720"

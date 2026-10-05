@@ -22,7 +22,7 @@ CLASSIFIER_CODES = {
 # รหัสที่เพิ่งมีใน MESSAGES แต่ PRD ข้อ 7 ยังไม่มีแถว (ว่าง = ทุกรหัสมีแถวใน PRD แล้ว)
 # M4 (C11) เพิ่มแถว E_JOB_STATE และ E_YT_REFUSED แล้ว รหัสใหม่ที่ยังไม่มีแถวให้ใส่ที่นี่ชั่วคราว
 # (มีแถวแล้วจะถูกตรวจทันที และ test_prd_pending_codes_have_no_prd_row เตือนให้ลบออกจากชุด)
-PRD_PENDING: set[str] = set()
+PRD_PENDING: set[str] = {"E_CAPTURE_UNSUPPORTED", "E_CAPTURE_BUSY", "E_QUEUE_PAUSED"}
 PRD = Path(__file__).resolve().parents[2] / "PRD.md"
 
 
@@ -140,7 +140,7 @@ def test_messages_match_prd_table() -> None:
         row = _prd_row(prd, code)
         assert row is not None, code
         # PRD เขียนช่องว่างของข้อความเป็น <ขนาด> และข้อความ "ตั้งแต่ M4" อยู่ในอัญประกาศในช่องหมายเหตุ
-        text = message.replace("{size}", "<ขนาด>")
+        text = message.replace("{size}", "<ขนาด>").replace("{time}", "<เวลา>")
         assert row.startswith(f"| `{code}` | {text} |") or f'"{text}"' in row, code
     assert "เน็ตหลุด ลองใหม่อีกครั้ง" in prd
 
@@ -218,3 +218,17 @@ def test_api_reuses_the_unknown_message() -> None:
 
 def test_m5b_messages_are_verbatim_spec_copy() -> None:
     assert MESSAGES["E_NO_SHARP_FRAMES"] == 'ภาพคมของคลิปนี้ถูกล้างไปแล้ว กด "ขอภาพคม" ใหม่ได้'
+
+
+def test_m5b2_capture_messages_are_verbatim_spec_copy() -> None:
+    assert MESSAGES["E_CAPTURE_UNSUPPORTED"] == 'คลิปนี้ถ่ายภาพคมเฉพาะจุดไม่ได้ ใช้ "ขอภาพคม" ทั้งคลิปแทนได้'
+    assert MESSAGES["E_CAPTURE_BUSY"] == "กำลังถ่ายภาพอื่นอยู่ รอสักครู่"
+    assert MESSAGES["E_QUEUE_PAUSED"] == "พักการโหลดอยู่เพราะยูทูปขอตรวจสอบ ลองใหม่หลัง {time}"
+
+
+def test_queue_paused_fills_the_time_and_never_shows_the_placeholder() -> None:
+    assert YtError("E_QUEUE_PAUSED", "paused", params={"time": "17:10"}).message == (
+        "พักการโหลดอยู่เพราะยูทูปขอตรวจสอบ ลองใหม่หลัง 17:10"
+    )
+    assert YtError("E_QUEUE_PAUSED").message == MESSAGES["E_BOT_CHECK"]
+    assert "{time}" not in str(YtError("E_QUEUE_PAUSED"))
