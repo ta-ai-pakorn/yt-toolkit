@@ -35,3 +35,7 @@ sponsor_clip = ""                # พิธเลือกคลิปสั้
 # M5 รอบ B (T17): คลิปของ tests/network/test_sharp_network.py · ตรวจข้อมูลคลิปซ้ำก่อนรันถ้าห่างหลายเดือน
 clip = "88o5Sk8_m1Y"            # 372 วิ มี storyboard มีถึง 1080p: ภาพคม 720p video-only ราว 30-50 MB
 portrait_clip = "IngFfl6DTqY"   # 60 วิ แนวตั้ง: ต้องได้ภาพ 720×1280 (D4) ราว 10-20 MB
+
+[capture]
+# M5 รอบ B2 (T15): คลิปของ tests/network/test_capture_network.py · ตรวจข้อมูลคลิปซ้ำก่อนรันถ้าห่างหลายเดือน
+landscape = "aqz-KE-bpKQ"  # Big Buck Bunny 635 วิ, CC BY, mp4 avc1 ถึง 1080 และ av01 ถึง 2160 (spike 2026-10-05: 1080p 2.0 MB / 4K 7.5 MB ต่อภาพ)
