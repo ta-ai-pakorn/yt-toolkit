@@ -1176,7 +1176,7 @@ def test_run_app_fake_mode_never_opens_real_folders(paths, fake_platform, monkey
 
 # ---------- M4 T18: ต่อคิว ตั้งค่า ข่าว และเครื่องมือสื่อเข้ากับวงจรชีวิตของแอพ ----------
 
-JOB_KINDS = {"video", "audio", "subtitle", "note", "contact_sheet", "frames_zip"}
+JOB_KINDS = {"video", "audio", "subtitle", "note", "frames_sharp", "contact_sheet", "frames_zip"}
 
 
 def test_open_services_fake_mode_wires_fakes(paths, fake_platform):
