@@ -114,7 +114,6 @@ export function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
 }
 
-
 export type TransitionDoc = {
   documentElement: { setAttribute(name: string, value: string): void; removeAttribute(name: string): void }
   startViewTransition?: (update: () => void) => { finished: Promise<unknown>; ready?: Promise<unknown>; updateCallbackDone?: Promise<unknown> }

@@ -16,6 +16,11 @@ function cachedIsLive(client: QueryClient, videoId: string): boolean {
   return client.getQueryData<VideoInfo>(["video", videoId])?.isLive === true
 }
 
+/** ความยาวคลิป (วินาที) จากข้อมูลที่โหลดไว้แล้ว · ยังไม่มี = undefined (ไม่จำกัดเวลาที่ส่ง) */
+function cachedDurationS(client: QueryClient, videoId: string): number | undefined {
+  return client.getQueryData<VideoInfo>(["video", videoId])?.durationS
+}
+
 /**
  * ถ่ายภาพคมหนึ่งภาพ (ทุกทางเข้าใช้ตัวนี้ spec 2.2): ถ่ายได้ครั้งละภาพทั้งแอพ (มีค้างอยู่ = ไม่ทำอะไร)
  * สำเร็จ = เติมลงแถบ (เวลาเดิม = แทนที่) + กระพริบ + toast "ถ่ายภาพคมแล้ว · {time}" มีปุ่ม "ดูภาพ"
@@ -24,7 +29,9 @@ function cachedIsLive(client: QueryClient, videoId: string): boolean {
 export async function runCapture(client: QueryClient, videoId: string, ms: number): Promise<void> {
   if (!captureStore.tryBegin()) return
   try {
-    const capture = await postCapture(videoId, captureTimeMs(ms))
+    const capture = await postCapture(videoId, captureTimeMs(ms, cachedDurationS(client, videoId)))
+    // รายการที่กำลังโหลดอยู่ (เช่นโหลดใหม่ตอนกลับมาที่หน้าต่าง) เป็นรายการก่อนถ่าย: ยกเลิกก่อน ไม่ให้ทับภาพใหม่
+    await client.cancelQueries({ queryKey: capturesKey(videoId) })
     client.setQueryData<Capture[]>(capturesKey(videoId), (list) => withCapture(list, capture))
     captureStore.flash({ videoId, id: capture.id })
     toast.success(fill(th.capture.done, { time: captureClock(capture.tMs) }), {

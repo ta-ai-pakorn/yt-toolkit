@@ -5,10 +5,11 @@ from __future__ import annotations
 import errno
 import json
 import shutil
+import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -122,7 +123,8 @@ def test_paused_queue_refuses_with_the_bangkok_time(env: Env) -> None:
         (clip_info(live=True), 1_000),
         (clip_info(duration_s=0), 1_000),
         (clip_info(duration_s=10), -1),
-        (clip_info(duration_s=10), 10_000),
+        (clip_info(duration_s=10), 11_000),  # เลยท้ายคลิปตั้งแต่ 1 วินาทีขึ้นไป = ยังปฏิเสธ
+        (clip_info(duration_s=10), 50_000),
         (clip_info(duration_s=10), True),
         (clip_info(duration_s=10), "1000"),
     ],
@@ -132,6 +134,55 @@ def test_requests_the_clip_cannot_serve_are_rejected(env: Env, info: dict, t_ms:
     with pytest.raises(CaptureRejected):
         env.service.capture(BBB, t_ms)  # type: ignore[arg-type]
     assert env.fetcher.calls == []
+
+
+@pytest.mark.parametrize("t_ms", [635_000, 635_000 - 50, 635_000 + 999])
+def test_a_capture_at_the_clip_end_takes_the_frame_100_ms_before_the_end(env: Env, t_ms: int) -> None:
+    # ดูจนจบคลิปแล้วกดถ่าย: เวลาของตัวเล่น = ความยาว (หรือเลยเล็กน้อยเมื่อ durationS ถูกปัดลง) ต้องได้ภาพ ไม่ใช่ 422
+    capture, created = env.service.capture(BBB, t_ms)
+    assert created is True and capture.id == "c_634900" and capture.t_ms == 634_900
+    assert env.fetcher.calls == [(BBB, 634_900, 2160)]
+    assert [e["tMs"] for e in env.index()] == [634_900]
+    again, created_again = env.service.capture(BBB, 635_000)  # กดซ้ำที่ท้ายคลิป = ภาพเดิม ไม่โหลดใหม่
+    assert again == capture and created_again is False and len(env.fetcher.calls) == 1
+
+
+def test_times_before_the_last_second_are_not_moved(env: Env) -> None:
+    assert env.service.capture(BBB, 634_000)[0].t_ms == 634_000
+    assert env.service.capture(BBB, 634_800)[0].t_ms == 634_800
+    assert [call[1] for call in env.fetcher.calls] == [634_000, 634_800]
+
+
+def _piece_past_its_segment(env: Env, monkeypatch: pytest.MonkeyPatch, past_ms: int) -> None:
+    """ตัวดึงคืนท่อนสุดท้ายของคลิป (ยาว 1 วินาที) ที่เริ่มก่อนเวลาที่ขอ past_ms: เวลาที่ขอเลยท้ายท่อนเมื่อ past_ms ≥ 1000"""
+    fetch = env.fetcher.fetch_frame_piece
+
+    def fetch_last(video_id: str, t_ms: int, cap: int | None, dest: Path) -> Any:
+        piece = fetch(video_id, t_ms, cap, dest)
+        return replace(piece, segment_start_ms=t_ms - past_ms, segment_duration_ms=1000)
+
+    monkeypatch.setattr(env.fetcher, "fetch_frame_piece", fetch_last)
+
+
+def test_a_time_past_the_last_segment_retries_100_ms_before_its_end(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    _piece_past_its_segment(env, monkeypatch, 1_200)
+    env.media.frame_limit_ms = 950  # ภาพสุดท้ายของท่อนอยู่ก่อน 0.95 วินาที
+    assert env.service.capture(BBB, 634_900)[1] is True
+    assert [call.t_ms for call in env.media.frames] == [1_200, 1_100, 900]
+
+
+def test_the_tail_retry_is_only_for_times_past_the_segment(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    _piece_past_its_segment(env, monkeypatch, 500)
+    env.media.frame_limit_ms = 0
+    with pytest.raises(YtError) as info:
+        env.service.capture(BBB, 634_900)
+    assert info.value.code == "E_UNKNOWN"
+    assert [call.t_ms for call in env.media.frames] == [500, 400]
+    env.media.frames.clear()
+    _piece_past_its_segment(env, monkeypatch, 1_000)  # ท้ายท่อนพอดี: รอบถอย 100 ms กับรอบท้ายท่อนเป็นเวลาเดียวกัน ลองครั้งเดียว
+    with pytest.raises(YtError):
+        env.service.capture(BBB, 634_900)
+    assert [call.t_ms for call in env.media.frames] == [1_000, 900]
 
 
 def test_a_bad_video_id_is_invalid_input(env: Env) -> None:
@@ -363,6 +414,38 @@ def test_list_is_sorted_and_drops_entries_without_a_cache_file(env: Env) -> None
     assert env.service.list("bad id") == []
 
 
+def test_recapture_after_the_cache_copy_vanished_leaves_no_orphan_in_the_folder(env: Env) -> None:
+    env.service.capture(BBB, 1_000)
+    (env.captures / "c_1000.jpg").unlink()  # ไฟล์ใน cache หาย แต่แถวใน index ยังอยู่
+    capture, created = env.service.capture(BBB, 1_000)
+    assert created is True
+    assert sorted(p.name for p in env.folder.iterdir()) == ["frame_00-00-01.jpg"]
+    assert [e["outputRel"].rsplit("/", 1)[1] for e in env.index()] == ["frame_00-00-01.jpg"]
+    env.service.delete(BBB, capture.id)
+    assert list(env.folder.iterdir()) == []  # ลบจากแอพแล้วไม่เหลือไฟล์ที่แอพลบไม่ได้
+
+
+def test_recapture_keeps_going_when_the_old_folder_copy_is_gone_or_locked(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    env.service.capture(BBB, 1_000)
+    env.service.capture(BBB, 2_000)
+    (env.captures / "c_1000.jpg").unlink()
+    (env.folder / "frame_00-00-01.jpg").unlink()  # สำเนาในโฟลเดอร์หายไปด้วย
+    assert env.service.capture(BBB, 1_000)[1] is True
+    (env.captures / "c_2000.jpg").unlink()
+    real_unlink = Path.unlink
+
+    def locked(self: Path, missing_ok: bool = False) -> None:
+        if self.name == "frame_00-00-02.jpg":
+            raise PermissionError(13, "used by another process")
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    assert env.service.capture(BBB, 2_000)[1] is True  # ลบไฟล์เดิมไม่ได้ = ถ่ายต่อได้ ได้ชื่อใหม่
+    monkeypatch.undo()
+    assert sorted(p.name for p in env.folder.iterdir()) == ["frame_00-00-01.jpg", "frame_00-00-02.jpg", "frame_00-00-02_2.jpg"]
+    assert [c.t_ms for c in env.service.list(BBB)] == [1_000, 2_000]
+
+
 def test_delete_removes_the_folder_copy_the_cache_copy_and_the_entry(env: Env) -> None:
     capture, _ = env.service.capture(BBB, 125_400)
     env.service.delete(BBB, capture.id)
@@ -468,7 +551,6 @@ def test_reveal_dir_prefers_the_recorded_folder_then_the_planned_one(env: Env) -
 @pytest.mark.parametrize(
     ("root", "rel"),
     [
-        ("\\\\server\\share", f"a/{OUTPUT_DIR}/frame_00-00-01.jpg"),
         ("relative/root", f"a/{OUTPUT_DIR}/frame_00-00-01.jpg"),
         (None, f"a\\{OUTPUT_DIR}\\frame_00-00-01.jpg"),
         (None, f"C:/a/{OUTPUT_DIR}/frame_00-00-01.jpg"),
@@ -479,3 +561,34 @@ def test_reveal_dir_prefers_the_recorded_folder_then_the_planned_one(env: Env) -
 )
 def test_recorded_output_refuses_odd_paths(tmp_path: Path, root: str | None, rel: str) -> None:
     assert recorded_output(str(tmp_path) if root is None else root, rel) is None
+
+
+def _double_slash_root(folder: Path) -> str:
+    """โฟลเดอร์ในเครื่องที่เขียนแบบขึ้นต้นด้วย \\\\ หรือ // (รูปเดียวกับ \\\\server\\share) โดยไม่ต่อเครือข่าย
+    Windows: \\\\?\\C:\\... · ระบบอื่น: //tmp/..."""
+    return "\\\\?\\" + str(folder) if sys.platform == "win32" else "/" + str(folder)
+
+
+def test_recorded_output_accepts_a_network_style_root(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    rel = f"a/{OUTPUT_DIR}/frame_00-00-01.jpg"
+    target = out / "a" / OUTPUT_DIR / "frame_00-00-01.jpg"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"jpg")
+    decoy = tmp_path / "decoy" / OUTPUT_DIR / "frame_00-00-01.jpg"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_bytes(b"keep me")
+    root = _double_slash_root(out)
+    assert root.startswith(("\\\\", "//"))
+    found = recorded_output(root, rel)
+    assert found is not None and found.read_bytes() == b"jpg"
+    assert recorded_output(root, f"../decoy/{OUTPUT_DIR}/frame_00-00-01.jpg") is None  # ออกนอก root = ไม่ยอม
+    assert recorded_output(root, f"a/{OUTPUT_DIR}/frame_00-00-09.jpg") is None  # ไม่มีไฟล์ = None
+
+
+def test_delete_with_a_network_style_root_removes_the_folder_copy(env: Env) -> None:
+    capture, _ = env.service.capture(BBB, 1_000)
+    _edit_entry(env, outputRoot=_double_slash_root(env.out))
+    env.service.delete(BBB, capture.id)
+    assert not (env.folder / "frame_00-00-01.jpg").exists()
+    assert env.service.list(BBB) == []

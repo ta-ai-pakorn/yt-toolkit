@@ -12,6 +12,7 @@ from helpers_ffmpeg import find_test_ffmpeg, requires_ffmpeg
 from PIL import Image
 
 from yttoolkit.core.capture import CaptureService
+from yttoolkit.core.frame_piece import PieceInfo, fetch_piece, piece_info, read_index, write_piece
 from yttoolkit.core.media import FfmpegTools
 
 pytestmark = requires_ffmpeg
@@ -60,3 +61,35 @@ def test_last_fraction_retries_and_still_gets_a_frame(tmp_path: Path) -> None:
     service = _service(tmp_path)
     capture, _ = service.capture(BBB, 3_950)  # ภาพสุดท้ายอยู่ที่ 3.9 วินาที: 3.95 ไม่มีภาพ ถอยไป 3.85 แล้วได้ภาพ 3.9
     assert _diff(_gray(service.cache_path(BBB, capture)), _gray(_reference(3.85, tmp_path))) < 0.5
+
+
+def test_a_capture_at_the_clip_end_gets_the_last_frame(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    capture, _ = service.capture(BBB, 4_000)  # ดูจนจบแล้วกดถ่าย: เวลา = ความยาวคลิป ถ่ายที่ 3.9 วินาทีแทน
+    assert capture.t_ms == 3_900
+    assert _diff(_gray(service.cache_path(BBB, capture)), _gray(_reference(3.9, tmp_path))) < 0.5
+
+
+class _UnwrappedFetcher:
+    """ตัดชิ้นจาก piece.mp4 ที่เวลาจริง (ไม่วนทุก 4 วินาที): เวลาเลยท้าย fixture = เลยท่อนสุดท้ายของคลิปจริง ๆ"""
+
+    def fetch_frame_piece(self, video_id: str, t_ms: int, max_short_side: int | None, dest: Path) -> PieceInfo:
+        data = PIECE.read_bytes()
+
+        def read_range(first: int, last: int) -> bytes:
+            return data[first : last + 1]
+
+        index = read_index(read_range)
+        piece, ref = fetch_piece(read_range, index, t_ms)
+        write_piece(dest, piece)
+        return piece_info({"width": 1920, "height": 1080, "format_id": "fixture"}, dest, index.sidx, ref)
+
+
+def test_a_time_past_the_last_segment_still_gets_the_last_frame(tmp_path: Path) -> None:
+    # durationS ปัดขึ้น (คลิปยาวจริง 4.0 วินาที แต่ข้อมูลบอก 5): 4.5 วินาทีเลยท่อนสุดท้าย (3-4 วินาที) ไปครึ่งวินาที
+    service = CaptureService(FakeVideos({BBB: clip_info(duration_s=5)}), _UnwrappedFetcher(),
+                             FfmpegTools(lambda: Path(_ffmpeg())), tmp_path / "cache", StubSettings(tmp_path / "out"),
+                             StubQueue(), work_root=tmp_path / "work")  # fmt: skip
+    capture, created = service.capture(BBB, 4_500)
+    assert created and capture.t_ms == 4_500
+    assert _diff(_gray(service.cache_path(BBB, capture)), _gray(_reference(3.9, tmp_path))) < 0.5

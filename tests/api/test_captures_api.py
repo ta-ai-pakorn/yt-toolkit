@@ -116,9 +116,15 @@ def test_post_body_is_strict(api, body) -> None:
     assert resp.status_code == 422 and _error(resp)["code"] == "E_BAD_REQUEST"
 
 
+def test_a_capture_at_the_clip_end_is_not_rejected(api) -> None:
+    # ดูจนจบคลิป (635 วินาที) แล้วกดถ่าย: ได้ภาพก่อนจบ 100 ms ไม่ใช่ 422 ที่บอกให้รีเฟรชหน้าเว็บ
+    resp = api().post(f"/api/videos/{BBB}/captures", json={"tMs": 635_000}, headers=AUTH)
+    assert resp.status_code == 201 and resp.json()["tMs"] == 634_900 and resp.json()["id"] == "c_634900"
+
+
 def test_out_of_range_and_bad_ids(api) -> None:
     client = api()
-    late = client.post(f"/api/videos/{BBB}/captures", json={"tMs": 635_000}, headers=AUTH)
+    late = client.post(f"/api/videos/{BBB}/captures", json={"tMs": 636_000}, headers=AUTH)
     assert late.status_code == 422 and _error(late)["code"] == "E_BAD_REQUEST"
     assert _error(late)["detail"].startswith(BBB)
     for path in ("/api/videos/bad/captures",):

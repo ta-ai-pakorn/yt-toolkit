@@ -28,7 +28,10 @@ function clock(ms: number): string {
   return tenth === 0 ? whole : `${whole}.${tenth}`
 }
 
-type MockOptions = { delayMs?: number; error?: { status: number; code: string; message: string } }
+/**
+ * maxTMs = ตอบ 422 แบบ backend เมื่อ tMs เกินค่านี้ (ตรวจว่าเว็บไม่ส่งเวลาที่เลยท้ายคลิป)
+ */
+type MockOptions = { delayMs?: number; error?: { status: number; code: string; message: string }; maxTMs?: number }
 type MockState = { list: Capture[]; posts: number[]; deletes: string[]; reveals: number }
 
 /** จำลอง API ถ่ายภาพของคลิป BBB: รายการ ถ่าย (หน่วงได้ / ตอบ error ได้) ลบ เปิดโฟลเดอร์ และไฟล์ภาพ */
@@ -39,6 +42,10 @@ async function mockCaptures(page: Page, initial: Capture[] = [], options: MockOp
     const { tMs } = route.request().postDataJSON() as { tMs: number }
     state.posts.push(tMs)
     if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs))
+    if (options.maxTMs !== undefined && tMs > options.maxTMs) {
+      const message = "ข้อมูลที่ส่งมาไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ"
+      return route.fulfill({ status: 422, json: { error: { code: "E_BAD_REQUEST", message, detail: null } } })
+    }
     if (options.error) {
       const { status, code, message } = options.error
       return route.fulfill({ status, json: { error: { code, message, detail: null } } })
@@ -263,7 +270,10 @@ test("error จาก backend: toast ข้อความไทย ไม่ม
 test("คิวพักเพราะยูทูปขอตรวจสอบ: ปุ่มกดไม่ได้แต่โฟกัสได้ พร้อมเวลาที่ลองใหม่", async ({ page }) => {
   const state = await mockCaptures(page)
   const until = new Date(Date.now() + 10 * 60_000).toISOString()
-  await page.route("**/api/queue", (route) => route.fulfill({ json: { pausedUntil: until, reason: "E_BOT_CHECK", concurrency: 2 } }))
+  let paused = true
+  await page.route("**/api/queue", (route) =>
+    route.fulfill({ json: { pausedUntil: paused ? until : null, reason: paused ? "E_BOT_CHECK" : null, concurrency: 2 } }),
+  )
   await open(page)
   await play(page)
   await expect(captureButton(page)).toBeDisabled()
@@ -272,7 +282,30 @@ test("คิวพักเพราะยูทูปขอตรวจสอ�
   await captureButton(page).hover()
   await expect(page.getByText(/^พักการโหลดอยู่เพราะยูทูปขอตรวจสอบ ลองใหม่หลัง \d{2}:\d{2}$/)).toBeVisible()
   await captureButton(page).click({ force: true })
-  await expect.poll(() => state.posts, { timeout: 500 }).toEqual([])
+
+  // ด่านกั้น: เลิกพักแล้วถ่ายจากเมนูภาพเฟรม (เปิดเมนู = โหลดสถานะคิวใหม่) แล้วรอให้คำขอนั้นถึง
+  // คำขอที่ได้ต้องมีแค่ของเมนู: คลิกตอนคิวพักไม่ได้ส่งอะไรเลย (คำขอนั้นจะมาก่อนของเมนูถ้ามี)
+  paused = false
+  const storyboard = (await (await page.request.get(`/api/videos/${BBB}/storyboard`)).json()) as { frames: { tMs: number }[] }
+  await page.getByRole("img", { name: /^ภาพเฟรมที่ / }).nth(2).click({ button: "right" })
+  await page.getByRole("menuitem", { name: BUTTON }).click()
+  await expect(page.getByRole("heading", { name: "ภาพที่ถ่ายไว้ (1)" })).toBeVisible()
+  expect(state.posts).toEqual([Math.round(storyboard.frames[2].tMs / 100) * 100])
+})
+
+test("ดูจนจบคลิปแล้วกดถ่าย: ส่งเวลาไม่เกิน 100 ms ก่อนจบ ไม่ได้ 422", async ({ page }) => {
+  const durationS = 635
+  const state = await mockCaptures(page, [], { maxTMs: durationS * 1000 - 100 })
+  await open(page)
+  await play(page)
+  await page.locator('[data-slot="player-controls"] [role="slider"]').focus()
+  await page.keyboard.press("End") // เล่นจากท้ายคลิป: ตัวเล่นปลอมจบทันที (ENDED) เวลาของตัวเล่น = ความยาวคลิป
+  await expect.poll(async () => (await fakeYTLog(page)).states).toContain(0)
+  await captureButton(page).click()
+  await expect(toast(page, /^ถ่ายภาพคมแล้ว · /)).toBeVisible()
+  expect(state.posts).toHaveLength(1)
+  expect(state.posts[0]).toBeLessThanOrEqual(durationS * 1000 - 100)
+  await expect(page.getByRole("heading", { name: "ภาพที่ถ่ายไว้ (1)" })).toBeVisible()
 })
 
 test("คลิปสด: ปุ่มกดไม่ได้พร้อมเหตุผล", async ({ page }) => {
