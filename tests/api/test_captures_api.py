@@ -231,3 +231,41 @@ def test_every_capture_error_code_has_its_mapped_status(make_client, tmp_path, c
     for resp in (created, deleted):
         assert resp.status_code == status and _error(resp)["code"] == code
     assert all(record.exc_info is None for record in caplog.records)  # ไม่ใช่ 500 = ไม่มี traceback ใน log
+
+
+def test_reveal_survives_an_open_folder_failure(api, caplog) -> None:
+    def vanished(folder: Path) -> None:
+        raise FileNotFoundError(r"C:\secret\path")
+
+    client = api()
+    client.post(f"/api/videos/{CLIP}/captures", json={"tMs": 1_000}, headers=AUTH)
+    client.app.state.ctx.open_folder = vanished
+    with caplog.at_level("DEBUG"):
+        resp = client.post(f"/api/videos/{CLIP}/captures/reveal", headers=AUTH)
+    assert resp.status_code == 404 and _error(resp)["code"] == "E_NOT_FOUND"
+    assert "secret" not in caplog.text and "secret" not in resp.text
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_post_with_a_malformed_id_never_reaches_the_service(make_client, tmp_path, caplog) -> None:
+    class Untouched:
+        def capture(self, video_id: str, t_ms: int):  # type: ignore[no-untyped-def]
+            raise AssertionError("service must not be called")
+
+    client = make_client(captures=Untouched(), cache_root=tmp_path / "cache")
+    with caplog.at_level("DEBUG"):
+        resp = client.post("/api/videos/bad%0Aid/captures", json={"tMs": 0}, headers=AUTH)
+    assert resp.status_code == 422 and _error(resp)["code"] == "E_INVALID_INPUT"
+    assert "bad\nid" not in caplog.text and "bad\nid" not in resp.text
+
+
+def test_delete_with_traversal_shaped_ids_deletes_nothing(api) -> None:
+    client = api()
+    capture = client.post(f"/api/videos/{BBB}/captures", json={"tMs": 1_000}, headers=AUTH).json()
+    folder = client.out
+    before = sorted(p.relative_to(folder) for p in folder.rglob("*"))
+    for capture_id in ("..%2F..%2Findex", "..", "c_1000.jpg", "c_abc", "c_1000%00", "%2e%2e%2fc_1000"):
+        resp = client.delete(f"/api/videos/{BBB}/captures/{capture_id}", headers=AUTH)
+        assert resp.status_code in (404, 405, 422), capture_id  # 405: ..%2F ถูกปรับเป็น route อื่นที่ไม่มี DELETE
+    assert sorted(p.relative_to(folder) for p in folder.rglob("*")) == before
+    assert client.get(f"/api/videos/{BBB}/captures").json() == {"captures": [capture]}

@@ -6,6 +6,7 @@ route เป็น `def` ธรรมดา (โหลดชิ้นวิด�
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,8 @@ from .videos import yt_error_response
 
 if TYPE_CHECKING:
     from ..app import AppContext
+
+log = logging.getLogger(__name__)
 
 MAX_CAPTURE_MS = 172_800_000  # 48 ชั่วโมง (ยาวกว่านี้ CaptureService ปฏิเสธด้วยความยาวคลิปอยู่แล้ว)
 
@@ -64,6 +67,8 @@ def build_captures_router(ctx: AppContext) -> APIRouter:
 
     @router.post("/videos/{video_id}/captures", status_code=201, response_model=None)
     def create_capture(video_id: str, body: CaptureBody, response: Response) -> dict | JSONResponse:
+        if not VIDEO_ID.fullmatch(video_id):
+            return invalid_id(video_id)
         try:
             capture, created = service.capture(video_id, body.tMs)
         except CaptureRejected as exc:
@@ -89,7 +94,11 @@ def build_captures_router(ctx: AppContext) -> APIRouter:
         folder: Path | None = service.reveal_dir(video_id) if VIDEO_ID.fullmatch(video_id) else None
         if folder is None:
             raise HTTPException(status_code=404)
-        (ctx.open_folder or ctx.plat.open_folder)(folder)
+        try:
+            (ctx.open_folder or ctx.plat.open_folder)(folder)
+        except OSError as exc:  # โฟลเดอร์หายไประหว่างทาง / เปิดไม่ได้: log แค่ชื่อชนิด error (ข้อความมี path เต็ม)
+            log.warning("เปิดโฟลเดอร์ภาพที่ถ่ายไม่สำเร็จ (%s): %s", video_id, type(exc).__name__)
+            raise HTTPException(status_code=404) from None
         return {"ok": True}
 
     return router
