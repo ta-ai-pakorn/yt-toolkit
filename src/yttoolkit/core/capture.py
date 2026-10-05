@@ -45,7 +45,7 @@ OUTPUT_DIR = "ภาพที่ถ่าย"
 CAPTURE_ID = re.compile(r"c_(\d{1,9})")
 NO_FRAME_RETRY_MS = 100  # spec 4: เวลาเศษท้ายคลิปที่ไม่มีภาพ ลองถอยหลัง 100 ms อีกครั้งเดียว
 # ดูจนจบคลิปแล้วกดถ่าย: เวลาของตัวเล่นเท่ากับหรือเลยความยาวที่ปัดเป็นวินาทีได้ (durationS ปัดขึ้นหรือลง)
-# เวลาในช่วง [ความยาว - END_SLACK_MS, ความยาว + END_SLACK_MS) จึงถ่ายที่ ความยาว - END_STEP_MS แทนการปฏิเสธ
+# เวลาไม่ถึง ความยาว + END_SLACK_MS จึงไม่ปฏิเสธ แต่ถ่ายที่เวลาไม่เกิน ความยาว - END_STEP_MS
 END_SLACK_MS = 1000
 END_STEP_MS = 100
 MAX_SAME_SECOND = 99
@@ -266,8 +266,7 @@ class CaptureService:
             raise CaptureRejected("duration unknown")
         if not 0 <= t_ms < duration_ms + END_SLACK_MS:
             raise CaptureRejected(f"tMs {t_ms} outside 0..{duration_ms}")
-        if t_ms >= duration_ms - END_SLACK_MS:
-            t_ms = min(t_ms, max(0, duration_ms - END_STEP_MS))  # ท้ายคลิป: ถ่ายภาพก่อนจบ 100 ms
+        t_ms = min(t_ms, max(0, duration_ms - END_STEP_MS))  # ท้ายคลิป: ถ่ายภาพก่อนจบ 100 ms
         existing = self._existing(video_id, t_ms)
         if existing is not None:
             return existing, False
