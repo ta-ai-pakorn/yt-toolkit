@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 import pytest
 from yttoolkit.core.db import Database
-from yttoolkit.core.jobs import NOTES, InvalidTransition, JobStore, NewJob, OutputFile, is_stage, split_stage, uuid7
+from yttoolkit.core.jobs import NOTES, InvalidTransition, JobStore, NewJob, OutputFile, count_stage, is_stage, note_api, split_stage, uuid7, valued_note
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
@@ -356,3 +356,56 @@ def test_m5a_notes_are_verbatim():
     assert NOTES["SPONSORBLOCK_EMPTY"] == "ไม่มีข้อมูลจากชุมชน ไม่ได้ตัดโฆษณา"
     assert NOTES["SPONSORBLOCK_UNREACHABLE"] == "ติดต่อ SponsorBlock ไม่ได้ ไม่ได้ตัดโฆษณา"
     assert NOTES["NO_CHAPTERS"] == "คลิปนี้ไม่มี chapter ได้ไฟล์เต็ม"
+
+
+def test_m5b_count_stages_are_stored(store):
+    (job,) = add(store)
+    store.transition(job.id, "running")
+    for stage in (count_stage("extracting_frames", 3, 120), count_stage("sharp_frames", 1, 1)):
+        assert store.update(job.id, stage=stage).stage == stage
+    for bad in ("extracting_frames:0x/3", "sharp_frames:", "extracting:1/2", "sharp_frames:1/2/3"):
+        with pytest.raises(ValueError):
+            store.update(job.id, stage=bad)
+
+
+def test_count_stage_bounds():
+    assert count_stage("extracting_frames", 1, 1) == "extracting_frames:1/1"
+    assert is_stage("sharp_frames:2/9") and is_stage("extracting_frames:200/200") and is_stage("splitting:1/2")
+    for args in (("extracting_frames", 0, 3), ("extracting_frames", 4, 3), ("sharp_frames", 1, 10_000), ("cutting", 1, 2)):
+        with pytest.raises(ValueError):
+            count_stage(*args)
+
+
+def test_valued_notes_fill_their_message():
+    assert NOTES["SHARP_LOW_RES"] == "คลิปนี้มีภาพสูงสุด {h}p ภาพจึงเล็กกว่าปกติ"
+    assert NOTES["SHARP_INTERVAL_RAISED"] == "ปรับเป็นทุก {n} วินาทีเพื่อไม่ให้เกิน 200 ภาพ"
+    assert valued_note("SHARP_LOW_RES", 480) == "SHARP_LOW_RES:480"
+    assert note_api("SHARP_LOW_RES:480") == {"code": "SHARP_LOW_RES", "message": "คลิปนี้มีภาพสูงสุด 480p ภาพจึงเล็กกว่าปกติ"}
+    assert note_api("SHARP_INTERVAL_RAISED:4") == {
+        "code": "SHARP_INTERVAL_RAISED", "message": "ปรับเป็นทุก 4 วินาทีเพื่อไม่ให้เกิน 200 ภาพ"}
+    assert note_api("NO_SUBTITLES") == {"code": "NO_SUBTITLES", "message": "คลิปนี้ไม่มีซับ"}
+    for bad in ("SHARP_LOW_RES", "SHARP_LOW_RES:x", "SHARP_LOW_RES:-1", "NO_SUBTITLES:3", "NOPE", "NOPE:1"):
+        assert note_api(bad) is None
+    for args in (("NO_SUBTITLES", 1), ("SHARP_LOW_RES", -1)):
+        with pytest.raises(ValueError):
+            valued_note(*args)
+
+
+def test_to_api_fills_valued_notes_and_lists_folder_outputs(store):
+    (job,) = add(store, kind="frames_sharp")
+    store.transition(job.id, "running")
+    folder = OutputFile("C:/out", "คลิป [aqz-KE-bpKQ]/คลิป - ภาพคม", 1234, "folder", files=12)
+    done = store.transition(job.id, "done", outputs=(folder,), notes=(valued_note("SHARP_LOW_RES", 360), "BROKEN:1"))
+    api = done.to_api()
+    assert api["outputs"] == [{"index": 0, "name": "คลิป - ภาพคม", "sizeBytes": 1234, "files": 12}]
+    assert api["notes"] == [{"code": "SHARP_LOW_RES", "message": "คลิปนี้มีภาพสูงสุด 360p ภาพจึงเล็กกว่าปกติ"}]
+    assert store.get(job.id).outputs == (folder,)
+
+
+def test_plain_outputs_have_no_files_key(store):
+    (job,) = add(store)
+    store.transition(job.id, "running")
+    plain = OutputFile("C:/out", "a/b.mp4", 9, "video")
+    done = store.transition(job.id, "done", outputs=(plain,))
+    assert store.get(job.id).outputs[0].files is None
+    assert "files" not in done.to_api()["outputs"][0]

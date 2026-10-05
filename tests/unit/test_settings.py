@@ -40,6 +40,7 @@ def test_defaults_match_the_c5_table(store, tmp_path):
         },
         "concurrency": 2,
         "sponsorblockDefault": ["sponsor", "selfpromo", "interaction"],
+        "autoSharpFrames": True,
         "theme": "system",
         "filenameStyle": "title",
         "cookies": {"enabled": False, "source": None, "warningAccepted": False},
@@ -97,6 +98,9 @@ def test_patch_changes_only_the_named_keys(store):
         {"theme": "blue"},
         {"filenameStyle": "x"},
         {"lastUsed": []},
+        {"autoSharpFrames": 1},
+        {"autoSharpFrames": "true"},
+        {"autoSharpFrames": None},
     ],
 )
 def test_invalid_patch_is_rejected_and_changes_nothing(store, bad):
@@ -298,3 +302,8 @@ def test_stored_valid_value_survives_revalidation(db, store):
 def test_sponsorblock_default_keeps_order_and_drops_duplicates(store):
     saved = store.patch({"sponsorblockDefault": ["filler", "sponsor", "filler", "music_offtopic"]})
     assert saved["sponsorblockDefault"] == ["filler", "sponsor", "music_offtopic"]
+
+
+def test_auto_sharp_frames_can_be_switched_off_and_on(store):
+    assert store.patch({"autoSharpFrames": False})["autoSharpFrames"] is False
+    assert store.patch({"autoSharpFrames": True})["autoSharpFrames"] is True
