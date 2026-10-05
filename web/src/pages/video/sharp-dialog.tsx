@@ -56,7 +56,11 @@ export function SharpRequestButton({ videoId, video, fast, hasSharp, variant = "
   const size = variant === "secondary" ? "sm" : "default"
   const block = sharpBlock(video)
 
-  if (sharpJobBusy(jobs.data, videoId)) {
+  const busy = sharpJobBusy(jobs.data, videoId)
+  // งานภาพคมเริ่มขณะ dialog เปิดอยู่: dialog ถูกถอดออก ต้องปิด open ด้วย ไม่งั้นจะเด้งขึ้นเองตอนงานจบ
+  if (busy && open) setOpen(false)
+
+  if (busy) {
     return (
       <Button variant={variant} size={size} className={TOUCH} disabled focusableWhenDisabled>
         <Spinner aria-hidden />
@@ -165,13 +169,15 @@ function SharpDialog({ open, onOpenChange, videoId, video, fast, hasSharp }: Dia
               aria-labelledby={customLabel}
               aria-invalid={model.customError || undefined}
               aria-describedby={model.customError ? errorId : undefined}
-              onFocus={() => setMode("custom")}
+              onPointerDown={() => setMode("custom")}
               onChange={(event) => {
                 setCustomText(event.target.value)
                 setMode("custom")
               }}
               onKeyDown={(event) => {
                 if (event.key === "Enter") void start()
+                // ช่องอยู่ในกลุ่มตัวเลือก: ลูกศรซ้าย/ขวาขณะแก้เลขต้องเลื่อนเคอร์เซอร์ ไม่ใช่ย้ายไปเลือกตัวเลือกอื่น
+                else if (event.key.startsWith("Arrow")) event.stopPropagation()
               }}
             />
             <span id={unitId}>{t.customUnit}</span>
@@ -181,8 +187,8 @@ function SharpDialog({ open, onOpenChange, videoId, video, fast, hasSharp }: Dia
           </div>
         </RadioGroup>
         {model.customError && <FieldError id={errorId}>{t.intervalError}</FieldError>}
-        {/* ประโยคเกิน 200 ภาพแทนจำนวนภาพแบบสด (AC-FRAME-04) โปรแกรมอ่านหน้าจออ่านให้เมื่อเปลี่ยน */}
-        <p role="status" className="empty:hidden">
+        {/* ประโยคเกิน 200 ภาพแทนจำนวนภาพแบบสด (AC-FRAME-04) · แสดงอยู่ใน DOM เสมอ (ว่าง = sr-only ไม่กินที่) เพื่อให้โปรแกรมอ่านหน้าจออ่านเมื่อข้อความเปลี่ยน */}
+        <p role="status" className={model.overflow ? undefined : "sr-only"}>
           {model.overflow && fill(t.overLimit, { N: model.overflow.n, count: model.overflow.count, N2: model.overflow.n2 })}
         </p>
         <ul className="flex flex-col gap-1 text-muted-foreground">
