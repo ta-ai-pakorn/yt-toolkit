@@ -36,6 +36,7 @@ from .download import (
     Downloader,
     DownloadHooks,
     DownloadResult,
+    MediaFacts,
     SharpPick,
     SponsorBlockError,
     SponsorSource,
@@ -58,7 +59,7 @@ from .jobs import (
 from .media import SHARP_LONG_SIDE, CutMode, CutTarget, MediaMeta, MediaTools, SubtitleInput, iso639_2
 from .sharp import MAX_INTERVAL_S, fast_times, plan_sharp
 from .sharp_store import FOLDER as SHARP_FOLDER
-from .sharp_store import commit_sharp, discard_sharp, prepare_sharp, read_sharp
+from .sharp_store import ManualSetKept, commit_sharp, discard_sharp, prepare_sharp, read_sharp
 from .srt_builder import SubOptions, options_from_dict
 from .storyboard import FOLDER as STORYBOARD_FOLDER
 from .storyboard import get_storyboard
@@ -105,6 +106,8 @@ class HandlerDeps:
     on_bot_check: Callable[[], None] | None = None
     # ที่มาของช่วงโฆษณา (C4 ตัว extractor) lifecycle ต่อให้ None = ติดต่อ SponsorBlock ไม่ได้ (ไม่ได้ตัดโฆษณา มีโน้ต)
     sponsors: SponsorSource | None = None
+    # ทำภาพคมอัตโนมัติหลังงานวิดีโอ (M5 รอบ B D6) lifecycle อ่านค่าตั้ง autoSharpFrames ทุกงาน · ค่าเริ่มต้น (เทส) = ไม่ทำ
+    auto_sharp: Callable[[], bool] = lambda: False
 
 
 # ---------- ตัวช่วย ----------
@@ -639,10 +642,12 @@ def _cache_sharp_set(
     origin: str,
     interval_s: int | None,
     before_commit: Callable[[], None] | None = None,
+    keep_manual: bool = False,
 ) -> dict:
     """เก็บภาพที่ดึงแล้ว (tMs, ไฟล์) เป็นชุดภาพคมของคลิปใน cache (งานมือและขั้นอัตโนมัติใช้ตัวเดียวกัน):
     prepare_sharp (ชุดใหม่ใน sharp.tmp-<jobId> ยังไม่มีใครเห็น) -> before_commit() -> commit_sharp (สลับแทนชุดเดิม)
     พลาดหรือยกเลิกตรงไหนก็ทิ้งชุดที่เตรียมไว้ ชุดเดิมอยู่ครบ (D5) · คืน index ของชุดใหม่
+    keep_manual=True = ไม่แทนชุดที่ผู้ใช้ขอเอง (เช็กตอนสลับ ใต้ล็อก) เจอ = ManualSetKept
     ไม่เช็กการยกเลิกระหว่างนี้: เร็วและต้องจบเป็นชุด · made ว่าง = ValueError (ผู้เรียกเช็กก่อน)"""
     staged = prepare_sharp(
         deps.cache_root, video_id, job_id, made, origin=origin,
@@ -651,7 +656,7 @@ def _cache_sharp_set(
     try:
         if before_commit is not None:
             before_commit()
-        return commit_sharp(deps.cache_root, video_id, staged)
+        return commit_sharp(deps.cache_root, video_id, staged, keep_manual=keep_manual)
     except BaseException:
         discard_sharp(staged)
         raise
@@ -759,7 +764,9 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     )
     suffix = (NO_AUDIO_SUFFIX if no_audio else "") + cut.suffix
     notes = (*result.choice.notes, *sub_notes, *ad_notes, *cut.notes, *split_notes)
-    return _finish(deps, ctx, clip, out, suffix=suffix, ext="mp4", kind="video", notes=notes)
+    finished = _finish(deps, ctx, clip, out, suffix=suffix, ext="mp4", kind="video", notes=notes)
+    _auto_sharp(deps, job, ctx, clip, report, finished, result.media)
+    return finished
 
 
 def _audio(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
@@ -992,6 +999,63 @@ def _frames_sharp(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     log.info("งาน %s คลิป %s บันทึกภาพคม %s/%s ภาพ", ctx.job_id, clip.video_id, len(made), len(plan.times_ms))
     output = OutputFile(root=str(clip.root), rel=rel, size_bytes=size, kind="folder", files=len(made))
     return JobResult(outputs=(output,), notes=_unique(notes), title=clip.title or None)
+
+
+def _auto_sharp_skip(deps: HandlerDeps, params: Mapping[str, Any], media: MediaFacts | None) -> str | None:
+    """เหตุผลที่ไม่ทำภาพคมอัตโนมัติ (D6) None = ทำ: ต้องเปิดค่าตั้ง เป็นไฟล์ทั้งคลิป (เส้นเวลาตรงกับคลิป)
+    ไฟล์ด้านสั้น ≥ 720 ไม่ใช่ HDR (ไม่ tone-map เอง D8) และมี ffmpeg · ไม่รู้ขนาด/ช่วงสีของไฟล์ = ไม่ทำ"""
+    if not deps.auto_sharp():
+        return "setting off"
+    if params.get("range") is not None or params.get("sponsorblock") or params.get("splitChapters"):
+        return "not the full clip"
+    if media is None or media.short_side is None or media.hdr is None:
+        return "file facts unknown"
+    if media.short_side < SHARP_MAX_SHORT_SIDE:
+        return "below 720"
+    if media.hdr:
+        return "hdr"
+    if not deps.media.available():
+        return "no ffmpeg"
+    return None
+
+
+def _auto_sharp(
+    deps: HandlerDeps,
+    job: Job,
+    ctx: JobContext,
+    clip: _Clip,
+    report: _Reporter,
+    finished: JobResult,
+    media: MediaFacts | None,
+) -> None:
+    """ภาพคมอัตโนมัติจากไฟล์วิดีโอที่อยู่ในโฟลเดอร์ผลลัพธ์แล้ว (ไม่โหลดเพิ่ม ไม่แตะเครือข่าย) ลง cache อย่างเดียว
+    พังแบบไหน ถูกยกเลิก หรือปิดโปรแกรม = บันทึก log แล้วจบ งานวิดีโอยังเสร็จพร้อมไฟล์ (ไม่มีโน้ต)
+    ชุดที่ผู้ใช้ขอเอง (manual) ไม่ถูกแทน: เช็กก่อนดึงภาพ (กรณีปกติ) และอีกครั้งใต้ล็อกตอนสลับ (งานมือเข้ามาระหว่างทาง)
+    ชุดอัตโนมัติเดิมถูกแทน"""
+    try:
+        reason = _auto_sharp_skip(deps, job.params, media)  # อ่านค่าตั้งจากฐานข้อมูลได้: อยู่ใน try ด้วย
+        if reason is not None:
+            log.info("งาน %s ไม่ทำภาพคมอัตโนมัติ (%s)", ctx.job_id, reason)
+            return
+        existing = read_sharp(deps.cache_root, clip.video_id)
+        if existing is not None and existing["origin"] == "manual":
+            raise ManualSetKept(clip.video_id)
+        fast = fast_times(deps.videos.raw(clip.video_id))
+        plan = plan_sharp(_clip_duration_s(clip), interval_s=None, fast_times=fast)
+        (out,) = finished.outputs
+        video_file = Path(out.root) / out.rel
+        made = _extract_frames(deps, ctx, report, video_file, plan.times_ms, stage="sharp_frames", dynamic_range=None)
+        if not made:
+            raise YtError("E_UNKNOWN", "no frames extracted")
+        _cache_sharp_set(deps, job.id, clip.video_id, made, origin="auto", interval_s=plan.interval_s,
+                         keep_manual=True)  # fmt: skip
+        log.info("งาน %s ทำภาพคมอัตโนมัติ %s/%s ภาพ", ctx.job_id, len(made), len(plan.times_ms))
+    except ManualSetKept:
+        log.info("งาน %s ไม่ทำภาพคมอัตโนมัติ (มีชุดที่ขอเองอยู่แล้ว)", ctx.job_id)
+    except Exception as exc:  # รวม JobCancelled (ยกเลิก/ปิดโปรแกรม) และ YtError: ไฟล์วิดีโอเสร็จแล้ว งานต้องจบ done
+        log.info("งาน %s ข้ามภาพคมอัตโนมัติ (%s)", ctx.job_id, type(exc).__name__)
+    finally:
+        shutil.rmtree(Path(ctx.workdir) / "frames", ignore_errors=True)
 
 
 def _contact_sheet(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:

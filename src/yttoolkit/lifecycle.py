@@ -314,6 +314,8 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
             cache_root=paths.cache,
             pinned=pinned.get,
             sponsors=extractor,  # type: ignore[arg-type]  # ทั้งตัวจริงและตัวปลอมมี sponsor_segments (C4)
+            # M5 รอบ B D6: อ่านค่าตั้งทุกงาน (ปิดในหน้าตั้งค่าแล้วมีผลกับงานถัดไปทันที)
+            auto_sharp=lambda: bool(settings.get().get("autoSharpFrames", True)),
         )
         delays = {"delay_range": FAKE_DELAY_RANGE} if fake else {}
         queue = QueueRunner(
