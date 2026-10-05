@@ -3,13 +3,22 @@ import { ApiError } from "@/lib/api"
 import { audioLanguageName } from "@/lib/languages"
 import type { Settings } from "@/lib/types"
 
-/** ค่าที่หน้า "ทั่วไป" แก้ได้ (ทั้งหกช่อง) */
-export type GeneralKey = "outputDir" | "concurrency" | "audioLanguage" | "videoDefault" | "audioDefault" | "autoSharpFrames"
+/** ค่าที่หน้า "ทั่วไป" แก้ได้ (ทั้งเจ็ดช่อง) */
+export type GeneralKey =
+  | "outputDir"
+  | "concurrency"
+  | "audioLanguage"
+  | "videoDefault"
+  | "audioDefault"
+  | "autoSharpFrames"
+  | "captureQuality"
 export type GeneralPatch = Partial<Pick<Settings, GeneralKey>>
 
 export const CONCURRENCY_CHOICES = [1, 2, 3] as const
 export const AUDIO_FORMATS = ["m4a", "mp3", "wav"] as const
 export const VIDEO_DEFAULTS = ["compat-1080", "compat-720", "max"] as const
+/** M5 รอบ B2 spec 2.4: ความละเอียดภาพที่ถ่าย (เพดานด้านสั้น) เรียงตามที่แสดง */
+export const CAPTURE_QUALITIES = ["max", "1080", "720"] as const
 
 /** ที่อยู่โฟลเดอร์ที่พิมพ์ → ค่าที่จะส่ง: ตัดช่องว่างหัวท้าย · ว่างหรือเท่าค่าที่บันทึกอยู่ = null (ไม่ต้องบันทึก) */
 export function outputDirPatch(draft: string, saved: string): GeneralPatch | null {

@@ -5,7 +5,7 @@ import { ApiError } from "@/lib/api"
 import { PRESETS } from "@/lib/sub-options"
 import type { Settings } from "@/lib/types"
 
-import { choicePatch, displayed, languageOptions, outputDirPatch, serverMessage } from "./general-form"
+import { CAPTURE_QUALITIES, choicePatch, displayed, languageOptions, outputDirPatch, serverMessage } from "./general-form"
 
 const SAVED: Settings = {
   outputDir: "C:\\Users\\u\\Videos\\YT-Toolkit",
@@ -96,5 +96,14 @@ describe("autoSharpFrames (M5 รอบ B)", () => {
   it("switching sends only that key, the same value sends nothing", () => {
     expect(choicePatch("autoSharpFrames", false, SAVED)).toEqual({ autoSharpFrames: false })
     expect(choicePatch("autoSharpFrames", true, SAVED)).toBeNull()
+  })
+})
+
+describe("captureQuality (M5 รอบ B2)", () => {
+  it("เลือกค่าอื่นส่งเฉพาะ key นั้น ค่าเดิมไม่ส่ง · ตัวเลือกสามค่าตามลำดับพร้อมชื่อไทย", () => {
+    expect(CAPTURE_QUALITIES).toEqual(["max", "1080", "720"])
+    expect(choicePatch("captureQuality", "720", SAVED)).toEqual({ captureQuality: "720" })
+    expect(choicePatch("captureQuality", "max", SAVED)).toBeNull()
+    expect(CAPTURE_QUALITIES.map((q) => th.general.captureQualities[q])).toEqual(["สูงสุดที่มี", "1080p", "720p"])
   })
 })

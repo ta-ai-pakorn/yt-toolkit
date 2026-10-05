@@ -69,7 +69,7 @@ async function seriousViolations(page: Page) {
     .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))
 }
 
-test("/settings เปิดที่แท็บทั่วไป พร้อมหกช่อง", async ({ page }) => {
+test("/settings เปิดที่แท็บทั่วไป พร้อมเจ็ดช่อง", async ({ page }) => {
   await page.goto("/settings")
   await expect(page.getByRole("tab", { name: "ทั่วไป" })).toHaveAttribute("aria-selected", "true")
   await expect(page.getByLabel("โฟลเดอร์ผลลัพธ์")).toBeVisible()
@@ -77,6 +77,7 @@ test("/settings เปิดที่แท็บทั่วไป พร้อ
   await expect(page.getByRole("group", { name: "จำนวนงานพร้อมกัน" })).toBeVisible()
   await expect(page.getByRole("combobox", { name: "ภาษาเสียงเริ่มต้น" })).toBeVisible()
   await expect(page.getByRole("combobox", { name: "คุณภาพวิดีโอเริ่มต้น" })).toBeVisible()
+  await expect(page.getByRole("combobox", { name: "ความละเอียดภาพที่ถ่าย" })).toBeVisible()
   await expect(page.getByRole("group", { name: "รูปแบบเสียงเริ่มต้น" })).toBeVisible()
   await expect(page.getByRole("switch", { name: "ทำภาพคมอัตโนมัติตอนโหลดวิดีโอ" })).toBeVisible()
   // ไม่มีปุ่มบันทึก: ทุกช่องบันทึกเมื่อเปลี่ยน
@@ -256,4 +257,18 @@ test("หน้าต่างแคบ 640 × 800: ไม่เลื่อน�
   await page.goto("/settings/general")
   await expect(page.getByLabel("โฟลเดอร์ผลลัพธ์")).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(640)
+})
+
+test("ความละเอียดภาพที่ถ่าย: ค่าเริ่มต้นสูงสุดที่มี · เลือก 720p แล้วบันทึกและคงอยู่ (ใช้ค่าจำลอง ไม่เขียน backend)", async ({ page, request }) => {
+  const stub = await stubSettings(page, request)
+  await page.goto("/settings/general")
+  const select = page.getByRole("combobox", { name: "ความละเอียดภาพที่ถ่าย" })
+  await expect(select).toContainText("สูงสุดที่มี")
+  await expect(page.getByText("ภาพยิ่งละเอียด ตัวหนังสือเล็กในคลิปยิ่งอ่านง่าย ใช้เน็ตต่อภาพมากขึ้น (4K ราว 8 MB)")).toBeVisible()
+  await select.click()
+  await page.getByRole("option", { name: "720p", exact: true }).click()
+  await expect(saved(page)).toBeVisible()
+  expect(stub.patches).toEqual([{ captureQuality: "720" }])
+  await page.reload()
+  await expect(page.getByRole("combobox", { name: "ความละเอียดภาพที่ถ่าย" })).toContainText("720p")
 })
