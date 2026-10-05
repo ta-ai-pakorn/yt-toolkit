@@ -21,6 +21,7 @@ from yttoolkit.core.frames import (
     MAX_SHEET_FRAMES,
     contact_sheet,
     file_timecode,
+    frame_file_names,
     frames_zip,
     timecode,
 )
@@ -541,3 +542,64 @@ def test_rendered_title_ink_stays_within_max_width(weight: str) -> None:
         assert box is not None
         assert box[0] >= 0
         assert box[2] <= width, (width, fitted)
+
+
+def test_frame_file_names_match_the_zip_names() -> None:
+    times = [4000, 4100, 4999, 5000, 3_661_000]
+    assert frame_file_names(times) == [
+        "frame_00-00-04.jpg", "frame_00-00-04_2.jpg", "frame_00-00-04_3.jpg", "frame_00-00-05.jpg", "frame_01-01-01.jpg",
+    ]  # fmt: skip
+
+
+def test_missing_code_can_name_the_sharp_set(tmp_path: Path) -> None:
+    for build_it in (
+        lambda: contact_sheet([(0, tmp_path / "nope.jpg")], "x", 1, missing_code="E_NO_SHARP_FRAMES"),
+        lambda: frames_zip([(0, tmp_path / "nope.jpg")], missing_code="E_NO_SHARP_FRAMES"),
+    ):
+        with pytest.raises(YtError) as caught:
+            build_it()
+        assert caught.value.code == "E_NO_SHARP_FRAMES"
+
+
+def _cell_row(sheet: Image.Image) -> list[int]:
+    """แถวความสว่าง (0-255) กลางช่องแรกของภาพรวม"""
+    gray = sheet.convert("L")
+    y = HEADER_H + GUTTER + CELL_H // 2
+    return [gray.getpixel((GUTTER + x, y)) for x in range(CELL_W)]
+
+
+def _hairline(path: Path, width: int, line_px: int) -> Path:
+    """ภาพ 16:9 สีดำล้วน มีเส้นขาวตั้งตรงกลางกว้าง line_px (ฉากเดียวกัน ถ่ายที่ความละเอียดต่างกัน)"""
+    image = Image.new("RGB", (width, width * 9 // 16), (0, 0, 0))
+    ImageDraw.Draw(image).rectangle((width // 2, 0, width // 2 + line_px - 1, image.height), fill=(255, 255, 255))
+    image.save(path, "JPEG", quality=95)
+    return path
+
+
+def test_sharp_sized_frames_are_downscaled_into_the_cell(tmp_path: Path) -> None:
+    big = make_frame(tmp_path / "big.jpg", (200, 30, 30), size=(1280, 720))
+    tall = make_frame(tmp_path / "tall.jpg", (30, 200, 30), size=(720, 1280))
+    data = contact_sheet([(0, big), (60_000, tall)], "ภาพคม", 120)
+    with Image.open(io.BytesIO(data)) as sheet:
+        assert sheet.width == 5 * CELL_W + 6 * 8
+        rgb = sheet.convert("RGB")
+    y = HEADER_H + GUTTER + CELL_H // 2
+    wide = [rgb.getpixel((GUTTER + x, y)) for x in (2, CELL_W // 2, CELL_W - 3)]
+    assert all(r > 150 and g < 80 for r, g, _ in wide)  # 16:9 เต็มช่อง ไม่ถูกตัดขอบ ไม่มีแถบดำ
+    left = GUTTER + CELL_W + GUTTER  # ช่องที่สอง: ภาพแนวตั้งย่อให้พอดีความสูง เหลือแถบดำสองข้าง
+    tall_cell = [rgb.getpixel((left + x, y)) for x in (2, CELL_W // 2, CELL_W - 3)]
+    assert max(tall_cell[0]) < 12 and max(tall_cell[2]) < 12
+    assert tall_cell[1][1] > 150 and tall_cell[1][0] < 80
+
+
+def test_sharp_downscale_keeps_a_hairline_crisp_but_an_upscaled_frame_blurs_it(tmp_path: Path) -> None:
+    """เส้นขาวบางในภาพคม 1280 กว้างย่อเหลือราว 1 พิกเซลในช่อง 320 ส่วนฉากเดียวกันที่ถ่าย 160 กว้างแล้วขยายขึ้นจะเบลอเป็นหลายพิกเซล
+    (ถ้าย่อผิดวิธี เส้นจะหายหรือแตก ค่าสองฝั่งนี้จะเปลี่ยน)"""
+    sharp = _hairline(tmp_path / "sharp.jpg", 1280, 4)
+    small = _hairline(tmp_path / "small.jpg", 160, 1)
+    with Image.open(io.BytesIO(contact_sheet([(0, sharp)], "x", 1))) as sheet:
+        sharp_row = _cell_row(sheet)
+    with Image.open(io.BytesIO(contact_sheet([(0, small)], "x", 1))) as sheet:
+        small_row = _cell_row(sheet)
+    assert max(sharp_row) > 180 and sum(v > 40 for v in sharp_row) <= 2  # เส้นยังคมและบาง
+    assert max(small_row) > 180 and sum(v > 40 for v in small_row) >= 3  # ภาพที่ขยายขึ้นเบลอเป็นแถบกว้างกว่า

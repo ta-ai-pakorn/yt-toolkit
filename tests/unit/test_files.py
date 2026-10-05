@@ -1,5 +1,6 @@
 import errno
 import os
+import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -519,3 +520,98 @@ def test_no_audio_chapter_folder_fits_wherever_the_full_no_audio_file_fits(total
         path = files.plan_chapter_output(root, "ก" * 300, ID, "mp4", None, index=total, total=total,
                                          chapter_title="ข" * 300, no_audio=True)  # fmt: skip
         assert len(str(path)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
+
+
+# ---------- ภาพคม (M5 รอบ B) ----------
+
+FRAME = "frame_000-00-00_200.jpg"  # ชื่อไฟล์ภาพคมที่ยาวที่สุดที่ตัวทำงานเขียนได้
+
+
+def _items(tmp_path: Path, names: list[str]) -> list[tuple[Path, str]]:
+    src = tmp_path / "work"
+    src.mkdir(exist_ok=True)
+    made = []
+    for i, name in enumerate(names):
+        path = src / f"{i:04d}.jpg"
+        path.write_bytes(b"jpg%d" % i)
+        made.append((path, name))
+    return made
+
+
+def test_sharp_dir_sits_in_the_clip_folder(tmp_path):
+    folder = files.plan_sharp_dir(tmp_path, "คลิป: ทดสอบ", ID)
+    assert folder.parent == files.plan_output(tmp_path, "คลิป: ทดสอบ", ID, "", "mp4").parent
+    assert folder.name == "คลิป ทดสอบ - ภาพคม"
+    grouped = files.plan_sharp_dir(tmp_path, "คลิป", ID, "งานลูกค้า")
+    assert grouped.parent.parent.name == "งานลูกค้า"
+
+
+def test_sharp_dir_fits_240_with_the_longest_frame_name():
+    # ราก path ความยาวตายตัว (ไม่ใช้ tmp_path) ผลจึงเหมือนกันทุกเครื่อง
+    root = Path("C:/" + "r" * 77)
+    assert files._u16(str(root)) == 80
+    folder = files.plan_sharp_dir(root, "ก" * 300, ID)
+    assert folder.name.endswith(files.SHARP_DIR_SUFFIX)
+    assert files._u16(str(folder)) + files.UNIQUE_RESERVE + 1 + files._u16(FRAME) <= files.PATH_LIMIT
+    assert folder.name != ID + files.SHARP_DIR_SUFFIX  # ยังเหลือที่ให้ชื่อคลิปบางส่วน
+    deep = Path("C:/" + "d" * 190)
+    with pytest.raises(YtError) as err:
+        files.plan_sharp_dir(deep, "ก" * 300, ID)
+    assert err.value.code == "E_OUTPUT_NOT_WRITABLE"
+
+
+def test_sharp_dir_candidates_keep_dotted_titles(tmp_path):  # Review Focus 1
+    planned = files.plan_sharp_dir(tmp_path, "Ep.1 วิธีทำ", ID)
+    first = files.move_files_into_dir(_items(tmp_path, ["frame_00-00-00.jpg"]), planned)
+    second = files.move_files_into_dir(_items(tmp_path, ["frame_00-00-00.jpg"]), planned)
+    assert first.name == "Ep.1 วิธีทำ - ภาพคม"
+    assert second.name == "Ep.1 วิธีทำ - ภาพคม (2)"
+    assert sorted(p.name for p in second.iterdir()) == ["frame_00-00-00.jpg"]  # ไม่มี marker เหลือ
+
+
+def test_move_files_into_dir_moves_everything_and_removes_the_marker(tmp_path):
+    items = _items(tmp_path, ["frame_00-00-00.jpg", "frame_00-00-00_2.jpg", "frame_00-01-00.jpg"])
+    final = files.move_files_into_dir(items, tmp_path / "out" / "คลิป [x]" / "คลิป - ภาพคม")
+    assert sorted(p.name for p in final.iterdir()) == ["frame_00-00-00.jpg", "frame_00-00-00_2.jpg", "frame_00-01-00.jpg"]
+    assert not (final / files.PARTIAL_MARKER).exists()
+    assert (final / "frame_00-00-00_2.jpg").read_bytes() == b"jpg1"
+    assert not any(src.exists() for src, _ in items)
+
+
+def test_move_files_into_dir_failure_removes_the_new_folder(tmp_path, monkeypatch):
+    items = _items(tmp_path, ["a.jpg", "b.jpg"])
+    real = files.os.replace
+    calls = {"n": 0}
+
+    def flaky(src, dst):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real(src, dst)
+
+    monkeypatch.setattr(files.os, "replace", flaky)
+    planned = tmp_path / "out" / "คลิป - ภาพคม"
+    with pytest.raises(YtError) as err:
+        files.move_files_into_dir(items, planned)
+    assert err.value.code == "E_DISK_FULL"
+    assert not planned.exists()
+
+
+def test_move_files_into_dir_cancel_removes_the_new_folder(tmp_path, monkeypatch):
+    items = _items(tmp_path, ["a.jpg"])
+
+    def interrupted(src, dst):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(files.os, "replace", interrupted)
+    planned = tmp_path / "out" / "คลิป - ภาพคม"
+    with pytest.raises(KeyboardInterrupt):
+        files.move_files_into_dir(items, planned)
+    assert not planned.exists()
+
+
+def test_move_files_into_dir_rejects_paths_as_names(tmp_path):
+    with pytest.raises(ValueError):
+        files.move_files_into_dir(_items(tmp_path, ["../x.jpg"]), tmp_path / "out" / "d")
+    assert not (tmp_path / "out" / "d").exists()
+    shutil.rmtree(tmp_path / "work")
