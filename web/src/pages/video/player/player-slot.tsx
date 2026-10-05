@@ -8,6 +8,7 @@ import { fill, th } from "@/i18n/th"
 import type { VideoInfo } from "@/lib/types"
 import { Thumbnail } from "@/pages/home/thumbnail"
 
+import { CaptureButton } from "../capture/capture-button"
 import { FOCUS_SLOTS, firstSlot, useFocusRescue } from "./focus-rescue"
 import { PlayerErrorView } from "./player-error"
 import { playerActions, playerAdapterHooks, usePlayerValue, type PlayerStatus } from "./player-store"
@@ -161,6 +162,8 @@ function DockToolbar({
         fallbackFocus={() => firstSlot(FOCUS_SLOTS.dockBack, FOCUS_SLOTS.timeline, FOCUS_SLOTS.cover)}
       />
       <RangeMarkButtons videoId={videoId} size="xs" />
+      {/* M5 รอบ B2: ถ่ายภาพคมตรงนี้ (ปุ่มไอคอน ชื่อและ tooltip เดียวกับปุ่มใต้ตัวเล่น) */}
+      <CaptureButton videoId={videoId} variant="dock" />
       <div className="ml-auto flex items-center gap-1 max-sm:ml-0 max-sm:justify-end">
         <Button
           variant="ghost"
@@ -389,6 +392,7 @@ function ControlsRow({
       {/* แถวปุ่มใต้ตัวเล่น (spec C2): ตั้งจุดเริ่ม · ตั้งจุดจบ · ปุ่มเพิ่มจากหัวคลิป ตัดขึ้นบรรทัดได้ */}
       <div data-slot="player-actions" className="flex flex-wrap items-center gap-1">
         <RangeMarkButtons videoId={video.videoId} />
+        <CaptureButton videoId={video.videoId} />
         {actions}
       </div>
     </div>

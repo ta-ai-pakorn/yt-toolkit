@@ -71,7 +71,7 @@ test("เมนูคลิกขวาของภาพคมครบทุ�
   const menu = page.getByRole("menu")
   await expect(menu.getByRole("menuitem")).toHaveText([
     "คัดลอกภาพ", "โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้", "เปิดในยูทูปตรงเวลานี้", "เล่นจากตรงนี้",
-    "ตั้งเป็นจุดเริ่ม", "ตั้งเป็นจุดจบ",
+    "ถ่ายภาพคมตรงนี้", "ตั้งเป็นจุดเริ่ม", "ตั้งเป็นจุดจบ",
   ])
   await menu.getByRole("menuitem", { name: "คัดลอกเวลา" }).click()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("00:01:00")

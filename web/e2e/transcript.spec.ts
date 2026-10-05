@@ -25,6 +25,7 @@ const M2_MENU = [
   "คัดลอกลิงก์ช่วงนี้",
   "เปิดในยูทูปตรงเวลานี้",
   "เล่นจากตรงนี้",
+  "ถ่ายภาพคมตรงนี้",
   "ตั้งเป็นจุดเริ่ม",
   "ตั้งเป็นจุดจบ",
 ]
@@ -287,7 +288,7 @@ test.describe("M3 ภาพเฟรม → ทรานสคริปต์ (Q
     await page.keyboard.press("Shift+F10")
     await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(MENU_WITH_SUBS)
     await expect(page.getByRole("menuitem", { name: "คัดลอกภาพ" })).toBeFocused()
-    for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowDown")
+    for (let i = 0; i < MENU_WITH_SUBS.indexOf("ดูซับช่วงนี้"); i++) await page.keyboard.press("ArrowDown")
     await expect(page.getByRole("menuitem", { name: "ดูซับช่วงนี้" })).toBeFocused()
     await page.keyboard.press("Enter")
 
