@@ -7,6 +7,8 @@
   จองด้วย files.move_into_place เท่านั้น จึงไม่มีไฟล์ครึ่ง ๆ กลาง ๆ ค้างที่ชื่อจริง
 - log บอกแค่รหัสงานและ path สัมพัทธ์กับโฟลเดอร์ผลลัพธ์ (path เต็มมีชื่อผู้ใช้ Windows)
 - params.folder (งานจาก W3) = โฟลเดอร์กลุ่มคั่นระหว่างโฟลเดอร์ผลลัพธ์กับโฟลเดอร์ของคลิป (files.plan_output)
+- M5 รอบ A: โหลดทั้งคลิปแล้วตัดช่วงเวลา/โฆษณาด้วย ffmpeg (core/media.cut) ก่อนขั้นจัดไฟล์เดิม
+  หรือแยกไฟล์ละ chapter ลงโฟลเดอร์ย่อยของคลิป (วิดีโอตัดแบบเร็ว เสียงตัดแบบแม่นยำ)
 core/ ไม่ import api/ หรือ platform/
 """
 
@@ -17,7 +19,7 @@ import logging
 import math
 import shutil
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -25,10 +27,20 @@ from typing import TYPE_CHECKING, Any
 from PIL import Image
 
 from . import files
-from .download import DownloadChoice, Downloader, DownloadHooks, audio_choice, video_choice
+from .advanced import ADS_SUFFIX, ChapterPart, Interval, chapter_parts, keep_intervals, kept_ms, range_suffix
+from .download import (
+    DownloadChoice,
+    Downloader,
+    DownloadHooks,
+    DownloadResult,
+    SponsorBlockError,
+    SponsorSource,
+    audio_choice,
+    video_choice,
+)
 from .frames import contact_sheet, frames_zip
-from .jobs import Handler, Job, JobContext, JobResult, OutputFile
-from .media import MediaMeta, MediaTools, SubtitleInput, iso639_2
+from .jobs import MIN_RANGE_MS, Handler, Job, JobContext, JobResult, OutputFile, split_stage
+from .media import CutMode, CutTarget, MediaMeta, MediaTools, SubtitleInput, iso639_2
 from .srt_builder import SubOptions, options_from_dict
 from .storyboard import FOLDER as STORYBOARD_FOLDER
 from .storyboard import get_storyboard
@@ -41,6 +53,7 @@ if TYPE_CHECKING:
 log = logging.getLogger("yttoolkit")
 
 DISK_FACTOR = 2  # ต้องมีที่ว่างอย่างน้อย 2 เท่าของขนาดคาดการณ์ (ไฟล์โหลด + ไฟล์ที่จัดเสร็จ)
+CUT_DISK_FACTOR = 3  # งานที่ตัด: ไฟล์ที่โหลด + ไฟล์ที่ตัด + ไฟล์ที่จัดเสร็จ อยู่พร้อมกันได้
 WARMING_WAIT_S = 5  # E_SESSION_WARMING ที่ไม่บอกเวลารอ
 DEFAULT_MP3_KBPS = 192
 NO_AUDIO_SUFFIX = " (ไม่มีเสียง)"
@@ -70,6 +83,8 @@ class HandlerDeps:
     # เบรกฉุกเฉินของคิว (QueueRunner.brake) สำหรับ E_BOT_CHECK ที่ตัวทำงานกลืนไว้เองไม่โยนต่อ
     # (คอมเมนต์ปักหมุดของงานโน้ต) open_services ต่อให้หลังสร้างคิว None = ไม่เบรก
     on_bot_check: Callable[[], None] | None = None
+    # ที่มาของช่วงโฆษณา (C4 ตัว extractor) lifecycle ต่อให้ None = ติดต่อ SponsorBlock ไม่ได้ (ไม่ได้ตัดโฆษณา มีโน้ต)
+    sponsors: SponsorSource | None = None
 
 
 # ---------- ตัวช่วย ----------
@@ -165,8 +180,15 @@ def _human_size(n: int) -> str:
     return f"{max(1, math.ceil(n / 1_000_000))} MB"
 
 
-def _disk_checked(choice: DownloadChoice, paths: Iterable[Path], disk_free: Callable[[Path], int]) -> DownloadChoice:
-    """ไม่เริ่มโหลดถ้าที่ว่างน้อยกว่า 2 เท่าของขนาดคาดการณ์ (ไม่รู้ขนาด หรืออ่านที่ว่างไม่ได้ = ไม่ตรวจ)
+def _disk_checked(
+    choice: DownloadChoice,
+    paths: Iterable[Path],
+    disk_free: Callable[[Path], int],
+    *,
+    factor: int = DISK_FACTOR,
+) -> DownloadChoice:
+    """ไม่เริ่มโหลดถ้าที่ว่างน้อยกว่า factor เท่าของขนาดคาดการณ์ (ไม่รู้ขนาด หรืออ่านที่ว่างไม่ได้ = ไม่ตรวจ)
+    งานที่ตัดช่วงเวลา/โฆษณาใช้ CUT_DISK_FACTOR (มีไฟล์ที่ตัดอีกไฟล์)
 
     ตรวจทั้งโฟลเดอร์ผลลัพธ์และโฟลเดอร์ทำงาน (อาจอยู่คนละไดรฟ์ ไฟล์โหลดลงโฟลเดอร์ทำงานก่อน)
     ตั้งใจใช้ 2 เท่ากับทั้งสองที่ (รวมโฟลเดอร์ผลลัพธ์ที่อยู่คนละไดรฟ์ซึ่งต้องการจริงแค่ 1 เท่า):
@@ -174,7 +196,7 @@ def _disk_checked(choice: DownloadChoice, paths: Iterable[Path], disk_free: Call
     """
     if not choice.expected_bytes:
         return choice
-    need = DISK_FACTOR * choice.expected_bytes
+    need = factor * choice.expected_bytes
     for path in paths:
         try:
             free = disk_free(path)
@@ -187,6 +209,223 @@ def _disk_checked(choice: DownloadChoice, paths: Iterable[Path], disk_free: Call
                 params={"size": _human_size(need)},
             )
     return choice
+
+
+def _requested_range(params: Mapping[str, Any]) -> Interval | None:
+    """ช่วงเวลาของงาน (API ตรวจมาแล้ว) ไม่มี = None · ข้อมูลงานเสีย = E_UNKNOWN"""
+    raw = params.get("range")
+    if raw is None:
+        return None
+    start = raw.get("startMs") if isinstance(raw, Mapping) else None
+    end = raw.get("endMs") if isinstance(raw, Mapping) else None
+    if type(start) is not int or type(end) is not int or start < 0 or end - start < MIN_RANGE_MS:
+        raise YtError("E_UNKNOWN", f"range: {raw!r}")
+    return start, end
+
+
+def _sponsor_segments(
+    deps: HandlerDeps, ctx: JobContext, clip: _Clip, params: Mapping[str, Any]
+) -> tuple[list[Interval] | None, tuple[str, ...]]:
+    """ช่วงโฆษณาตามหมวดที่ขอ: None = ไม่ได้ขอตัดโฆษณา หรือติดต่อ SponsorBlock ไม่ได้ (คู่กับโน้ต)
+
+    error ของ SponsorBlock ไม่ทำให้งานล้ม ไม่ลองใหม่ ไม่พักคิว (ไม่ใช่ยูทูป) log บอกแค่ชนิด error
+    """
+    categories = params.get("sponsorblock")
+    if not categories:
+        return None, ()
+    source = deps.sponsors
+    if source is None:
+        log.info("งาน %s ไม่มีตัวดึงข้อมูล SponsorBlock ไม่ได้ตัดโฆษณา", ctx.job_id)
+        return None, ("SPONSORBLOCK_UNREACHABLE",)
+    try:
+        found = source.sponsor_segments(clip.video_id, [str(c) for c in categories], clip.meta.duration_s)
+    except SponsorBlockError as exc:
+        log.info("งาน %s ติดต่อ SponsorBlock ไม่ได้ (%s) ไม่ได้ตัดโฆษณา", ctx.job_id, exc)
+        return None, ("SPONSORBLOCK_UNREACHABLE",)
+    return [(start, end) for start, end, _ in found], ()
+
+
+def _duration_ms(raw: Mapping[str, Any], clip: _Clip) -> int | None:
+    """ความยาวจริงของไฟล์ที่โหลด (duration ของ yt-dlp รอบนี้ ไม่มีใช้ของ probe) ไม่รู้ = None"""
+    for value in (raw.get("duration"), clip.info.get("durationS")):
+        if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+            return round(value * 1000)
+    return None
+
+
+def _clipped_range(span: Interval | None, total_ms: int | None) -> Interval | None:
+    """ช่วงที่ขอ ตัดปลายให้ไม่เกินความยาวคลิป (API ตรวจไม่ได้ถ้าคลิปยังไม่เคยดึงข้อมูลก่อนเข้าคิว)
+
+    ไม่รู้ความยาว = ตามที่ขอ · เหลือไม่ถึง 1 วินาที = E_UNKNOWN
+    งานวิดีโอ เสียง ซับ และการฝังซับใช้กฎเดียวกัน ช่วงของสื่อกับของซับจึงตรงกันเสมอ
+    """
+    if span is None:
+        return None
+    start, end = span
+    if total_ms is not None:
+        end = min(end, total_ms)
+    if end - start < MIN_RANGE_MS:
+        raise YtError("E_UNKNOWN", f"range {span} is outside the clip ({total_ms} ms)")
+    return start, end
+
+
+def _job_range(params: Mapping[str, Any], clip: _Clip) -> Interval | None:
+    """ช่วงเวลาของงานที่ตัดปลายตามความยาวจาก probe แล้ว (ตรวจก่อนโหลด ช่วงนอกคลิปไม่ต้องรอโหลดทั้งคลิปก่อนล้ม)"""
+    return _clipped_range(_requested_range(params), _duration_ms({}, clip))
+
+
+def _has_audio_stream(raw: Mapping[str, Any]) -> bool:
+    """คลิปมีเสียงไหม ดูจากรายการ format ของการดึงข้อมูลรอบที่โหลด (ชุดเดียวกับที่ choose ใช้เลือก format)
+
+    มี format ที่ acodec ไม่ใช่ "none" = มีเสียง (acodec ไม่รู้ เช่น HLS ถือว่าอาจมีเสียง)
+    ไม่มีรายการ format = ไม่รู้ ถือว่ามีเสียงแบบ M4
+    คลิปไม่มีเสียงเลยต้องตัดแบบไม่มีเสียง ไม่งั้นการตัดแบบแม่นยำต้องการแทร็กเสียงแล้ว ffmpeg ล้ม
+    """
+    formats = [f for f in (raw.get("formats") or []) if isinstance(f, Mapping)]
+    if not formats:
+        return True
+    return any(f.get("acodec") != "none" for f in formats)
+
+
+@dataclass(frozen=True)
+class _Cut:
+    path: Path  # ไฟล์ที่จะเข้าขั้นจัดไฟล์ (ไม่ได้ตัด = ไฟล์ที่โหลดมาเอง)
+    suffix: str  # ส่วนต่อท้ายชื่อไฟล์ ช่วงเวลา + (ตัดโฆษณา)
+    duration_s: float | None  # ความยาวหลังตัด (ความคืบหน้าของขั้นถัดไป)
+    notes: tuple[str, ...]
+
+
+def _cut(
+    deps: HandlerDeps,
+    ctx: JobContext,
+    clip: _Clip,
+    result: DownloadResult,
+    report: _Reporter,
+    *,
+    span: Interval | None,
+    ads: list[Interval] | None,
+    target: CutTarget,
+    has_audio: bool,
+) -> _Cut:
+    """ตัดช่วงเวลาและ/หรือโฆษณาแบบแม่นยำ (D1) ไม่มีอะไรต้องตัด = ใช้ไฟล์ที่โหลดมา ไม่แปลงซ้ำ ไม่ต่อชื่อ
+
+    ปลายช่วงเกินความยาวจริง (API ตรวจไม่ได้เพราะยังไม่มีข้อมูลคลิป) = ตัดปลายให้เท่าความยาวจริง เหลือไม่ถึง 1 วิ = E_UNKNOWN
+    ขอตัดโฆษณาแต่ไม่มีอะไรถูกตัดเลย = โน้ต SPONSORBLOCK_EMPTY (ชื่อไฟล์ไม่มี (ตัดโฆษณา))
+    """
+    full = _Cut(result.path, "", clip.meta.duration_s, ())
+    if span is None and ads is None:
+        return full
+    total = _duration_ms(result.info, clip)
+    span = _clipped_range(span, total)
+    whole = span if span is not None else ((0, total) if total is not None else None)
+    if whole is None:
+        raise YtError("E_UNKNOWN", "clip duration unknown, cannot cut")
+    keep = keep_intervals(whole, ads or ())
+    ads_cut = bool(keep) and keep != [whole]
+    notes = ("SPONSORBLOCK_EMPTY",) if ads is not None and not ads_cut else ()
+    if span is None and not ads_cut:
+        return replace(full, notes=notes)
+    if not ads_cut:
+        keep = [whole]
+    report.stage("cutting_ads" if ads_cut else "cutting")
+    out = Path(ctx.workdir) / f"cut.{target}"
+    deps.media.cut(result.path, out, keep, mode="exact", target=target, has_audio=has_audio,
+                   cancel=ctx.cancelled, on_progress=report.fraction)  # fmt: skip
+    ctx.check_cancelled()
+    result.path.unlink(missing_ok=True)  # ไฟล์ที่โหลดมาไม่ใช้แล้ว คืนที่ว่างก่อนขั้นจัดไฟล์
+    suffix = (range_suffix(*span) if span is not None else "") + (ADS_SUFFIX if ads_cut else "")
+    return _Cut(out, suffix, kept_ms(keep) / 1000, notes)
+
+
+def _ignore_progress(_fraction: float | None) -> None:
+    """ขั้นจัดไฟล์ของแต่ละ chapter สั้นมาก แถบคิวแสดงเฉพาะความคืบหน้าของการตัด"""
+
+
+def _chapter_start(chapter: Mapping[str, Any]) -> float:
+    """เวลาเริ่มของ chapter สำหรับเรียงลำดับ อ่านไม่ได้ = ไว้ท้ายสุด (chapter_parts ข้ามให้เอง)"""
+    value = chapter.get("startS")
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        return math.inf
+    return float(value)
+
+
+def _chapters(clip: _Clip, result: DownloadResult) -> list[ChapterPart]:
+    """chapter ของคลิป (VideoInfo จาก cache) เรียงตามเวลาเริ่ม ปลายสุดท้ายไม่เกินความยาวจริงของไฟล์ที่โหลด
+    ไม่ถึง 2 chapter = []"""
+    total = _duration_ms(result.info, clip)
+    if not total:
+        return []
+    chapters = [c for c in (clip.info.get("chapters") or []) if isinstance(c, Mapping)]
+    return chapter_parts(sorted(chapters, key=_chapter_start), total)
+
+
+def _split(
+    deps: HandlerDeps,
+    ctx: JobContext,
+    clip: _Clip,
+    result: DownloadResult,
+    report: _Reporter,
+    parts: list[ChapterPart],
+    *,
+    ext: str,
+    target: CutTarget,
+    mode: CutMode,
+    has_audio: bool,
+    finalize: Callable[[Path, Path, MediaMeta], None],
+) -> list[tuple[Path, ChapterPart]]:
+    """ไฟล์ละ chapter ใน workdir ตามลำดับ (D2/D6): ตัดช่วงของ chapter แล้วจัดไฟล์ (ปก ชื่อ chapter ลำดับ n/total)
+    ไฟล์ทั้งหมดย้ายเข้าที่พร้อมกันตอนจบ (ยกเลิกกลางทาง = ไม่มีไฟล์ไหนเข้าโฟลเดอร์ผลลัพธ์)"""
+    workdir = Path(ctx.workdir)
+    made: list[tuple[Path, ChapterPart]] = []
+    for part in parts:
+        ctx.check_cancelled()
+        report.stage(split_stage(part.index, part.total))
+        cut = workdir / f"part-{part.index:03d}.cut.{target}"
+        deps.media.cut(result.path, cut, [(part.start_ms, part.end_ms)], mode=mode, target=target,
+                       has_audio=has_audio, cancel=ctx.cancelled, on_progress=report.fraction)  # fmt: skip
+        ctx.check_cancelled()
+        out = workdir / f"part-{part.index:03d}.{ext}"
+        meta = replace(
+            clip.meta,
+            title=part.title or f"chapter {part.index}",
+            duration_s=(part.end_ms - part.start_ms) / 1000,
+            track=f"{part.index}/{part.total}",
+        )
+        finalize(cut, out, meta)
+        cut.unlink(missing_ok=True)
+        made.append((out, part))
+    result.path.unlink(missing_ok=True)
+    return made
+
+
+def _finish_chapters(
+    deps: HandlerDeps,
+    ctx: JobContext,
+    clip: _Clip,
+    made: list[tuple[Path, ChapterPart]],
+    *,
+    ext: str,
+    kind: str,
+    notes: Iterable[str],
+    no_audio: bool = False,
+) -> JobResult:
+    """ย้ายไฟล์ของทุก chapter เข้า "<โฟลเดอร์ของคลิป>/แยกตาม chapter (<ext>)/" ตามลำดับ (D4) แล้วเขียน
+    แหล่งที่มา.txt ที่โฟลเดอร์ของคลิป ผลของงาน = ทุกไฟล์ตามลำดับ chapter
+    วิดีโอไม่มีเสียง (no_audio) = โฟลเดอร์ย่อย "แยกตาม chapter (mp4, ไม่มีเสียง)" ไม่ปนกับชุดที่มีเสียง"""
+    ctx.check_cancelled()
+    outputs: list[OutputFile] = []
+    for path, part in made:
+        planned = files.plan_chapter_output(
+            clip.root, clip.title, clip.video_id, ext, clip.group,
+            index=part.index, total=part.total, chapter_title=part.title, no_audio=no_audio,
+        )  # fmt: skip
+        final = files.move_into_place(path, planned)
+        rel = final.relative_to(clip.root).as_posix()
+        log.info("งาน %s บันทึกไฟล์ %s", ctx.job_id, rel)
+        outputs.append(OutputFile(root=str(clip.root), rel=rel, size_bytes=final.stat().st_size, kind=kind))
+    clip_folder = files.plan_output(clip.root, clip.title, clip.video_id, "", ext, clip.group).parent
+    _write_note(deps, ctx, clip, clip_folder)
+    return JobResult(outputs=tuple(outputs), notes=_unique(notes), title=clip.title or None)
 
 
 def _hooks(deps: HandlerDeps, ctx: JobContext, report: _Reporter) -> DownloadHooks:
@@ -227,20 +466,26 @@ def _sub_options(raw: Any, key: str) -> SubOptions:
 
 
 def _export_subtitle(
-    deps: HandlerDeps, ctx: JobContext, video_id: str, track_id: str, fmt: str, opts: SubOptions
+    deps: HandlerDeps,
+    ctx: JobContext,
+    video_id: str,
+    track_id: str,
+    fmt: str,
+    opts: SubOptions,
+    span: Interval | None = None,
 ) -> SubtitleExport:
     """SubtitleService.export ถ้าเซสชันผู้ชมยังไม่พร้อม (E_SESSION_WARMING) รอตามที่บอกแล้วลองอีกครั้งเดียว"""
     try:
-        return deps.subtitles.export(video_id, track_id, fmt, opts)
+        return deps.subtitles.export(video_id, track_id, fmt, opts, span)
     except YtError as exc:
         if exc.code != "E_SESSION_WARMING":
             raise
         ctx.wait(exc.retry_after or WARMING_WAIT_S)
-    return deps.subtitles.export(video_id, track_id, fmt, opts)
+    return deps.subtitles.export(video_id, track_id, fmt, opts, span)
 
 
 def _embedded_subtitle(
-    deps: HandlerDeps, ctx: JobContext, clip: _Clip, params: Mapping[str, Any]
+    deps: HandlerDeps, ctx: JobContext, clip: _Clip, params: Mapping[str, Any], span: Interval | None
 ) -> tuple[SubtitleInput | None, tuple[str, ...]]:
     """ซับ .srt สำหรับฝังใน mp4 ทำไม่ได้ = ข้ามพร้อมโน้ต EMBED_SUBS_SKIPPED
 
@@ -252,7 +497,7 @@ def _embedded_subtitle(
         return None, ()
     opts = _sub_options(params.get("subOptions"), "subOptions")  # ค่าเสีย = งานล้ม (ไม่ใช่ข้ามซับ)
     try:
-        result = _export_subtitle(deps, ctx, clip.video_id, str(track_id), "srt", opts)
+        result = _export_subtitle(deps, ctx, clip.video_id, str(track_id), "srt", opts, span)
     except YtError as exc:
         if exc.code in _EMBED_RETRY_CODES:
             raise
@@ -314,31 +559,56 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     clip = _start(deps, job, ctx, report)
     params = job.params
     workdir = Path(ctx.workdir)
-    subtitle, sub_notes = _embedded_subtitle(deps, ctx, clip, params)
+    span = _job_range(params, clip)
+    split = bool(params.get("splitChapters"))
+    subtitle, sub_notes = _embedded_subtitle(deps, ctx, clip, params, span)
+    ads, ad_notes = _sponsor_segments(deps, ctx, clip, params)
     ctx.check_cancelled()
+    factor = CUT_DISK_FACTOR if split or span is not None or bool(ads) else DISK_FACTOR
 
     def choose(raw: dict) -> DownloadChoice:
-        return _disk_checked(video_choice(raw, params), (clip.root, workdir), deps.disk_free)
+        return _disk_checked(video_choice(raw, params), (clip.root, workdir), deps.disk_free, factor=factor)
 
     result = deps.downloader.download(clip.video_id, choose, workdir, _hooks(deps, ctx, report))
     ctx.check_cancelled()
+    no_audio = bool(params.get("noAudio"))
+    has_audio = not no_audio and _has_audio_stream(result.info)
+    split_notes: tuple[str, ...] = ()
+    if split:
+        parts = _chapters(clip, result)
+        if parts:
+            cover = _cover(deps, clip, ctx)
+
+            def finalize(src: Path, dst: Path, meta: MediaMeta) -> None:
+                deps.media.finalize_mp4(
+                    src, dst, meta, cover=cover, subtitle=None, audio_language=result.choice.audio_language,
+                    cancel=ctx.cancelled, on_progress=_ignore_progress, no_audio=no_audio,
+                )  # fmt: skip
+
+            made = _split(deps, ctx, clip, result, report, parts, ext="mp4", target="mp4", mode="fast",
+                          has_audio=has_audio, finalize=finalize)  # fmt: skip
+            report.stage("writing")
+            notes = (*result.choice.notes, *sub_notes)
+            return _finish_chapters(deps, ctx, clip, made, ext="mp4", kind="video", notes=notes, no_audio=no_audio)
+        split_notes = ("NO_CHAPTERS",)
+    cut = _cut(deps, ctx, clip, result, report, span=span, ads=ads, target="mp4", has_audio=has_audio)
     cover = _cover(deps, clip, ctx)
     ctx.check_cancelled()
     report.stage("writing")
     out = workdir / "out.mp4"
     deps.media.finalize_mp4(
-        result.path,
+        cut.path,
         out,
-        clip.meta,
+        replace(clip.meta, duration_s=cut.duration_s),
         cover=cover,
         subtitle=subtitle,
         audio_language=result.choice.audio_language,
         cancel=ctx.cancelled,
         on_progress=report.fraction,
-        no_audio=bool(params.get("noAudio")),
+        no_audio=no_audio,
     )
-    suffix = NO_AUDIO_SUFFIX if params.get("noAudio") else ""
-    notes = (*result.choice.notes, *sub_notes)
+    suffix = (NO_AUDIO_SUFFIX if no_audio else "") + cut.suffix
+    notes = (*result.choice.notes, *sub_notes, *ad_notes, *cut.notes, *split_notes)
     return _finish(deps, ctx, clip, out, suffix=suffix, ext="mp4", kind="video", notes=notes)
 
 
@@ -350,30 +620,63 @@ def _audio(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     if fmt not in ("m4a", "mp3", "wav"):
         raise YtError("E_UNKNOWN", f"audio format {fmt!r}")
     workdir = Path(ctx.workdir)
+    span = _job_range(params, clip)
+    split = bool(params.get("splitChapters"))
+    ads, ad_notes = _sponsor_segments(deps, ctx, clip, params)
+    ctx.check_cancelled()
+    factor = CUT_DISK_FACTOR if split or span is not None or bool(ads) else DISK_FACTOR
 
     def choose(raw: dict) -> DownloadChoice:
-        return _disk_checked(audio_choice(raw, params), (clip.root, workdir), deps.disk_free)
+        return _disk_checked(audio_choice(raw, params), (clip.root, workdir), deps.disk_free, factor=factor)
 
     result = deps.downloader.download(clip.video_id, choose, workdir, _hooks(deps, ctx, report))
     ctx.check_cancelled()
+    split_notes: tuple[str, ...] = ()
+    if split:
+        parts = _chapters(clip, result)
+        if parts:
+            cover = None if fmt == "wav" else _cover(deps, clip, ctx)
+            kbps = int(params.get("mp3Kbps") or DEFAULT_MP3_KBPS)
+            language = result.choice.audio_language
+
+            def finalize(src: Path, dst: Path, meta: MediaMeta) -> None:
+                common: dict[str, Any] = {"audio_language": language, "cancel": ctx.cancelled,
+                                          "on_progress": _ignore_progress}  # fmt: skip
+                if fmt == "wav":
+                    deps.media.to_wav(src, dst, meta, **common)
+                elif fmt == "mp3":
+                    deps.media.to_mp3(src, dst, meta, kbps=kbps, cover=cover, **common)
+                else:
+                    deps.media.finalize_m4a(src, dst, meta, cover=cover, **common)
+
+            made = _split(deps, ctx, clip, result, report, parts, ext=fmt, target="m4a" if fmt == "m4a" else "wav",
+                          mode="exact", has_audio=True, finalize=finalize)  # fmt: skip
+            report.stage("writing")
+            return _finish_chapters(deps, ctx, clip, made, ext=fmt, kind="audio", notes=result.choice.notes)
+        split_notes = ("NO_CHAPTERS",)
+    # m4a ตัดเป็น m4a · mp3/wav ตัดเป็น wav (PCM ตัดได้ตรงตัวอย่างเสียง) แล้วแปลงต่อครั้งเดียว
+    target: CutTarget = "m4a" if fmt == "m4a" else "wav"
+    cut = _cut(deps, ctx, clip, result, report, span=span, ads=ads, target=target, has_audio=True)
     language = result.choice.audio_language
+    meta = replace(clip.meta, duration_s=cut.duration_s)
     out = workdir / f"out.{fmt}"
     common: dict[str, Any] = {"audio_language": language, "cancel": ctx.cancelled, "on_progress": report.fraction}
     if fmt == "wav":
         report.stage("converting")
-        deps.media.to_wav(result.path, out, clip.meta, **common)
+        deps.media.to_wav(cut.path, out, meta, **common)
     else:
         cover = _cover(deps, clip, ctx)
         ctx.check_cancelled()
         if fmt == "mp3":
             report.stage("converting")
             kbps = int(params.get("mp3Kbps") or DEFAULT_MP3_KBPS)
-            deps.media.to_mp3(result.path, out, clip.meta, kbps=kbps, cover=cover, **common)
+            deps.media.to_mp3(cut.path, out, meta, kbps=kbps, cover=cover, **common)
         else:
             report.stage("writing")
-            deps.media.finalize_m4a(result.path, out, clip.meta, cover=cover, **common)
+            deps.media.finalize_m4a(cut.path, out, meta, cover=cover, **common)
     report.stage("writing")
-    return _finish(deps, ctx, clip, out, suffix="", ext=fmt, kind="audio", notes=result.choice.notes)
+    notes = (*result.choice.notes, *ad_notes, *cut.notes, *split_notes)
+    return _finish(deps, ctx, clip, out, suffix=cut.suffix, ext=fmt, kind="audio", notes=notes)
 
 
 def _subtitle(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
@@ -386,8 +689,9 @@ def _subtitle(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
         # คลิปไม่มีซับ: งานจบแบบไม่มีไฟล์ (ไม่ใช่ error สีแดง PRD 7) ไม่สร้างโฟลเดอร์
         return JobResult(notes=("NO_SUBTITLES",), title=clip.title or None)
     opts = _sub_options(params.get("options"), "options")
+    span = _job_range(params, clip)
     try:
-        result = _export_subtitle(deps, ctx, clip.video_id, str(track_id), fmt, opts)
+        result = _export_subtitle(deps, ctx, clip.video_id, str(track_id), fmt, opts, span)
     except YtError as exc:
         if exc.code != "E_NO_SUBTITLES":
             raise
@@ -398,7 +702,8 @@ def _subtitle(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     out = Path(ctx.workdir) / f"out.{fmt}"
     out.write_bytes(result.data)
     lang = files.safe_component(result.lang, "und")
-    return _finish(deps, ctx, clip, out, suffix=f".{lang}", ext=fmt, kind="subtitle")
+    suffix = (range_suffix(*span) if span is not None else "") + f".{lang}"
+    return _finish(deps, ctx, clip, out, suffix=suffix, ext=fmt, kind="subtitle")
 
 
 def _pinned_getter(deps: HandlerDeps, ctx: JobContext) -> Callable[[str], dict | None] | None:
@@ -520,7 +825,7 @@ def _frames_zip(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
 
 
 def build_handlers(deps: HandlerDeps) -> dict[str, Handler]:
-    """ตัวทำงานของทุกชนิดงานใน M4 (frames_sharp เป็นงาน M5 ยังไม่มี)"""
+    """ตัวทำงานของทุกชนิดงานใน M4 + ตัวเลือกขั้นสูงของ M5 รอบ A (frames_sharp เป็นงานรอบ B ยังไม่มี)"""
 
     def bind(fn: Callable[[HandlerDeps, Job, JobContext], JobResult]) -> Handler:
         def handler(job: Job, ctx: JobContext) -> JobResult:

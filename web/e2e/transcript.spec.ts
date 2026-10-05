@@ -18,7 +18,16 @@ const SEARCH = "ค้นหาคำในทรานสคริปต์"
 const NO_SUBS = "คลิปนี้ไม่มีซับ"
 const PICK_HINT = "คลิปนี้ไม่มีซับจากเจ้าของคลิปหรือซับภาษาต้นฉบับ เลือกแทร็กที่ต้องการจากรายการ"
 // เมนูของภาพเฟรมที่ไม่ขึ้นกับซับ: 4 รายการของ M2 + "เปิดในยูทูปตรงเวลานี้" (owner round 4) + "เล่นจากตรงนี้" (M3.5)
-const M2_MENU = ["คัดลอกภาพ", "โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้", "เปิดในยูทูปตรงเวลานี้", "เล่นจากตรงนี้"]
+const M2_MENU = [
+  "คัดลอกภาพ",
+  "โหลดภาพนี้",
+  "คัดลอกเวลา",
+  "คัดลอกลิงก์ช่วงนี้",
+  "เปิดในยูทูปตรงเวลานี้",
+  "เล่นจากตรงนี้",
+  "ตั้งเป็นจุดเริ่ม",
+  "ตั้งเป็นจุดจบ",
+]
 const MENU_WITH_SUBS = [...M2_MENU, "ดูซับช่วงนี้"]
 // ภาพเฟรมของคลิปนี้ห่างกัน 4895 ms: ภาพที่ใกล้ 10 วินาทีที่สุดคือ 9790 ms (00:00:09)
 const FRAME_NEAR_10S = "00:00:09"
@@ -253,7 +262,7 @@ test.describe("M3 ทรานสคริปต์: บรรทัดของ
 })
 
 test.describe("M3 ภาพเฟรม → ทรานสคริปต์ (Q6 = ก)", () => {
-  test(`คลิกขวาภาพ ${FRAME_NEAR_10S} → เมนูมี 6 รายการ สุดท้ายคือ 'ดูซับช่วงนี้' → บรรทัดของเวลานั้นถูกไฮไลต์และเห็นในจอ`, async ({
+  test(`คลิกขวาภาพ ${FRAME_NEAR_10S} → เมนูมี 9 รายการ สุดท้ายคือ 'ดูซับช่วงนี้' → บรรทัดของเวลานั้นถูกไฮไลต์และเห็นในจอ`, async ({
     page,
   }) => {
     await mockThai(page)
@@ -278,7 +287,7 @@ test.describe("M3 ภาพเฟรม → ทรานสคริปต์ (Q
     await page.keyboard.press("Shift+F10")
     await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(MENU_WITH_SUBS)
     await expect(page.getByRole("menuitem", { name: "คัดลอกภาพ" })).toBeFocused()
-    for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowDown")
+    for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowDown")
     await expect(page.getByRole("menuitem", { name: "ดูซับช่วงนี้" })).toBeFocused()
     await page.keyboard.press("Enter")
 
@@ -301,7 +310,7 @@ async function expectCurrentLineCovers(page: Page, at: number) {
 }
 
 test.describe("M3 ทรานสคริปต์: คลิปที่ไม่มีซับ / ไม่มีแทร็กที่ใช้อยู่", () => {
-  test("คลิปไม่มีซับ: เมนูภาพเฟรมไม่มี 'ดูซับช่วงนี้' (5 รายการ) · แท็บทรานสคริปต์บอก 'คลิปนี้ไม่มีซับ'", async ({ page }) => {
+  test("คลิปไม่มีซับ: เมนูภาพเฟรมไม่มี 'ดูซับช่วงนี้' (8 รายการ) · แท็บทรานสคริปต์บอก 'คลิปนี้ไม่มีซับ'", async ({ page }) => {
     await mockSubtitles(page, BBB, { tracks: [] })
     await page.goto(`/v/${BBB}`)
     await frameButton(page, "00:00:04").click({ button: "right" })

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "boundary-midpoint",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "startMs": 1000, "endMs": 3000,
+      "tokens": [{"t": "Before", "s": 0, "e": 800}, {"t": " cross", "s": 900, "e": 1300}, {"t": " inside", "s": 1300, "e": 2000}, {"t": " edge", "s": 2600, "e": 3400}, {"t": " after", "s": 3500, "e": 3900}],
+      "ranged": [{"t": " cross", "s": 0, "e": 300}, {"t": " inside", "s": 300, "e": 1000}],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,200\r\ncross inside\r\n"
+    },
+    {
+      "name": "last-cue-clamped",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "startMs": 4000, "endMs": 5500,
+      "tokens": [{"t": "Hello", "s": 5000, "e": 5200}, {"t": " world", "s": 5200, "e": 5300}],
+      "ranged": [{"t": "Hello", "s": 1000, "e": 1200}, {"t": " world", "s": 1200, "e": 1300}],
+      "srt": "1\r\n00:00:01,000 --> 00:00:01,500\r\nHello world\r\n"
+    },
+    {
+      "name": "thai-shift",
+      "options": {"maxChars": 15, "lines": 1, "minMs": 800, "maxMs": 3000, "mode": "chars"},
+      "startMs": 60000, "endMs": 63200,
+      "tokens": [{"t": "สวัสดี", "s": 60000, "e": 60600}, {"t": "ครับ", "s": 60600, "e": 61000}, {"t": "วันนี้", "s": 62500, "e": 63000}, {"t": "เรา", "s": 63000, "e": 63300}],
+      "ranged": [{"t": "สวัสดี", "s": 0, "e": 600}, {"t": "ครับ", "s": 600, "e": 1000}, {"t": "วันนี้", "s": 2500, "e": 3000}, {"t": "เรา", "s": 3000, "e": 3200}],
+      "srt": "1\r\n00:00:00,000 --> 00:00:01,000\r\nสวัสดีครับ\r\n\r\n2\r\n00:00:02,500 --> 00:00:03,200\r\nวันนี้เรา\r\n"
+    },
+    {
+      "name": "empty-range",
+      "options": {"maxChars": 25, "lines": 1, "minMs": 1200, "maxMs": 5000, "mode": "chars"},
+      "startMs": 10000, "endMs": 20000,
+      "tokens": [{"t": "Only", "s": 0, "e": 500}],
+      "ranged": [],
+      "srt": ""
+    }
+  ]
+}

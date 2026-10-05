@@ -16,7 +16,16 @@ const FRAME_LIST = "รายการภาพเฟรม"
 const FRAME_COUNT = 128
 // ลิงก์เว็บอื่นยังเป็นแถวสีแดง (ข้อความธรรมดาที่ไม่มีลิงก์ถูกข้ามเงียบ ๆ ตั้งแต่ D1)
 const NOT_YOUTUBE = "https://vimeo.com/123"
-const MENU_ITEMS = ["คัดลอกภาพ", "โหลดภาพนี้", "คัดลอกเวลา", "คัดลอกลิงก์ช่วงนี้", "เปิดในยูทูปตรงเวลานี้", "เล่นจากตรงนี้"]
+const MENU_ITEMS = [
+  "คัดลอกภาพ",
+  "โหลดภาพนี้",
+  "คัดลอกเวลา",
+  "คัดลอกลิงก์ช่วงนี้",
+  "เปิดในยูทูปตรงเวลานี้",
+  "เล่นจากตรงนี้",
+  "ตั้งเป็นจุดเริ่ม",
+  "ตั้งเป็นจุดจบ",
+]
 
 const frameSection = (page: Page) => page.getByRole("region", { name: "ภาพเฟรม" })
 const frameItems = (page: Page) => page.getByRole("list", { name: FRAME_LIST }).getByRole("listitem")
@@ -233,7 +242,7 @@ test.describe("W2 ภาพเฟรม", () => {
     await expect(chip("00:00:00")).toBeHidden()
   })
 
-  test("คีย์บอร์ด: Shift+F10 และปุ่ม Menu เปิดเมนู มีห้ารายการ · Esc ปิดแล้วโฟกัสกลับที่ภาพ", async ({ page }) => {
+  test("คีย์บอร์ด: Shift+F10 และปุ่ม Menu เปิดเมนู มีแปดรายการ · Esc ปิดแล้วโฟกัสกลับที่ภาพ", async ({ page }) => {
     await openBbb(page)
     const frame = frameButton(page, "00:00:09")
     await frame.focus()

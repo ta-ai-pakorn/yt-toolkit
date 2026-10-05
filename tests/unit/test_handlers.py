@@ -24,11 +24,20 @@ from helpers_ffmpeg import ffprobe_json, find_test_ffmpeg, requires_ffmpeg
 from yttoolkit.core import files
 from yttoolkit.core.cancel import JobCancelled
 from yttoolkit.core.db import Database
-from yttoolkit.core.download import DownloadChoice, Downloader, DownloadHooks, DownloadResult
+from yttoolkit.core.advanced import ADS_SUFFIX
+from yttoolkit.core.download import (
+    DownloadChoice,
+    Downloader,
+    DownloadHooks,
+    DownloadResult,
+    SponsorBlockError,
+    audio_choice,
+    video_choice,
+)
 from yttoolkit.core.extractor import FakeExtractor
 from yttoolkit.core.handlers import HandlerDeps, build_handlers
 from yttoolkit.core.jobs import Job, JobResult
-from yttoolkit.core.media import FakeMediaTools, FfmpegTools
+from yttoolkit.core.media import CutCall, FakeMediaTools, FfmpegTools
 from yttoolkit.core.srt_builder import PRESETS, options_from_dict
 from yttoolkit.core.subtitles import SubtitleService
 from yttoolkit.core.videos import VideoService
@@ -1102,3 +1111,326 @@ def test_video_with_real_ffmpeg_embeds_subs_and_cover(env):
     assert probe["format"]["tags"]["title"] == THAI_TITLE
     audio = [s for s in streams if s["codec_type"] == "audio"]
     assert audio[0]["tags"]["language"] == "tha"
+
+
+# ---------- M5 รอบ A: ช่วงเวลา ตัดโฆษณา ซับตามช่วง ----------
+
+RANGE = {"startMs": 90_000, "endMs": 300_000}
+ADS = [(60_000, 90_000, "sponsor"), (100_000, 101_000, "intro")]
+
+
+class StubSponsors:
+    """SponsorSource ตามสัญญา C4: ช่วงตายตัว หรือ error=True = ติดต่อ SponsorBlock ไม่ได้"""
+
+    def __init__(self, segments=(), error: bool = False) -> None:
+        self.segments = list(segments)
+        self.error = error
+        self.calls: list[tuple[str, tuple[str, ...], float | None]] = []
+
+    def sponsor_segments(self, video_id, categories, duration_s):
+        self.calls.append((video_id, tuple(categories), duration_s))
+        if self.error:
+            raise SponsorBlockError("fake: unreachable")
+        return [s for s in self.segments if s[2] in categories]
+
+
+def run_with(env, sponsors, kind: str, video_id: str, params: dict, **kwargs):
+    return env.run(kind, video_id, params, deps=replace(env.deps, sponsors=sponsors), **kwargs)
+
+
+def test_video_range_is_cut_exactly_and_named(env):
+    result, ctx = env.run("video", BBB, video_params(range=RANGE))
+    assert env.media.cuts == [CutCall("media.mp4", "cut.mp4", ((90_000, 300_000),), "exact", "mp4", True)]
+    assert ctx.stages.index("cutting") < ctx.stages.index("writing")
+    name, kwargs = env.media.calls[-1]
+    assert name == "finalize_mp4" and kwargs["meta"].duration_s == 210.0
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, " (01.30-05.00)", "mp4")
+    assert result.notes == ()
+
+
+def test_range_end_after_the_clip_is_clipped_to_the_real_duration(env):
+    result, _ = env.run("video", BBB, video_params(range={"startMs": 600_000, "endMs": 700_000}))
+    assert env.media.cuts[-1].intervals == ((600_000, 635_000),)
+    assert output_path(result).name.endswith(" (10.00-10.35).mp4")
+
+
+def test_range_outside_the_clip_fails_the_job(env):
+    with pytest.raises(YtError) as info:
+        env.run("video", BBB, video_params(range={"startMs": 700_000, "endMs": 710_000}))
+    assert info.value.code == "E_UNKNOWN"
+    assert folders(env.out) == []
+
+
+def test_no_audio_range_name_order(env):
+    result, _ = env.run("video", BBB, video_params(noAudio=True, range=RANGE))
+    assert env.media.cuts[-1].has_audio is False
+    assert output_path(result).name.endswith(" (ไม่มีเสียง) (01.30-05.00).mp4")
+
+
+def test_sponsorblock_cuts_the_ads(env):
+    sponsors = StubSponsors(ADS)
+    result, ctx = run_with(env, sponsors, "video", BBB, video_params(sponsorblock=["sponsor"]))
+    assert sponsors.calls == [(BBB, ("sponsor",), 635.0)]
+    assert env.media.cuts[-1].intervals == ((0, 60_000), (90_000, 635_000))
+    assert "cutting_ads" in ctx.stages and "cutting" not in ctx.stages
+    assert env.media.calls[-1][1]["meta"].duration_s == 605.0
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, ADS_SUFFIX, "mp4")
+    assert result.notes == ()
+
+
+def test_sponsorblock_without_data_keeps_the_full_clip_and_name(env):
+    result, ctx = run_with(env, StubSponsors(), "video", BBB, video_params(sponsorblock=["sponsor"]))
+    assert env.media.cuts == [] and "cutting_ads" not in ctx.stages
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, "", "mp4")
+    assert result.notes == ("SPONSORBLOCK_EMPTY",)
+
+
+@pytest.mark.parametrize("sponsors", [StubSponsors(error=True), None], ids=["error", "no-source"])
+def test_sponsorblock_unreachable_keeps_the_full_clip(env, sponsors):
+    result, _ = run_with(env, sponsors, "video", BBB, video_params(sponsorblock=["sponsor"]))
+    assert env.media.cuts == []
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, "", "mp4")
+    assert result.notes == ("SPONSORBLOCK_UNREACHABLE",)
+
+
+def test_range_and_ads_together(env):
+    params = video_params(range={"startMs": 30_000, "endMs": 120_000}, sponsorblock=["sponsor"])
+    result, _ = run_with(env, StubSponsors(ADS), "video", BBB, params)
+    assert env.media.cuts[-1].intervals == ((30_000, 60_000), (90_000, 120_000))
+    assert output_path(result).name.endswith(" (00.30-02.00) (ตัดโฆษณา).mp4")
+
+
+def test_ads_outside_the_range_cut_the_range_only(env):
+    params = video_params(range={"startMs": 200_000, "endMs": 260_000}, sponsorblock=["sponsor"])
+    result, ctx = run_with(env, StubSponsors(ADS), "video", BBB, params)
+    assert env.media.cuts[-1].intervals == ((200_000, 260_000),)
+    assert "cutting" in ctx.stages and "cutting_ads" not in ctx.stages
+    assert output_path(result).name.endswith(" (03.20-04.20).mp4")
+    assert result.notes == ("SPONSORBLOCK_EMPTY",)
+
+
+def test_sponsors_are_not_asked_without_sponsorblock(env):
+    sponsors = StubSponsors(ADS)
+    run_with(env, sponsors, "video", BBB, video_params(range=RANGE))
+    assert sponsors.calls == []
+
+
+@pytest.mark.parametrize(
+    ("fmt", "target", "method"),
+    [("m4a", "m4a", "finalize_m4a"), ("mp3", "wav", "to_mp3"), ("wav", "wav", "to_wav")],
+)
+def test_audio_range(env, fmt, target, method):
+    result, ctx = env.run("audio", BBB, audio_params(fmt, range=RANGE))
+    assert env.media.cuts == [CutCall("media.m4a", f"cut.{target}", ((90_000, 300_000),), "exact", target, True)]
+    name, kwargs = env.media.calls[-1]
+    assert name == method and kwargs["meta"].duration_s == 210.0
+    assert "cutting" in ctx.stages
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, " (01.30-05.00)", fmt)
+
+
+def test_audio_sponsorblock(env):
+    result, _ = run_with(env, StubSponsors(ADS), "audio", BBB, audio_params("m4a", sponsorblock=["sponsor"]))
+    assert env.media.cuts[-1] == CutCall("media.m4a", "cut.m4a", ((0, 60_000), (90_000, 635_000)), "exact", "m4a", True)
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, ADS_SUFFIX, "m4a")
+
+
+def test_subtitle_range_file(env):
+    params = {"trackId": "a.th-orig", "format": "srt", "options": MEDIUM, "range": {"startMs": 10_000, "endMs": 40_000}}
+    result, _ = env.run("subtitle", THAI, params)
+    expected = env.subtitles.export(THAI, "a.th-orig", "srt", PRESETS["medium"], (10_000, 40_000))
+    assert output_path(result).read_bytes() == expected.data
+    assert output_path(result) == env.planned(THAI, THAI_TITLE, f" (00.10-00.40).{expected.lang}", "srt")
+
+
+def test_embedded_subtitles_follow_the_range(env):
+    params = video_params(embedSubs="a.th-orig", subOptions=MEDIUM, range={"startMs": 10_000, "endMs": 40_000})
+    env.run("video", THAI, params)
+    name, kwargs = env.media.calls[-1]
+    expected = env.subtitles.export(THAI, "a.th-orig", "srt", PRESETS["medium"], (10_000, 40_000)).data
+    assert name == "finalize_mp4" and kwargs["sub_text"] == expected
+
+
+def test_cutting_needs_three_times_the_download_size(env):
+    expected = video_choice(env.fake.probe(BBB), video_params()).expected_bytes
+    assert expected == 267_891_149
+    env.free = 600_000_000  # >= 2 x expected, < 3 x expected
+    env.run("video", BBB, video_params())
+    with pytest.raises(YtError) as info:
+        env.run("video", BBB, video_params(range=RANGE))
+    assert info.value.code == "E_DISK_FULL" and info.value.params == {"size": "804 MB"}
+
+
+@pytest.mark.parametrize("kind", ["video", "audio"])
+def test_sponsorblock_without_data_needs_only_twice_the_download_size(env, kind):
+    params = video_params(sponsorblock=["sponsor"]) if kind == "video" else audio_params("m4a", sponsorblock=["sponsor"])
+    choose = video_choice if kind == "video" else audio_choice
+    expected = choose(env.fake.probe(BBB), params).expected_bytes
+    env.free = expected * 2 + expected // 2  # >= 2 x expected, < 3 x expected
+    result, _ = run_with(env, StubSponsors(), kind, BBB, params)
+    assert result.notes == ("SPONSORBLOCK_EMPTY",)
+    with pytest.raises(YtError) as info:
+        run_with(env, StubSponsors(ADS), kind, BBB, params)
+    assert info.value.code == "E_DISK_FULL"
+
+
+def test_cancel_while_cutting_leaves_nothing(env):
+    with pytest.raises(JobCancelled):
+        env.run("video", BBB, video_params(range=RANGE), cancel_on="cutting")
+    assert folders(env.out) == []
+
+
+# ---------- M5 รอบ A fix round 1: คลิปไม่มีเสียง และช่วงของคลิปที่ยังไม่เคยดึงข้อมูล ----------
+
+
+class SilentDownloader(StubDownloader):
+    """คลิปที่ไม่มีแทร็กเสียงเลย: ทุก format ของการดึงข้อมูลรอบโหลดมี acodec "none" ไฟล์ที่โหลดไม่มีเสียง"""
+
+    def download(self, video_id, choose, workdir, hooks):
+        info = dict(self.fake.probe(video_id))
+        info["formats"] = [f for f in info["formats"] if f.get("acodec") == "none"]
+        choice = choose(info)
+        self.choices.append(choice)
+        target = workdir / "media.mp4"
+        shutil.copyfile(MEDIA / "video-noaudio.mp4", target)
+        return DownloadResult(target, info, choice)
+
+
+def test_range_on_a_clip_without_audio_cuts_without_audio(env):
+    deps = replace(env.deps, downloader=SilentDownloader(env.fake))
+    result, _ = env.run("video", BBB, video_params(range=RANGE), deps=deps)
+    assert env.media.cuts == [CutCall("media.mp4", "cut.mp4", ((90_000, 300_000),), "exact", "mp4", False)]
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, " (01.30-05.00)", "mp4")
+
+
+def test_clip_with_audio_formats_cuts_with_audio(env):
+    env.run("video", BBB, video_params(range=RANGE))
+    assert env.media.cuts[-1].has_audio is True
+
+
+@requires_ffmpeg
+def test_range_on_a_clip_without_audio_with_real_ffmpeg(env):
+    ffmpeg = find_test_ffmpeg()
+    assert ffmpeg is not None
+    deps = replace(env.deps, downloader=SilentDownloader(env.fake), media=FfmpegTools(lambda: Path(ffmpeg)))
+    result, _ = env.run("video", BBB, video_params(range={"startMs": 0, "endMs": 1000}), deps=deps)
+    probe = ffprobe_json(output_path(result))
+    assert [s["codec_type"] for s in probe["streams"]] == ["video"]
+    assert abs(float(probe["format"]["duration"]) - 1.0) < 0.15
+
+
+def subtitle_range_params(start_ms: int, end_ms: int) -> dict:
+    return {"trackId": "a.th-orig", "format": "srt", "options": MEDIUM, "range": {"startMs": start_ms, "endMs": end_ms}}
+
+
+def test_subtitle_range_past_the_end_is_clipped_to_the_clip(env):
+    result, _ = env.run("subtitle", THAI, subtitle_range_params(360_000, 400_000))
+    expected = env.subtitles.export(THAI, "a.th-orig", "srt", PRESETS["medium"], (360_000, 372_000))
+    assert output_path(result).read_bytes() == expected.data
+    assert output_path(result) == env.planned(THAI, THAI_TITLE, f" (06.00-06.12).{expected.lang}", "srt")
+
+
+@pytest.mark.parametrize("span", [(700_000, 710_000), (371_500, 380_000)], ids=["outside", "under-1s-left"])
+def test_subtitle_range_outside_the_clip_fails_the_job(env, span):
+    with pytest.raises(YtError) as info:
+        env.run("subtitle", THAI, subtitle_range_params(*span))
+    assert info.value.code == "E_UNKNOWN"
+    assert folders(env.out) == []
+
+
+def test_embedded_subtitles_and_cut_use_the_same_clipped_range(env):
+    params = video_params(embedSubs="a.th-orig", subOptions=MEDIUM, range={"startMs": 360_000, "endMs": 400_000})
+    result, _ = env.run("video", THAI, params)
+    assert env.media.cuts[-1].intervals == ((360_000, 372_000),)
+    expected = env.subtitles.export(THAI, "a.th-orig", "srt", PRESETS["medium"], (360_000, 372_000)).data
+    assert env.media.calls[-1][1]["sub_text"] == expected
+    assert output_path(result).name.endswith(" (06.00-06.12).mp4")
+
+
+def test_range_outside_the_clip_fails_before_downloading(env):
+    with pytest.raises(YtError) as info:
+        env.run("video", BBB, video_params(range={"startMs": 700_000, "endMs": 710_000}))
+    assert info.value.code == "E_UNKNOWN"
+    assert env.downloader.choices == []
+
+
+# ---------- M5 รอบ A: แยกไฟล์ตาม chapter ----------
+
+ZOO_TITLE = "Me at the zoo"
+ZOO_NAMES = ["01 - Intro", "02 - The cool thing", "03 - End"]
+
+
+def test_video_chapter_split(env):
+    result, ctx = env.run("video", ZOO, video_params(splitChapters=True))
+    assert [c.intervals for c in env.media.cuts] == [((0, 5_000),), ((5_000, 17_000),), ((17_000, 19_000),)]
+    assert {(c.mode, c.target, c.has_audio) for c in env.media.cuts} == {("fast", "mp4", True)}
+    assert [s for s in ctx.stages if s.startswith("splitting")] == ["splitting:1/3", "splitting:2/3", "splitting:3/3"]
+    clip_folder = env.planned(ZOO, ZOO_TITLE, "", "mp4").parent
+    paths = [Path(o.root) / o.rel for o in result.outputs]
+    assert [p.name for p in paths] == [f"{n}.mp4" for n in ZOO_NAMES]
+    assert {p.parent for p in paths} == {clip_folder / "แยกตาม chapter (mp4)"}
+    assert all(p.is_file() for p in paths) and {o.kind for o in result.outputs} == {"video"}
+    assert (clip_folder / files.SOURCE_NOTE_NAME).is_file()
+    metas = [kwargs["meta"] for name, kwargs in env.media.calls if name == "finalize_mp4"]
+    assert [(m.title, m.track, m.duration_s) for m in metas] == [
+        ("Intro", "1/3", 5.0), ("The cool thing", "2/3", 12.0), ("End", "3/3", 2.0)]
+    assert result.notes == ()
+
+
+@pytest.mark.parametrize(
+    ("fmt", "target", "method"),
+    [("m4a", "m4a", "finalize_m4a"), ("mp3", "wav", "to_mp3"), ("wav", "wav", "to_wav")],
+)
+def test_audio_chapter_split_is_exact(env, fmt, target, method):
+    result, _ = env.run("audio", ZOO, audio_params(fmt, splitChapters=True))
+    assert [(c.mode, c.target) for c in env.media.cuts] == [("exact", target)] * 3
+    assert [Path(o.rel).name for o in result.outputs] == [f"{n}.{fmt}" for n in ZOO_NAMES]
+    assert {Path(o.rel).parent.name for o in result.outputs} == {f"แยกตาม chapter ({fmt})"}
+    assert [name for name, _ in env.media.calls] == [method] * 3
+
+
+def test_chapter_split_on_a_clip_without_chapters_gives_the_full_file(env):
+    result, ctx = env.run("video", BBB, video_params(splitChapters=True))
+    assert env.media.cuts == [] and not any(s.startswith("splitting") for s in ctx.stages)
+    assert output_path(result) == env.planned(BBB, BBB_TITLE, "", "mp4")
+    assert result.notes == ("NO_CHAPTERS",)
+
+
+def test_second_chapter_split_gets_numbered_copies(env):
+    env.run("video", ZOO, video_params(splitChapters=True))
+    again, _ = env.run("video", ZOO, video_params(splitChapters=True))
+    assert Path(again.outputs[0].rel).name == "01 - Intro (2).mp4"
+
+
+def test_no_audio_chapter_split_goes_to_its_own_folder(env):
+    """owner ruling 2026-10-02: ไม่ปนกับไฟล์ chapter ที่มีเสียงของคลิปเดียวกัน ชื่อไฟล์ข้างในเหมือนเดิม"""
+    with_sound, _ = env.run("video", ZOO, video_params(splitChapters=True))
+    silent, _ = env.run("video", ZOO, video_params(splitChapters=True, noAudio=True))
+    clip_folder = env.planned(ZOO, ZOO_TITLE, "", "mp4").parent
+    silent_paths = [Path(o.root) / o.rel for o in silent.outputs]
+    assert [p.name for p in silent_paths] == [f"{n}.mp4" for n in ZOO_NAMES]
+    assert {p.parent for p in silent_paths} == {clip_folder / "แยกตาม chapter (mp4, ไม่มีเสียง)"}
+    assert all(p.is_file() for p in silent_paths)
+    assert {(Path(o.root) / o.rel).parent for o in with_sound.outputs} == {clip_folder / "แยกตาม chapter (mp4)"}
+    assert {c.has_audio for c in env.media.cuts[3:]} == {False}
+    assert {kwargs["no_audio"] for name, kwargs in env.media.calls[3:] if name == "finalize_mp4"} == {True}
+    assert (clip_folder / files.SOURCE_NOTE_NAME).is_file()
+
+
+def test_chapters_out_of_order_are_split_by_start_time(env, monkeypatch):
+    real = env.videos.get
+
+    def reversed_chapters(video_id: str, **kwargs: Any) -> dict:
+        info = dict(real(video_id, **kwargs))
+        info["chapters"] = list(reversed(info["chapters"]))
+        return info
+
+    monkeypatch.setattr(env.videos, "get", reversed_chapters)
+    result, _ = env.run("video", ZOO, video_params(splitChapters=True))
+    assert [c.intervals for c in env.media.cuts] == [((0, 5_000),), ((5_000, 17_000),), ((17_000, 19_000),)]
+    assert [Path(o.rel).name for o in result.outputs] == [f"{n}.mp4" for n in ZOO_NAMES]
+
+
+def test_cancel_during_the_chapter_split_leaves_nothing(env):
+    with pytest.raises(JobCancelled):
+        env.run("video", ZOO, video_params(splitChapters=True), cancel_on="splitting:2/3")
+    assert folders(env.out) == []

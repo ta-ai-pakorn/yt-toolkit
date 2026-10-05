@@ -25,7 +25,11 @@ from .yterrors import YtError
 
 PATH_LIMIT = 240
 TITLE_MAX = 100
-TAIL_RESERVE = 30  # suffix + "." + ext ยาวไม่เกินนี้
+TAIL_RESERVE = 30  # suffix + "." + ext ยาวไม่เกินนี้ (งบที่จองไว้ให้โฟลเดอร์ของคลิป ไม่เปลี่ยนตั้งแต่ M4)
+TAIL_MAX = 60  # M5: ส่วนต่อท้าย (ไม่มีเสียง) + ช่วงเวลา + (ตัดโฆษณา) + นามสกุล ยาวได้ถึงนี้ (ส่วนเกิน TAIL_RESERVE ตัดจากชื่อไฟล์)
+CHAPTER_DIR = "แยกตาม chapter ({ext})"  # D4: โฟลเดอร์ย่อยของไฟล์แยกตาม chapter ในโฟลเดอร์ของคลิป
+# owner ruling 2026-10-02: chapter ของวิดีโอไม่มีเสียงแยกโฟลเดอร์ ไม่ปนกับชุดที่มีเสียง (ชื่อไฟล์ข้างในเหมือนกัน)
+CHAPTER_DIR_NO_AUDIO = "แยกตาม chapter ({ext}, ไม่มีเสียง)"
 UNIQUE_RESERVE = 5  # " (99)"
 SOURCE_NOTE_NAME = "แหล่งที่มา.txt"
 GROUP_FALLBACK = "YT-Toolkit batch"  # ชื่อโฟลเดอร์กลุ่มที่ทำความสะอาดแล้วว่าง (เช่น "..")
@@ -99,7 +103,7 @@ def plan_output(root: Path, title: str, video_id: str, suffix: str, ext: str, gr
     ชื่อกลุ่มไม่ถูกตัด: path ยาวเกินให้ตัดชื่อคลิปก่อน แล้วค่อยใช้ทางสำรองเดิม (videoId / E_OUTPUT_NOT_WRITABLE)
     """
     tail = f"{suffix}.{ext}"
-    assert _u16(tail) <= TAIL_RESERVE, "suffix + extension longer than TAIL_RESERVE"
+    assert _u16(tail) <= TAIL_MAX, "suffix + extension longer than TAIL_MAX"
     base = root / group_folder_name(group) if group else root
     t = safe_component(title, video_id)
     budget = PATH_LIMIT - (_u16(str(base)) + 1) - _u16(f" [{video_id}]") - 1 - TAIL_RESERVE - UNIQUE_RESERVE
@@ -108,9 +112,48 @@ def plan_output(root: Path, title: str, video_id: str, suffix: str, ext: str, gr
     if cap >= _MIN_TITLE:
         short = truncate_title(t, min(TITLE_MAX, cap))
     if short:
-        planned = base / f"{short} [{video_id}]" / f"{short}{tail}"
+        # ชื่อโฟลเดอร์คิดจากงบเดิมเสมอ (ทุกงานของคลิปลงโฟลเดอร์เดียวกัน) ส่วนท้ายที่ยาวกว่า TAIL_RESERVE
+        # ตัดเฉพาะชื่อไฟล์ลงเท่าส่วนที่เกิน: ชื่อแบบ M4 (ส่วนท้าย <= 30) จึงเหมือนเดิมทุกตัวอักษร
+        file_cap = budget - _u16(short) + TAIL_RESERVE - _u16(tail)
+        stem = short if _u16(short) <= file_cap else truncate_title(short, file_cap)
+        planned = base / f"{short} [{video_id}]" / f"{stem or video_id}{tail}"
     else:
         planned = base / video_id / f"{video_id}{tail}"
+    if _u16(str(planned)) > PATH_LIMIT - UNIQUE_RESERVE:
+        raise YtError("E_OUTPUT_NOT_WRITABLE", "path too long")
+    return planned
+
+
+def chapter_dir_name(ext: str, *, no_audio: bool = False) -> str:
+    """ชื่อโฟลเดอร์ย่อยของไฟล์แยกตาม chapter เช่น แยกตาม chapter (mp4) หรือ แยกตาม chapter (mp4, ไม่มีเสียง)"""
+    return (CHAPTER_DIR_NO_AUDIO if no_audio else CHAPTER_DIR).format(ext=ext)
+
+
+def plan_chapter_output(
+    root: Path,
+    title: str,
+    video_id: str,
+    ext: str,
+    group: str | None,
+    *,
+    index: int,
+    total: int,
+    chapter_title: str,
+    no_audio: bool = False,
+) -> Path:
+    """ไฟล์ของ chapter ที่ index: <โฟลเดอร์ของคลิป>/แยกตาม chapter (<ext>)/<NN> - <ชื่อ chapter>.<ext>
+    no_audio (วิดีโอไม่มีเสียง) = โฟลเดอร์ย่อย "แยกตาม chapter (<ext>, ไม่มีเสียง)" ชื่อไฟล์ข้างในแบบเดียวกัน
+
+    NN 2 หลัก (3 หลักเมื่อมี 100 chapter ขึ้นไป) ชื่อ chapter ทำความสะอาดแบบชื่อคลิป ว่าง = "chapter <n>"
+    ตัดชื่อ chapter ให้ path ไม่เกิน 240 ไม่เหลือที่เลย = "<NN>.<ext>" ยังยาวเกิน = E_OUTPUT_NOT_WRITABLE
+    """
+    clip_folder = plan_output(root, title, video_id, "", ext, group).parent
+    folder = clip_folder / chapter_dir_name(ext, no_audio=no_audio)
+    number = f"{index:0{3 if total >= 100 else 2}d}"
+    name = safe_component(chapter_title, f"chapter {index}")
+    budget = PATH_LIMIT - UNIQUE_RESERVE - (_u16(str(folder)) + 1) - _u16(f"{number} - ") - _u16(f".{ext}")
+    short = truncate_title(name, budget) if budget > 0 else ""
+    planned = folder / (f"{number} - {short}.{ext}" if short else f"{number}.{ext}")
     if _u16(str(planned)) > PATH_LIMIT - UNIQUE_RESERVE:
         raise YtError("E_OUTPUT_NOT_WRITABLE", "path too long")
     return planned

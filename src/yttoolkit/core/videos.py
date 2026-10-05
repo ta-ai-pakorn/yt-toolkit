@@ -622,6 +622,13 @@ class VideoService:
         finally:
             lock.release()
 
+    def peek_cached(self, video_id: str) -> dict | None:
+        """VideoInfo ที่เก็บไว้ (ไม่ดูอายุ ไม่ probe ไม่นับว่าเปิดคลิป) ใช้ตรวจค่าของงานตอนส่งเข้าคิว
+        id ผิดรูปแบบ ไม่มีแถว หรือแถวเสีย = None"""
+        if not VIDEO_ID.fullmatch(video_id):
+            return None
+        return self._stored_hit(video_id, peek=True)
+
     def _cached_hit(self, video_id: str, peek: bool = False) -> dict | None:
         moment, stamp = self._stamp()
         info = self._cached_info(video_id, moment)

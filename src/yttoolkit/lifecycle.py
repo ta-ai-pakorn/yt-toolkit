@@ -23,6 +23,7 @@ from .api.errors import redact_home
 from .app import AppContext, create_app
 from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
 from .core import files, thai_fallback, tools
+from .core.advanced import ADS_SUFFIX
 from .core.comments import PinnedCommentService
 from .core.db import Database, purge_stale_cache
 from .core.events import CLOSED, Event, EventBus
@@ -64,6 +65,17 @@ _SWEEP_SUFFIXES = (NO_AUDIO_SUFFIX, CONTACT_SHEET_SUFFIX, FRAMES_ZIP_SUFFIX)
 _SWEEP_MEDIA_EXTS = ("mp4", "m4a", "mp3", "wav", "jpg", "zip")  # video, audio, contact_sheet, frames_zip
 # subtitle (api/jobs.py SubtitleParams.format) และโน้ต "<ชื่อ>.note.md" (ส่วน ".note" อยู่ตำแหน่งรหัสภาษา)
 _SWEEP_SUB_EXTS = ("srt", "txt", "md")
+# M5 รอบ A: ส่วนต่อท้ายช่วงเวลา " (01.30-05.00)" / " (1.02.30-1.05.00)" (core/advanced.range_suffix)
+_RANGE_SUFFIX = r" \((?:\d{2}\.\d{2}-\d{2}\.\d{2}|\d{1,3}\.\d{2}\.\d{2}-\d{1,3}\.\d{2}\.\d{2})\)"
+_UNIQUE = r"(?: \((?:[2-9]|[1-9][0-9])\))?"  # " (2)" ... " (99)" จาก files._candidates
+# ไฟล์ในโฟลเดอร์ย่อย "แยกตาม chapter (<ext>)": "<NN> - <ชื่อ>.<ext>" หรือ "<NN>.<ext>" (files.plan_chapter_output)
+_CHAPTER_EXTS = ("mp4", "m4a", "mp3", "wav")
+_CHAPTER_FILE = re.compile(rf"\d{{2,3}}(?: - .+)?{_UNIQUE}\.(?:{'|'.join(_CHAPTER_EXTS)})(?:\.part)?")
+# + "แยกตาม chapter (mp4, ไม่มีเสียง)" ของวิดีโอไม่มีเสียง (owner ruling 2026-10-02)
+_CHAPTER_DIRS = (
+    *(files.chapter_dir_name(ext) for ext in _CHAPTER_EXTS),
+    files.chapter_dir_name("mp4", no_audio=True),
+)
 # stop รอแอพปิดเองไม่เกินเท่านี้ก่อน kill ต้องนานกว่า หยุดคิว + uvicorn รอ request ค้าง (มีเทสคุม)
 STOP_WAIT_S = 10.0
 STOP_POLL_S = 0.1
@@ -298,6 +310,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
             subtitles=subtitles,
             cache_root=paths.cache,
             pinned=pinned.get,
+            sponsors=extractor,  # type: ignore[arg-type]  # ทั้งตัวจริงและตัวปลอมมี sponsor_segments (C4)
         )
         delays = {"delay_range": FAKE_DELAY_RANGE} if fake else {}
         queue = QueueRunner(
@@ -391,25 +404,51 @@ def sweep_interrupted_outputs(store: JobStore, output_root: Path, job_ids: Itera
         for folder, prefix in _clip_folders(root, job.video_id, job.title, job_group(job.params)):
             if folder not in seen:
                 seen.add(folder)
-                removed += _sweep_folder(folder, prefix, keep)
+                removed += _sweep_folder(folder, toolkit_name_pattern(prefix), keep)
+                for name in _CHAPTER_DIRS:
+                    chapters = folder / name
+                    removed += _sweep_folder(chapters, _CHAPTER_FILE, keep)
+                    _remove_if_empty(chapters)
     return removed
+
+
+def _prefixes(name: str) -> str:
+    """regex ของทุกคำขึ้นต้นที่ไม่ว่างของ name (files.plan_output ตัดชื่อไฟล์ให้สั้นลงเมื่อส่วนท้ายยาวเกิน 30 ตัว)"""
+    pattern = ""
+    for ch in reversed(name[1:]):
+        pattern = f"(?:{re.escape(ch)}{pattern})?"
+    return re.escape(name[:1]) + pattern
 
 
 def toolkit_name_pattern(prefix: str) -> re.Pattern[str]:
     """ชื่อไฟล์ที่ตัวทำงานในคิวสร้างได้จริงในโฟลเดอร์ของคลิป (ใช้ fullmatch) ต่อท้าย .part ได้
 
     สื่อ/ภาพ/zip: <ชื่อ>[ส่วนต่อท้ายของชนิดงาน][ (N)].<นามสกุล>  เช่น "ชื่อ (ไม่มีเสียง) (2).mp4"
-    ซับ: <ชื่อ>[ (N)].<ภาษา>.<รูปแบบ>  (files วางเลขกันซ้ำไว้หน้ารหัสภาษา)
+    M5 รอบ A: <ชื่อ>[ (ไม่มีเสียง)][ (ช่วงเวลา)][ (ตัดโฆษณา)][ (N)].<นามสกุล> (ต้องมีช่วงเวลาหรือตัดโฆษณา ชื่ออาจถูกตัดสั้น)
+    ซับ: <ชื่อ>[ (ช่วงเวลา)][ (N)].<ภาษา>.<รูปแบบ>  (files วางเลขกันซ้ำไว้หน้ารหัสภาษา)
     ชื่ออื่น (เช่นไฟล์ของผู้ใช้ "<ชื่อ> notes.docx") ไม่ตรง จึงไม่ถูกลบ"""
     name = re.escape(prefix)
+    shrunk = _prefixes(prefix)
     suffixes = "|".join(re.escape(s) for s in _SWEEP_SUFFIXES)
-    unique = r"(?: \((?:[2-9]|[1-9][0-9])\))?"  # " (2)" ... " (99)" จาก files._candidates
-    media = rf"{name}(?:{suffixes})?{unique}\.(?:{'|'.join(_SWEEP_MEDIA_EXTS)})"
-    subtitle = rf"{name}{unique}\.[A-Za-z0-9-]+\.(?:{'|'.join(_SWEEP_SUB_EXTS)})"
-    return re.compile(rf"(?:{media}|{subtitle})(?:\.part)?")
+    exts = "|".join(_SWEEP_MEDIA_EXTS)
+    subs = "|".join(_SWEEP_SUB_EXTS)
+    no_audio, ads = re.escape(NO_AUDIO_SUFFIX), re.escape(ADS_SUFFIX)
+    media = rf"{name}(?:{suffixes})?{_UNIQUE}\.(?:{exts})"
+    cut = rf"{shrunk}(?:{no_audio})?(?:{_RANGE_SUFFIX}(?:{ads})?|{ads}){_UNIQUE}\.(?:{exts})"
+    subtitle = rf"{name}{_UNIQUE}\.[A-Za-z0-9-]+\.(?:{subs})"
+    subtitle_range = rf"{shrunk}{_RANGE_SUFFIX}{_UNIQUE}\.[A-Za-z0-9-]+\.(?:{subs})"
+    return re.compile(rf"(?:{media}|{cut}|{subtitle}|{subtitle_range})(?:\.part)?")
 
 
-def _sweep_folder(folder: Path, prefix: str, keep: set[str]) -> int:
+def _remove_if_empty(folder: Path) -> None:
+    """โฟลเดอร์ย่อยของ chapter ที่ว่างหลังล้างไฟล์ค้าง = ลบทิ้ง (มีไฟล์อื่นอยู่ = rmdir ไม่สำเร็จ ปล่อยไว้)"""
+    try:
+        folder.rmdir()
+    except OSError:
+        return
+
+
+def _sweep_folder(folder: Path, ours: re.Pattern[str], keep: set[str]) -> int:
     try:
         children = list(folder.iterdir())
     except FileNotFoundError:
@@ -417,7 +456,6 @@ def _sweep_folder(folder: Path, prefix: str, keep: set[str]) -> int:
     except OSError as exc:
         log.warning("อ่านโฟลเดอร์ผลลัพธ์ไม่ได้ตอนล้างไฟล์ค้าง: %s", type(exc).__name__)
         return 0
-    ours = toolkit_name_pattern(prefix)
     removed = 0
     for child in children:
         if not ours.fullmatch(child.name) or os.path.normcase(str(child)) in keep:

@@ -171,7 +171,16 @@ export type JobKind = "video" | "audio" | "subtitle" | "frames_sharp" | "contact
 
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
 
-export type JobStage = "probing" | "downloading_video" | "downloading_audio" | "merging" | "converting" | "writing"
+export type JobStage =
+  | "probing"
+  | "downloading_video"
+  | "downloading_audio"
+  | "merging"
+  | "converting"
+  | "writing"
+  | "cutting"
+  | "cutting_ads"
+  | `splitting:${number}/${number}`
 
 export type JobError = { code: string; message: string; detail?: string | null }
 
@@ -216,13 +225,32 @@ export type JobPatch = { id: string } & { [K in keyof Omit<Job, "id">]?: Job[K] 
  */
 export type GroupFolder = { folder?: string }
 
+/** ช่วงเวลาของงาน (M5 รอบ A): มิลลิวินาที เต็มวินาที เริ่มก่อนจบอย่างน้อย 1 วินาที */
+export type TimeRange = { startMs: number; endMs: number }
+
+/** หมวด SponsorBlock ที่ตัดได้ (ตรงกับ core/jobs.SPONSORBLOCK_CATEGORIES) */
+export type SponsorCategory =
+  | "sponsor"
+  | "selfpromo"
+  | "interaction"
+  | "intro"
+  | "outro"
+  | "preview"
+  | "filler"
+  | "music_offtopic"
+
 export type VideoJobParams = GroupFolder & {
   /** ไม่มีคีย์ = เลือกให้อัตโนมัติ */
   formatId?: string
   maxQuality: boolean
   /** เพดานความละเอียดของโหมดเปิดได้ทุกที่ (ค่าเริ่มต้น 1080) */
   maxHeight?: 720 | 1080
-  splitChapters: false
+  /** แยกไฟล์ตาม chapter (M5 รอบ A) ใช้คู่กับ range, sponsorblock และ embedSubs ไม่ได้ */
+  splitChapters: boolean
+  /** โหลดเฉพาะช่วง (M5 รอบ A) */
+  range?: TimeRange
+  /** หมวดโฆษณาที่ตัด (M5 รอบ A) ไม่มีคีย์ = ไม่ตัด */
+  sponsorblock?: SponsorCategory[]
   noAudio: boolean
   /** "original" หรือรหัสภาษา เช่น "en-US" */
   audioLanguage: string
@@ -234,11 +262,16 @@ export type VideoJobParams = GroupFolder & {
 export type AudioJobParams = GroupFolder & {
   format: "m4a" | "mp3" | "wav"
   mp3Kbps?: 128 | 192 | 320
-  splitChapters: false
+  /** แยกไฟล์ตาม chapter (M5 รอบ A) ใช้คู่กับ range และ sponsorblock ไม่ได้ */
+  splitChapters: boolean
+  /** โหลดเฉพาะช่วง (M5 รอบ A) */
+  range?: TimeRange
+  /** หมวดโฆษณาที่ตัด (M5 รอบ A) ไม่มีคีย์ = ไม่ตัด */
+  sponsorblock?: SponsorCategory[]
   audioLanguage: string
 }
 
-export type SubtitleJobParams = GroupFolder & { trackId?: string; format: SubExportFormat; options: SubOptions }
+export type SubtitleJobParams = GroupFolder & { trackId?: string; format: SubExportFormat; options: SubOptions; range?: TimeRange }
 
 export type ContactSheetJobParams = GroupFolder & { source: "fast"; columns: 5 }
 

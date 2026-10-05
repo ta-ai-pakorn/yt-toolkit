@@ -10,10 +10,10 @@ import shutil
 import subprocess
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from .cancel import JobCancelled
 from .yterrors import YtError
@@ -26,6 +26,13 @@ _ISO639_2 = {
 
 _STDERR_TAIL_CHARS = 4000
 _POLL_SECONDS = 0.1
+
+CutMode = Literal["exact", "fast"]
+CutTarget = Literal["mp4", "m4a", "wav"]
+# ตัดแบบแม่นยำ (D1) เข้ารหัสภาพใหม่ด้วย H.264 ที่เปิดได้ทุกที่ ความเร็วพอดีกับโน้ตบุ๊กทั่วไป
+X264_PRESET = "veryfast"
+X264_CRF = 20
+CUT_AAC_KBPS = 192
 
 
 def iso639_2(lang: str | None) -> str:
@@ -47,6 +54,7 @@ class MediaMeta:
     comment: str  # https://www.youtube.com/watch?v=<id>
     date: str | None  # YYYY-MM-DD
     duration_s: float | None  # ใช้คิดความคืบหน้าเท่านั้น
+    track: str | None = None  # "3/12" ของไฟล์แยกตาม chapter
 
 
 @dataclass(frozen=True)
@@ -110,6 +118,19 @@ class MediaTools(Protocol):
         on_progress: Callable[[float | None], None],
     ) -> None: ...
 
+    def cut(
+        self,
+        src: Path,
+        dst: Path,
+        intervals: Sequence[tuple[int, int]],
+        *,
+        mode: CutMode,
+        target: CutTarget,
+        has_audio: bool,
+        cancel: Callable[[], bool],
+        on_progress: Callable[[float | None], None],
+    ) -> None: ...
+
 
 # ---------- ตัวสร้างอาร์กิวเมนต์ (ฟังก์ชันล้วน) ----------
 
@@ -122,6 +143,8 @@ def _meta_args(meta: MediaMeta) -> list[str]:
     args = ["-metadata", f"title={meta.title}", "-metadata", f"artist={meta.artist}", "-metadata", f"comment={meta.comment}"]
     if meta.date:
         args += ["-metadata", f"date={meta.date}"]
+    if meta.track:
+        args += ["-metadata", f"track={meta.track}"]
     return args
 
 
@@ -222,12 +245,86 @@ def wav_args(
     audio_language: str | None,
 ) -> list[str]:
     # ไม่ใส่ -ar: อัตราสุ่มตัวอย่างคงเดิม  audio_language รับไว้ให้ลายเซ็นเหมือนตัวอื่น (wav ไม่มีแท็กภาษา)
-    return (
-        _head(ffmpeg, src)
-        + ["-map", "0:a:0", "-c:a", "pcm_s16le"]
-        + ["-metadata", f"title={meta.title}", "-metadata", f"artist={meta.artist}"]
-        + [str(dst)]
-    )
+    tags = ["-metadata", f"title={meta.title}", "-metadata", f"artist={meta.artist}"]
+    if meta.track:
+        tags += ["-metadata", f"track={meta.track}"]
+    return _head(ffmpeg, src) + ["-map", "0:a:0", "-c:a", "pcm_s16le"] + tags + [str(dst)]
+
+
+def _seconds(ms: int) -> str:
+    return f"{ms / 1000:.3f}"
+
+
+def _check_intervals(intervals: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
+    clean = [(int(s), int(e)) for s, e in intervals]
+    if not clean or any(s < 0 or e <= s for s, e in clean):
+        raise ValueError(f"bad cut intervals: {intervals!r}")
+    return clean
+
+
+def _check_cut(intervals: Sequence[tuple[int, int]], mode: CutMode, target: CutTarget) -> list[tuple[int, int]]:
+    """กฎเดียวกันทั้งตัวจริง (cut_args) และตัวปลอม: ใช้ผิดในโหมดปลอมก็พังเหมือนของจริง"""
+    clean = _check_intervals(intervals)
+    if mode == "fast" and (target != "mp4" or len(clean) != 1):
+        raise ValueError("fast cut takes exactly one interval of an mp4")
+    return clean
+
+
+def cut_args(
+    ffmpeg: str,
+    src: Path,
+    dst: Path,
+    intervals: Sequence[tuple[int, int]],
+    *,
+    mode: CutMode,
+    target: CutTarget,
+    has_audio: bool,
+) -> list[str]:
+    """ตัดช่วง (มิลลิวินาทีบนเส้นเวลาต้นฉบับ) ลงไฟล์ระหว่างทาง (C3)
+
+    - fast: mp4 ช่วงเดียว คัดลอกสตรีม เริ่มที่ keyframe ก่อนจุดตัด (แยก chapter ของวิดีโอ D6)
+    - exact + m4a ช่วงเดียว: คัดลอกสตรีม (คลาดไม่เกินหนึ่งเฟรม AAC ~23 ms)
+    - exact อื่น ๆ: แต่ละช่วงเป็น input ของตัวเอง (-ss ก่อน -i = seek แม่นยำเมื่อเข้ารหัสใหม่) แล้วต่อด้วย concat
+      mp4 = H.264 + AAC (หรือไม่มีเสียง) · m4a = AAC · wav = PCM (ให้ to_mp3/to_wav แปลงต่อ)
+    """
+    clean = _check_cut(intervals, mode, target)
+    head = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"]
+    if mode == "fast":
+        ((s, e),) = clean
+        maps = ["-map", "0:v:0"] + (["-map", "0:a?"] if has_audio else [])
+        return head + ["-ss", _seconds(s), "-t", _seconds(e - s), "-i", str(src)] + maps + [
+            "-c", "copy", "-avoid_negative_ts", "make_zero", "-f", "mp4", str(dst)]  # fmt: skip
+    if target == "m4a" and len(clean) == 1:
+        ((s, e),) = clean
+        return head + ["-ss", _seconds(s), "-t", _seconds(e - s), "-i", str(src),
+                       "-map", "0:a:0", "-c", "copy", "-f", "mp4", str(dst)]  # fmt: skip
+    video = target == "mp4"
+    audio = has_audio or target != "mp4"
+    args = list(head)
+    chains: list[str] = []
+    pads: list[str] = []
+    for i, (s, e) in enumerate(clean):
+        args += ["-ss", _seconds(s), "-t", _seconds(e - s), "-i", str(src)]
+        if video:
+            chains.append(f"[{i}:v:0]setpts=PTS-STARTPTS[v{i}]")
+            pads.append(f"[v{i}]")
+        if audio:
+            chains.append(f"[{i}:a:0]asetpts=PTS-STARTPTS[a{i}]")
+            pads.append(f"[a{i}]")
+    outs = ("[v]" if video else "") + ("[a]" if audio else "")
+    chains.append("".join(pads) + f"concat=n={len(clean)}:v={int(video)}:a={int(audio)}{outs}")
+    args += ["-filter_complex", ";".join(chains)]
+    if video:
+        args += ["-map", "[v]"]
+    if audio:
+        args += ["-map", "[a]"]
+    if video:
+        args += ["-c:v", "libx264", "-preset", X264_PRESET, "-crf", str(X264_CRF), "-pix_fmt", "yuv420p"]
+    if audio:
+        args += ["-c:a", "pcm_s16le"] if target == "wav" else ["-c:a", "aac", "-b:a", f"{CUT_AAC_KBPS}k"]
+    else:
+        args += ["-an"]
+    return args + ["-f", "wav" if target == "wav" else "mp4", str(dst)]
 
 
 # ---------- ตัวรัน ffmpeg ----------
@@ -418,15 +515,46 @@ class FfmpegTools:
         args = wav_args(self._require(), src.resolve(), dst.resolve(), meta, audio_language=audio_language)
         self._run(args, meta, cancel, on_progress)
 
+    def cut(
+        self,
+        src: Path,
+        dst: Path,
+        intervals: Sequence[tuple[int, int]],
+        *,
+        mode: CutMode,
+        target: CutTarget,
+        has_audio: bool,
+        cancel: Callable[[], bool],
+        on_progress: Callable[[float | None], None],
+    ) -> None:
+        args = cut_args(self._require(), src.resolve(), dst.resolve(), intervals,
+                        mode=mode, target=target, has_audio=has_audio)  # fmt: skip
+        kept_s = sum(e - s for s, e in intervals) / 1000
+        run_ffmpeg(args, duration_s=kept_s, cancel=cancel, on_progress=on_progress, popen_flags=self._popen_flags)
+
+
+@dataclass(frozen=True)
+class CutCall:
+    """การตัดหนึ่งครั้งของ FakeMediaTools (เทสตรวจช่วงที่ตัด ความยาวของไฟล์ปลอมไม่ตรงกับช่วงที่ตัด)"""
+
+    src_name: str
+    dst_name: str
+    intervals: tuple[tuple[int, int], ...]
+    mode: str
+    target: str
+    has_audio: bool
+
 
 class FakeMediaTools:
     """MediaTools ที่ไม่ใช้ ffmpeg: คัดลอกไฟล์ (ใช้ใน e2e และเทสที่ไม่มี ffmpeg)
 
     mp4 / m4a คัดลอก `src` ไป `dst` ส่วน mp3 / wav เขียนสำเนาของ audio.mp3 / audio.wav ใน `media_root`
+    ตัดช่วง = คัดลอกไฟล์ (เป้าหมาย wav = audio.wav) และจดการเรียกไว้ใน cuts
     """
 
     def __init__(self, media_root: Path) -> None:
         self._root = media_root
+        self.cuts: list[CutCall] = []
 
     def available(self) -> bool:
         return True
@@ -499,3 +627,21 @@ class FakeMediaTools:
         on_progress: Callable[[float | None], None],
     ) -> None:
         self._copy(self._root / "audio.wav", dst, cancel, on_progress)
+
+    def cut(
+        self,
+        src: Path,
+        dst: Path,
+        intervals: Sequence[tuple[int, int]],
+        *,
+        mode: CutMode,
+        target: CutTarget,
+        has_audio: bool,
+        cancel: Callable[[], bool],
+        on_progress: Callable[[float | None], None],
+    ) -> None:
+        clean = _check_cut(intervals, mode, target)
+        if cancel():
+            raise JobCancelled()
+        self.cuts.append(CutCall(src.name, dst.name, tuple(clean), mode, target, has_audio))
+        self._copy(self._root / "audio.wav" if target == "wav" else src, dst, cancel, on_progress)

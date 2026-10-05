@@ -11,10 +11,12 @@ from yttoolkit.api.errors import redact_home
 from yttoolkit.api.jobs import ITEMS_MAX, ORDER_IDS_MAX
 from yttoolkit.core.db import Database
 from yttoolkit.core.events import Event, EventBus
+from yttoolkit.core.extractor import FakeExtractor
 from yttoolkit.core.jobs import JobResult, JobStore, NewJob, OutputFile
 from yttoolkit.core.media import FakeMediaTools
 from yttoolkit.core.queue import QueueRunner
 from yttoolkit.core.settings import SettingsStore
+from yttoolkit.core.videos import VideoService
 from yttoolkit.core.yterrors import MESSAGES
 
 AUTH = {"X-Toolkit-Token": "test-token", "Origin": "http://127.0.0.1:8787"}
@@ -142,13 +144,10 @@ def test_post_normalises_defaults(env):
     [
         {"videoId": "aqz-KE-bpKQ", "kind": "frames_sharp", "params": {}},
         {"videoId": "aqz-KE-bpKQ", "kind": "video", "params": {"range": {"startS": 0, "endS": 5}}},
-        {"videoId": "aqz-KE-bpKQ", "kind": "video", "params": {"splitChapters": True}},
-        {"videoId": "aqz-KE-bpKQ", "kind": "audio", "params": {"format": "m4a", "splitChapters": True}},
         {"videoId": "aqz-KE-bpKQ", "kind": "video", "params": {"embedSubs": "o.th"}},
         # AC-VID-10 part 2: embedded subtitles together with split by chapter
         {"videoId": "aqz-KE-bpKQ", "kind": "video",
          "params": {"embedSubs": "o.th", "subOptions": SUB_OPTIONS, "splitChapters": True}},
-        {"videoId": "aqz-KE-bpKQ", "kind": "video", "params": {"sponsorblock": ["sponsor"]}},
         {"videoId": "aqz-KE-bpKQ", "kind": "video", "params": {"useCookies": True}},
         {"videoId": "aqz-KE-bpKQ", "kind": "video", "params": {"formatId": "137; rm"}},
         {"videoId": "aqz-KE-bpKQ", "kind": "video", "params": {"audioLanguage": "thai language"}},
@@ -169,6 +168,128 @@ def test_post_rejects_bad_items(env, item):
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "E_BAD_REQUEST"
     assert env.store.pending_count() == 0
+
+
+# ---------- POST /jobs: ตัวเลือกขั้นสูง (M5 รอบ A) ----------
+
+VIDEO = {"maxQuality": False, "splitChapters": False, "noAudio": False, "audioLanguage": "original"}
+RANGE = {"startMs": 90_000, "endMs": 300_000}
+
+
+def video_item(video_id: str = "aqz-KE-bpKQ", **params) -> dict:
+    return {"videoId": video_id, "kind": "video", "params": {**VIDEO, **params}}
+
+
+def test_post_accepts_m5a_advanced_params(env):
+    items = [
+        video_item(range=RANGE),
+        video_item(sponsorblock=["sponsor", "filler"]),
+        video_item("jNQXAC9IVRw", splitChapters=True),
+        {"videoId": "aqz-KE-bpKQ", "kind": "audio",
+         "params": {"format": "mp3", "range": RANGE, "sponsorblock": ["intro"]}},
+        {"videoId": "jNQXAC9IVRw", "kind": "audio", "params": {"format": "m4a", "splitChapters": True}},
+        {"videoId": "88o5Sk8_m1Y", "kind": "subtitle",
+         "params": {"trackId": "a.th-orig", "format": "txt", "options": SUB_OPTIONS, "range": RANGE}},
+    ]
+    resp = env.client().post("/api/jobs", json={"items": items}, headers=AUTH)
+    assert resp.status_code == 200, resp.text
+    stored = [job["params"] for job in resp.json()["jobs"]]
+    assert stored[0] == {**VIDEO, "range": RANGE}
+    assert stored[1] == {**VIDEO, "sponsorblock": ["sponsor", "filler"]}
+    assert stored[2] == {**VIDEO, "splitChapters": True}
+    assert stored[3] == {"format": "mp3", "mp3Kbps": 192, "splitChapters": False, "audioLanguage": "original",
+                         "range": RANGE, "sponsorblock": ["intro"]}
+    assert stored[4] == {"format": "m4a", "splitChapters": True, "audioLanguage": "original"}
+    assert stored[5]["range"] == RANGE
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"range": {"startMs": 90_000}},
+        {"range": {**RANGE, "x": 1}},
+        {"range": {"startMs": 90_500, "endMs": 300_000}},
+        {"range": {"startMs": -1000, "endMs": 3000}},
+        {"range": {"startMs": 5000, "endMs": 5000}},
+        {"range": {"startMs": 6000, "endMs": 5000}},
+        {"range": {"startMs": 1000.0, "endMs": 5000}},
+        {"range": {"startMs": True, "endMs": 5000}},
+        {"range": {"startMs": "1000", "endMs": 5000}},
+        {"sponsorblock": []},
+        {"sponsorblock": ["sponsor", "sponsor"]},
+        {"sponsorblock": ["poi_highlight"]},
+        {"sponsorblock": "sponsor"},
+        {"splitChapters": "yes"},
+        {"splitChapters": True, "range": RANGE},
+        {"splitChapters": True, "sponsorblock": ["sponsor"]},
+        {"splitChapters": True, "embedSubs": "o.th", "subOptions": SUB_OPTIONS},
+    ],
+)
+def test_post_rejects_bad_advanced_video_params(env, params):
+    resp = env.client().post("/api/jobs", json={"items": [video_item(**params)]}, headers=AUTH)
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "E_BAD_REQUEST"
+    assert env.store.pending_count() == 0
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"videoId": "aqz-KE-bpKQ", "kind": "audio", "params": {"format": "m4a", "splitChapters": True, "range": RANGE}},
+        {"videoId": "aqz-KE-bpKQ", "kind": "subtitle", "params": {"format": "md", "options": SUB_OPTIONS, "range": RANGE}},
+        {"videoId": "aqz-KE-bpKQ", "kind": "subtitle",
+         "params": {"format": "srt", "options": SUB_OPTIONS, "sponsorblock": ["sponsor"]}},
+        {"videoId": "aqz-KE-bpKQ", "kind": "subtitle",
+         "params": {"format": "srt", "options": SUB_OPTIONS, "splitChapters": True}},
+    ],
+)
+def test_post_rejects_bad_advanced_audio_and_subtitle_params(env, item):
+    resp = env.client().post("/api/jobs", json={"items": [item]}, headers=AUTH)
+    assert resp.status_code == 422
+
+
+@pytest.fixture
+def cached(env):
+    """AppContext overrides with a VideoService whose probe cache holds two clips
+    (the videos router also needs extractor and cache_root, see api/videos.build_videos_router)"""
+    fake = FakeExtractor(FIXTURES)
+    videos = VideoService(env.db, fake)
+    videos.get("aqz-KE-bpKQ")  # 635 s, no chapters
+    videos.get("jNQXAC9IVRw")  # 19 s, 3 chapters
+    return {"videos": videos, "extractor": fake, "cache_root": env.tmp / "cache"}
+
+
+@pytest.mark.parametrize(
+    ("item", "status"),
+    [
+        (video_item(range={"startMs": 0, "endMs": 635_000}), 200),
+        (video_item(range={"startMs": 600_000, "endMs": 636_000}), 422),
+        (video_item("jNQXAC9IVRw", range={"startMs": 0, "endMs": 19_000}), 200),
+        (video_item("jNQXAC9IVRw", range={"startMs": 0, "endMs": 20_000}), 422),
+        (video_item(splitChapters=True), 422),
+        (video_item("jNQXAC9IVRw", splitChapters=True), 200),
+        ({"videoId": "aqz-KE-bpKQ", "kind": "audio", "params": {"format": "wav", "splitChapters": True}}, 422),
+        (video_item("88o5Sk8_m1Y", range={"startMs": 0, "endMs": 999_000}), 200),  # not cached: the handler checks
+        (video_item("88o5Sk8_m1Y", splitChapters=True), 200),
+    ],
+)
+def test_post_checks_range_and_chapters_against_a_cached_probe(env, cached, item, status):
+    resp = env.client(**cached).post("/api/jobs", json={"items": [item]}, headers=AUTH)
+    assert resp.status_code == status, resp.text
+    if status == 422:
+        assert resp.json()["error"]["code"] == "E_BAD_REQUEST"
+        assert item["videoId"] in resp.json()["error"]["detail"]
+        assert env.store.pending_count() == 0
+
+
+def test_post_rejects_a_range_on_a_clip_without_a_known_duration(env, cached, monkeypatch):
+    videos = cached["videos"]
+    monkeypatch.setattr(videos, "peek_cached", lambda video_id: {"durationS": 0, "isLive": False, "chapters": []})
+    resp = env.client(**cached).post("/api/jobs", json={"items": [video_item(range=RANGE)]}, headers=AUTH)
+    assert resp.status_code == 422
+    monkeypatch.setattr(videos, "peek_cached", lambda video_id: {"durationS": 900, "isLive": True, "chapters": []})
+    resp = env.client(**cached).post("/api/jobs", json={"items": [video_item(range=RANGE)]}, headers=AUTH)
+    assert resp.status_code == 422
 
 
 def test_post_rejects_empty_and_oversized_lists(env):

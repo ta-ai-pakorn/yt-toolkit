@@ -1,25 +1,43 @@
 """API คิวงาน (สัญญา C4): สร้างงาน ดูรายการ ยกเลิก ลองใหม่ เรียงคิว ทำคิวต่อ และส่งไฟล์ผลลัพธ์
 
 route เป็น `def` ธรรมดา (แตะฐานข้อมูลและดิสก์) FastAPI จึงส่งไปรันใน threadpool
-ค่าของงานแต่ละชนิด (C3) ตรวจด้วย pydantic: key ที่ไม่รู้จัก ช่วงเวลา แยกตามบท และภาพคม = 422 ใน M4
+ค่าของงานแต่ละชนิด (C3 + M5 รอบ A) ตรวจด้วย pydantic: key ที่ไม่รู้จัก คุกกี้ และภาพคม = 422
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import UTC
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from ..core.download import FFMPEG_KINDS
-from ..core.jobs import InvalidTransition, Job, NewJob, OutputFile
+from ..core.jobs import (
+    MIN_RANGE_MS,
+    RANGE_TOLERANCE_MS,
+    SPONSORBLOCK_CATEGORIES,
+    InvalidTransition,
+    Job,
+    NewJob,
+    OutputFile,
+)
 from ..core.srt_builder import options_from_dict
 from ..core.yterrors import MESSAGES
-from .errors import error_response, redact_home
+from .errors import BAD_REQUEST_MESSAGE, error_response, redact_home
 from .safepath import safe_parts
 from .videos import attachment_header
 
@@ -93,6 +111,50 @@ def _audio_language(value: str) -> str:
     return value
 
 
+class RangeModel(_Strict):
+    """ช่วงเวลาของงาน (M5 รอบ A): มิลลิวินาทีเต็มวินาที เริ่มก่อนจบอย่างน้อย 1 วินาที"""
+
+    startMs: StrictInt = Field(ge=0)
+    endMs: StrictInt
+
+    @model_validator(mode="after")
+    def _whole_seconds(self) -> RangeModel:
+        if self.startMs % 1000 or self.endMs % 1000:
+            raise ValueError("range must be whole seconds (multiples of 1000 ms)")
+        if self.endMs - self.startMs < MIN_RANGE_MS:
+            raise ValueError("range must start before it ends and last at least 1 second")
+        return self
+
+
+def _sponsor_categories(value: list[str] | None) -> list[str] | None:
+    if value is None:
+        return None
+    if not value:
+        raise ValueError("sponsorblock must list at least one category")
+    if len(set(value)) != len(value):
+        raise ValueError("sponsorblock categories must be unique")
+    unknown = [v for v in value if v not in SPONSORBLOCK_CATEGORIES]
+    if unknown:
+        raise ValueError(f"unknown sponsorblock categories: {unknown}")
+    return value
+
+
+class _CutOptions(_Grouped):
+    """ตัวเลือกขั้นสูงของงานวิดีโอและเสียง: แยกตาม chapter ใช้คู่กับช่วงเวลาหรือตัดโฆษณาไม่ได้"""
+
+    range: RangeModel | None = None
+    sponsorblock: list[str] | None = None
+    splitChapters: StrictBool = False
+
+    _sponsorblock = field_validator("sponsorblock")(_sponsor_categories)
+
+    @model_validator(mode="after")
+    def _chapters_alone(self) -> _CutOptions:
+        if self.splitChapters and (self.range is not None or self.sponsorblock is not None):
+            raise ValueError("splitChapters cannot be combined with range or sponsorblock")
+        return self
+
+
 class SubOptionsModel(_Strict):
     maxChars: int
     lines: int
@@ -107,11 +169,10 @@ class SubOptionsModel(_Strict):
         return self
 
 
-class VideoParams(_Grouped):
+class VideoParams(_CutOptions):
     formatId: str | None = Field(None, pattern=_FORMAT_ID)
     maxQuality: bool = False
     maxHeight: Literal[720, 1080] | None = None
-    splitChapters: Literal[False] = False  # แยกตามบทมาใน M5
     noAudio: bool = False
     audioLanguage: str = "original"
     embedSubs: str | None = Field(None, pattern=_TRACK_ID)
@@ -120,16 +181,17 @@ class VideoParams(_Grouped):
     _language = field_validator("audioLanguage")(_audio_language)
 
     @model_validator(mode="after")
-    def _embed_needs_options(self) -> VideoParams:
+    def _embed_rules(self) -> VideoParams:
         if self.embedSubs is not None and self.subOptions is None:
             raise ValueError("embedSubs requires subOptions")
+        if self.embedSubs is not None and self.splitChapters:
+            raise ValueError("embedSubs cannot be combined with splitChapters")  # AC-VID-10 part 2
         return self
 
 
-class AudioParams(_Grouped):
+class AudioParams(_CutOptions):
     format: Literal["m4a", "mp3", "wav"]
     mp3Kbps: Literal[128, 192, 320] | None = None
-    splitChapters: Literal[False] = False
     audioLanguage: str = "original"
 
     _language = field_validator("audioLanguage")(_audio_language)
@@ -147,6 +209,13 @@ class SubtitleParams(_Grouped):
     trackId: str | None = Field(None, pattern=_TRACK_ID)
     format: Literal["srt", "txt", "md"]
     options: SubOptionsModel
+    range: RangeModel | None = None
+
+    @model_validator(mode="after")
+    def _range_formats(self) -> SubtitleParams:
+        if self.range is not None and self.format == "md":
+            raise ValueError("range works with srt and txt only")
+        return self
 
 
 class ContactSheetParams(_Grouped):
@@ -200,6 +269,23 @@ class PostJobsBody(_Strict):
 
 class OrderBody(_Strict):
     ids: list[str] = Field(min_length=1, max_length=ORDER_IDS_MAX)
+
+
+def clip_problem(params: Mapping[str, Any], info: Mapping[str, Any] | None) -> str | None:
+    """ตรวจช่วงเวลาและการแยก chapter กับข้อมูลคลิปที่เก็บไว้ (C1) ไม่มีข้อมูล = None (ตัวทำงานตรวจอีกรอบ)"""
+    rng = params.get("range")
+    split = bool(params.get("splitChapters"))
+    if info is None or (rng is None and not split):
+        return None
+    if rng is not None:
+        duration_ms = int(info.get("durationS") or 0) * 1000
+        if info.get("isLive") or duration_ms <= 0:
+            return "range needs a clip with a known duration"
+        if rng["endMs"] > duration_ms + RANGE_TOLERANCE_MS:
+            return f"range ends after the clip ({duration_ms} ms)"
+    if split and len(info.get("chapters") or []) < 2:
+        return "splitChapters needs a clip with at least 2 chapters"
+    return None
 
 
 # ---------- ไฟล์ผลลัพธ์ ----------
@@ -268,6 +354,14 @@ def build_jobs_router(ctx: AppContext) -> APIRouter:
         if any(item.kind in FFMPEG_KINDS for item in body.items):
             if ctx.media is None or not ctx.media.available():
                 return error_response(409, "E_FFMPEG_MISSING", MESSAGES["E_FFMPEG_MISSING"])
+        videos = ctx.videos
+        if videos is not None:
+            for item in body.items:
+                if "range" not in item.params and not item.params.get("splitChapters"):
+                    continue
+                problem = clip_problem(item.params, videos.peek_cached(item.videoId))
+                if problem is not None:
+                    return error_response(422, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, f"{item.videoId}: {problem}")
         jobs = queue.enqueue([item.to_new_job() for item in body.items])
         return {"jobs": [api(job) for job in jobs]}
 

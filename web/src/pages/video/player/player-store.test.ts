@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import {
   __resetPlayerForTests,
   getPlayerState,
+  markTimeMs,
   playerActions,
   playerAdapterHooks,
   type PlayerAdapter,
@@ -174,5 +175,19 @@ describe("ปิด / เปลี่ยนคลิป", () => {
     playerAdapterHooks.onStatus("paused")
     playerActions.pause()
     expect(current.calls).toEqual([["pause"]])
+  })
+})
+
+describe("เวลาที่ตัวเล่นอยู่หรือกำลังจะไป (ตั้งจุดเริ่ม/จบ)", () => {
+  it("กำลังโหลดหลังขอเล่นจากเวลาหนึ่ง = เวลาที่ขอไว้ ไม่ใช่ 0:00", () => {
+    playerActions.playFrom(42_000)
+    expect(getPlayerState().currentMs).toBe(0)
+    expect(markTimeMs()).toBe(42_000)
+  })
+
+  it("ตัวเล่นพร้อมแล้ว = เวลาปัจจุบัน", () => {
+    readyAdapter()
+    playerAdapterHooks.onTime(7_500)
+    expect(markTimeMs()).toBe(7_500)
   })
 })

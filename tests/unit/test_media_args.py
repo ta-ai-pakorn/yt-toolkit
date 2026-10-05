@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from yttoolkit.core.cancel import JobCancelled
 from yttoolkit.core.media import (
+    CutCall,
     FakeMediaTools,
     FfmpegTools,
     MediaMeta,
     SubtitleInput,
+    cut_args,
     iso639_2,
     m4a_args,
     mp3_args,
@@ -39,6 +42,7 @@ M = [
 ]  # fmt: skip
 COVER = Path("cover.jpg")
 SUB = SubtitleInput(path=Path("subs.srt"), language="tha")
+MEDIA_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "media"
 
 
 def _contains(args: list[str], seq: list[str]) -> bool:
@@ -272,3 +276,115 @@ def test_run_ffmpeg_missing_executable_is_ffmpeg_missing(tmp_path: Path) -> None
     with pytest.raises(YtError) as info:
         run_ffmpeg([str(tmp_path / "nope.exe")], duration_s=None, cancel=_never, on_progress=_ignore)
     assert info.value.code == "E_FFMPEG_MISSING"
+
+
+CUT_HEAD = [FF, "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"]
+X264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]
+
+
+def test_cut_exact_mp4_one_interval() -> None:
+    args = cut_args(FF, SRC, DST, [(90_000, 300_000)], mode="exact", target="mp4", has_audio=True)
+    assert args == CUT_HEAD + [
+        "-ss", "90.000", "-t", "210.000", "-i", str(SRC),
+        "-filter_complex",
+        "[0:v:0]setpts=PTS-STARTPTS[v0];[0:a:0]asetpts=PTS-STARTPTS[a0];[v0][a0]concat=n=1:v=1:a=1[v][a]",
+        "-map", "[v]", "-map", "[a]", *X264, "-c:a", "aac", "-b:a", "192k", "-f", "mp4", str(DST),
+    ]  # fmt: skip
+
+
+def test_cut_exact_mp4_two_intervals_without_audio() -> None:
+    args = cut_args(FF, SRC, DST, [(0, 60_000), (90_000, 635_000)], mode="exact", target="mp4", has_audio=False)
+    assert args == CUT_HEAD + [
+        "-ss", "0.000", "-t", "60.000", "-i", str(SRC),
+        "-ss", "90.000", "-t", "545.000", "-i", str(SRC),
+        "-filter_complex", "[0:v:0]setpts=PTS-STARTPTS[v0];[1:v:0]setpts=PTS-STARTPTS[v1];[v0][v1]concat=n=2:v=1:a=0[v]",
+        "-map", "[v]", *X264, "-an", "-f", "mp4", str(DST),
+    ]  # fmt: skip
+
+
+def test_cut_fast_mp4_is_a_stream_copy() -> None:
+    args = cut_args(FF, SRC, DST, [(5_000, 17_000)], mode="fast", target="mp4", has_audio=True)
+    assert args == CUT_HEAD + [
+        "-ss", "5.000", "-t", "12.000", "-i", str(SRC), "-map", "0:v:0", "-map", "0:a?",
+        "-c", "copy", "-avoid_negative_ts", "make_zero", "-f", "mp4", str(DST),
+    ]  # fmt: skip
+    silent = cut_args(FF, SRC, DST, [(5_000, 17_000)], mode="fast", target="mp4", has_audio=False)
+    assert "0:a?" not in silent
+
+
+def test_cut_m4a_one_interval_copies_two_intervals_reencode() -> None:
+    m4a = Path("in.m4a")
+    one = cut_args(FF, m4a, DST, [(9_500, 11_500)], mode="exact", target="m4a", has_audio=True)
+    assert one == CUT_HEAD + ["-ss", "9.500", "-t", "2.000", "-i", str(m4a), "-map", "0:a:0", "-c", "copy",
+                              "-f", "mp4", str(DST)]
+    two = cut_args(FF, m4a, DST, [(9_500, 11_500), (19_000, 22_000)], mode="exact", target="m4a", has_audio=True)
+    assert two[-9:] == ["-map", "[a]", "-c:a", "aac", "-b:a", "192k", "-f", "mp4", str(DST)]
+    assert "[a0][a1]concat=n=2:v=0:a=1[a]" in two[two.index("-filter_complex") + 1]
+
+
+def test_cut_wav_is_pcm() -> None:
+    args = cut_args(FF, SRC, Path("cut.wav"), [(1_000, 3_000)], mode="exact", target="wav", has_audio=True)
+    assert args[-7:] == ["-map", "[a]", "-c:a", "pcm_s16le", "-f", "wav", "cut.wav"]
+    assert args[args.index("-filter_complex") + 1] == "[0:a:0]asetpts=PTS-STARTPTS[a0];[a0]concat=n=1:v=0:a=1[a]"
+
+
+@pytest.mark.parametrize(
+    ("intervals", "mode", "target"),
+    [([], "exact", "mp4"), ([(5, 5)], "exact", "mp4"), ([(-1000, 0)], "exact", "wav"),
+     ([(0, 1000), (2000, 3000)], "fast", "mp4"), ([(0, 1000)], "fast", "m4a")],
+)
+def test_cut_rejects_bad_requests(intervals, mode, target) -> None:
+    with pytest.raises(ValueError):
+        cut_args(FF, SRC, DST, intervals, mode=mode, target=target, has_audio=True)
+
+
+def test_track_metadata_only_when_set() -> None:
+    assert "track=3/12" not in mp4_args(FF, SRC, DST, META, cover=None, subtitle=None, audio_language=None)
+    with_track = replace(META, track="3/12")
+    for args in (
+        mp4_args(FF, SRC, DST, with_track, cover=None, subtitle=None, audio_language=None),
+        m4a_args(FF, SRC, DST, with_track, cover=None, audio_language=None),
+        mp3_args(FF, SRC, DST, with_track, kbps=192, cover=None, audio_language=None),
+        wav_args(FF, SRC, DST, with_track, audio_language=None),
+    ):
+        assert _contains(args, ["-metadata", "track=3/12"])
+
+
+def test_fake_cut_records_and_copies(tmp_path: Path) -> None:
+    fake = FakeMediaTools(MEDIA_ROOT)
+    src = tmp_path / "media.mp4"
+    src.write_bytes(b"video")
+    seen: list[float | None] = []
+    fake.cut(src, tmp_path / "cut.mp4", [(0, 1000), (2000, 3000)], mode="exact", target="mp4", has_audio=False,
+             cancel=lambda: False, on_progress=seen.append)
+    fake.cut(src, tmp_path / "cut.wav", [(0, 1000)], mode="exact", target="wav", has_audio=True,
+             cancel=lambda: False, on_progress=seen.append)
+    assert (tmp_path / "cut.mp4").read_bytes() == b"video"
+    assert (tmp_path / "cut.wav").read_bytes() == (MEDIA_ROOT / "audio.wav").read_bytes()
+    assert fake.cuts == [
+        CutCall("media.mp4", "cut.mp4", ((0, 1000), (2000, 3000)), "exact", "mp4", False),
+        CutCall("media.mp4", "cut.wav", ((0, 1000),), "exact", "wav", True),
+    ]
+    assert seen == [1.0, 1.0]
+    with pytest.raises(JobCancelled):
+        fake.cut(src, tmp_path / "x.mp4", [(0, 1000)], mode="fast", target="mp4", has_audio=True,
+                 cancel=lambda: True, on_progress=seen.append)
+
+
+@pytest.mark.parametrize(
+    ("intervals", "target"),
+    [([(0, 1000)], "m4a"), ([(0, 1000)], "wav"), ([(0, 1000), (2000, 3000)], "mp4")],
+)
+def test_fake_cut_rejects_what_the_real_cutter_rejects(tmp_path: Path, intervals, target) -> None:
+    # ตัวปลอมต้องพังเหมือนตัวจริง ไม่งั้น handler ที่เรียกผิดจะผ่านเทสในโหมดปลอม
+    with pytest.raises(ValueError) as real:
+        cut_args(FF, SRC, DST, intervals, mode="fast", target=target, has_audio=True)
+    fake = FakeMediaTools(MEDIA_ROOT)
+    src = tmp_path / "media.mp4"
+    src.write_bytes(b"video")
+    dst = tmp_path / f"cut.{target}"
+    with pytest.raises(ValueError) as faked:
+        fake.cut(src, dst, intervals, mode="fast", target=target, has_audio=True,
+                 cancel=lambda: False, on_progress=lambda _: None)
+    assert str(faked.value) == str(real.value) == "fast cut takes exactly one interval of an mp4"
+    assert fake.cuts == [] and not dst.exists()

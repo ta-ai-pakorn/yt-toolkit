@@ -6,17 +6,18 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
-import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
-import { Switch } from "@/components/ui/switch"
 import { fill, th } from "@/i18n/th"
-import { AUTO_QUALITY, buildVideoParams, qualityOptions, videoSizeEstimate, type QualityOption } from "@/lib/download-options"
+import { AUTO_QUALITY, buildVideoParams, keptVideoSize, qualityOptions, type QualityOption } from "@/lib/download-options"
 import { formatBytes } from "@/lib/format"
 import { useEnqueue } from "@/lib/jobs"
 import type { VideoInfo } from "@/lib/types"
 
+import { AdvancedSection } from "../advanced/advanced-section"
+import { SwitchRow } from "../advanced/switch-row"
+import { revealRangeErrors, useAdvancedChoice } from "../advanced/use-advanced-choice"
 import { originalLanguage } from "../subs/track-groups"
 import { subtitlesQuery } from "../subs-queries"
 import { useSubSettings } from "../subs-settings"
@@ -95,36 +96,6 @@ export function NoFormats({ title }: { title: string }) {
   )
 }
 
-type SwitchRowProps = {
-  label: string
-  hint: string
-  checked: boolean
-  onChange: (checked: boolean) => void
-  disabled?: boolean
-}
-
-/** สวิตช์พร้อมคำอธิบายใต้ชื่อ (คำอธิบายผูกกับสวิตช์ผ่าน aria-describedby) */
-function SwitchRow({ label, hint, checked, onChange, disabled = false }: SwitchRowProps) {
-  const id = useId()
-  const hintId = useId()
-  return (
-    <Field orientation="horizontal" className="items-start" data-disabled={disabled || undefined}>
-      <Switch
-        id={id}
-        checked={checked}
-        onCheckedChange={onChange}
-        disabled={disabled}
-        aria-describedby={hintId}
-        className="mt-0.5"
-      />
-      <FieldContent>
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
-        <FieldDescription id={hintId}>{hint}</FieldDescription>
-      </FieldContent>
-    </Field>
-  )
-}
-
 type Props = {
   video: VideoInfo
   /** ยิงคำขอรายการแทร็กซับ (ช่องฝังซับ) เมื่อข้อมูลคลิปมาแล้วเท่านั้น */
@@ -137,7 +108,7 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
   const qualityLabelId = useId()
   const embedLabelId = useId()
   const embedHintId = useId()
-  const { state, languages, remember, cap } = useDownloadState(video, choices)
+  const { state, languages, remember, cap, ready } = useDownloadState(video, choices)
   const subSettings = useSubSettings()
   const subtitles = useQuery(subtitlesQuery(video.videoId, enabled))
   const { enqueue, pending } = useEnqueue(ENQUEUE_MESSAGES)
@@ -146,20 +117,35 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
   // ความละเอียดสูงสุดเปิดอยู่: "อัตโนมัติ" = ภาพดีที่สุดของคลิป (อาจเป็น VP9/AV1) ไม่ใช่ "เปิดได้ทุกที่ 1080p"
   const autoLabel = state.maxQuality ? t.autoMax : fill(t.auto, { h: cap })
   const autoNotCompat = state.maxQuality && options.length > 0 && !options[0].compat
-  const labels = new Map<string, string>([[AUTO_QUALITY, autoLabel]])
-  for (const option of options) {
-    labels.set(option.value, optionLabel(option, videoSizeEstimate(video, option.value, state.noAudio, state.maxQuality, cap)))
-  }
-  const size = videoSizeEstimate(video, state.quality, state.noAudio, state.maxQuality, cap)
 
   const tracks = subtitles.data ? embeddableTracks(subtitles.data.tracks, originalLanguage(subtitles.data.tracks, video.audio)) : []
-  const embedSubs = resolveEmbed(choices.embedSubs, tracks)
+  const chosenEmbed = resolveEmbed(choices.embedSubs, tracks)
+  const advanced = useAdvancedChoice(video, "video", chosenEmbed !== null)
+  // ขนาดประมาณ (รายการคุณภาพ และข้อความใต้ปุ่ม) ย่อตามความยาวของช่วงที่ตั้ง (ตัดโฆษณา/แยก chapter = ไม่รู้ล่วงหน้า ใช้ขนาดเต็ม)
+  const estimate = (quality: string) => keptVideoSize(video, quality, state.noAudio, state.maxQuality, cap, advanced.keptS)
+  const labels = new Map<string, string>([[AUTO_QUALITY, autoLabel]])
+  for (const option of options) {
+    labels.set(option.value, optionLabel(option, estimate(option.value)))
+  }
+  // แยกตาม chapter เปิดอยู่ = ไม่ฝังซับ (ใช้คู่กันไม่ได้ AC-VID-10 ส่วนที่ 2) ช่องฝังซับกดไม่ได้พร้อมเหตุผล
+  const embedSubs = advanced.split ? null : chosenEmbed
   // รายการแทร็กยังไม่มา = ยังกดไม่ได้ (ไม่มีเหตุผลให้บอก) · มาแล้วไม่มีซับ หรือโหลดไม่สำเร็จ = กดไม่ได้พร้อมเหตุผล
-  const embedReason = subtitles.isPending ? null : tracks.length === 0 ? t.embedNoSubs : null
-  const embedDisabled = tracks.length === 0
+  const embedReason = advanced.split
+    ? th.advanced.blocked.chapters
+    : subtitles.isPending
+      ? null
+      : tracks.length === 0
+        ? t.embedNoSubs
+        : null
+  const embedDisabled = advanced.split || tracks.length === 0
+  const size = estimate(state.quality)
 
   async function submit() {
-    if (pending) return
+    if (pending || !ready) return
+    if (advanced.invalid) {
+      revealRangeErrors(advanced, video.videoId, "video")
+      return
+    }
     const params = buildVideoParams({
       quality: state.quality,
       maxQuality: state.maxQuality,
@@ -168,6 +154,7 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
       audioLanguage: state.audioLanguage,
       embedSubs,
       subOptions: subSettings.options,
+      advanced: advanced.params,
     })
     const ok = await enqueue([{ videoId: video.videoId, kind: "video", params, title: video.title }])
     if (ok) remember(videoPrefsPatch(state, video, languages, cap))
@@ -266,10 +253,12 @@ function VideoForm({ video, enabled, choices, choose }: Props) {
         </p>
       </div>
 
+      <AdvancedSection video={video} tab="video" choice={advanced} embedSubsOn={embedSubs !== null} />
+
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <Button disabled={pending} focusableWhenDisabled onClick={() => void submit()}>
+        <Button disabled={pending || !ready} focusableWhenDisabled onClick={() => void submit()}>
           {pending ? <Spinner aria-hidden /> : <Download aria-hidden />}
-          {t.download}
+          {advanced.label(t.download)}
         </Button>
         {size !== undefined && (
           <span className="text-sm text-muted-foreground">{fill(t.estimate, { size: formatBytes(size) })}</span>

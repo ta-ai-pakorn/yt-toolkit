@@ -11,6 +11,7 @@ import { Thumbnail } from "@/pages/home/thumbnail"
 import { FOCUS_SLOTS, firstSlot, useFocusRescue } from "./focus-rescue"
 import { PlayerErrorView } from "./player-error"
 import { playerActions, playerAdapterHooks, usePlayerValue, type PlayerStatus } from "./player-store"
+import { RangeMarkButtons } from "./range-mark-buttons"
 import { ReelStatus } from "./reel-button"
 import { Timeline } from "./timeline"
 import { createPlayerIframe, createYouTubeAdapter, type YouTubeAdapter } from "./youtube-adapter"
@@ -129,16 +130,24 @@ function PlayerFrame({ videoId, title, thumbnailUrl, docked, loading, boxRef, on
           </div>
         )}
       </div>
-      {docked && <DockToolbar boxRef={boxRef} onClose={onClose} />}
+      {docked && <DockToolbar videoId={videoId} boxRef={boxRef} onClose={onClose} />}
     </div>
   )
 }
 
 /**
- * แถบเครื่องมือของตัวเล่นลอย: "ช่วง i จาก n" + หยุด (ตอนเล่นช่วงไฮไลต์) · "กลับไปที่หัวคลิป" · ✕ "ปิดตัวเล่น"
+ * แถบเครื่องมือของตัวเล่นลอย: "ช่วง i จาก n" + หยุด (ตอนเล่นช่วงไฮไลต์) + ปุ่มตั้งจุดเริ่ม/จบ (M5 รอบ A) · "กลับไปที่หัวคลิป" · ✕ "ปิดตัวเล่น"
  * หายไปเมื่อตัวเล่นกลับเข้าหัวคลิป (เลื่อนจอขึ้นเอง): โฟกัสที่อยู่บนปุ่มเหล่านี้ย้ายไปแถบไทม์ไลน์ (ไม่มี = "ดูภาพปก")
  */
-function DockToolbar({ boxRef, onClose }: { boxRef: RefObject<HTMLDivElement | null>; onClose: () => void }) {
+function DockToolbar({
+  videoId,
+  boxRef,
+  onClose,
+}: {
+  videoId: string
+  boxRef: RefObject<HTMLDivElement | null>
+  onClose: () => void
+}) {
   const toolbar = useRef<HTMLDivElement>(null)
   const backToHeader = () => firstSlot(FOCUS_SLOTS.timeline, FOCUS_SLOTS.cover)
   useFocusRescue(toolbar, backToHeader)
@@ -151,6 +160,7 @@ function DockToolbar({ boxRef, onClose }: { boxRef: RefObject<HTMLDivElement | n
         // กดหยุด = "กลับไปที่หัวคลิป" ข้าง ๆ · หายเพราะกลับเข้าหัวคลิป = แถบไทม์ไลน์
         fallbackFocus={() => firstSlot(FOCUS_SLOTS.dockBack, FOCUS_SLOTS.timeline, FOCUS_SLOTS.cover)}
       />
+      <RangeMarkButtons videoId={videoId} size="xs" />
       <div className="ml-auto flex items-center gap-1 max-sm:ml-0 max-sm:justify-end">
         <Button
           variant="ghost"
@@ -297,7 +307,7 @@ export function PlayerSlot({
 }
 
 /**
- * แถวใต้ตัวเล่นในหัวคลิป: แถบไทม์ไลน์ + "ช่วง i จาก n" กับปุ่มหยุด (ตอนเล่นช่วงไฮไลต์)
+ * แถวใต้ตัวเล่นในหัวคลิป: แถบไทม์ไลน์ + "ช่วง i จาก n" + ปุ่มตั้งจุดเริ่ม/จบ (M5 รอบ A) กับปุ่มหยุด (ตอนเล่นช่วงไฮไลต์)
  * มีเฉพาะหลังเริ่มเล่นและตัวเล่นอยู่ในหัวคลิป (ลอยอยู่ = ไม่มี สถานะช่วงไฮไลต์ไปอยู่บนตัวเล่นลอยแทน)
  * ก่อนเล่นไม่จองที่ไว้ หัวคลิปก่อนเล่นจึงสูงเท่ากันทุกคลิป (ปุ่มช่วงไฮไลต์อยู่ในแถวปุ่มของหัวคลิป)
  */
@@ -329,6 +339,7 @@ function ControlsRow({ video, durationMs, className }: { video: VideoInfo; durat
           firstSlot(FOCUS_SLOTS.dockBack, FOCUS_SLOTS.reel, FOCUS_SLOTS.cover)
         }
       />
+      <RangeMarkButtons videoId={video.videoId} />
     </div>
   )
 }

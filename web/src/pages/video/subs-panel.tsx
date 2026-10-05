@@ -1,11 +1,13 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { useId, useRef } from "react"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { th } from "@/i18n/th"
-import type { SubtitleTracks, VideoInfo } from "@/lib/types"
+import type { SubtitleTracks } from "@/lib/types"
 
+import { AdvancedSection } from "./advanced/advanced-section"
+import { revealRangeErrors, useAdvancedChoice } from "./advanced/use-advanced-choice"
 import { videoQuery } from "./queries"
 import { ExportButtons } from "./subs/export-buttons"
 import { PresetControls } from "./subs/preset-controls"
@@ -26,8 +28,10 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
   const track = trackInEffect(data, trackId)
   const settings = useSubSettings()
   const tokens = useQuery(tokensQuery(videoId, track?.id))
-  // อ่านข้อมูลคลิปจาก cache เท่านั้น (หน้า W2 โหลดไว้แล้ว) ไม่สร้างคำขอใหม่ ซึ่งจะนับว่าเปิดคลิปซ้ำ
-  const video = useQueryClient().getQueryData<VideoInfo>(videoQuery(videoId).queryKey)
+  // ข้อมูลคลิปจาก cache เท่านั้น (หน้า W2 โหลดไว้แล้ว) ไม่ยิงคำขอใหม่ ซึ่งจะนับว่าเปิดคลิปซ้ำ
+  const video = useQuery({ ...videoQuery(videoId), enabled: false }).data
+  const advanced = useAdvancedChoice(video, "subs", false)
+  const range = advanced.params.range ?? null
   const originalLang = originalLanguage(data.tracks, video?.audio)
   const defaultTrackId = data.defaultTrackId
   // ยูทูปไม่ให้โหลดซับแปล: กลับไปแทร็กเริ่มต้นของคลิป (เปลี่ยนแค่แทร็กใน patch เดียว)
@@ -60,11 +64,15 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
             triggerRef={triggerRef}
           />
           <PresetControls options={settings.options} onPreset={settings.choosePreset} onCustom={settings.setCustom} />
+          {video && <AdvancedSection video={video} tab="subs" choice={advanced} embedSubsOn={false} />}
           {track && (
             <>
               <Separator />
-              <SubsPreview query={tokens} options={settings.options} onUseOriginal={backToOriginal} />
+              <SubsPreview query={tokens} options={settings.options} onUseOriginal={backToOriginal} range={range} />
             </>
+          )}
+          {advanced.values.sponsorblock && !advanced.split && (
+            <p className="text-sm text-warning">{th.advanced.subsWarning}</p>
           )}
           <ExportButtons
             videoId={videoId}
@@ -72,6 +80,10 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
             options={settings.options}
             tokens={tokens.data?.tokens}
             failed={tokens.isError}
+            range={range}
+            invalid={advanced.invalid}
+            onInvalid={() => revealRangeErrors(advanced, videoId, "subs")}
+            label={advanced.label}
           />
         </CardContent>
       </Card>

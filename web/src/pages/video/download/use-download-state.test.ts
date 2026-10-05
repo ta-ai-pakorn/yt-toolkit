@@ -109,9 +109,9 @@ describe("resolveDownloadState: ค่าที่จำไว้ → ค่า�
     expect(resolveDownloadState(prefs({ quality: 720 }), small, null, {}).quality).toBe("auto")
   })
 
-  it("จำความสูงของภาพ VP9 ไว้แต่ปิดความละเอียดสูงสุด = ใช้ H.264 ที่สูงเท่ากัน · 2160 ไม่มีในโหมดเปิดได้ทุกที่ = อัตโนมัติ", () => {
+  it("จำความสูงของภาพ VP9 ไว้แต่ปิดความละเอียดสูงสุด = ใช้ H.264 ที่สูงเท่ากัน · 2160 เกินเพดาน = ตัวเลือกที่เพดาน (1080p) ไม่ใช่อัตโนมัติ", () => {
     expect(resolveDownloadState(prefs({ quality: 1080 }), clip(), null, {}).quality).toBe("299")
-    expect(resolveDownloadState(prefs({ quality: 2160 }), clip(), null, {}).quality).toBe("auto")
+    expect(resolveDownloadState(prefs({ quality: 2160 }), clip(), null, {}).quality).toBe("299")
     expect(resolveDownloadState(prefs({ quality: 2160, maxQuality: true }), clip(), null, {}).quality).toBe("315")
   })
 
@@ -135,8 +135,8 @@ describe("resolveDownloadState: ค่าที่จำไว้ → ค่า�
 })
 
 describe("เพดาน compat-720 ในการเลือกคุณภาพของคลิป", () => {
-  it("ความสูงที่จำไว้เกินเพดาน (1080) = อัตโนมัติ · 720 เริ่มที่ 720p", () => {
-    expect(resolveDownloadState(prefs({ quality: 1080 }), clip(), null, {}, 720).quality).toBe("auto")
+  it("ความสูงที่จำไว้เกินเพดาน (1080) = ตัวเลือกที่เพดาน 720p (M4 follow-up) · 720 เริ่มที่ 720p", () => {
+    expect(resolveDownloadState(prefs({ quality: 1080 }), clip(), null, {}, 720).quality).toBe("298")
     expect(resolveDownloadState(prefs({ quality: 720 }), clip(), null, {}, 720).quality).toBe("298")
   })
 
@@ -277,5 +277,22 @@ describe("ขนาด wav", () => {
     expect(wavSourceTrack([opus, dub])).toBe(dub)
     expect(wavSourceTrack([opus])).toBe(opus)
     expect(wavSourceTrack([])).toBeUndefined()
+  })
+})
+
+describe("qualityForHeight กับเพดาน (M4 follow-up 'หน้า W2 กับค่าตั้ง' ข้อ 2)", () => {
+  const compat = [
+    { value: "299", height: 1080, fps: 60, codec: "H.264", compat: true },
+    { value: "298", height: 720, fps: 60, codec: "H.264", compat: true },
+  ]
+  it("ความสูงเกินเพดาน = ตัวเลือกที่เพดาน · ไม่ส่งเพดาน = กติกาเดิม", () => {
+    expect(qualityForHeight(compat, 1080, 720)).toBe("298")
+    expect(qualityForHeight(compat, 2160, 1080)).toBe("299")
+    expect(qualityForHeight(compat, 720, 1080)).toBe("298")
+    expect(qualityForHeight(compat, 480, 1080)).toBe("auto")
+    expect(qualityForHeight(compat, 2160)).toBe("auto")
+  })
+  it("ความละเอียดสูงสุดเปิด = ไม่ใช้เพดาน", () => {
+    expect(resolveDownloadState(prefs({ quality: 2160, maxQuality: true }), clip(), null, {}, 720).quality).toBe("315")
   })
 })

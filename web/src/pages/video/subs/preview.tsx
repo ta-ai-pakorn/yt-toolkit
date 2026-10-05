@@ -1,11 +1,12 @@
 import type { UseQueryResult } from "@tanstack/react-query"
 import { CaptionsOff } from "lucide-react"
-import { useEffect, useId, useRef, useState, type RefObject } from "react"
+import { useEffect, useId, useMemo, useRef, useState, type RefObject } from "react"
 
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { fill, th } from "@/i18n/th"
-import { cueStats } from "@/lib/srt-builder"
+import { rangeText, type ClipRange } from "@/lib/advanced-options"
+import { clampCues, cueStats, rangeTokens } from "@/lib/srt-builder"
 import type { SubOptions, SubTokens } from "@/lib/types"
 
 import { hasCode } from "../errors"
@@ -69,10 +70,22 @@ function useOverflowX(box: RefObject<HTMLElement | null>, content: RefObject<HTM
  * ตัวอย่าง 5 ซับแรก + สรุปทั้งแทร็ก: ข้อความและการขึ้นบรรทัดตรงกับที่ตัวสร้างซับให้มาทุกตัว
  * (ไม่ตัดคำหรือขึ้นบรรทัดเพิ่มเอง บรรทัดที่ยาวกว่ากล่องเลื่อนดูแนวนอนได้) จะได้เห็นแบบเดียวกับในไฟล์ .srt
  */
-function PreviewBody({ data, options }: { data: SubTokens; options: SubOptions }) {
+function PreviewBody({ data, options, range }: { data: SubTokens; options: SubOptions; range: ClipRange | null }) {
   const titleId = useId()
+  const start = range?.startMs
+  const end = range?.endMs
+  // ช่วงเวลา (AC-SUB-10): คำในช่วงนับเวลาใหม่จาก 0 แบบเดียวกับไฟล์ที่ backend สร้าง (srt-range.test.ts)
+  const tokens = useMemo(
+    () => (start === undefined || end === undefined ? data.tokens : rangeTokens(data.tokens, start, end)),
+    [data.tokens, start, end],
+  )
   // options มาจาก useSubSettings ตรง ๆ (ก้อนเดิมระหว่าง render) ซับจึงสร้างใหม่เฉพาะเมื่อค่าเปลี่ยนจริง
-  const cues = useCues(data.tokens, options)
+  const built = useCues(tokens, options)
+  const cues = useMemo(
+    () => (start === undefined || end === undefined ? built : clampCues(built, end - start)),
+    [built, start, end],
+  )
+  const title = range ? fill(th.advanced.previewTitle, { title: t.previewTitle, range: rangeText(range) }) : t.previewTitle
   const stats = cueStats(cues)
   const boxRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLOListElement>(null)
@@ -81,7 +94,7 @@ function PreviewBody({ data, options }: { data: SubTokens; options: SubOptions }
   return (
     <section aria-labelledby={titleId} className="flex flex-col gap-2">
       <h3 id={titleId} className="text-sm font-medium">
-        {t.previewTitle}
+        {title}
       </h3>
       <div
         ref={boxRef}
@@ -120,6 +133,8 @@ type Props = {
   options: SubOptions
   /** ปุ่ม "ใช้ซับภาษาต้นฉบับ" เมื่อยูทูปไม่ให้โหลดซับแปล null = คลิปไม่มีแทร็กเริ่มต้น (ไม่มีปุ่ม) */
   onUseOriginal: ((button: HTMLButtonElement) => void) | null
+  /** ช่วงเวลาที่ตั้งไว้ (null = ทั้งคลิป) ตัวอย่างและหัวข้อเป็นของช่วงนั้น */
+  range: ClipRange | null
 }
 
 /**
@@ -127,7 +142,7 @@ type Props = {
  * ยูทูปไม่ให้โหลดซับแปล = คำแนะนำ + ปุ่มใช้ซับภาษาต้นฉบับ · ซับแปลรอเซสชัน = กล่องนับถอยหลัง (โหลดให้เองเมื่อครบ)
  * ผิดพลาดอื่น = Alert + ลองใหม่ (ถ้าลองแล้วช่วย)
  */
-export function SubsPreview({ query, options, onUseOriginal }: Props) {
+export function SubsPreview({ query, options, onUseOriginal, range }: Props) {
   if (query.isError) {
     if (hasCode(query.error, "E_NO_SUBTITLES")) return <NoTokens />
     if (hasCode(query.error, "E_TRANSLATION_BLOCKED")) return <TranslationBlocked onUseOriginal={onUseOriginal} />
@@ -135,5 +150,5 @@ export function SubsPreview({ query, options, onUseOriginal }: Props) {
     return <LoadError title={t.loadError} error={query.error} onRetry={() => void query.refetch()} />
   }
   if (!query.isSuccess) return <PreviewSkeleton />
-  return <PreviewBody data={query.data} options={options} />
+  return <PreviewBody data={query.data} options={options} range={range} />
 }

@@ -438,3 +438,84 @@ def test_group_emoji_counts_in_utf16_units(tmp_path):
     assert files._u16(str(p)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
     # งบ 240 ถูกใช้ตามหน่วย UTF-16: ชื่อคลิปเหลือ 12 ตัว (นับ code point จะได้ชื่อยาวกว่านี้มาก)
     assert len(p.name) == 12 + len(".mp4")
+
+
+def test_m4_names_and_folders_are_unchanged_by_the_longer_tail_budget(tmp_path):
+    root = tmp_path / ("r" * 40)
+    for title in ("สั้น", "ก" * 300, "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film"):
+        for suffix, ext in (("", "mp4"), (" (ไม่มีเสียง)", "mp4"), (".th", "srt"), (" - contact sheet", "jpg")):
+            planned = files.plan_output(root, title, ID, suffix, ext)
+            short = planned.parent.name[: -len(f" [{ID}]")]
+            assert planned.name == f"{short}{suffix}.{ext}"
+
+
+def test_long_m5_tail_shortens_only_the_file_name(tmp_path):
+    title = "ก" * 300
+    tail = " (ไม่มีเสียง) (100.00.00-100.05.00) (ตัดโฆษณา)"
+    plain = files.plan_output(tmp_path, title, ID, "", "mp4")
+    long = files.plan_output(tmp_path, title, ID, tail, "mp4")
+    assert long.parent == plain.parent  # same clip folder as every other job of the clip
+    assert long.name.endswith(f"{tail}.mp4") and len(long.name) < len(plain.name) + len(tail)
+    assert len(str(long)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
+
+
+def test_tail_longer_than_tail_max_is_a_programming_error(tmp_path):
+    with pytest.raises(AssertionError):
+        files.plan_output(tmp_path, "t", ID, " " + "x" * 60, "mp4")
+
+
+def test_chapter_output_names(tmp_path):
+    path = files.plan_chapter_output(tmp_path, "คลิป", ID, "mp4", None, index=1, total=3, chapter_title="Intro: part 1")
+    assert path.parent.name == "แยกตาม chapter (mp4)"
+    assert path.parent.parent == files.plan_output(tmp_path, "คลิป", ID, "", "mp4").parent
+    assert path.name == "01 - Intro part 1.mp4"
+    assert files.plan_chapter_output(tmp_path, "คลิป", ID, "mp3", "ชุด A", index=7, total=120,
+                                     chapter_title="x").name == "007 - x.mp3"
+    assert files.plan_chapter_output(tmp_path, "คลิป", ID, "m4a", None, index=2, total=3,
+                                     chapter_title=" ?? ").name == "02 - chapter 2.m4a"
+    assert files.chapter_dir_name("wav") == "แยกตาม chapter (wav)"
+
+
+def test_chapter_output_fits_the_path_limit(tmp_path):
+    path = files.plan_chapter_output(tmp_path, "ก" * 300, ID, "mp4", None, index=12, total=30, chapter_title="ข" * 300)
+    assert len(str(path)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
+    assert path.name.startswith("12 - ข") and path.name.endswith(".mp4")
+
+
+# ---------- owner ruling 2026-10-02: วิดีโอไม่มีเสียงที่แยก chapter อยู่โฟลเดอร์ย่อยของตัวเอง ----------
+
+
+def test_no_audio_chapter_folder_name(tmp_path):
+    assert files.chapter_dir_name("mp4", no_audio=True) == "แยกตาม chapter (mp4, ไม่มีเสียง)"
+    assert files.chapter_dir_name("mp4") == "แยกตาม chapter (mp4)"
+    path = files.plan_chapter_output(tmp_path, "คลิป", ID, "mp4", None, index=1, total=3,
+                                     chapter_title="Intro: part 1", no_audio=True)  # fmt: skip
+    assert path.parent.name == "แยกตาม chapter (mp4, ไม่มีเสียง)"
+    assert path.parent.parent == files.plan_output(tmp_path, "คลิป", ID, "", "mp4").parent
+    assert path.name == "01 - Intro part 1.mp4"
+    with_sound = files.plan_chapter_output(tmp_path, "คลิป", ID, "mp4", None, index=1, total=3,
+                                           chapter_title="Intro: part 1")  # fmt: skip
+    assert with_sound.parent.name == "แยกตาม chapter (mp4)" and with_sound.name == path.name
+
+
+def test_no_audio_chapter_output_fits_the_path_limit(tmp_path):
+    path = files.plan_chapter_output(tmp_path, "ก" * 300, ID, "mp4", None, index=12, total=30,
+                                     chapter_title="ข" * 300, no_audio=True)  # fmt: skip
+    assert len(str(path)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
+    assert path.name.startswith("12 - ข") and path.parent.name.endswith(", ไม่มีเสียง)")
+
+
+@pytest.mark.parametrize("total", [99, 999])
+def test_no_audio_chapter_folder_fits_wherever_the_full_no_audio_file_fits(total):
+    """ทุกความยาวของโฟลเดอร์ผลลัพธ์ที่ไฟล์เต็มแบบไม่มีเสียงชื่อยาวสุด (ช่วงเวลา + ตัดโฆษณา) วางได้
+    ไฟล์ chapter ของงานไม่มีเสียงก็วางได้ (ชื่อโฟลเดอร์ย่อยยาวขึ้นไม่ทำให้งานล้มเพราะ path ยาว)"""
+    longest = " (ไม่มีเสียง) (100.00.00-100.05.00) (ตัดโฆษณา)"
+    for size in range(3, files.PATH_LIMIT):
+        root = Path("C:/" + "r" * (size - 3))
+        try:
+            files.plan_output(root, "ก" * 300, ID, longest, "mp4")
+        except YtError:
+            continue
+        path = files.plan_chapter_output(root, "ก" * 300, ID, "mp4", None, index=total, total=total,
+                                         chapter_title="ข" * 300, no_audio=True)  # fmt: skip
+        assert len(str(path)) + files.UNIQUE_RESERVE <= files.PATH_LIMIT
