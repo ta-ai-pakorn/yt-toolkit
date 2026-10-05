@@ -187,3 +187,9 @@ Big Buck Bunny © Blender Foundation | www.bigbuckbunny.org
 
 `FakeMediaTools.extract_frame` เขียนสำเนาของ `media/cover.jpg` เป็นภาพคมทุกภาพ (โหมดปลอมไม่มี ffmpeg)
 `sharp/plan-cases.json`: เคสแผนเวลาภาพคมที่ `tests/unit/test_sharp_plan.py` และ `web/src/lib/sharp-frames.test.ts` อ่านร่วมกัน (เขียนเอง คำนวณมือตาม spec 3.2)
+
+## capture/ (M5 รอบ B2 ถ่ายภาพคมตรงจุด)
+- `piece.mp4`: วิดีโอสังเคราะห์ 4 วินาที 1920×1080 10 fps (`testsrc` ของ ffmpeg) แบบ fragmented mp4 ที่เรียงกล่องแบบไฟล์ DASH ของยูทูป: `ftyp`, `moov`, `sidx` (version 1, timescale 10240, 4 ท่อน ท่อนละ 1 วินาที) แล้ว `moof`+`mdat` ทีละท่อน · ไม่มี B-frame ไฟล์จึงเริ่มที่เวลา 0 · ราว 50 KB
+- สร้างครั้งเดียวด้วย ffmpeg 8.1 (Gyan full build) แล้ว commit ไว้ เทสไม่สร้างใหม่ (ffmpeg รุ่นอื่นได้ไบต์ต่างกันเล็กน้อย เทสตรวจแค่โครงสร้าง):
+  `ffmpeg -f lavfi -i "testsrc=size=1920x1080:rate=10:duration=4" -c:v libx264 -preset veryslow -crf 40 -bf 0 -g 10 -keyint_min 10 -sc_threshold 0 -pix_fmt yuv420p -an -movflags +frag_keyframe+empty_moov+default_base_moof+global_sidx -fflags +bitexact -flags:v +bitexact piece.mp4`
+- ใช้กับ `core/frame_piece.py` (เทสตัวอ่าน sidx), `FakeExtractor.fetch_frame_piece` (ตัดชิ้นด้วยตัวอ่านตัวจริง เวลาเกิน 4 วินาทีวนกลับด้วย `t % 4000`) และเทส ffmpeg จริงของการถ่ายภาพ (ภาพจากชิ้นต้องตรงกับภาพจากไฟล์เต็มที่เวลาเดียวกัน)
