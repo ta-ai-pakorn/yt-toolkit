@@ -2161,3 +2161,21 @@ def test_sharp_cache_sweep_failure_is_logged_not_raised(paths, fake_platform, mo
         assert any("ภาพคม" in r.getMessage() for r in caplog.records)
     finally:
         services.db.close()
+
+
+def test_open_services_wires_auto_sharp_to_the_setting(paths, fake_platform, monkeypatch):
+    captured = {}
+    real = lifecycle.build_handlers
+
+    def spy(deps):
+        captured["deps"] = deps
+        return real(deps)
+
+    monkeypatch.setattr(lifecycle, "build_handlers", spy)
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        assert captured["deps"].auto_sharp() is True
+        services.settings.patch({"autoSharpFrames": False})
+        assert captured["deps"].auto_sharp() is False
+    finally:
+        services.db.close()

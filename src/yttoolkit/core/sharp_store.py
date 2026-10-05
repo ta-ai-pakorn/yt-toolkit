@@ -40,6 +40,10 @@ _guard = threading.Lock()
 _locks: dict[str, threading.Lock] = {}
 
 
+class ManualSetKept(Exception):
+    """commit_sharp(keep_manual=True) เจอชุดที่ผู้ใช้ขอเองอยู่ในที่: ไม่สลับ ทิ้งชุดที่เตรียมไว้ (ขั้นอัตโนมัติ D6)"""
+
+
 def _lock_for(video_id: str) -> threading.Lock:
     with _guard:
         return _locks.setdefault(video_id, threading.Lock())
@@ -139,8 +143,10 @@ def _rename(src: Path, dst: Path) -> None:
             time.sleep(RENAME_WAIT_S)
 
 
-def commit_sharp(cache_root: Path, video_id: str, staged: Path) -> dict:
-    """สลับชุดที่เตรียมไว้เข้าที่ (แทนชุดเดิม D5) พลาด = คืนชุดเดิม ทิ้งชุดใหม่ แล้ว E_UNKNOWN"""
+def commit_sharp(cache_root: Path, video_id: str, staged: Path, *, keep_manual: bool = False) -> dict:
+    """สลับชุดที่เตรียมไว้เข้าที่ (แทนชุดเดิม D5) พลาด = คืนชุดเดิม ทิ้งชุดใหม่ แล้ว E_UNKNOWN
+    keep_manual=True (ขั้นอัตโนมัติ): ชุดในที่เป็นของผู้ใช้ (origin "manual") = ทิ้งชุดใหม่แล้ว ManualSetKept
+    เช็กใต้ล็อกเดียวกับการสลับ งานมือที่สลับเข้ามาระหว่างขั้นอัตโนมัติกำลังดึงภาพจึงไม่ถูกแทน"""
     clip = _clip_dir(cache_root, video_id)
     staged = Path(staged)
     if staged.parent != clip or not staged.name.startswith(TMP_PREFIX):
@@ -155,6 +161,9 @@ def commit_sharp(cache_root: Path, video_id: str, staged: Path) -> dict:
     target = clip / FOLDER
     old = clip / f"{OLD_PREFIX}{staged.name[len(TMP_PREFIX):]}"
     with _lock_for(video_id):
+        if keep_manual and (current := read_sharp(cache_root, video_id)) is not None and current["origin"] == "manual":
+            discard_sharp(staged)
+            raise ManualSetKept(video_id)
         moved_old = False
         try:
             if target.exists():
