@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer } from "react"
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from "react"
 import { flushSync } from "react-dom"
 
 import { usePlayerValue } from "./player/player-store"
@@ -21,8 +21,8 @@ const OVERLAYS = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="l
 
 const CONTROLS = '[data-slot="player-controls"]'
 const TOGGLE = '[data-slot="theater-toggle"]'
-/** ส่วนในแถวใต้ตัวเล่นที่ต้องคงโฟกัสไว้เมื่อแถวย้ายคอลัมน์ (คลิปแนวตั้ง: แบบปกติ ↔ โรงภาพยนตร์) */
-const KEEP_FOCUS = [TOGGLE, '[role="slider"]']
+/** ส่วนในแถวใต้ตัวเล่นที่ต้องคงโฟกัสไว้เมื่อแถวย้ายคอลัมน์ (คลิปแนวตั้ง: แบบปกติ ↔ โรงภาพยนตร์) · รวมปุ่ม "ถ่ายภาพคมตรงนี้" */
+const KEEP_FOCUS = [TOGGLE, '[role="slider"]', '[data-slot="capture-button"]']
 
 /** โฟกัสอยู่ที่ปุ่มสลับหรือแถบไทม์ไลน์ในแถวใต้ตัวเล่นไหม (คืน selector ของส่วนนั้น) */
 function focusedControl(): string | null {
@@ -66,20 +66,23 @@ export function useTheater(o: { videoId: string | null; portrait: boolean; narro
   const canToggle = (started || on) && !narrow
   const layout = headerLayout({ on, narrow, portrait })
 
-  const change = useCallback(
-    (action: TheaterAction) => {
-      const apply = () => {
-        const focused = focusedControl()
-        flushSync(() => dispatch(action))
-        if (focused !== null) restoreFocus(focused)
-      }
-      runLayoutTransition(apply, {
-        doc: document,
-        animate: !narrow && inView && !prefersReducedMotion(),
-      })
-    },
-    [narrow, inView],
-  )
+  // ค่าล่าสุดของจอแคบ/ช่องอยู่ในจอ ณ ตอนกด (ตั้งก่อนวาดจอ): ปุ่ม T ที่ผูกไว้ตั้งแต่ก่อนตัวเล่นลอยจะได้ไม่ใช้ค่าเก่าแล้วเล่นแอนิเมชัน
+  const live = useRef({ narrow, inView })
+  useLayoutEffect(() => {
+    live.current = { narrow, inView }
+  }, [narrow, inView])
+
+  const change = useCallback((action: TheaterAction) => {
+    const apply = () => {
+      const focused = focusedControl()
+      flushSync(() => dispatch(action))
+      if (focused !== null) restoreFocus(focused)
+    }
+    runLayoutTransition(apply, {
+      doc: document,
+      animate: !live.current.narrow && live.current.inView && !prefersReducedMotion(),
+    })
+  }, [])
 
   const toggle = useCallback(() => {
     if (videoId === null) return

@@ -216,7 +216,7 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
         <h2 id={headingId} className="text-sm font-medium">
           {fill(th.capture.stripTitle, { n: list.length })}
         </h2>
-        <Button variant="link" size="sm" className="h-auto px-0 max-sm:h-11" onClick={() => void reveal()}>
+        <Button variant="link" size="sm" className="h-auto px-0 text-foreground max-sm:h-11" onClick={() => void reveal()}>
           <FolderOpen aria-hidden />
           {th.capture.openFolder}
         </Button>
@@ -307,7 +307,7 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
               <Play aria-hidden />
               {th.frames.playFrom}
             </Button>
-            <Button variant="destructive" size="sm" onClick={() => setConfirming(shown)}>
+            <Button variant="destructive" size="sm" className="bg-background" onClick={() => setConfirming(shown)}>
               <Trash2 aria-hidden />
               {th.capture.delete}
             </Button>

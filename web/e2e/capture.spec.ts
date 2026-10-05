@@ -327,6 +327,31 @@ test.describe("โหมดโรงภาพยนตร์แนวนอน",
     expect(Math.abs(slot.x - column.x - (column.width - slot.width) / 2)).toBeLessThan(1.5)
   })
 
+  test("คลิปแนวตั้ง: โฟกัสปุ่ม 'ถ่ายภาพคมตรงนี้' แล้วกด T แถวใต้ตัวเล่นย้ายคอลัมน์ โฟกัสยังอยู่ที่ปุ่มนี้", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await mockCaptures(page)
+    // ข้อมูลคลิปจาก backend โหมด fake แต่สลับกว้าง/สูง: คลิปกลายเป็นแนวตั้ง (แบบเดียวกับ theater.spec.ts)
+    await page.route(
+      (url) => url.pathname === `/api/videos/${BBB}`,
+      async (route) => {
+        const response = await route.fetch()
+        const body = (await response.json()) as { video: { width?: number; height: number }[] }
+        const video = body.video.map((f) => (f.width ? { ...f, width: f.height, height: f.width } : f))
+        await route.fulfill({ response, json: { ...body, video } })
+      },
+    )
+    await open(page)
+    await play(page)
+    await expect(header(page)).toHaveAttribute("data-layout", "theater-tall")
+    await expect(page.locator('[data-slot="video-info"]').locator('[data-slot="player-controls"]')).toHaveCount(1)
+    await captureButton(page).focus()
+    await expect(captureButton(page)).toBeFocused()
+    await page.keyboard.press("t")
+    await expect(header(page)).toHaveAttribute("data-layout", "compact")
+    await expect(page.locator('[data-slot="video-info"]').locator('[data-slot="player-controls"]')).toHaveCount(0)
+    await expect(captureButton(page)).toBeFocused()
+  })
+
   test("จอสูง 1280×1000: ตัวเล่นเต็มความกว้างของเนื้อหา", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 1000 })
     await mockCaptures(page)
