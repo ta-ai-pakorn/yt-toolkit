@@ -61,6 +61,11 @@ export function useTheater(o: { videoId: string | null; portrait: boolean; narro
   const { videoId, portrait, narrow, inView } = o
   const [state, dispatch] = useReducer(theaterReducer, { videoId: null, on: false })
   const on = videoId !== null && isTheaterOn(state, videoId)
+  // สถานะที่วาดลงจอแล้วล่าสุด (อัปเดตระหว่าง flushSync) ใช้จำค่าตามเลย์เอาต์ที่เห็นจริงหลังสลับ
+  const committed = useRef(state)
+  useLayoutEffect(() => {
+    committed.current = state
+  }, [state])
   const started = usePlayerValue((s) => videoId !== null && s.videoId === videoId && s.started)
   // ปิดตัวเล่นตอนอยู่ในโหมดโรงภาพยนตร์ เลย์เอาต์คงเดิม: ยังสลับได้ (ปุ่มและ T) จนกว่าจะย่อกลับ
   const canToggle = (started || on) && !narrow
@@ -72,10 +77,12 @@ export function useTheater(o: { videoId: string | null; portrait: boolean; narro
     live.current = { narrow, inView }
   }, [narrow, inView])
 
-  const change = useCallback((action: TheaterAction) => {
+  const change = useCallback((action: TheaterAction, remember = false) => {
     const apply = () => {
       const focused = focusedControl()
       flushSync(() => dispatch(action))
+      // จำค่าจากสถานะหลังสลับ ไม่ใช่จาก on ตอนวาดจอ: กด T สองครั้งก่อนวาดจอใหม่ = สลับสองครั้ง ค่าที่จำต้องตรงกับที่เห็น
+      if (remember) writeTheaterPreference(safeStorage(), isTheaterOn(committed.current, action.videoId))
       if (focused !== null) restoreFocus(focused)
     }
     runLayoutTransition(apply, {
@@ -86,9 +93,8 @@ export function useTheater(o: { videoId: string | null; portrait: boolean; narro
 
   const toggle = useCallback(() => {
     if (videoId === null) return
-    writeTheaterPreference(safeStorage(), !on)
-    change({ type: "toggle", videoId })
-  }, [videoId, on, change])
+    change({ type: "toggle", videoId }, true)
+  }, [videoId, change])
 
   const onPlayPressed = useCallback(() => {
     if (videoId === null) return

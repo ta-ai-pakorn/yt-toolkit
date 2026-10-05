@@ -172,6 +172,22 @@ test("ปุ่ม T บนแป้นภาษาไทย (ได้ตัว
   expect(await stored(page)).toBe("0")
 })
 
+test("กด T สองครั้งก่อนจอวาดใหม่: สลับสองครั้ง ค่าที่จำตรงกับเลย์เอาต์ที่เห็นสุดท้าย", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, BBB)
+  await play(page)
+  await expect(header(page)).toHaveAttribute("data-layout", "theater-wide")
+  // สองครั้งในงานเดียวของเบราว์เซอร์: การสลับครั้งแรกยังรอ view transition (ยังไม่วาดจอใหม่) ตอนกดครั้งที่สอง
+  await heading(page).evaluate((node) => {
+    for (let i = 0; i < 2; i += 1) {
+      node.dispatchEvent(new KeyboardEvent("keydown", { key: "t", code: "KeyT", bubbles: true, cancelable: true }))
+    }
+  })
+  await settled(page)
+  await expect(header(page)).toHaveAttribute("data-layout", "theater-wide")
+  expect(await stored(page)).toBe("1")
+})
+
 test("คลิปแนวตั้ง: ตัวเล่นสูง 80% ของจอทางซ้าย ข้อมูลและแถวใต้ตัวเล่นอยู่ทางขวา", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await asPortrait(page, BBB)
