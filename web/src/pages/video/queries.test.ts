@@ -1,7 +1,7 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { pinnedCommentQuery } from "./queries"
+import { pinnedCommentQuery, sharpQuery } from "./queries"
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -53,5 +53,36 @@ describe("pinnedCommentQuery", () => {
     await open(client)
     await open(client)
     expect(fetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+async function observe<T>(client: QueryClient, options: ReturnType<typeof sharpQuery>) {
+  const observer = new QueryObserver(client, options)
+  const unsubscribe = observer.subscribe(() => undefined)
+  await vi.waitFor(() => expect(observer.getCurrentResult().isFetching).toBe(false))
+  const result = observer.getCurrentResult()
+  unsubscribe()
+  return result as { data: T | undefined; error: unknown }
+}
+
+describe("sharpQuery", () => {
+  it("uses the shared key and the sharp route", async () => {
+    const fetch = stubFetch(200, { origin: "manual", intervalMs: 60000, frames: [] })
+    expect(sharpQuery("aqz-KE-bpKQ", true).queryKey).toEqual(["sharp", "aqz-KE-bpKQ"])
+    await observe(new QueryClient(), sharpQuery("aqz-KE-bpKQ", true))
+    expect(fetch).toHaveBeenCalledWith("/api/videos/aqz-KE-bpKQ/sharp", expect.anything())
+  })
+
+  it("404 = no sharp set yet (null), not an error", async () => {
+    stubFetch(404, envelope("E_NO_SHARP_FRAMES"))
+    const result = await observe(new QueryClient(), sharpQuery("aqz-KE-bpKQ", true))
+    expect(result.data).toBeNull()
+    expect(result.error).toBeNull()
+  })
+
+  it("other failures stay errors", async () => {
+    stubFetch(502, envelope("E_NETWORK"))
+    const result = await observe(new QueryClient(), sharpQuery("aqz-KE-bpKQ", true))
+    expect(result.error).toMatchObject({ code: "E_NETWORK" })
   })
 })
