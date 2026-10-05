@@ -100,6 +100,13 @@ def prepare_sharp(
         raise ValueError(f"bad origin: {origin!r}")
     if not _JOB_ID.fullmatch(job_id):
         raise ValueError(f"bad job id: {job_id!r}")
+    # กฎเดียวกับ _valid: ชุดที่อ่านกลับไม่ได้ต้องไม่เคยถูกสลับเข้าไปแทนชุดเดิม
+    if interval_ms is not None and (type(interval_ms) is not int or interval_ms <= 0):
+        raise ValueError(f"bad interval: {interval_ms!r}")
+    if not isinstance(created_at, str):
+        raise ValueError("bad createdAt")
+    if any(type(t_ms) is not int or t_ms < 0 for t_ms, _src in frames):
+        raise ValueError("bad frame time")
     staged = _clip_dir(cache_root, video_id) / f"{TMP_PREFIX}{job_id}"
     shutil.rmtree(staged, ignore_errors=True)
     try:
@@ -138,6 +145,13 @@ def commit_sharp(cache_root: Path, video_id: str, staged: Path) -> dict:
     staged = Path(staged)
     if staged.parent != clip or not staged.name.startswith(TMP_PREFIX):
         raise ValueError(f"not a staged sharp set: {staged.name}")
+    try:
+        staged_ok = _valid(json.loads((staged / INDEX).read_text(encoding="utf-8")), staged)
+    except (OSError, ValueError):
+        staged_ok = False
+    if not staged_ok:
+        discard_sharp(staged)
+        raise YtError("E_UNKNOWN", "staged sharp set is not valid")
     target = clip / FOLDER
     old = clip / f"{OLD_PREFIX}{staged.name[len(TMP_PREFIX):]}"
     with _lock_for(video_id):

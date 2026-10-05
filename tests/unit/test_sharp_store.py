@@ -152,3 +152,41 @@ def test_sweep_restores_the_old_set_when_sharp_is_missing(tmp_path: Path) -> Non
 
 def test_sweep_of_a_missing_cache_root_is_zero(tmp_path: Path) -> None:
     assert sweep_sharp_leftovers(tmp_path / "nope") == 0
+
+
+@pytest.mark.parametrize(
+    ("frames", "interval_ms", "created_at"),
+    [
+        ([(0, COVER)], 0, WHEN),
+        ([(0, COVER)], -5, WHEN),
+        ([(0, COVER)], True, WHEN),
+        ([(0, COVER)], 1.5, WHEN),
+        ([(-1, COVER)], None, WHEN),
+        ([(0, COVER), (True, COVER)], None, WHEN),
+        ([(0, COVER)], None, None),
+    ],
+)
+def test_prepare_rejects_what_read_sharp_would_reject(tmp_path: Path, frames, interval_ms, created_at) -> None:
+    _install(tmp_path, JOB_A, [0, 1000])
+    with pytest.raises(ValueError):
+        prepare_sharp(tmp_path, BBB, JOB_B, frames, origin="manual", interval_ms=interval_ms, created_at=created_at)
+    assert sorted(p.name for p in (tmp_path / BBB).iterdir()) == [FOLDER]  # ไม่เหลือโฟลเดอร์ staged
+    assert len(read_sharp(tmp_path, BBB)["frames"]) == 2
+
+
+def test_commit_of_an_invalid_staged_set_keeps_the_previous_set(tmp_path: Path) -> None:
+    _install(tmp_path, JOB_A, [0, 1000, 2000])
+    staged = prepare_sharp(tmp_path, BBB, JOB_B, _frames([0]), origin="auto", interval_ms=None, created_at=WHEN)
+    doc = json.loads((staged / "index.json").read_text(encoding="utf-8"))
+    (staged / "index.json").write_text(json.dumps({**doc, "intervalMs": 0}), encoding="utf-8")
+    with pytest.raises(YtError) as err:
+        commit_sharp(tmp_path, BBB, staged)
+    assert err.value.code == "E_UNKNOWN"
+    assert not staged.exists()
+    assert len(read_sharp(tmp_path, BBB)["frames"]) == 3
+    assert sorted(p.name for p in (tmp_path / BBB).iterdir()) == [FOLDER]
+    staged = prepare_sharp(tmp_path, BBB, JOB_B, _frames([0]), origin="auto", interval_ms=None, created_at=WHEN)
+    (staged / "f_0000.jpg").unlink()  # ไฟล์ภาพหายก่อนสลับ
+    with pytest.raises(YtError):
+        commit_sharp(tmp_path, BBB, staged)
+    assert len(read_sharp(tmp_path, BBB)["frames"]) == 3
