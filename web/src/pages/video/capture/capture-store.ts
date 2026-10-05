@@ -66,6 +66,11 @@ export const captureStore = {
   },
 }
 
+/** คำสั่งเปิดภาพที่ค้างอยู่เป็นของคลิปอื่น (กดปุ่ม "ดูภาพ" ใน toast หลังเปลี่ยนไปดูคลิปอื่นแล้ว) */
+export function viewsOtherClip(viewing: CaptureTarget | null, videoId: string): boolean {
+  return viewing !== null && viewing.videoId !== videoId
+}
+
 /** อ่านเฉพาะค่าที่เลือก (ต้องคืน primitive หรืออ้างอิงเดิม) */
 export function useCaptureUi<T>(select: (s: CaptureUiState) => T): T {
   return useSyncExternalStore(

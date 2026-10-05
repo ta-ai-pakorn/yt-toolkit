@@ -33,7 +33,7 @@ import {
   revealScrollLeft,
   stripKeyTarget,
 } from "./capture-model"
-import { captureStore, useCaptureUi } from "./capture-store"
+import { captureStore, useCaptureUi, viewsOtherClip } from "./capture-store"
 
 /** wrap = ภาพตัดขึ้นบรรทัด (แบบปกติ จอแคบ แนวตั้ง) · row = แถวเดียวเลื่อนได้ (โรงภาพยนตร์แนวนอน) */
 export type StripLayout = "wrap" | "row"
@@ -79,6 +79,7 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
   const list = captures.data ?? []
   const viewing = useCaptureUi((s) => (s.viewing?.videoId === videoId ? s.viewing.id : null))
   const flash = useCaptureUi((s) => (s.flash?.videoId === videoId ? s.flash : null))
+  const foreignView = useCaptureUi((s) => viewsOtherClip(s.viewing, videoId))
   const [active, setActive] = useState(0)
   const [confirming, setConfirming] = useState<Capture | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -95,11 +96,19 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
   const shown = current ?? lastViewed
   const tabStop = Math.min(active, Math.max(0, list.length - 1))
 
-  // คำสั่งเปิดภาพ/กระพริบที่ค้างของคลิปอื่นไม่ใช่ของแถบนี้ · แถบหายไป = กระพริบที่ยังไม่ได้ใช้ของคลิปนี้ไม่ต้องรอ
+  // คำสั่งเปิดภาพ/กระพริบที่ค้างของคลิปอื่นไม่ใช่ของแถบนี้ · แถบหายไป = กระพริบที่ยังไม่ได้ใช้ และคำสั่งเปิดภาพที่ค้างไม่ต้องรอ
   useEffect(() => {
     captureStore.dropOtherClips(videoId)
-    return () => captureStore.dropFlash(videoId)
+    return () => {
+      captureStore.dropFlash(videoId)
+      captureStore.closeView()
+    }
   }, [videoId])
+
+  // กดปุ่ม "ดูภาพ" ใน toast ของคลิปก่อนหน้าหลังเปลี่ยนมาดูคลิปนี้แล้ว: ทิ้งทันที (ไม่เปิดให้ตอนกลับไปดูคลิปนั้นภายหลัง)
+  useEffect(() => {
+    if (foreignView) captureStore.closeView()
+  }, [foreignView])
 
   // ขอเปิดภาพที่ไม่มีในรายการแล้ว (โหลดรายการเสร็จแล้วยังไม่พบ เช่นถูกลบไปแล้ว) = เลิกค้างไว้ ไม่เปิดให้ตอนเข้ามาดูครั้งหลัง
   const settled = captures.data !== undefined && !captures.isFetching

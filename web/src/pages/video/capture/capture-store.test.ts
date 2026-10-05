@@ -6,7 +6,7 @@ import { QUEUE_KEY } from "@/lib/jobs"
 import type { Capture } from "@/lib/types"
 
 import { capturesKey } from "./capture-api"
-import { __resetCaptureStoreForTests, captureStore } from "./capture-store"
+import { __resetCaptureStoreForTests, captureStore, viewsOtherClip } from "./capture-store"
 import { runCapture } from "./use-capture"
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
@@ -70,6 +70,14 @@ describe("flash และ view ที่ค้างอยู่", () => {
     captureStore.dropFlash(BBB)
     expect(captureStore.get().flash).toBeNull()
     expect(captureStore.get().viewing).not.toBeNull()
+  })
+})
+
+describe("viewsOtherClip", () => {
+  it("เปิดภาพของคลิปอื่น = true · คลิปนี้หรือไม่มีคำสั่ง = false", () => {
+    expect(viewsOtherClip({ videoId: "OTHER000001", id: "c_1" }, BBB)).toBe(true)
+    expect(viewsOtherClip({ videoId: BBB, id: "c_1" }, BBB)).toBe(false)
+    expect(viewsOtherClip(null, BBB)).toBe(false)
   })
 })
 
