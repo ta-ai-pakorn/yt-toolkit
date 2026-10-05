@@ -9,6 +9,7 @@ sidx บอกว่าแต่ละท่อนเริ่มที่ไบ
 from __future__ import annotations
 
 import errno
+import math
 import struct
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -20,8 +21,9 @@ from .yterrors import YtError
 HEAD_BYTES = 65_536  # คำขอแรก: ftyp + moov + sidx ของยูทูปอยู่ในช่วงนี้แทบทุกคลิป
 MAX_INDEX_BYTES = 1_048_576  # เลยจากนี้ยังไม่เจอ sidx = ไม่ใช่ไฟล์แบบที่รองรับ
 MAX_TOP_BOXES = 64
-# ค่าตั้ง captureQuality -> ด้านสั้นสูงสุด (None = ไม่จำกัด "สูงสุดที่มี")
-CAPTURE_SHORT_SIDES: dict[str, int | None] = {"max": None, "1080": 1080, "720": 720}
+MAX_SEGMENT_BYTES = 64 * 1024 * 1024  # ท่อนที่ sidx บอกว่าใหญ่กว่านี้ = ไฟล์แปลก ไม่โหลดทั้งท่อน
+# ค่าตั้ง captureQuality -> ด้านสั้นสูงสุด ("สูงสุดที่มี" = สูงสุดถึง 4K ตาม spec E2 ด้านสั้น 2160 จึงรวม 4K แนวตั้ง ตัด 8K)
+CAPTURE_SHORT_SIDES: dict[str, int | None] = {"max": 2160, "1080": 1080, "720": 720}
 
 ReadRange = Callable[[int, int], bytes]  # (ไบต์แรก, ไบต์สุดท้ายแบบนับรวม) -> ข้อมูล (สั้นกว่าที่ขอได้ถ้าถึงท้ายไฟล์)
 
@@ -79,6 +81,8 @@ def parse_sidx(box: bytes, box_offset: int) -> SidxIndex:
     """
     if len(box) < 32 or box[4:8] != b"sidx":
         raise _unsupported("not a sidx box")
+    if box[0:4] == b"\x00\x00\x00\x01":
+        raise _unsupported("sidx with a 64-bit box size")
     version = box[8]
     if version not in (0, 1):
         raise _unsupported(f"sidx version {version}")
@@ -107,6 +111,8 @@ def parse_sidx(box: bytes, box_offset: int) -> SidxIndex:
         if word >> 31:
             raise _unsupported("sidx points to another sidx")
         size = word & 0x7FFF_FFFF
+        if size == 0 or size > MAX_SEGMENT_BYTES:
+            raise _unsupported(f"sidx segment size {size}")
         refs.append(SidxRef(offset, size, start, duration))
         offset += size
         start += duration
@@ -196,7 +202,7 @@ def max_short_side(quality: str) -> int | None:
 
 
 def _positive(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
         return None
     return int(value) if value > 0 else None
 

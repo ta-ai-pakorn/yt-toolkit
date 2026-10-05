@@ -12,6 +12,7 @@ from yttoolkit.core import frame_piece
 from yttoolkit.core.frame_piece import (
     HEAD_BYTES,
     MAX_INDEX_BYTES,
+    MAX_SEGMENT_BYTES,
     PieceInfo,
     SidxIndex,
     SidxRef,
@@ -78,6 +79,9 @@ def test_parse_sidx_gives_offsets_and_times(version: int) -> None:
         _sidx(2, 1000, 0, 0, [(10, 10)]),  # unknown version
         _sidx(0, 0, 0, 0, [(10, 10)]),  # timescale 0
         _sidx(0, 1000, 0, 0, [(0x8000_0010, 10)]),  # reference to another sidx
+        _sidx(0, 1000, 0, 0, [(0, 10)]),  # empty segment
+        _sidx(0, 1000, 0, 0, [(10, 10), (MAX_SEGMENT_BYTES + 1, 10)]),  # segment bigger than 64 MB
+        struct.pack(">I4sQ", 1, b"sidx", 48) + b"\x00" * 32,  # 64-bit box size header
     ],
 )
 def test_bad_sidx_is_unsupported(box: bytes) -> None:
@@ -128,6 +132,28 @@ def test_a_sidx_too_far_into_the_file_is_unsupported() -> None:
 
 def test_a_bad_box_size_is_unsupported() -> None:
     data = struct.pack(">I4s", 4, b"ftyp") + b"\x00" * 100
+    with pytest.raises(YtError) as info:
+        read_index(Reader(data))
+    assert info.value.code == "E_CAPTURE_UNSUPPORTED"
+
+
+def test_a_segment_of_exactly_64_mb_is_still_fine() -> None:
+    index = parse_sidx(_sidx(0, 1000, 0, 0, [(MAX_SEGMENT_BYTES, 10)]), 0)
+    assert index.refs[0].size == MAX_SEGMENT_BYTES
+
+
+def test_a_top_box_with_a_64_bit_size_is_walked_over() -> None:
+    data = _file()
+    large = struct.pack(">I4sQ", 1, b"free", 16 + 20) + b"\x00" * 20
+    ftyp_end = struct.unpack_from(">I", data, 0)[0]
+    data = data[:ftyp_end] + large + data[ftyp_end:]
+    index = read_index(Reader(data))
+    assert index.init == data[: len(data) - 3000]
+    assert [r.offset for r in index.sidx.refs][0] == len(data) - 3000
+
+
+def test_a_zero_size_box_is_unsupported() -> None:
+    data = struct.pack(">I4s", 0, b"free") + b"\x00" * 100
     with pytest.raises(YtError) as info:
         read_index(Reader(data))
     assert info.value.code == "E_CAPTURE_UNSUPPORTED"
@@ -196,7 +222,7 @@ def _fmt(fid: str, w: int | None, h: int, **extra: object) -> dict:
 
 
 def test_max_short_side_maps_the_setting() -> None:
-    assert [max_short_side(q) for q in ("max", "1080", "720")] == [None, 1080, 720]
+    assert [max_short_side(q) for q in ("max", "1080", "720")] == [2160, 1080, 720]
     with pytest.raises(ValueError):
         max_short_side("4k")
 
@@ -205,6 +231,8 @@ def test_short_side_counts_portrait_by_width() -> None:
     assert short_side({"width": 1080, "height": 1920}) == 1080
     assert short_side({"height": 720}) == 720
     assert short_side({"width": 640}) == 0
+    assert short_side({"width": float("inf"), "height": float("nan")}) == 0  # ค่าไม่จำกัด/ไม่ใช่ตัวเลข = ไม่รู้ขนาด
+    assert short_side({"width": 1920, "height": float("inf")}) == 0
 
 
 def test_pick_prefers_the_largest_short_side_under_the_cap() -> None:
@@ -214,6 +242,18 @@ def test_pick_prefers_the_largest_short_side_under_the_cap() -> None:
     assert pick_capture_format({"formats": formats}, 720)["format_id"] == "136"
     portrait = [_fmt("p1080", 1080, 1920), _fmt("p720", 720, 1280)]
     assert pick_capture_format({"formats": portrait}, 1080)["format_id"] == "p1080"  # ด้านสั้น 1080 ไม่เกินเพดาน
+
+
+def test_max_means_up_to_4k_and_leaves_8k_out() -> None:
+    formats = [
+        _fmt("8k", 7680, 4320, vcodec="av01.0.17M.08"),
+        _fmt("4k", 3840, 2160, vcodec="av01.0.12M.08"),
+        _fmt("4k-portrait", 2160, 3840, vcodec="av01.0.12M.08"),
+    ]
+    cap = max_short_side("max")
+    assert pick_capture_format({"formats": formats}, cap)["format_id"] == "4k"
+    assert pick_capture_format({"formats": formats[2:]}, cap)["format_id"] == "4k-portrait"
+    assert pick_capture_format({"formats": formats[:1]}, cap)["format_id"] == "8k"  # ไม่มีตัวใต้เพดาน = ตัวเล็กสุดที่เหนือเพดาน
 
 
 def test_pick_order_sdr_then_avc1_then_smallest() -> None:
