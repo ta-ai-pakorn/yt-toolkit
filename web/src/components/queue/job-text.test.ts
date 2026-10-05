@@ -14,6 +14,7 @@ import {
   pausedRemainingMs,
   progressLine,
   retryText,
+  sharpCount,
   stageText,
 } from "./job-text"
 
@@ -147,5 +148,37 @@ describe("M5-A: ชื่องานต่อท้ายตัวเลือ�
     expect(stageText("splitting:3/12")).toBe("กำลังแยก chapter 3/12")
     expect(stageText("writing")).toBe("บันทึกไฟล์")
     expect(progressLine(job({ stage: "splitting:2/5", progress: 0.5 }))).toBe("กำลังแยก chapter 2/5 · 50%")
+  })
+})
+
+describe("ภาพคม (M5 รอบ B)", () => {
+  const sharp = (over: Partial<Job> = {}) => job({ kind: "frames_sharp", params: {}, ...over })
+
+  it("stageText of the two sharp stages", () => {
+    expect(stageText("extracting_frames:3/40")).toBe("กำลังดึงภาพ 3/40")
+    expect(stageText("sharp_frames:2/9")).toBe("กำลังทำภาพคม 2/9")
+  })
+
+  it("sharpCount: folder output first, then the extracting stage", () => {
+    expect(sharpCount({ outputs: [{ index: 0, name: "x - ภาพคม", sizeBytes: 9, files: 38 }], stage: "extracting_frames:1/40" })).toBe(38)
+    expect(sharpCount({ stage: "extracting_frames:3/40" })).toBe(40)
+    expect(sharpCount({ stage: "downloading_video" })).toBeNull()
+    expect(sharpCount({})).toBeNull()
+  })
+
+  it("jobTitle of a sharp job", () => {
+    expect(jobTitle(sharp({ status: "queued" }))).toBe("คลิปทดสอบ · ภาพคม")
+    expect(jobTitle(sharp({ stage: "downloading_video" }))).toBe("คลิปทดสอบ · ภาพคม")
+    expect(jobTitle(sharp({ stage: "extracting_frames:3/40" }))).toBe("คลิปทดสอบ · ภาพคม 40 ภาพ")
+    expect(jobTitle(sharp({ status: "done", outputs: [{ index: 0, name: "คลิป - ภาพคม", sizeBytes: 9, files: 38 }] }))).toBe(
+      "คลิปทดสอบ · ภาพคม 38 ภาพ"
+    )
+    expect(jobTitle(sharp({ title: "" }))).toBe("aqz-KE-bpKQ · ภาพคม")
+  })
+
+  it("progressLine shows the sharp stage, other kinds keep their titles", () => {
+    expect(progressLine(sharp({ stage: "extracting_frames:3/40", progress: 0.05 }))).toBe("กำลังดึงภาพ 3/40 · 5%")
+    expect(progressLine(job({ stage: "sharp_frames:2/9" }))).toBe("กำลังทำภาพคม 2/9")
+    expect(jobTitle(job())).toBe("คลิปทดสอบ")
   })
 })

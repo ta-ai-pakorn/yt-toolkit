@@ -4,13 +4,30 @@ import { formatDuration } from "@/lib/format"
 import type { Job, JobParams, JobStage } from "@/lib/types"
 
 const SPLIT = /^splitting:(\d+)\/(\d+)$/
+const EXTRACTING = /^extracting_frames:(\d+)\/(\d+)$/
+const AUTO_SHARP = /^sharp_frames:(\d+)\/(\d+)$/
 type FixedStage = keyof typeof th.queue.stages
 
-/** ข้อความของขั้นตอน: "splitting:3/12" = "กำลังแยก chapter 3/12" (M5 รอบ A) ที่เหลือตามตาราง th.queue.stages */
+/**
+ * ข้อความของขั้นตอน: "splitting:3/12" = "กำลังแยก chapter 3/12" (M5 รอบ A) · "extracting_frames:3/40" = "กำลังดึงภาพ 3/40"
+ * · "sharp_frames:2/9" = "กำลังทำภาพคม 2/9" (M5 รอบ B) · ที่เหลือตามตาราง th.queue.stages
+ */
 export function stageText(stage: JobStage): string {
   const split = SPLIT.exec(stage)
   if (split) return fill(th.queue.splitting, { i: split[1], n: split[2] })
+  const extracting = EXTRACTING.exec(stage)
+  if (extracting) return fill(th.queue.extracting, { i: extracting[1], n: extracting[2] })
+  const auto = AUTO_SHARP.exec(stage)
+  if (auto) return fill(th.queue.autoSharp, { i: auto[1], n: auto[2] })
   return th.queue.stages[stage as FixedStage]
+}
+
+/** จำนวนภาพของงานภาพคม: งานเสร็จ = จำนวนไฟล์ในโฟลเดอร์ผล · กำลังดึงภาพ = n ของขั้น · ยังไม่รู้ = null */
+export function sharpCount(job: Partial<Pick<Job, "stage" | "outputs">>): number | null {
+  const files = job.outputs?.[0]?.files
+  if (files !== undefined) return files
+  const extracting = job.stage === undefined ? null : EXTRACTING.exec(job.stage)
+  return extracting ? Number(extracting[2]) : null
 }
 
 /** ตัวเลือกขั้นสูงของงาน ต่อท้ายชื่องาน (spec 3.5): " · ช่วง 1:30-5:00", " · แยก chapter", " · ตัดโฆษณา" */
@@ -22,9 +39,20 @@ export function jobChoice(params: JobParams): string {
   return text
 }
 
-/** ชื่อที่แสดงของงาน: ชื่อคลิป (ยังไม่รู้ชื่อ = รหัสคลิป) + ตัวเลือกขั้นสูงของงาน */
-export const jobTitle = (job: Pick<Job, "title" | "videoId"> & { params?: JobParams }): string =>
-  (job.title || job.videoId) + (job.params ? jobChoice(job.params) : "")
+type TitledJob = Pick<Job, "title" | "videoId"> & Partial<Pick<Job, "kind" | "params" | "stage" | "outputs">>
+
+/**
+ * ชื่อที่แสดงของงาน: ชื่อคลิป (ยังไม่รู้ชื่อ = รหัสคลิป) + ตัวเลือกขั้นสูง
+ * งานภาพคม: " · ภาพคม {n} ภาพ" เมื่อรู้จำนวน (spec 3.5) ยังไม่รู้ = " · ภาพคม"
+ */
+export const jobTitle = (job: TitledJob): string => {
+  const base = job.title || job.videoId
+  if (job.kind === "frames_sharp") {
+    const n = sharpCount(job)
+    return base + (n === null ? th.queue.sharpTitle : fill(th.queue.sharpTitleCount, { n }))
+  }
+  return base + (job.params ? jobChoice(job.params) : "")
+}
 
 /** เปอร์เซ็นต์จากความคืบหน้า 0..1 (ปัดลง ไม่ขึ้น 100% ก่อนเสร็จจริง) เช่น "42%" */
 export function formatPercent(progress: number): string {
