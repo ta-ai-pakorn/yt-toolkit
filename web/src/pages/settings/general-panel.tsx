@@ -17,6 +17,7 @@ import { SwitchRow } from "@/pages/video/advanced/switch-row"
 
 import {
   AUDIO_FORMATS,
+  CAPTURE_QUALITIES,
   CONCURRENCY_CHOICES,
   VIDEO_DEFAULTS,
   choicePatch,
@@ -73,7 +74,7 @@ export function GeneralPanel() {
   if (settings.isPending) {
     return (
       <div className="flex max-w-xl flex-col gap-5" aria-busy="true">
-        {Array.from({ length: 6 }, (_, i) => (
+        {Array.from({ length: 7 }, (_, i) => (
           <Skeleton key={i} className="h-14 w-full" />
         ))}
       </div>
@@ -158,6 +159,22 @@ export function GeneralPanel() {
             if (next) choose(choicePatch("videoDefault", next, shown))
           }}
         />
+      </Field>
+
+      {/* M5 รอบ B2 spec 2.4: ความละเอียดของ "ถ่ายภาพคมตรงนี้" (เพดานนับที่ด้านสั้น) */}
+      <Field>
+        <FieldTitle id="general-capture">{t.captureQuality}</FieldTitle>
+        <ChoiceSelect
+          labelId="general-capture"
+          hintId="general-capture-hint"
+          value={shown.captureQuality}
+          options={CAPTURE_QUALITIES.map((value) => ({ value, label: t.captureQualities[value] }))}
+          onChange={(value) => {
+            const next = CAPTURE_QUALITIES.find((q) => q === value)
+            if (next) choose(choicePatch("captureQuality", next, shown))
+          }}
+        />
+        <FieldDescription id="general-capture-hint">{t.captureQualityHint}</FieldDescription>
       </Field>
 
       <Field>
