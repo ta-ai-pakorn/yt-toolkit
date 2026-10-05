@@ -33,6 +33,10 @@ CutTarget = Literal["mp4", "m4a", "wav"]
 X264_PRESET = "veryfast"
 X264_CRF = 20
 CUT_AAC_KBPS = 192
+# ภาพคม (M5 รอบ B D4): ด้านยาว 1280 ไม่ขยายภาพเล็ก · -q:v 2 ของ mjpeg (คมพอสำหรับงานสไลด์ ไฟล์ราว 150-300 KB)
+SHARP_LONG_SIDE = 1280
+SHARP_JPEG_Q = 2
+_HLG = "HLG"
 
 
 def iso639_2(lang: str | None) -> str:
@@ -130,6 +134,17 @@ class MediaTools(Protocol):
         cancel: Callable[[], bool],
         on_progress: Callable[[float | None], None],
     ) -> None: ...
+
+    def extract_frame(
+        self,
+        src: Path,
+        dst: Path,
+        t_ms: int,
+        *,
+        long_side: int,
+        dynamic_range: str | None,
+        cancel: Callable[[], bool],
+    ) -> bool: ...
 
 
 # ---------- ตัวสร้างอาร์กิวเมนต์ (ฟังก์ชันล้วน) ----------
@@ -325,6 +340,53 @@ def cut_args(
     else:
         args += ["-an"]
     return args + ["-f", "wav" if target == "wav" else "mp4", str(dst)]
+
+
+def scale_filter(long_side: int) -> str:
+    """ย่อให้ด้านยาวไม่เกิน long_side คงสัดส่วน ไม่ขยาย (แนวนอน 1280x720 · แนวตั้ง 720x1280 · ภาพเล็กคงเดิม)"""
+    return f"scale=w='min({long_side},iw)':h='min({long_side},ih)':force_original_aspect_ratio=decrease"
+
+
+def tonemap_filter(dynamic_range: str) -> str:
+    """HDR -> SDR (D8 ใช้เฉพาะคลิปที่ไม่มี format SDR เลย) setparams บอกช่วงสีให้ zscale เองเพราะบางไฟล์ไม่ติดป้าย
+    (วัดแล้ว: ไม่มี setparams = "no path between colorspaces") HLG ใช้ arib-std-b67 นอกนั้น smpte2084 (HDR10)"""
+    trc = "arib-std-b67" if dynamic_range.strip().upper() == _HLG else "smpte2084"
+    return (
+        f"setparams=range=tv:color_primaries=bt2020:color_trc={trc}:colorspace=bt2020nc,"
+        "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,"
+        "zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
+    )
+
+
+def _check_frame(t_ms: int, long_side: int, dynamic_range: str | None) -> None:
+    """กฎเดียวกันทั้งตัวจริงและตัวปลอม"""
+    if isinstance(t_ms, bool) or not isinstance(t_ms, int) or t_ms < 0:
+        raise ValueError(f"bad frame time: {t_ms!r}")
+    if long_side < 1:
+        raise ValueError(f"bad long side: {long_side!r}")
+    if dynamic_range is not None and dynamic_range.strip().upper() in ("", "SDR"):
+        raise ValueError("pass dynamic_range=None for SDR")
+
+
+def frame_args(
+    ffmpeg: str,
+    src: Path,
+    dst: Path,
+    t_ms: int,
+    *,
+    long_side: int = SHARP_LONG_SIDE,
+    dynamic_range: str | None = None,
+) -> list[str]:
+    """ภาพคมหนึ่งภาพ (spec 3.4): -ss ก่อน -i บนไฟล์ในเครื่อง = ตรงเวลา · dynamic_range = HDR ที่ต้อง tone-map"""
+    _check_frame(t_ms, long_side, dynamic_range)
+    scale = scale_filter(long_side)
+    vf = scale if dynamic_range is None else f"{tonemap_filter(dynamic_range)},{scale}"
+    return [ffmpeg, "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-ss", _seconds(t_ms), "-i", str(src),
+            "-frames:v", "1", "-vf", vf, "-q:v", str(SHARP_JPEG_Q), str(dst)]  # fmt: skip
+
+
+def _no_progress(_fraction: float | None) -> None:
+    """ภาพเดียวจบเร็ว ความคืบหน้านับต่อภาพที่ตัวทำงาน"""
 
 
 # ---------- ตัวรัน ffmpeg ----------
@@ -532,6 +594,44 @@ class FfmpegTools:
         kept_s = sum(e - s for s, e in intervals) / 1000
         run_ffmpeg(args, duration_s=kept_s, cancel=cancel, on_progress=on_progress, popen_flags=self._popen_flags)
 
+    def extract_frame(
+        self,
+        src: Path,
+        dst: Path,
+        t_ms: int,
+        *,
+        long_side: int,
+        dynamic_range: str | None,
+        cancel: Callable[[], bool],
+    ) -> bool:
+        """True = ได้ภาพ JPEG ที่ dst · False = ffmpeg ไม่ได้ภาพ (เวลาเลยภาพสุดท้าย ช่วงวินาทีท้ายคลิป) ภาพจึงถูกข้าม
+        ffmpeg หาไม่เจอ / ดิสก์เต็ม / ยกเลิก = โยนต่อ"""
+        args = frame_args(self._require(), src.resolve(), dst.resolve(), t_ms,
+                          long_side=long_side, dynamic_range=dynamic_range)  # fmt: skip
+        if cancel():
+            # เหมือนตัวปลอม: ยกเลิกแล้วไม่เปิด ffmpeg (ภาพเดียวจบเร็วกว่ารอบเช็กยกเลิกของ run_ffmpeg)
+            raise JobCancelled()
+        dst.unlink(missing_ok=True)
+        try:
+            run_ffmpeg(args, duration_s=None, cancel=cancel, on_progress=_no_progress, popen_flags=self._popen_flags)
+        except YtError as exc:
+            if exc.code != "E_UNKNOWN":
+                raise
+            dst.unlink(missing_ok=True)
+            return False
+        return dst.is_file() and dst.stat().st_size > 0
+
+
+@dataclass(frozen=True)
+class FrameCall:
+    """ภาพคมหนึ่งภาพของ FakeMediaTools (ภาพที่เขียนเป็นสำเนาของ cover.jpg เสมอ)"""
+
+    src_name: str
+    dst_name: str
+    t_ms: int
+    long_side: int
+    dynamic_range: str | None
+
 
 @dataclass(frozen=True)
 class CutCall:
@@ -550,11 +650,14 @@ class FakeMediaTools:
 
     mp4 / m4a คัดลอก `src` ไป `dst` ส่วน mp3 / wav เขียนสำเนาของ audio.mp3 / audio.wav ใน `media_root`
     ตัดช่วง = คัดลอกไฟล์ (เป้าหมาย wav = audio.wav) และจดการเรียกไว้ใน cuts
+    ภาพคม = คัดลอก cover.jpg และจดการเรียกไว้ใน frames
     """
 
     def __init__(self, media_root: Path) -> None:
         self._root = media_root
         self.cuts: list[CutCall] = []
+        self.frames: list[FrameCall] = []
+        self.frame_limit_ms: int | None = None  # เวลาตั้งแต่นี้ไม่ได้ภาพ (เลียนแบบภาพท้ายคลิป)
 
     def available(self) -> bool:
         return True
@@ -645,3 +748,22 @@ class FakeMediaTools:
             raise JobCancelled()
         self.cuts.append(CutCall(src.name, dst.name, tuple(clean), mode, target, has_audio))
         self._copy(self._root / "audio.wav" if target == "wav" else src, dst, cancel, on_progress)
+
+    def extract_frame(
+        self,
+        src: Path,
+        dst: Path,
+        t_ms: int,
+        *,
+        long_side: int,
+        dynamic_range: str | None,
+        cancel: Callable[[], bool],
+    ) -> bool:
+        _check_frame(t_ms, long_side, dynamic_range)
+        if cancel():
+            raise JobCancelled()
+        self.frames.append(FrameCall(src.name, dst.name, t_ms, long_side, dynamic_range))
+        if not Path(src).is_file() or (self.frame_limit_ms is not None and t_ms >= self.frame_limit_ms):
+            return False
+        shutil.copyfile(self._root / "cover.jpg", dst)
+        return True
