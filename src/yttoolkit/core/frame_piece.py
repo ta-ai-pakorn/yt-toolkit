@@ -192,7 +192,9 @@ def write_piece(dest: Path, data: bytes) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(data)
     except OSError as err:
-        raise YtError("E_DISK_FULL" if err.errno == errno.ENOSPC else "E_UNKNOWN", type(err).__name__) from err
+        code = "E_DISK_FULL" if err.errno == errno.ENOSPC else "E_UNKNOWN"
+        # ไม่ผูก OSError เดิม: ข้อความมี path ของไฟล์ทำงาน และ log ของ 500 พิมพ์สายโซ่ exception
+        raise YtError(code, type(err).__name__) from None
 
 
 def max_short_side(quality: str) -> int | None:
