@@ -90,3 +90,10 @@ describe("serverMessage", () => {
     expect(serverMessage(new Error("boom"))).toBe(th.general.saveFailed)
   })
 })
+
+describe("autoSharpFrames (M5 รอบ B)", () => {
+  it("switching sends only that key, the same value sends nothing", () => {
+    expect(choicePatch("autoSharpFrames", false, SAVED)).toEqual({ autoSharpFrames: false })
+    expect(choicePatch("autoSharpFrames", true, SAVED)).toBeNull()
+  })
+})

@@ -69,7 +69,7 @@ async function seriousViolations(page: Page) {
     .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))
 }
 
-test("/settings เปิดที่แท็บทั่วไป พร้อมห้าช่อง", async ({ page }) => {
+test("/settings เปิดที่แท็บทั่วไป พร้อมหกช่อง", async ({ page }) => {
   await page.goto("/settings")
   await expect(page.getByRole("tab", { name: "ทั่วไป" })).toHaveAttribute("aria-selected", "true")
   await expect(page.getByLabel("โฟลเดอร์ผลลัพธ์")).toBeVisible()
@@ -78,6 +78,7 @@ test("/settings เปิดที่แท็บทั่วไป พร้อ
   await expect(page.getByRole("combobox", { name: "ภาษาเสียงเริ่มต้น" })).toBeVisible()
   await expect(page.getByRole("combobox", { name: "คุณภาพวิดีโอเริ่มต้น" })).toBeVisible()
   await expect(page.getByRole("group", { name: "รูปแบบเสียงเริ่มต้น" })).toBeVisible()
+  await expect(page.getByRole("switch", { name: "ทำภาพคมอัตโนมัติตอนโหลดวิดีโอ" })).toBeVisible()
   // ไม่มีปุ่มบันทึก: ทุกช่องบันทึกเมื่อเปลี่ยน
   await expect(page.getByRole("button", { name: /^บันทึก/ })).toHaveCount(0)
 })
@@ -207,6 +208,19 @@ test("คุณภาพวิดีโอเริ่มต้นและร�
   await expect(
     page.getByRole("group", { name: "รูปแบบเสียงเริ่มต้น" }).getByRole("button", { name: "wav" })
   ).toHaveAttribute("aria-pressed", "true")
+})
+
+test("ทำภาพคมอัตโนมัติ: เปิดอยู่ตั้งต้น · ปิดแล้วบันทึกและคงอยู่ (ใช้ค่าจำลอง ไม่เขียน backend)", async ({ page, request }) => {
+  const stub = await stubSettings(page, request)
+  await page.goto("/settings/general")
+  const toggle = page.getByRole("switch", { name: "ทำภาพคมอัตโนมัติตอนโหลดวิดีโอ" })
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
+  await expect(page.getByText("ใช้ไฟล์ที่โหลดมาแล้ว ไม่ต้องโหลดเพิ่ม ใช้เวลาเพิ่มราว 10-40 วินาทีต่อคลิป")).toBeVisible()
+  await toggle.click()
+  await expect(saved(page)).toBeVisible()
+  expect(stub.patches).toEqual([{ autoSharpFrames: false }])
+  await page.reload()
+  await expect(page.getByRole("switch", { name: "ทำภาพคมอัตโนมัติตอนโหลดวิดีโอ" })).toHaveAttribute("aria-checked", "false")
 })
 
 test("โหลดค่าตั้งไม่สำเร็จ → แจ้งพร้อมปุ่มลองใหม่ แล้วแสดงช่องเมื่อโหลดได้", async ({ page }) => {
