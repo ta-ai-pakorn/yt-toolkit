@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query"
 import { useSyncExternalStore } from "react"
 
 import { JOBS_KEY, mergeJobPatch, QUEUE_KEY, upsertJob } from "./jobs"
+import { sharpKey } from "./sharp-frames"
 import type { Job, JobPatch, QueueState } from "./types"
 
 /** เหตุการณ์จาก GET /api/events (SSE สัญญา C6) ที่อ่านแล้ว */
@@ -105,6 +106,17 @@ function setQueue(
   else client.setQueryData<QueueState>(QUEUE_KEY, { ...queue, ...patch })
 }
 
+/** งานที่ทำให้ชุดภาพคมของคลิปเปลี่ยนได้: งานภาพคม และงานวิดีโอ (ภาพคมอัตโนมัติ) เพิ่งเสร็จ → videoId ที่ต้องโหลดชุดใหม่ */
+export function sharpRefreshTarget(
+  before: Job | undefined,
+  after: Job
+): string | null {
+  if (after.status !== "done" || before?.status === "done") return null
+  return after.kind === "frames_sharp" || after.kind === "video"
+    ? after.videoId
+    : null
+}
+
 /**
  * โหลดใหม่ด้วยคำขอที่ส่งหลัง SSE ต่อติด: คำขอแรกที่ยังไม่ตอบ (ยังไม่มีข้อมูล) react-query จะไม่ยิงซ้ำแต่รอคำตอบเดิม
  * ซึ่ง backend คำนวณก่อนต่อติด เหตุการณ์ในช่วงนั้นจึงหายไป · ยกเลิกคำขอค้างก่อน แล้วจึงโหลดใหม่
@@ -154,8 +166,12 @@ export function connectEvents(
         return
       }
       const { before, after } = applyServerEvent(client, event)
-      if (after !== undefined && before?.status !== after.status)
+      if (after !== undefined && before?.status !== after.status) {
+        const refresh = sharpRefreshTarget(before, after)
+        if (refresh !== null)
+          void client.invalidateQueries({ queryKey: sharpKey(refresh) })
         opts.onJobChange?.(before, after)
+      }
     }
     return [name, handler] as const
   })

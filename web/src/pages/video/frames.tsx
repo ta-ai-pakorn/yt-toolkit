@@ -11,6 +11,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { fill, th } from "@/i18n/th"
 import { ApiError } from "@/lib/api"
@@ -18,18 +19,19 @@ import { copyImage } from "@/lib/clipboard"
 import { downloadFile } from "@/lib/download"
 import { formatTimecode, youtubeLinkAt, youtubeWatchUrl } from "@/lib/format"
 import { useEnqueue } from "@/lib/jobs"
-import type { ReplaySegment, StoryboardFrame } from "@/lib/types"
+import type { FrameSource, ReplaySegment, StoryboardFrame } from "@/lib/types"
 
 import { errorMessage } from "./errors"
 import { nearestFrameIndex, revealAndFocus } from "./frame-target"
 import { FrameLightbox } from "./lightbox"
+import { frameSetShown } from "./frame-set"
 import { LoadError } from "./load-error"
 import { replayedFrameIndexes } from "./most-replayed"
 import { nowPlayingFrame } from "./playback-sync"
 import { playerActions, usePlayerValue } from "./player/player-store"
 import { markRange } from "./player/range-mark-buttons"
 import { ReplayedMark } from "./replayed-mark"
-import { storyboardQuery } from "./queries"
+import { sharpQuery, storyboardQuery } from "./queries"
 import { subtitlesQuery } from "./subs-queries"
 import { trackInEffect } from "./track-label"
 import { useVideoParams } from "./url-state"
@@ -444,6 +446,30 @@ function NoStoryboard() {
   )
 }
 
+/** ปุ่มสลับ [ภาพเร็ว | ภาพคม] (มีทั้งสองชุดเท่านั้น) · กดปุ่มที่เลือกอยู่ซ้ำไม่ทำอะไร (ต้องมีชุดที่เลือกเสมอ) */
+function FrameSetToggle({ value, onChange }: { value: FrameSource; onChange: (next: FrameSource) => void }) {
+  return (
+    <ToggleGroup
+      aria-label={t.setLabel}
+      variant="outline"
+      size="sm"
+      spacing={0}
+      value={[value]}
+      onValueChange={(next) => {
+        const picked = next[0]
+        if (picked === "fast" || picked === "sharp") onChange(picked)
+      }}
+    >
+      <ToggleGroupItem value="fast" className={`px-3 ${TOUCH}`}>
+        {t.setFast}
+      </ToggleGroupItem>
+      <ToggleGroupItem value="sharp" className={`px-3 ${TOUCH}`}>
+        {t.setSharp}
+      </ToggleGroupItem>
+    </ToggleGroup>
+  )
+}
+
 type Bulk = "sheet" | "zip"
 
 /** ข้อความ toast ตอนส่งเข้าคิว: "failed" ของคิวคือ "เพิ่มเข้าคิวไม่สำเร็จ" (addFailed) */
@@ -454,8 +480,8 @@ const ENQUEUE_MESSAGES = {
   goHealth: th.queue.goHealth,
 }
 
-/** ปุ่มโหลดทั้งชุด: M4 ส่งงานเข้าคิว (ไฟล์ลงโฟลเดอร์ปลายทาง) ตัวกรองไม่มีผล ทุกภาพเสมอ */
-function BulkDownloads({ videoId }: { videoId: string }) {
+/** ปุ่มโหลดทั้งชุด: ส่งงานเข้าคิว (ไฟล์ลงโฟลเดอร์ปลายทาง) ใช้ชุดภาพที่เห็นอยู่ (source) ตัวกรองไม่มีผล ทุกภาพเสมอ */
+function BulkDownloads({ videoId, source }: { videoId: string; source: FrameSource }) {
   const [busy, setBusy] = useState<Bulk | null>(null)
   const { enqueue } = useEnqueue(ENQUEUE_MESSAGES)
 
@@ -465,8 +491,8 @@ function BulkDownloads({ videoId }: { videoId: string }) {
     try {
       await enqueue([
         kind === "sheet"
-          ? { videoId, kind: "contact_sheet", params: { source: "fast", columns: 5 } }
-          : { videoId, kind: "frames_zip", params: { source: "fast" } },
+          ? { videoId, kind: "contact_sheet", params: { source, columns: 5 } }
+          : { videoId, kind: "frames_zip", params: { source } },
       ])
     } finally {
       setBusy(null)
@@ -519,6 +545,7 @@ type FramesSectionProps = {
 /** ส่วน "ภาพเฟรม" ของ W2 · เริ่มโหลด storyboard เมื่อ `enabled` (หลังข้อมูลคลิปมาแล้ว) */
 export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionProps) {
   const storyboard = useQuery(storyboardQuery(videoId, enabled))
+  const sharp = useQuery(sharpQuery(videoId, enabled))
   // รายการแทร็กซับ (cache เดียวกับป้ายแทร็กที่หัวคลิป) ใช้ตัดสินว่าเมนูภาพเฟรมมี "ดูซับช่วงนี้" ไหม
   const subtitles = useQuery(subtitlesQuery(videoId, enabled))
   const { trackId, at, replayed, update } = useVideoParams()
@@ -526,32 +553,42 @@ export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionP
     subtitles.isSuccess && subtitles.data.tracks.length > 0 && trackInEffect(subtitles.data, trackId) !== null
   // Q6 = ก: ไปแท็บทรานสคริปต์ที่บรรทัดของเวลานั้น (patch เดียว เพราะ update อ่าน URL ตอนสร้าง)
   const onViewSubs = hasTrack ? (tMs: number) => update({ tab: "transcript", at: tMs }) : undefined
-  const frames = useMemo(() => storyboard.data?.frames ?? [], [storyboard.data])
-  // ภาพที่มีป้าย "ดูซ้ำบ่อย" (รวมภาพแทนของช่วงสั้นที่ไม่มีภาพอยู่ข้างใน) คิดครั้งเดียวต่อชุดภาพ
+  const fastFrames = useMemo(() => storyboard.data?.frames ?? [], [storyboard.data])
+  const sharpFrames = useMemo(() => sharp.data?.frames ?? [], [sharp.data])
+  // ชุดที่ผู้ใช้กดเลือกเองในรอบที่เปิดหน้านี้ (ของคลิปนี้เท่านั้น ไม่จำข้ามการโหลดหน้า spec 2)
+  const [chosen, setChosen] = useState<{ videoId: string; source: FrameSource } | null>(null)
+  const hasFast = storyboard.isSuccess && fastFrames.length > 0
+  const hasSharp = sharpFrames.length > 0
+  const shown = frameSetShown({ hasFast, hasSharp, chosen: chosen?.videoId === videoId ? chosen.source : null })
+  const frames = shown === "sharp" ? sharpFrames : fastFrames
+  // ภาพที่มีป้าย "ดูซ้ำบ่อย" (รวมภาพแทนของช่วงสั้นที่ไม่มีภาพอยู่ข้างใน) คิดครั้งเดียวต่อชุดภาพที่เห็น
   const marked = useMemo(() => replayedFrameIndexes(frames, mostReplayed), [frames, mostReplayed])
   // ?replayed=1 แต่คลิปไม่มีช่วงหรือไม่มีภาพในช่วง = ไม่สนใจ (เห็นทุกภาพ ไม่มีปุ่ม)
   const filtered = replayed && marked.length > 0
   const unfilter = useCallback(() => update({ replayed: false }), [update])
   const noStoryboard =
     (storyboard.isError && storyboard.error instanceof ApiError && storyboard.error.code === "E_NO_STORYBOARD") ||
-    (storyboard.isSuccess && frames.length === 0)
+    (storyboard.isSuccess && fastFrames.length === 0)
+  // รอคำตอบภาพคมก่อนแสดงภาพเร็ว: คลิปที่มีภาพคมเปิดมาที่ภาพคมเลยไม่กระพริบ (ขอภาพคมพลาด = แสดงภาพเร็วตามเดิม)
+  const gridShown = shown === "sharp" || (!sharp.isPending && hasFast)
 
+  const grid = (
+    <FrameGrid
+      frames={frames}
+      videoId={videoId}
+      at={at}
+      marked={marked}
+      filtered={filtered}
+      onUnfilter={unfilter}
+      onViewSubs={onViewSubs}
+    />
+  )
   let body
-  if (noStoryboard) body = <NoStoryboard />
+  if (gridShown) body = grid
+  else if (sharp.isPending) body = <FrameSkeleton />
+  else if (noStoryboard) body = <NoStoryboard />
   else if (storyboard.isError) {
     body = <LoadError title={t.loadError} error={storyboard.error} onRetry={() => void storyboard.refetch()} />
-  } else if (storyboard.isSuccess) {
-    body = (
-      <FrameGrid
-        frames={frames}
-        videoId={videoId}
-        at={at}
-        marked={marked}
-        filtered={filtered}
-        onUnfilter={unfilter}
-        onViewSubs={onViewSubs}
-      />
-    )
   } else body = <FrameSkeleton />
 
   return (
@@ -565,14 +602,14 @@ export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionP
             </h2>
           </CardTitle>
           {/* บอกว่าภาพเฟรมทำอะไรได้บ้าง (คลิกดูใหญ่ / คลิกขวาคัดลอก-โหลด) คนที่ไม่รู้ว่าคลิกขวาได้จะได้เจอ */}
-          {storyboard.isSuccess && frames.length > 0 && (
-            // จอแคบ: ลงไปอยู่ใต้ปุ่มโหลดเต็มความกว้าง ไม่ถูกบีบข้างปุ่ม
-            <CardDescription className="sm:col-span-1">{t.hint}</CardDescription>
-          )}
-          {storyboard.isSuccess && frames.length > 0 && (
+          {gridShown && <CardDescription className="sm:col-span-1">{t.hint}</CardDescription>}
+          {gridShown && (
             <CardAction className="max-sm:col-start-1 max-sm:row-span-1 max-sm:row-start-2 max-sm:justify-self-start">
-              {/* ตัวกรองไม่มีผลกับไฟล์ที่โหลด: .zip และภาพรวมเฟรมได้ทุกภาพเสมอ */}
+              {/* ตัวกรองไม่มีผลกับไฟล์ที่โหลด: .zip และภาพรวมเฟรมได้ทุกภาพของชุดที่เห็นเสมอ */}
               <div className="flex flex-wrap items-center gap-2">
+                {hasFast && hasSharp && (
+                  <FrameSetToggle value={shown} onChange={(source) => setChosen({ videoId, source })} />
+                )}
                 {marked.length > 0 && (
                   <ReplayedFilterButton
                     count={marked.length}
@@ -582,14 +619,12 @@ export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionP
                     onToggle={() => update(filtered ? { replayed: false } : { replayed: true, at: null })}
                   />
                 )}
-                <BulkDownloads videoId={videoId} />
+                <BulkDownloads videoId={videoId} source={shown} />
               </div>
             </CardAction>
           )}
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {body}
-        </CardContent>
+        <CardContent className="flex flex-col gap-3">{body}</CardContent>
       </Card>
     </section>
   )

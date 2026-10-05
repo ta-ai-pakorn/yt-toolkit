@@ -7,6 +7,7 @@ import {
   connectEvents,
   EVENTS_URL,
   parseServerEvent,
+  sharpRefreshTarget,
 } from "./events"
 import { JOBS_KEY, QUEUE_KEY } from "./jobs"
 import type { Job, QueueState } from "./types"
@@ -320,5 +321,27 @@ describe("connectEvents", () => {
     disconnect()
     expect(source.count()).toBe(0)
     expect(source.closed).toBe(true)
+  })
+})
+
+describe("sharpRefreshTarget", () => {
+  const sharpJob: Job = { ...JOB, kind: "frames_sharp", params: {} }
+  it("a frames_sharp or video job that just finished refreshes its clip", () => {
+    expect(sharpRefreshTarget({ ...sharpJob, status: "running" }, { ...sharpJob, status: "done" })).toBe("aqz-KE-bpKQ")
+    expect(sharpRefreshTarget({ ...JOB, status: "running" }, { ...JOB, status: "done" })).toBe("aqz-KE-bpKQ")
+  })
+  it("anything else does not", () => {
+    expect(sharpRefreshTarget({ ...sharpJob, status: "done" }, { ...sharpJob, status: "done" })).toBeNull()
+    expect(sharpRefreshTarget({ ...sharpJob, status: "running" }, { ...sharpJob, status: "failed" })).toBeNull()
+    const zip: Job = { ...JOB, kind: "frames_zip", params: { source: "sharp" } }
+    expect(sharpRefreshTarget({ ...zip, status: "running" }, { ...zip, status: "done" })).toBeNull()
+  })
+  it("connectEvents invalidates ['sharp', id] when such a job finishes", () => {
+    const client = new QueryClient()
+    client.setQueryData(JOBS_KEY, [{ ...sharpJob, status: "running" }])
+    const spy = vi.spyOn(client, "invalidateQueries")
+    const { source } = connect(client)
+    source.emit("job.updated", { id: JOB.id, status: "done" })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["sharp", "aqz-KE-bpKQ"] })
   })
 })
