@@ -10,7 +10,7 @@ const UPCOMING = "UPCOMINGLV1"
 const PRIVATE = "PRIVATEVID1"
 const PRIVATE_MESSAGE = "คลิปนี้เป็นส่วนตัว เจ้าของต้องเปิดเป็นสาธารณะก่อน"
 const BOT_MESSAGE = "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท รอสัก 10 นาทีแล้วค่อยลองใหม่"
-const NO_STORYBOARD_MESSAGE = "คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว ภาพคมจะใช้ได้ในเวอร์ชันถัดไป"
+const NO_STORYBOARD_MESSAGE = 'คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว กด "ขอภาพคม" แทนได้'
 const FRAME_LIST = "รายการภาพเฟรม"
 // ภาพเฟรมของ Big Buck Bunny ในชุดทดสอบ: แสดงครบทุกภาพตั้งแต่แรก (D7)
 const FRAME_COUNT = 128
@@ -491,16 +491,13 @@ test.describe("W2 ภาพเฟรม", () => {
     expect(queue.bodies).toHaveLength(1)
   })
 
-  test("คลิปที่ไม่มี storyboard: Empty พร้อมปุ่ม 'ขอภาพคม' ที่ปิดอยู่ และ tooltip", async ({ page }) => {
+  test("คลิปที่ไม่มี storyboard: Empty พร้อมปุ่ม 'ขอภาพคม' ที่กดได้ (M5 รอบ B)", async ({ page }) => {
     await page.goto(`/v/${ZOO}`)
     await expect(page.getByText(NO_STORYBOARD_MESSAGE)).toBeVisible()
     const button = page.getByRole("button", { name: "ขอภาพคม" })
-    await expect(button).toBeDisabled()
-    // ปุ่มที่ปิดใช้งานต้องดูจางลง (aria-disabled ไม่ได้ทำให้สไตล์ disabled: ทำงาน)
-    await expect(button).toHaveCSS("opacity", "0.5")
-    await expect(button).toHaveCSS("cursor", "not-allowed")
-    await button.hover()
-    await expect(page.locator('[data-slot="tooltip-content"]')).toHaveText("เปิดใช้ในเวอร์ชันถัดไป")
+    await expect(button).toBeEnabled()
+    await button.click()
+    await expect(page.getByRole("dialog", { name: "ขอภาพคม" })).toBeVisible()
     await expect(page.getByRole("button", { name: "โหลดภาพรวมเฟรม" })).toHaveCount(0)
   })
 
