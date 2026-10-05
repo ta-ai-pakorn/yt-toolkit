@@ -2078,3 +2078,86 @@ def test_open_services_gives_the_handlers_the_sponsorblock_source(paths, fake_pl
         assert captured["deps"].sponsors is services.extractor
     finally:
         services.db.close()
+
+
+# ---------- M5 รอบ B: ของค้างของภาพคม ----------
+
+
+@pytest.mark.parametrize(
+    ("name", "ours"),
+    [
+        (f"{TITLE} - ภาพคม", True),
+        (f"{TITLE} - ภาพคม (2)", True),
+        (f"{TITLE} - ภาพคม (99)", True),
+        (f"{TITLE[:5]} - ภาพคม", True),  # ชื่อถูกตัดสั้นตามความยาว path
+        (f"{TITLE} - ภาพคม (1)", False),
+        (f"{TITLE} - ภาพคม เก่า", False),
+        ("อีกคลิป - ภาพคม", False),
+        (f"{TITLE}.mp4", False),
+    ],
+)
+def test_sharp_dir_pattern(name, ours):
+    assert bool(lifecycle.sharp_dir_pattern(TITLE).fullmatch(name)) is ours
+
+
+def test_sweep_removes_only_partial_sharp_folders(paths):
+    db, store, root, folder, _job_id = _sweep_env(paths)
+    try:
+        partial = folder / f"{TITLE} - ภาพคม (2)"  # ดับระหว่างย้ายภาพเข้า: ยังมี marker
+        partial.mkdir()
+        (partial / files.PARTIAL_MARKER).write_bytes(b"")
+        (partial / "frame_00-00-00.jpg").write_bytes(b"x")
+        finished = folder / f"{TITLE} - ภาพคม"  # ชุดที่เสร็จแล้ว (ไม่มี marker) แม้ไม่อยู่ในประวัติงานแล้ว
+        finished.mkdir()
+        (finished / "frame_00-00-00.jpg").write_bytes(b"x")
+        user = folder / "ภาพของฉัน"  # โฟลเดอร์ของผู้ใช้ที่บังเอิญมี marker
+        user.mkdir()
+        (user / files.PARTIAL_MARKER).write_bytes(b"")
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, root, stranded) == 1
+        assert not partial.exists() and finished.exists() and user.exists()
+    finally:
+        db.close()
+
+
+def test_sweep_keeps_a_done_jobs_sharp_folder(paths):
+    db, store, root, folder, _job_id = _sweep_env(paths)
+    try:
+        kept = folder / f"{TITLE} - ภาพคม (3)"
+        kept.mkdir()
+        (kept / files.PARTIAL_MARKER).write_bytes(b"")
+        (done,) = store.add([NewJob("aqz-KE-bpKQ", "frames_sharp", {}, TITLE)])
+        store.transition(done.id, "running")
+        output = OutputFile(str(root), f"{folder.name}/{kept.name}", 0, "folder", files=0)
+        store.transition(done.id, "done", outputs=(output,))
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, root, stranded) == 0
+        assert kept.exists()
+    finally:
+        db.close()
+
+
+def test_open_services_sweeps_sharp_leftovers_in_the_cache(paths, fake_platform):
+    clip = paths.cache / "aqz-KE-bpKQ"
+    stale = clip / "sharp.tmp-01900000-0000-7000-8000-000000000001"
+    stale.mkdir(parents=True)
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        assert not stale.exists()
+    finally:
+        services.db.close()
+
+
+def test_sharp_cache_sweep_failure_is_logged_not_raised(paths, fake_platform, monkeypatch, caplog):
+    def broken(cache_root):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(lifecycle, "sweep_sharp_leftovers", broken)
+    with caplog.at_level(logging.ERROR, logger="yttoolkit"):
+        services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        assert any("ภาพคม" in r.getMessage() for r in caplog.records)
+    finally:
+        services.db.close()
