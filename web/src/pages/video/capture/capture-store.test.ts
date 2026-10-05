@@ -101,6 +101,27 @@ describe("runCapture", () => {
     expect(captureStore.get().viewing).toEqual({ videoId: BBB, id: "c_125400" })
   })
 
+  it("ดูจนจบคลิปแล้วกดถ่าย: ส่งเวลาไม่เกิน 100 ms ก่อนจบตามความยาวในข้อมูลคลิปที่โหลดไว้", async () => {
+    const client = new QueryClient()
+    client.setQueryData(["video", BBB], { videoId: BBB, durationS: 635, isLive: false })
+    api.postCapture.mockResolvedValue(item(634_900))
+    await runCapture(client, BBB, 635_000)
+    expect(api.postCapture).toHaveBeenCalledWith(BBB, 634_900)
+  })
+
+  it("รายการที่กำลังโหลดค้างอยู่ตอนถ่ายเสร็จ (รายการก่อนถ่าย) ไม่ทับภาพใหม่", async () => {
+    const client = new QueryClient()
+    let release: (list: Capture[]) => void = () => undefined
+    const stale = client
+      .fetchQuery({ queryKey: capturesKey(BBB), queryFn: () => new Promise<Capture[]>((resolve) => (release = resolve)) })
+      .catch(() => undefined)
+    api.postCapture.mockResolvedValue(item(125_400))
+    await runCapture(client, BBB, 125_400)
+    release([item(200_000)])
+    await stale
+    expect(client.getQueryData<Capture[]>(capturesKey(BBB))?.map((c) => c.id)).toEqual(["c_125400"])
+  })
+
   it("พลาด = toast ข้อความจาก backend ไม่เติมแถบ · ยูทูปขอตรวจสอบ = โหลดสถานะคิวใหม่", async () => {
     const client = new QueryClient()
     const invalidate = vi.spyOn(client, "invalidateQueries")

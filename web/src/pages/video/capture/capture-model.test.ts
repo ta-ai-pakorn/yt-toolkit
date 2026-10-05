@@ -20,6 +20,19 @@ describe("captureTimeMs", () => {
     expect(captureTimeMs(-30)).toBe(0)
     expect(captureTimeMs(Number.NaN)).toBe(0)
   })
+
+  it("รู้ความยาวคลิป = ไม่เกิน 100 ms ก่อนจบ (ดูจนจบแล้วกดถ่าย) · ไม่รู้ความยาว = ไม่จำกัด", () => {
+    expect(captureTimeMs(635_000, 635)).toBe(634_900)
+    expect(captureTimeMs(634_960, 635)).toBe(634_900)
+    expect(captureTimeMs(640_000, 635)).toBe(634_900)
+    expect(captureTimeMs(634_800, 635)).toBe(634_800)
+    expect(captureTimeMs(125_449, 635)).toBe(125_400)
+    expect(captureTimeMs(50, 0.05)).toBe(0)
+    expect(captureTimeMs(635_000, 0)).toBe(635_000)
+    expect(captureTimeMs(635_000, undefined)).toBe(635_000)
+    expect(captureTimeMs(635_000, null)).toBe(635_000)
+    expect(captureTimeMs(635_000, Number.NaN)).toBe(635_000)
+  })
 })
 
 describe("captureClock", () => {

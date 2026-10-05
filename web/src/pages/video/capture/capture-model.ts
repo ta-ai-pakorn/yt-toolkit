@@ -6,9 +6,15 @@ import { formatDuration, formatTimecode } from "@/lib/format"
 /** ปุ่มถ่ายภาพปัดเวลาของตัวเล่นทีละ 100 ms (spec 2.1) */
 export const CAPTURE_STEP_MS = 100
 
-export function captureTimeMs(ms: number): number {
+/**
+ * เวลาที่ส่งไปถ่าย: ปัดทีละ 100 ms ไม่ติดลบ · รู้ความยาวคลิป (durationS > 0) = ไม่เกิน 100 ms ก่อนจบ
+ * (ดูจนจบคลิปแล้วกดถ่าย เวลาของตัวเล่นเท่ากับความยาวคลิปพอดี ซึ่งไม่มีภาพ)
+ */
+export function captureTimeMs(ms: number, durationS?: number | null): number {
   const safe = Number.isFinite(ms) ? Math.max(0, ms) : 0
-  return Math.round(safe / CAPTURE_STEP_MS) * CAPTURE_STEP_MS
+  const rounded = Math.round(safe / CAPTURE_STEP_MS) * CAPTURE_STEP_MS
+  if (durationS == null || !Number.isFinite(durationS) || durationS <= 0) return rounded
+  return Math.min(rounded, Math.max(0, Math.floor(durationS * 1000) - CAPTURE_STEP_MS))
 }
 
 /** เวลาของภาพที่ถ่าย "2:05" หรือ "2:05.4": ละเอียดถึง 0.1 วินาที สองภาพในวินาทีเดียวกันจึงอ่านต่างกัน */
