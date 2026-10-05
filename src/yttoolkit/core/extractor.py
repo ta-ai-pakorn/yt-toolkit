@@ -27,7 +27,15 @@ from urllib.parse import parse_qs
 import httpx
 
 from .cancel import JobCancelled
-from .download import DownloadChoice, DownloadHooks, DownloadResult, SponsorBlockError, SponsorSegment
+from .download import (
+    DownloadChoice,
+    DownloadHooks,
+    DownloadResult,
+    MediaFacts,
+    SponsorBlockError,
+    SponsorSegment,
+    media_facts,
+)
 from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix_id
 from .visitor_session import VisitorSession
 from .yterrors import YtError, classify
@@ -452,6 +460,17 @@ def _media_path(result: object, workdir: Path) -> Path:
     raise YtError("E_UNKNOWN", f"yt-dlp โหลดจบแต่หาไฟล์สื่อไม่ได้ (เจอ {len(found)} ไฟล์)")
 
 
+def _downloaded_facts(result: object) -> MediaFacts | None:
+    """ขนาดภาพและช่วงสีของไฟล์ที่โหลดจริง: requested_downloads ตัวสุดท้าย (yt-dlp รวมค่าของภาพไว้ให้ตอนรวมไฟล์)
+    หรือผลระดับบน · ไม่รู้ความสูง = None"""
+    if not isinstance(result, dict):
+        return None
+    downloads = result.get("requested_downloads")
+    source = downloads[-1] if isinstance(downloads, list) and downloads and isinstance(downloads[-1], dict) else result
+    facts = media_facts(source)
+    return facts if facts.height is not None else None
+
+
 class YtDlpExtractor:
     """ตัวจริง: probe/playlist ผ่าน yt-dlp, fetch ผ่าน httpx.Client ตัวเดียวที่ใช้ร่วมกันทุก thread
 
@@ -649,7 +668,7 @@ class YtDlpExtractor:
             if hooks.is_cancelled():
                 raise JobCancelled()
             try:
-                path = self._download_media(source, choice, workdir, hooks)
+                path, media = self._download_media(source, choice, workdir, hooks)
             except YtError as exc:
                 _clear_media(workdir)
                 if exc.code != "E_YT_REFUSED" or attempt >= _REFUSED_ATTEMPTS:
@@ -660,7 +679,7 @@ class YtDlpExtractor:
             except JobCancelled:
                 _clear_media(workdir)
                 raise
-            return DownloadResult(path=path, info=info, choice=choice)
+            return DownloadResult(path=path, info=info, choice=choice, media=media)
 
     def _extract_for_download(self, url: str) -> tuple[dict, dict]:
         """(info สำหรับ process_ie_result, info ที่ sanitize แล้วสำหรับ choose และ DownloadResult)
@@ -683,14 +702,14 @@ class YtDlpExtractor:
 
     def _download_media(
         self, source: dict, choice: DownloadChoice, workdir: Path, hooks: DownloadHooks
-    ) -> Path:
-        """YoutubeDL ตัวที่สองโหลดตาม choice แล้วคืนไฟล์ใน workdir"""
+    ) -> tuple[Path, MediaFacts | None]:
+        """YoutubeDL ตัวที่สองโหลดตาม choice แล้วคืนไฟล์ใน workdir กับขนาดภาพของไฟล์นั้น"""
         from yt_dlp.utils import DownloadCancelled
 
         try:
             with self._ydl(_download_opts(choice, workdir, hooks), with_session=True) as ydl:
                 result = ydl.process_ie_result(source, download=True)
-            return _media_path(result, workdir)
+            return _media_path(result, workdir), _downloaded_facts(result)
         except (YtError, JobCancelled):
             raise
         except DownloadCancelled as exc:
@@ -822,7 +841,13 @@ class FakeExtractor:
         except Exception:
             _clear_media(workdir)
             raise
-        return DownloadResult(path=workdir / target, info=info, choice=choice)
+        return DownloadResult(path=workdir / target, info=info, choice=choice, media=self._media_of(conf))
+
+    @staticmethod
+    def _media_of(conf: dict) -> MediaFacts | None:
+        """"media" ของคลิปใน behaviors.json (M5 รอบ B ภาพคมอัตโนมัติ) ไม่มี = ไม่รู้ (ภาพคมอัตโนมัติจะข้าม)"""
+        media = conf.get("media")
+        return media_facts(media) if isinstance(media, dict) else None
 
     def _behavior_doc(self) -> dict:
         """behaviors.json (อ่านครั้งเดียว) ไม่มีไฟล์ = ไม่มีคลิปพิเศษ ใช้ค่าตั้งต้น"""

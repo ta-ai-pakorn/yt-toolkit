@@ -179,3 +179,11 @@ Big Buck Bunny © Blender Foundation | www.bigbuckbunny.org
 - `ADSOFFLINE1.json` ติดต่อไม่ได้ · `ADSNODATA01` ไม่มีไฟล์ = ไม่มีข้อมูล
 
 คลิปปลอมของ M5 รอบ A ใน `downloads/behaviors.json`: RANGECLIP01, ADSCUTCLIP1, ADSNODATA01, ADSOFFLINE1 (probe เป็น aqz-KE-bpKQ) และ CHAPTERS001 (probe เป็น jNQXAC9IVRw 3 chapter) ใช้ใน web/e2e/queue-advanced.spec.ts เท่านั้น
+
+## ภาพคม (M5 รอบ B)
+คลิปปลอมใน `downloads/behaviors.json` (probe เป็น aqz-KE-bpKQ 635 วิ ภาพเร็ว 128 ภาพ) ใช้ใน `web/e2e/queue-sharp.spec.ts` เท่านั้น:
+- `SHARPCLIP01` "คลิปภาพคม": งาน `frames_sharp` (เลือก format 298 avc1 1280×720 ตาม `download.sharp_choice`)
+- `AUTOSHARP01` "คลิปภาพคมอัตโนมัติ": มี `"media": {"width": 1280, "height": 720, "dynamic_range": "SDR"}` = ตัวปลอมบอกว่าไฟล์ที่โหลดเป็น 720p SDR งาน `video` จึงทำภาพคมอัตโนมัติ (คลิปอื่นไม่มี `media` = ไม่รู้ขนาดไฟล์ ภาพคมอัตโนมัติข้าม)
+
+`FakeMediaTools.extract_frame` เขียนสำเนาของ `media/cover.jpg` เป็นภาพคมทุกภาพ (โหมดปลอมไม่มี ffmpeg)
+`sharp/plan-cases.json`: เคสแผนเวลาภาพคมที่ `tests/unit/test_sharp_plan.py` และ `web/src/lib/sharp-frames.test.ts` อ่านร่วมกัน (เขียนเอง คำนวณมือตาม spec 3.2)
