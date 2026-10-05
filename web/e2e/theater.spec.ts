@@ -43,11 +43,25 @@ async function open(page: Page, videoId: string) {
   await expect(heading(page)).not.toBeEmpty()
 }
 
-/** กด ▶ ในช่องตัวเล่น แล้วรอจนตัวเล่นปลอมเล่นอยู่ */
+/**
+ * รอให้การสลับเลย์เอาต์ (view transition ราว 300 ms) จบ: ระหว่างนั้น <html> รับการคลิกแทนทุกอย่าง (พฤติกรรมของเบราว์เซอร์)
+ * ถ้าคลิกตอนนั้น Playwright ลองใหม่โดยบังคับเลื่อนจอ (scrollIntoView end/center/start) จนช่องตัวเล่นพ้นจอครึ่งหนึ่ง
+ * ตัวเล่นจึงลอยและแถวปุ่มใต้ตัวเล่นหายไป (gate 2) · คีย์บอร์ดไม่ต้องรอ (ไม่มีการเลื่อนจอ)
+ */
+const settled = (page: Page) => expect(page.locator("html[data-theater-switching]")).toHaveCount(0)
+
+/** กดปุ่มสลับหลังการสลับครั้งก่อนจบแล้ว */
+async function clickToggle(page: Page) {
+  await settled(page)
+  await toggle(page).click()
+}
+
+/** กด ▶ ในช่องตัวเล่น แล้วรอจนตัวเล่นปลอมเล่นอยู่และการขยาย (ถ้ามี) จบแล้ว */
 async function play(page: Page) {
   await page.getByRole("button", { name: "เล่นคลิป", exact: true }).click()
   await expect(iframe(page)).toHaveCount(1)
   await expect.poll(async () => (await fakeYTLog(page)).calls).toContain("play")
+  await settled(page)
 }
 
 /** ข้อมูลคลิปจาก backend โหมด fake แต่สลับกว้าง/สูง: คลิปกลายเป็นแนวตั้ง */
@@ -94,7 +108,7 @@ test("▶ ขยายเต็มความกว้างโดยไม่�
   await expect(toggle(page)).toHaveText("ขยายตัวเล่น (T)")
   await expect(toggle(page)).toHaveAttribute("aria-pressed", "false")
   expect(await stored(page)).toBe("0")
-  await toggle(page).click()
+  await clickToggle(page)
   await expect(header(page)).toHaveAttribute("data-layout", "theater-wide")
   expect(await stored(page)).toBe("1")
   // สลับไปมาแล้วยังเป็น iframe ตัวเดิม (ไม่ถูกสร้างใหม่ ไม่โหลดใหม่)
@@ -105,14 +119,14 @@ test("▶ ขยายเต็มความกว้างโดยไม่�
 test("ค่าที่จำไว้ใช้กับทุกคลิป · เปิดคลิปอื่นเริ่มแบบปกติจนกว่าจะกด ▶", async ({ page }) => {
   await open(page, BBB)
   await play(page)
-  await toggle(page).click()
+  await clickToggle(page)
   await expect(header(page)).toHaveAttribute("data-layout", "compact")
 
   await open(page, THAI)
   await expect(header(page)).toHaveAttribute("data-layout", "compact")
   await play(page)
   await expect(header(page)).toHaveAttribute("data-layout", "compact")
-  await toggle(page).click()
+  await clickToggle(page)
   await expect(header(page)).toHaveAttribute("data-layout", "theater-wide")
 
   await open(page, BBB)
@@ -209,7 +223,7 @@ test("ปิดตัวเล่นลอยตอนขยายอยู่: 
 
   // กด ▶ อีกครั้ง (ค่าที่จำไว้ = แบบปกติ) แล้วขยายด้วยปุ่ม · ปิดอีกรอบแล้วย่อด้วยคีย์บอร์ด: โฟกัสไปที่ ▶ ไม่หลุดไป body
   await play(page)
-  await toggle(page).click()
+  await clickToggle(page)
   await expect(header(page)).toHaveAttribute("data-layout", "theater-wide")
   await page.evaluate(() => window.scrollTo(0, 2000))
   await dock(page).getByRole("button", { name: "ปิดตัวเล่น", exact: true }).click()
@@ -239,7 +253,7 @@ test("ลดการเคลื่อนไหว: เลย์เอาต์
   await open(page, BBB)
   await play(page)
   await expect(header(page)).toHaveAttribute("data-layout", "theater-wide")
-  await toggle(page).click()
+  await clickToggle(page)
   await expect(header(page)).toHaveAttribute("data-layout", "compact")
   expect(await transitions(page)).toBe(0)
 })
