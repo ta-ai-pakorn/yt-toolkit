@@ -189,3 +189,19 @@ html[data-player-docked] {
   --toast-bottom-offset: calc(var(--dock-bottom-offset) + 1rem + var(--player-dock-h, 0px) + 0.75rem);
   --toast-mobile-bottom-offset: calc(var(--dock-bottom-offset) + var(--player-dock-h, 0px) + 0.75rem);
 }
+/*
+ * M5 รอบ B2 โหมดโรงภาพยนตร์: ชื่อ view transition ของช่องตัวเล่นและคอลัมน์ข้อมูลมีเฉพาะระหว่างสลับ
+ * (theater.ts ใส่ html[data-theater-switching] แล้วเอาออกเมื่อจบ) ตัวเล่นลอยจึงไม่ถูกกระทบตอนปกติ
+ * ราว 300 ms ease-out · ลดการเคลื่อนไหว = ไม่เรียก startViewTransition เลย
+ */
+html[data-theater-switching] [data-slot="video-header"] [data-slot="player-slot"] {
+  view-transition-name: yt-player;
+}
+html[data-theater-switching] [data-slot="video-info"] {
+  view-transition-name: yt-info;
+}
+::view-transition-group(yt-player),
+::view-transition-group(yt-info) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
