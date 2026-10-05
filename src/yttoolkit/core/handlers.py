@@ -1,4 +1,4 @@
-"""ตัวทำงานของแต่ละชนิดงานในคิว (M4): video, audio, subtitle, note, contact_sheet, frames_zip
+"""ตัวทำงานของแต่ละชนิดงานในคิว (M4 + M5): video, audio, subtitle, note, frames_sharp, contact_sheet, frames_zip
 
 ตัวทำงานแค่เรียงขั้นตอน ไม่ตัดสินใจเรื่องคิว (ลองใหม่ พักคิว ยกเลิก เป็นของ core/queue.py):
 ดึงข้อมูลคลิป (cache) -> โหลด (extractor) -> จัดไฟล์สื่อ (ffmpeg) -> ย้ายเข้าโฟลเดอร์ผลลัพธ์ -> แหล่งที่มา.txt
@@ -9,6 +9,8 @@
 - params.folder (งานจาก W3) = โฟลเดอร์กลุ่มคั่นระหว่างโฟลเดอร์ผลลัพธ์กับโฟลเดอร์ของคลิป (files.plan_output)
 - M5 รอบ A: โหลดทั้งคลิปแล้วตัดช่วงเวลา/โฆษณาด้วย ffmpeg (core/media.cut) ก่อนขั้นจัดไฟล์เดิม
   หรือแยกไฟล์ละ chapter ลงโฟลเดอร์ย่อยของคลิป (วิดีโอตัดแบบเร็ว เสียงตัดแบบแม่นยำ)
+- M5 รอบ B: frames_sharp โหลดวิดีโออย่างเดียว ≤ 720p ดึงภาพคมทีละเวลาด้วย ffmpeg ลบวิดีโอ แล้วเก็บทั้ง cache ของแอพ
+  (core/sharp_store) และโฟลเดอร์ "<ชื่อคลิป> - ภาพคม" · contact sheet / zip ใช้ชุดภาพคมได้ (source "sharp")
 core/ ไม่ import api/ หรือ platform/
 """
 
@@ -18,7 +20,7 @@ import io
 import logging
 import math
 import shutil
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,18 +31,34 @@ from PIL import Image
 from . import files
 from .advanced import ADS_SUFFIX, ChapterPart, Interval, chapter_parts, keep_intervals, kept_ms, range_suffix
 from .download import (
+    SHARP_MAX_SHORT_SIDE,
     DownloadChoice,
     Downloader,
     DownloadHooks,
     DownloadResult,
+    SharpPick,
     SponsorBlockError,
     SponsorSource,
     audio_choice,
+    sharp_choice,
     video_choice,
 )
-from .frames import contact_sheet, frames_zip
-from .jobs import MIN_RANGE_MS, Handler, Job, JobContext, JobResult, OutputFile, split_stage
-from .media import CutMode, CutTarget, MediaMeta, MediaTools, SubtitleInput, iso639_2
+from .frames import contact_sheet, frame_file_names, frames_zip
+from .jobs import (
+    MIN_RANGE_MS,
+    Handler,
+    Job,
+    JobContext,
+    JobResult,
+    OutputFile,
+    count_stage,
+    split_stage,
+    valued_note,
+)
+from .media import SHARP_LONG_SIDE, CutMode, CutTarget, MediaMeta, MediaTools, SubtitleInput, iso639_2
+from .sharp import MAX_INTERVAL_S, fast_times, plan_sharp
+from .sharp_store import FOLDER as SHARP_FOLDER
+from .sharp_store import commit_sharp, discard_sharp, prepare_sharp, read_sharp
 from .srt_builder import SubOptions, options_from_dict
 from .storyboard import FOLDER as STORYBOARD_FOLDER
 from .storyboard import get_storyboard
@@ -61,6 +79,8 @@ CONTACT_SHEET_SUFFIX = " - contact sheet"
 FRAMES_ZIP_SUFFIX = " - frames"
 NOTE_SUFFIX = ".note"  # โน้ต = "<ชื่อ>.note.md" (ชื่อเดียวกับที่ GET /videos/{id}/note ตั้ง)
 COVER_JPEG_QUALITY = 90
+SHARP_SIZE_FACTOR = 1.1  # spec 3.5: ที่ว่างสำหรับวิดีโอชั่วคราว = ขนาด × 1.1
+SHARP_FRAME_BYTES = 400_000  # spec 3.5: เผื่อภาพคมภาพละ 400 KB
 # ยูทูปมีปัญหาชั่วคราว: ให้คิวลองใหม่ / พักคิว แทนการได้วิดีโอที่ไม่มีซับ
 _EMBED_RETRY_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK"})
 
@@ -551,6 +571,136 @@ def _unique(notes: Iterable[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(notes))
 
 
+def _clip_duration_s(clip: _Clip) -> int:
+    """ความยาวคลิปเป็นวินาทีเต็มของ VideoInfo (ตัวเลขเดียวกับหน้าเว็บ แผนภาพจึงตรงกับที่ dialog บอก)
+    คลิปสด = E_LIVE_NOT_READY · ไม่รู้ความยาว = E_UNKNOWN (API กันไว้แล้วถ้ามีข้อมูลคลิปใน cache ตอนส่งงาน)"""
+    if clip.info.get("isLive"):
+        raise YtError("E_LIVE_NOT_READY", "live clip")
+    value = clip.info.get("durationS")
+    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+        raise YtError("E_UNKNOWN", "duration unknown")
+    return int(value)
+
+
+def _sharp_interval(params: Mapping[str, Any]) -> int | None:
+    raw = params.get("intervalS")
+    if raw is None:
+        return None
+    if type(raw) is not int or not 1 <= raw <= MAX_INTERVAL_S:
+        raise YtError("E_UNKNOWN", f"intervalS: {raw!r}")
+    return raw
+
+
+def _sharp_need(size: int | None, frames: int) -> int | None:
+    """ที่ว่างที่ต้องมี: วิดีโอชั่วคราว × 1.1 + 400 KB ต่อภาพ · ไม่รู้ขนาดวิดีโอ = ไม่ตรวจ (กฎเดิมของ M4)"""
+    if size is None:
+        return None
+    return math.ceil(size * SHARP_SIZE_FACTOR) + frames * SHARP_FRAME_BYTES
+
+
+def _extract_frames(
+    deps: HandlerDeps,
+    ctx: JobContext,
+    report: _Reporter,
+    src: Path,
+    times: Sequence[int],
+    *,
+    stage: str,
+    dynamic_range: str | None,
+) -> list[tuple[int, Path]]:
+    """ภาพคมทีละเวลาลง workdir/frames (ffmpeg ครั้งละภาพ) ขั้น "<stage>:i/n" ความคืบหน้า (i-1)/n
+    เวลาที่ไม่ได้ภาพ (วินาทีท้ายคลิป) ถูกข้าม · เช็กการยกเลิกก่อนทุกภาพ"""
+    folder = Path(ctx.workdir) / "frames"
+    folder.mkdir(parents=True, exist_ok=True)
+    made: list[tuple[int, Path]] = []
+    total = len(times)
+    for i, t_ms in enumerate(times, start=1):
+        ctx.check_cancelled()
+        report.stage(count_stage(stage, i, total))
+        report.fraction((i - 1) / total)
+        dst = folder / f"{i:04d}.jpg"
+        if deps.media.extract_frame(src, dst, t_ms, long_side=SHARP_LONG_SIDE, dynamic_range=dynamic_range,
+                                    cancel=ctx.cancelled):  # fmt: skip
+            made.append((t_ms, dst))
+    ctx.check_cancelled()
+    return made
+
+
+def _created_at(deps: HandlerDeps) -> str:
+    return deps.now().astimezone(UTC).isoformat(timespec="seconds")
+
+
+def _cache_sharp_set(
+    deps: HandlerDeps,
+    job_id: str,
+    video_id: str,
+    made: Sequence[tuple[int, Path]],
+    *,
+    origin: str,
+    interval_s: int | None,
+    before_commit: Callable[[], None] | None = None,
+) -> dict:
+    """เก็บภาพที่ดึงแล้ว (tMs, ไฟล์) เป็นชุดภาพคมของคลิปใน cache (งานมือและขั้นอัตโนมัติใช้ตัวเดียวกัน):
+    prepare_sharp (ชุดใหม่ใน sharp.tmp-<jobId> ยังไม่มีใครเห็น) -> before_commit() -> commit_sharp (สลับแทนชุดเดิม)
+    พลาดหรือยกเลิกตรงไหนก็ทิ้งชุดที่เตรียมไว้ ชุดเดิมอยู่ครบ (D5) · คืน index ของชุดใหม่
+    ไม่เช็กการยกเลิกระหว่างนี้: เร็วและต้องจบเป็นชุด · made ว่าง = ValueError (ผู้เรียกเช็กก่อน)"""
+    staged = prepare_sharp(
+        deps.cache_root, video_id, job_id, made, origin=origin,
+        interval_ms=interval_s * 1000 if interval_s is not None else None, created_at=_created_at(deps),
+    )  # fmt: skip
+    try:
+        if before_commit is not None:
+            before_commit()
+        return commit_sharp(deps.cache_root, video_id, staged)
+    except BaseException:
+        discard_sharp(staged)
+        raise
+
+
+def _publish_sharp(
+    deps: HandlerDeps, job: Job, clip: _Clip, made: list[tuple[int, Path]], *, interval_s: int | None
+) -> Path:
+    """ชุดภาพคมของงานมือไปทั้งสองที่ (D2): ภาพย้ายเข้าโฟลเดอร์ "<ชื่อคลิป> - ภาพคม" ก่อนสลับชุดใน cache
+    สลับไม่สำเร็จ = ลบโฟลเดอร์ที่งานนี้เพิ่งสร้าง (ชุดเดิมใน cache ยังอยู่) · คืนโฟลเดอร์นั้น"""
+    placed: list[Path] = []
+
+    def place() -> None:
+        names = frame_file_names([t_ms for t_ms, _ in made])
+        items = [(path, name) for (_t_ms, path), name in zip(made, names, strict=True)]
+        planned = files.plan_sharp_dir(clip.root, clip.title, clip.video_id, clip.group)
+        placed.append(files.move_files_into_dir(items, planned))
+
+    try:
+        _cache_sharp_set(deps, job.id, clip.video_id, made, origin="manual", interval_s=interval_s,
+                         before_commit=place)  # fmt: skip
+    except BaseException:
+        for folder in placed:
+            shutil.rmtree(folder, ignore_errors=True)  # โฟลเดอร์ที่งานนี้เพิ่งสร้าง
+        raise
+    return placed[0]
+
+
+def _frame_source(params: Mapping[str, Any]) -> str:
+    source = params.get("source") or "fast"
+    if source not in ("fast", "sharp"):
+        raise YtError("E_UNKNOWN", f"source: {source!r}")
+    return str(source)
+
+
+def _missing_code(source: str) -> str:
+    return "E_NO_SHARP_FRAMES" if source == "sharp" else "E_NO_STORYBOARD"
+
+
+def _sharp_set_frames(deps: HandlerDeps, clip: _Clip, ctx: JobContext) -> list[tuple[int, Path]]:
+    """ภาพของชุดภาพคมใน cache เรียงตามเวลา ชุดหาย (ล้าง cache ไปแล้ว) = E_NO_SHARP_FRAMES"""
+    index = read_sharp(deps.cache_root, clip.video_id)
+    if index is None:
+        raise YtError("E_NO_SHARP_FRAMES", f"no sharp set for {clip.video_id}")
+    folder = Path(deps.cache_root) / clip.video_id / SHARP_FOLDER
+    ctx.check_cancelled()
+    return [(frame["tMs"], folder / frame["file"]) for frame in index["frames"]]
+
+
 # ---------- ตัวทำงานแต่ละชนิด ----------
 
 
@@ -797,13 +947,62 @@ def _frames(deps: HandlerDeps, clip: _Clip, ctx: JobContext, report: _Reporter) 
     return [(frame["tMs"], folder / frame["file"]) for frame in index["frames"]]
 
 
+def _frames_sharp(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
+    """ภาพคม (D1): แผนเวลา -> โหลดวิดีโออย่างเดียว ≤ 720p (เส้นทางโหลดเดิม: เว้นช่วง เบรก ลองใหม่ ยกเลิก)
+    -> ffmpeg ทีละภาพ -> ลบวิดีโอ -> cache + โฟลเดอร์ "<ชื่อคลิป> - ภาพคม" ผลของงาน = โฟลเดอร์นั้น"""
+    report = _Reporter(ctx)
+    clip = _start(deps, job, ctx, report)
+    duration_s = _clip_duration_s(clip)
+    interval_s = _sharp_interval(job.params)
+    fast = fast_times(deps.videos.raw(clip.video_id)) if interval_s is None else None
+    plan = plan_sharp(duration_s, interval_s=interval_s, fast_times=fast)
+    notes: list[str] = []
+    if plan.raised and plan.interval_s is not None:
+        notes.append(valued_note("SHARP_INTERVAL_RAISED", plan.interval_s))
+    workdir = Path(ctx.workdir)
+    picked: list[SharpPick] = []
+
+    def choose(raw: dict) -> DownloadChoice:
+        choice, pick = sharp_choice(raw)
+        picked[:] = [pick]
+        need = replace(choice, expected_bytes=_sharp_need(choice.expected_bytes, len(plan.times_ms)))
+        return _disk_checked(need, (clip.root, workdir), deps.disk_free, factor=1)
+
+    result = deps.downloader.download(clip.video_id, choose, workdir, _hooks(deps, ctx, report))
+    ctx.check_cancelled()
+    pick = picked[-1]
+    if 0 < pick.short_side < SHARP_MAX_SHORT_SIDE:
+        notes.append(valued_note("SHARP_LOW_RES", pick.short_side))
+    made = _extract_frames(deps, ctx, report, result.path, plan.times_ms, stage="extracting_frames",
+                           dynamic_range=pick.dynamic_range if pick.hdr else None)  # fmt: skip
+    video_bytes = result.path.stat().st_size if result.path.is_file() else None
+    result.path.unlink(missing_ok=True)  # AC-FRAME-03: ลบวิดีโอชั่วคราวทันทีที่ดึงภาพครบ
+    if not made:
+        # ffmpeg อ่านวิดีโอที่โหลดมาไม่ได้เลย: log ข้อมูลไฟล์ (ไม่มี path ไม่มีชื่อคลิป) ไว้หาสาเหตุ
+        log.warning("งาน %s คลิป %s ดึงภาพคมไม่ได้เลย (0/%s ภาพ format %s %s %s ไฟล์ %s ไบต์)", ctx.job_id,
+                    clip.video_id, len(plan.times_ms), pick.format_id, pick.dynamic_range,
+                    "มีเสียง" if pick.muxed else "วิดีโอล้วน", video_bytes)  # fmt: skip
+        raise YtError("E_UNKNOWN", "no frames extracted")
+    report.stage("writing")
+    ctx.check_cancelled()
+    folder = _publish_sharp(deps, job, clip, made, interval_s=plan.interval_s)
+    rel = folder.relative_to(clip.root).as_posix()
+    size = sum(p.stat().st_size for p in folder.iterdir() if p.is_file())
+    _write_note(deps, ctx, clip, folder.parent)
+    log.info("งาน %s คลิป %s บันทึกภาพคม %s/%s ภาพ", ctx.job_id, clip.video_id, len(made), len(plan.times_ms))
+    output = OutputFile(root=str(clip.root), rel=rel, size_bytes=size, kind="folder", files=len(made))
+    return JobResult(outputs=(output,), notes=_unique(notes), title=clip.title or None)
+
+
 def _contact_sheet(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     report = _Reporter(ctx)
     clip = _start(deps, job, ctx, report)
-    frames = _frames(deps, clip, ctx, report)
+    source = _frame_source(job.params)
+    frames = _sharp_set_frames(deps, clip, ctx) if source == "sharp" else _frames(deps, clip, ctx, report)
     report.stage("converting")
     columns = int(job.params.get("columns") or 5)
-    data = contact_sheet(frames, clip.title, int(clip.info.get("durationS") or 0), columns)
+    data = contact_sheet(frames, clip.title, int(clip.info.get("durationS") or 0), columns,
+                         missing_code=_missing_code(source))  # fmt: skip
     ctx.check_cancelled()
     report.stage("writing")
     out = Path(ctx.workdir) / "out.jpg"
@@ -814,9 +1013,10 @@ def _contact_sheet(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
 def _frames_zip(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     report = _Reporter(ctx)
     clip = _start(deps, job, ctx, report)
-    frames = _frames(deps, clip, ctx, report)
+    source = _frame_source(job.params)
+    frames = _sharp_set_frames(deps, clip, ctx) if source == "sharp" else _frames(deps, clip, ctx, report)
     report.stage("converting")
-    data = frames_zip(frames)
+    data = frames_zip(frames, missing_code=_missing_code(source))
     ctx.check_cancelled()
     report.stage("writing")
     out = Path(ctx.workdir) / "out.zip"
@@ -825,7 +1025,7 @@ def _frames_zip(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
 
 
 def build_handlers(deps: HandlerDeps) -> dict[str, Handler]:
-    """ตัวทำงานของทุกชนิดงานใน M4 + ตัวเลือกขั้นสูงของ M5 รอบ A (frames_sharp เป็นงานรอบ B ยังไม่มี)"""
+    """ตัวทำงานของทุกชนิดงาน (M4 + ตัวเลือกขั้นสูง M5 รอบ A + ภาพคม M5 รอบ B)"""
 
     def bind(fn: Callable[[HandlerDeps, Job, JobContext], JobResult]) -> Handler:
         def handler(job: Job, ctx: JobContext) -> JobResult:
@@ -839,6 +1039,7 @@ def build_handlers(deps: HandlerDeps) -> dict[str, Handler]:
         "audio": bind(_audio),
         "subtitle": bind(_subtitle),
         "note": bind(_note),
+        "frames_sharp": bind(_frames_sharp),
         "contact_sheet": bind(_contact_sheet),
         "frames_zip": bind(_frames_zip),
     }
