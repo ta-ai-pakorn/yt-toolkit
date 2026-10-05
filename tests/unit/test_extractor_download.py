@@ -58,6 +58,10 @@ C14 = {
         "SHARPCLIP01": {"probeAs": BBB, "title": "คลิปภาพคม"},
         "AUTOSHARP01": {"probeAs": BBB, "title": "คลิปภาพคมอัตโนมัติ",
                         "media": {"width": 1280, "height": 720, "dynamic_range": "SDR"}},
+        "CAPTURE0001": {"probeAs": BBB, "title": "คลิปถ่ายภาพคม"},
+        "CAPTURENO01": {"probeAs": BBB, "title": "คลิปถ่ายภาพคมไม่ได้", "captureError": "E_CAPTURE_UNSUPPORTED"},
+        "CAPTUREBOT1": {"probeAs": BBB, "title": "คลิปถ่ายภาพคมติดบอท", "captureError": "E_BOT_CHECK"},
+        "CAPTURENET1": {"probeAs": BBB, "title": "คลิปถ่ายภาพคมเน็ตหลุด", "captureError": "E_NETWORK"},
     },
 }
 
