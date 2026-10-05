@@ -14,6 +14,7 @@ import logging
 import re
 import unicodedata
 import zipfile
+from collections.abc import Sequence
 from functools import cache
 from importlib import resources
 from pathlib import Path
@@ -260,23 +261,31 @@ def sample_frames(frames: Frames, limit: int = MAX_SHEET_FRAMES) -> Frames:
     return [frames[round(i * step)] for i in range(limit)]
 
 
-def _missing(path: Path, exc: Exception) -> YtError:
-    # ไฟล์เฟรมหาย/เสียหมายถึง cache ของ storyboard ไม่ครบ ให้ผู้เรียกสร้างใหม่ได้
-    return YtError(
-        "E_NO_STORYBOARD",
-        f"{FRAME_FILE_BAD} ({type(exc).__name__}): {path}",
-    )
+def _missing(path: Path, exc: Exception, code: str = "E_NO_STORYBOARD") -> YtError:
+    # ไฟล์เฟรมหาย/เสีย = ชุดภาพใน cache ไม่ครบ (ภาพเร็ว: สร้างใหม่ได้ · ภาพคม: ถูกล้างไปแล้ว กดขอใหม่)
+    return YtError(code, f"{FRAME_FILE_BAD} ({type(exc).__name__}): {path}")
 
 
-def _load_cell(path: Path) -> Image.Image:
+def _load_cell(path: Path, code: str = "E_NO_STORYBOARD") -> Image.Image:
     try:
         with Image.open(path) as source:
             image = source.convert("RGB")
     except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
-        raise _missing(Path(path), exc) from exc
+        raise _missing(Path(path), exc, code) from exc
     if image.size != (CELL_W, CELL_H):
-        image = ImageOps.pad(image, (CELL_W, CELL_H), color=(0, 0, 0))
+        image = ImageOps.pad(image, (CELL_W, CELL_H), color=(0, 0, 0))  # ภาพคมย่อลงช่อง ภาพเร็วขยายขึ้น
     return image
+
+
+def frame_file_names(times_ms: Sequence[int]) -> list[str]:
+    """frame_HH-MM-SS.jpg ตามลำดับ วินาทีเดียวกันต่อท้าย _2, _3 (ชื่อใน zip และในโฟลเดอร์ภาพคมใช้กฎเดียวกัน)"""
+    seen: dict[str, int] = {}
+    names: list[str] = []
+    for t_ms in times_ms:
+        stem = f"frame_{file_timecode(t_ms)}"
+        seen[stem] = seen.get(stem, 0) + 1
+        names.append(f"{stem}.jpg" if seen[stem] == 1 else f"{stem}_{seen[stem]}.jpg")
+    return names
 
 
 def _draw_badge(draw: ImageDraw.ImageDraw, left: int, top: int, label: str) -> None:
@@ -296,7 +305,7 @@ def _draw_badge(draw: ImageDraw.ImageDraw, left: int, top: int, label: str) -> N
 
 
 def contact_sheet(
-    frames: Frames, title: str, duration_s: int, columns: int = 5
+    frames: Frames, title: str, duration_s: int, columns: int = 5, *, missing_code: str = "E_NO_STORYBOARD"
 ) -> bytes:
     """ภาพรวมเฟรม (ปุ่ม "โหลดภาพรวมเฟรม" ที่ W2) ในไฟล์ JPEG เดียว: หัวภาพ (ชื่อคลิป + ความยาว + จำนวนเฟรม) แล้วตามด้วยกริด
 
@@ -334,7 +343,7 @@ def contact_sheet(
         row, col = divmod(position, columns)
         left = GUTTER + col * (CELL_W + GUTTER)
         top = HEADER_H + GUTTER + row * (CELL_H + GUTTER)
-        sheet.paste(_load_cell(path), (left, top))
+        sheet.paste(_load_cell(path, missing_code), (left, top))
         _draw_badge(draw, left, top, timecode(t_ms))
 
     out = io.BytesIO()
@@ -342,27 +351,21 @@ def contact_sheet(
     return out.getvalue()
 
 
-def frames_zip(frames: Frames) -> bytes:
-    """zip แบบไม่บีบอัด (JPEG บีบซ้ำไม่ได้ประโยชน์) ชื่อ frame_HH-MM-SS.jpg ตามลำดับเฟรม
-
-    ชื่อซ้ำ (หลายเฟรมอยู่ในวินาทีเดียวกัน) ต่อท้าย _2, _3 วันที่ในไฟล์ตายตัว
-    จึงได้ไบต์เหมือนเดิมทุกครั้งที่ทำจากเฟรมชุดเดิม
-    """
+def frames_zip(frames: Frames, *, missing_code: str = "E_NO_STORYBOARD") -> bytes:
+    """zip แบบไม่บีบอัด (JPEG บีบซ้ำไม่ได้ประโยชน์) ชื่อ frame_HH-MM-SS.jpg ตามลำดับเฟรม (frame_file_names)
+    วันที่ในไฟล์ตายตัว จึงได้ไบต์เหมือนเดิมทุกครั้งที่ทำจากเฟรมชุดเดิม"""
     if not frames:
         raise ValueError("ไม่มีเฟรมให้ใส่ zip")
-    seen: dict[str, int] = {}
     out = io.BytesIO()
+    names = frame_file_names([t_ms for t_ms, _ in frames])
     with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as archive:
-        for t_ms, path in frames:
-            stem = f"frame_{file_timecode(t_ms)}"
-            seen[stem] = seen.get(stem, 0) + 1
-            name = f"{stem}.jpg" if seen[stem] == 1 else f"{stem}_{seen[stem]}.jpg"
+        for (_t_ms, path), name in zip(frames, names, strict=True):
             info = zipfile.ZipInfo(name, date_time=_ZIP_DATE)
             info.compress_type = zipfile.ZIP_STORED
             info.external_attr = 0o644 << 16
             try:
                 data = Path(path).read_bytes()
             except OSError as exc:
-                raise _missing(Path(path), exc) from exc
+                raise _missing(Path(path), exc, missing_code) from exc
             archive.writestr(info, data)
     return out.getvalue()

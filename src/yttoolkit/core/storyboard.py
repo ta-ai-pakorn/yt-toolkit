@@ -198,7 +198,7 @@ def _crop_cells(
                 f"แผ่นภาพเล็กกว่าที่ควร ({grid.width}x{grid.height}): {url}",
             )
         cell = grid.crop((left, top, left + width, top + height)).convert("RGB")
-        cell.save(out_dir / _file_name(spec.index), "JPEG", quality=JPEG_QUALITY)
+        cell.save(out_dir / frame_file_name(spec.index), "JPEG", quality=JPEG_QUALITY)
 
 
 def _crop_fragment(
@@ -247,7 +247,8 @@ def _crop_partial_grids(
             )
 
 
-def _file_name(index: int) -> str:
+def frame_file_name(index: int) -> str:
+    """ชื่อไฟล์ภาพใน cache: f_0000.jpg (ภาพคมใน cache ใช้ชื่อแบบเดียวกัน M5 รอบ B)"""
     return f"f_{index:04d}.jpg"
 
 
@@ -284,7 +285,7 @@ def _build_into(
     index = {
         "intervalMs": interval_ms(sb),
         "frames": [
-            {"index": s.index, "tMs": s.t_ms, "file": _file_name(s.index)}
+            {"index": s.index, "tMs": s.t_ms, "file": frame_file_name(s.index)}
             for s in frames
         ],
     }
