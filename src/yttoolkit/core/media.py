@@ -140,7 +140,7 @@ class MediaTools(Protocol):
         dst: Path,
         t_ms: int,
         *,
-        long_side: int,
+        long_side: int | None,
         dynamic_range: str | None,
         cancel: Callable[[], bool],
     ) -> bool: ...
@@ -357,11 +357,11 @@ def tonemap_filter(dynamic_range: str) -> str:
     )
 
 
-def _check_frame(t_ms: int, long_side: int, dynamic_range: str | None) -> None:
-    """กฎเดียวกันทั้งตัวจริงและตัวปลอม"""
+def _check_frame(t_ms: int, long_side: int | None, dynamic_range: str | None) -> None:
+    """กฎเดียวกันทั้งตัวจริงและตัวปลอม · long_side None = ไม่ย่อ (ภาพคมตรงจุด M5 รอบ B2)"""
     if isinstance(t_ms, bool) or not isinstance(t_ms, int) or t_ms < 0:
         raise ValueError(f"bad frame time: {t_ms!r}")
-    if long_side < 1:
+    if long_side is not None and (isinstance(long_side, bool) or not isinstance(long_side, int) or long_side < 1):
         raise ValueError(f"bad long side: {long_side!r}")
     if dynamic_range is not None and dynamic_range.strip().upper() in ("", "SDR"):
         raise ValueError("pass dynamic_range=None for SDR")
@@ -373,15 +373,20 @@ def frame_args(
     dst: Path,
     t_ms: int,
     *,
-    long_side: int = SHARP_LONG_SIDE,
+    long_side: int | None = SHARP_LONG_SIDE,
     dynamic_range: str | None = None,
 ) -> list[str]:
-    """ภาพคมหนึ่งภาพ (spec 3.4): -ss ก่อน -i บนไฟล์ในเครื่อง = ตรงเวลา · dynamic_range = HDR ที่ต้อง tone-map"""
+    """ภาพคมหนึ่งภาพ (spec 3.4): -ss ก่อน -i บนไฟล์ในเครื่อง = ตรงเวลา · dynamic_range = HDR ที่ต้อง tone-map
+    long_side None = เก็บความละเอียดเท่าต้นฉบับ (M5 รอบ B2) · ไม่มีตัวกรองเลย = ไม่ใส่ -vf"""
     _check_frame(t_ms, long_side, dynamic_range)
-    scale = scale_filter(long_side)
-    vf = scale if dynamic_range is None else f"{tonemap_filter(dynamic_range)},{scale}"
+    filters: list[str] = []
+    if dynamic_range is not None:
+        filters.append(tonemap_filter(dynamic_range))
+    if long_side is not None:
+        filters.append(scale_filter(long_side))
+    vf = ["-vf", ",".join(filters)] if filters else []
     return [ffmpeg, "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-ss", _seconds(t_ms), "-i", str(src),
-            "-frames:v", "1", "-vf", vf, "-q:v", str(SHARP_JPEG_Q), str(dst)]  # fmt: skip
+            "-frames:v", "1", *vf, "-q:v", str(SHARP_JPEG_Q), str(dst)]  # fmt: skip
 
 
 def _no_progress(_fraction: float | None) -> None:
@@ -602,7 +607,7 @@ class FfmpegTools:
         dst: Path,
         t_ms: int,
         *,
-        long_side: int,
+        long_side: int | None,
         dynamic_range: str | None,
         cancel: Callable[[], bool],
     ) -> bool:
@@ -631,7 +636,7 @@ class FrameCall:
     src_name: str
     dst_name: str
     t_ms: int
-    long_side: int
+    long_side: int | None
     dynamic_range: str | None
 
 
@@ -757,7 +762,7 @@ class FakeMediaTools:
         dst: Path,
         t_ms: int,
         *,
-        long_side: int,
+        long_side: int | None,
         dynamic_range: str | None,
         cancel: Callable[[], bool],
     ) -> bool:
