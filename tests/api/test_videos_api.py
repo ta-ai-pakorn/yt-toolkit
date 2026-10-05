@@ -17,6 +17,7 @@ from PIL import Image
 
 from yttoolkit.core.db import Database
 from yttoolkit.core.extractor import FakeExtractor
+from yttoolkit.core.sharp_store import commit_sharp, prepare_sharp
 from yttoolkit.core.videos import VideoService
 from yttoolkit.core.yterrors import MESSAGES, YtError
 
@@ -1008,3 +1009,44 @@ def test_yt_refused_maps_to_502_with_its_message(brake_api):
     assert resp.status_code == 502
     assert _error(resp)["code"] == "E_YT_REFUSED"
     assert _error(resp)["message"] == MESSAGES["E_YT_REFUSED"]
+
+
+# ---------- M5 รอบ B ภาพคม ----------
+
+COVER = FIXTURES / "media" / "cover.jpg"
+
+
+def _sharp_set(client, times=(0, 60_000)) -> dict:
+    staged = prepare_sharp(client.cache_root, BBB, "01900000-0000-7000-8000-0000000000aa", [(t, COVER) for t in times],
+                           origin="manual", interval_ms=60_000, created_at="2026-10-05T03:00:00+00:00")  # fmt: skip
+    return commit_sharp(client.cache_root, BBB, staged)
+
+
+def test_sharp_set_is_listed_with_versioned_immutable_urls(api):
+    client = api()
+    _sharp_set(client)
+    resp = client.get(f"/api/videos/{BBB}/sharp")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["origin"] == "manual" and body["intervalMs"] == 60_000
+    assert [(f["index"], f["tMs"]) for f in body["frames"]] == [(0, 0), (1, 60_000)]
+    assert re.fullmatch(rf"/api/cache/{BBB}/sharp/f_0001\.jpg\?v=\d+", body["frames"][1]["url"])
+    image = client.get(body["frames"][1]["url"])
+    assert image.status_code == 200 and image.headers["cache-control"] == "public, max-age=86400, immutable"
+    download = client.get(body["frames"][1]["url"] + "&download=1")
+    assert download.headers["content-disposition"] == 'attachment; filename="frame_00-01-00.jpg"'
+
+
+def test_no_sharp_set_is_a_quiet_404(api, caplog):
+    client = api()
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        resp = client.get(f"/api/videos/{BBB}/sharp")
+    assert resp.status_code == 404
+    assert resp.json()["error"] == {"code": "E_NO_SHARP_FRAMES", "message": MESSAGES["E_NO_SHARP_FRAMES"], "detail": None}
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+def test_sharp_with_a_bad_id_is_422(api):
+    resp = api().get("/api/videos/not-an-id/sharp")
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "E_INVALID_INPUT"

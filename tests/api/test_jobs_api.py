@@ -142,7 +142,6 @@ def test_post_normalises_defaults(env):
 @pytest.mark.parametrize(
     "item",
     [
-        {"videoId": "aqz-KE-bpKQ", "kind": "frames_sharp", "params": {}},
         {"videoId": "aqz-KE-bpKQ", "kind": "video", "params": {"range": {"startS": 0, "endS": 5}}},
         {"videoId": "aqz-KE-bpKQ", "kind": "video", "params": {"embedSubs": "o.th"}},
         # AC-VID-10 part 2: embedded subtitles together with split by chapter
@@ -157,7 +156,7 @@ def test_post_normalises_defaults(env):
          "params": {"format": "srt", "options": {**SUB_OPTIONS, "minMs": 9000}}},
         {"videoId": "aqz-KE-bpKQ", "kind": "subtitle", "params": {"format": "srt", "options": SUB_OPTIONS,
                                                                   "trackId": "x.th"}},
-        {"videoId": "aqz-KE-bpKQ", "kind": "contact_sheet", "params": {"source": "sharp"}},
+        {"videoId": "aqz-KE-bpKQ", "kind": "contact_sheet", "params": {"source": "crisp"}},
         {"videoId": "short", "kind": "frames_zip", "params": {}},
         {"videoId": "aqz-KE-bpKQ", "kind": "frames_zip", "params": {}, "extra": 1},
     ],
@@ -659,3 +658,85 @@ def test_routes_absent_without_a_queue(make_client):
     client = make_client()
     assert client.get("/api/jobs").status_code == 404
     assert client.get("/api/queue").status_code == 404
+
+
+# ---------- M5 รอบ B ภาพคม ----------
+
+
+def test_post_accepts_frames_sharp_and_sharp_sources(env):
+    items = [
+        {"videoId": "aqz-KE-bpKQ", "kind": "frames_sharp", "params": {}},
+        {"videoId": "aqz-KE-bpKQ", "kind": "frames_sharp", "params": {"intervalS": 60, "folder": "งานลูกค้า"}},
+        {"videoId": "aqz-KE-bpKQ", "kind": "contact_sheet", "params": {"source": "sharp", "columns": 5}},
+        {"videoId": "aqz-KE-bpKQ", "kind": "frames_zip", "params": {"source": "sharp"}},
+    ]
+    resp = env.client().post("/api/jobs", json={"items": items}, headers=AUTH)
+    assert resp.status_code == 200, resp.text
+    assert [job["params"] for job in resp.json()["jobs"]] == [
+        {}, {"intervalS": 60, "folder": "งานลูกค้า"}, {"source": "sharp", "columns": 5}, {"source": "sharp"}]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{"intervalS": 0}, {"intervalS": 3601}, {"intervalS": 1.5}, {"intervalS": True}, {"intervalS": "5"},
+     {"interval": 5}, {"source": "sharp"}],
+)  # fmt: skip
+def test_post_rejects_bad_frames_sharp_params(env, params):
+    item = {"videoId": "aqz-KE-bpKQ", "kind": "frames_sharp", "params": params}
+    resp = env.client().post("/api/jobs", json={"items": [item]}, headers=AUTH)
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "E_BAD_REQUEST"
+    assert env.store.pending_count() == 0
+
+
+def test_post_frames_sharp_checks_a_cached_probe(env, cached, monkeypatch):
+    item = {"videoId": "aqz-KE-bpKQ", "kind": "frames_sharp", "params": {"intervalS": 10}}
+    assert env.client(**cached).post("/api/jobs", json={"items": [item]}, headers=AUTH).status_code == 200
+    uncached = {**item, "videoId": "88o5Sk8_m1Y"}
+    assert env.client(**cached).post("/api/jobs", json={"items": [uncached]}, headers=AUTH).status_code == 200
+    videos = cached["videos"]
+    for info in ({"durationS": 0, "isLive": False}, {"durationS": 900, "isLive": True}):
+        monkeypatch.setattr(videos, "peek_cached", lambda video_id, info=info: info)
+        resp = env.client(**cached).post("/api/jobs", json={"items": [item]}, headers=AUTH)
+        assert resp.status_code == 422
+        assert resp.json()["error"]["detail"].startswith("aqz-KE-bpKQ: ")
+    assert env.store.pending_count() == 2
+
+
+def test_post_frames_sharp_without_ffmpeg_is_409(env):
+    item = {"videoId": "aqz-KE-bpKQ", "kind": "frames_sharp", "params": {}}
+    resp = env.client(media=NoFfmpeg()).post("/api/jobs", json={"items": [item]}, headers=AUTH)
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "E_FFMPEG_MISSING"
+
+
+def _done_with_folder(env):
+    out_root = env.tmp / "out"
+    folder = out_root / "คลิป [aqz-KE-bpKQ]" / "คลิป - ภาพคม"
+    folder.mkdir(parents=True)
+    (folder / "frame_00-00-00.jpg").write_bytes(b"jpg")
+    (job,) = env.add(1, kind="frames_sharp")
+    output = OutputFile(str(out_root), "คลิป [aqz-KE-bpKQ]/คลิป - ภาพคม", 3, "folder", files=1)
+    env.finish(job.id, "done", outputs=(output,))
+    return job, folder
+
+
+def test_folder_output_is_listed_but_not_downloadable(env):
+    job, _ = _done_with_folder(env)
+    client = env.client()
+    listed = next(j for j in client.get("/api/jobs").json()["jobs"] if j["id"] == job.id)
+    assert listed["outputs"] == [{"index": 0, "name": "คลิป - ภาพคม", "sizeBytes": 3, "files": 1}]
+    assert client.get(f"/api/jobs/{job.id}/outputs/0").status_code == 404
+
+
+def test_reveal_of_a_folder_output_opens_the_folder(env):
+    job, folder = _done_with_folder(env)
+    opened: list[Path] = []
+    client = env.client(open_folder=opened.append)
+    assert client.post(f"/api/jobs/{job.id}/outputs/0/reveal", headers=AUTH).status_code == 200
+    assert opened == [folder.resolve()]
+    assert client.app.state.ctx.plat.revealed == []
+    for child in folder.iterdir():
+        child.unlink()
+    folder.rmdir()
+    assert client.post(f"/api/jobs/{job.id}/outputs/0/reveal", headers=AUTH).status_code == 404

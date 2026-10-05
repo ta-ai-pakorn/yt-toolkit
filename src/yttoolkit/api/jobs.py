@@ -1,7 +1,7 @@
 """API คิวงาน (สัญญา C4): สร้างงาน ดูรายการ ยกเลิก ลองใหม่ เรียงคิว ทำคิวต่อ และส่งไฟล์ผลลัพธ์
 
 route เป็น `def` ธรรมดา (แตะฐานข้อมูลและดิสก์) FastAPI จึงส่งไปรันใน threadpool
-ค่าของงานแต่ละชนิด (C3 + M5 รอบ A) ตรวจด้วย pydantic: key ที่ไม่รู้จัก คุกกี้ และภาพคม = 422
+ค่าของงานแต่ละชนิด (C3 + M5 รอบ A/B) ตรวจด้วย pydantic: key ที่ไม่รู้จักและคุกกี้ = 422
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from ..core.jobs import (
     NewJob,
     OutputFile,
 )
+from ..core.sharp import MAX_INTERVAL_S
 from ..core.srt_builder import options_from_dict
 from ..core.yterrors import MESSAGES
 from .errors import BAD_REQUEST_MESSAGE, error_response, redact_home
@@ -219,12 +220,18 @@ class SubtitleParams(_Grouped):
 
 
 class ContactSheetParams(_Grouped):
-    source: Literal["fast"] = "fast"
+    source: Literal["fast", "sharp"] = "fast"  # M5 รอบ B: "sharp" = ชุดภาพคมใน cache
     columns: Literal[5] = 5
 
 
 class FramesZipParams(_Grouped):
-    source: Literal["fast"] = "fast"
+    source: Literal["fast", "sharp"] = "fast"
+
+
+class FramesSharpParams(_Grouped):
+    """ภาพคม (M5 รอบ B): ไม่ส่ง intervalS = เวลาเดียวกับภาพเร็ว (คลิปไม่มี storyboard = ค่าเริ่มต้นของตัวทำงาน)"""
+
+    intervalS: StrictInt | None = Field(None, ge=1, le=MAX_INTERVAL_S)
 
 
 class NoteParams(_Grouped):
@@ -238,6 +245,7 @@ PARAMS_BY_KIND: dict[str, type[BaseModel]] = {
     "audio": AudioParams,
     "subtitle": SubtitleParams,
     "note": NoteParams,
+    "frames_sharp": FramesSharpParams,
     "contact_sheet": ContactSheetParams,
     "frames_zip": FramesZipParams,
 }
@@ -245,7 +253,7 @@ PARAMS_BY_KIND: dict[str, type[BaseModel]] = {
 
 class NewJobModel(_Strict):
     videoId: str = Field(pattern=_VIDEO_ID)
-    kind: Literal["video", "audio", "subtitle", "note", "contact_sheet", "frames_zip"]  # frames_sharp = M5
+    kind: Literal["video", "audio", "subtitle", "note", "frames_sharp", "contact_sheet", "frames_zip"]
     params: dict[str, Any]
     title: str = Field("", max_length=TITLE_MAX_CHARS)
 
@@ -288,11 +296,21 @@ def clip_problem(params: Mapping[str, Any], info: Mapping[str, Any] | None) -> s
     return None
 
 
+def sharp_problem(info: Mapping[str, Any] | None) -> str | None:
+    """ภาพคมของคลิปที่เก็บข้อมูลไว้: คลิปสดหรือไม่รู้ความยาว = ทำไม่ได้ ไม่มีข้อมูล = None (ตัวทำงานตรวจอีกรอบ)"""
+    if info is None:
+        return None
+    if info.get("isLive") or int(info.get("durationS") or 0) <= 0:
+        return "frames_sharp needs a finished clip with a known duration"
+    return None
+
+
 # ---------- ไฟล์ผลลัพธ์ ----------
 
 
-def output_path(out: OutputFile) -> Path | None:
+def output_path(out: OutputFile, *, allow_folder: bool = False) -> Path | None:
     """path จริงของไฟล์ผลลัพธ์ ต้องอยู่ใต้โฟลเดอร์ผลลัพธ์ที่บันทึกไว้ตอนทำงาน และยังมีไฟล์อยู่ ไม่ผ่าน = None
+    ผลแบบโฟลเดอร์ (ภาพคม) ใช้ได้เฉพาะเมื่อ allow_folder (เปิดโฟลเดอร์ ไม่ใช่ดาวน์โหลด)
 
     rel ตรวจแบบไม่แตะดิสก์ก่อน (ห้าม .. / backslash / ไดรฟ์) และ root ต้องไม่ใช่ path เครือข่าย (UNC)
     เพราะการแตะ path แบบนั้นบน Windows ทำให้เครื่องไปต่อ SMB
@@ -309,9 +327,11 @@ def output_path(out: OutputFile) -> Path | None:
         target = root.joinpath(*parts).resolve()
     except (OSError, RuntimeError):
         return None
-    if not target.is_relative_to(root) or not target.is_file():
+    if not target.is_relative_to(root):
         return None
-    return target
+    if out.kind == "folder":
+        return target if allow_folder and target.is_dir() else None
+    return target if target.is_file() else None
 
 
 # ---------- router ----------
@@ -340,11 +360,11 @@ def build_jobs_router(ctx: AppContext) -> APIRouter:
     def job_state_error() -> JSONResponse:
         return error_response(409, "E_JOB_STATE", MESSAGES["E_JOB_STATE"])
 
-    def output_of(job_id: str, index: int) -> Path:
+    def output_of(job_id: str, index: int, *, allow_folder: bool = False) -> Path:
         job = find(job_id)
         if not 0 <= index < len(job.outputs):
             raise HTTPException(status_code=404)
-        target = output_path(job.outputs[index])
+        target = output_path(job.outputs[index], allow_folder=allow_folder)
         if target is None:
             raise HTTPException(status_code=404)
         return target
@@ -357,9 +377,12 @@ def build_jobs_router(ctx: AppContext) -> APIRouter:
         videos = ctx.videos
         if videos is not None:
             for item in body.items:
-                if "range" not in item.params and not item.params.get("splitChapters"):
+                if item.kind == "frames_sharp":
+                    problem = sharp_problem(videos.peek_cached(item.videoId))
+                elif "range" in item.params or item.params.get("splitChapters"):
+                    problem = clip_problem(item.params, videos.peek_cached(item.videoId))
+                else:
                     continue
-                problem = clip_problem(item.params, videos.peek_cached(item.videoId))
                 if problem is not None:
                     return error_response(422, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, f"{item.videoId}: {problem}")
         jobs = queue.enqueue([item.to_new_job() for item in body.items])
@@ -426,9 +449,12 @@ def build_jobs_router(ctx: AppContext) -> APIRouter:
 
     @router.post("/jobs/{job_id}/outputs/{index}/reveal")
     def reveal_output(job_id: str, index: int) -> dict:
-        target = output_of(job_id, index)
-        revealer = ctx.reveal or ctx.plat.reveal
-        revealer(target)
+        target = output_of(job_id, index, allow_folder=True)
+        if target.is_dir():
+            # ภาพคม: ผลของงานคือโฟลเดอร์ "เปิดโฟลเดอร์" จึงเปิดโฟลเดอร์นั้นเลย
+            (ctx.open_folder or ctx.plat.open_folder)(target)
+        else:
+            (ctx.reveal or ctx.plat.reveal)(target)
         return {"ok": True}
 
     return router

@@ -25,6 +25,9 @@ from pydantic import BaseModel, Field
 from ..core.comments import PinnedCommentService
 from ..core.frames import file_timecode
 from ..core.inputs import VIDEO_ID, InputItem, scan_text
+from ..core.sharp_store import FOLDER as SHARP_FOLDER
+from ..core.sharp_store import INDEX as SHARP_INDEX
+from ..core.sharp_store import read_sharp
 from ..core.storyboard import FOLDER as STORYBOARD_FOLDER
 from ..core.storyboard import INDEX as STORYBOARD_INDEX
 from ..core.storyboard import get_storyboard
@@ -53,6 +56,7 @@ STATUS_BY_CODE: dict[str, int] = {
     "E_VIDEO_PRIVATE": 404,
     "E_NO_STORYBOARD": 404,
     "E_NO_SUBTITLES": 404,
+    "E_NO_SHARP_FRAMES": 404,
     "E_LIVE_NOT_READY": 409,
     "E_AGE_RESTRICTED": 409,
     "E_GEO_BLOCKED": 409,
@@ -78,6 +82,7 @@ _CACHE_MEDIA_TYPES = {
     ".webp": "image/webp",
 }
 _FRAME_FILE = re.compile(r"f_\d{4,}\.jpg")
+_FRAME_FOLDERS = (STORYBOARD_FOLDER, SHARP_FOLDER)
 
 
 class ResolveBody(BaseModel):
@@ -253,6 +258,29 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
             ],
         }
 
+    @router.get("/videos/{video_id}/sharp", response_model=None)
+    @maps_yt_errors
+    def sharp(video_id: str) -> dict | JSONResponse:
+        # ชุดภาพคมของคลิป (M5 รอบ B) ไม่มีชุด = 404 เงียบ ๆ (หน้าเว็บถือว่า "ยังไม่มีภาพคม" ไม่ใช่ error ไม่ต้อง log)
+        if not VIDEO_ID.fullmatch(video_id):
+            raise YtError("E_INVALID_INPUT", f"video id ไม่ถูกรูปแบบ: {video_id!r}")
+        index = read_sharp(cache_root, video_id)
+        if index is None:
+            return error_response(404, "E_NO_SHARP_FRAMES", MESSAGES["E_NO_SHARP_FRAMES"])
+        folder = cache_root / video_id / SHARP_FOLDER
+        try:
+            query = f"?v={(folder / SHARP_INDEX).stat().st_mtime_ns}"
+        except OSError:
+            query = ""
+        return {
+            "origin": index["origin"],
+            "intervalMs": index["intervalMs"],
+            "frames": [
+                {"index": f["index"], "tMs": f["tMs"], "url": f"/api/cache/{video_id}/{SHARP_FOLDER}/{f['file']}{query}"}
+                for f in index["frames"]
+            ],
+        }
+
     @router.get("/playlists/{playlist_id}", response_model=None)
     @maps_yt_errors
     def playlist(playlist_id: str, v: str | None = None) -> dict:
@@ -279,7 +307,7 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
         if found is None:
             raise HTTPException(status_code=404)
         target, parts, media_type = found
-        is_frame = len(parts) == 2 and parts[0] == STORYBOARD_FOLDER and _FRAME_FILE.fullmatch(parts[1])
+        is_frame = len(parts) == 2 and parts[0] in _FRAME_FOLDERS and _FRAME_FILE.fullmatch(parts[1])
         headers: dict[str, str] = {}
         if is_frame:
             headers["Cache-Control"] = FRAME_CACHE_CONTROL
