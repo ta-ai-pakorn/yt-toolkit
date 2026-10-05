@@ -106,9 +106,7 @@ def test_messages_are_verbatim_prd_copy() -> None:
     assert (
         MESSAGES["E_LIVE_NOT_READY"] == "คลิปนี้ยังถ่ายทอดสดอยู่หรือยังไม่เผยแพร่ ลองใหม่หลังจบไลฟ์"
     )
-    assert (
-        MESSAGES["E_NO_STORYBOARD"] == "คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว ภาพคมจะใช้ได้ในเวอร์ชันถัดไป"
-    )
+    assert MESSAGES["E_NO_STORYBOARD"] == 'คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว กด "ขอภาพคม" แทนได้'
     assert MESSAGES["E_NETWORK"] == "เน็ตหลุด ลองใหม่อีกครั้ง"
     assert (
         MESSAGES["E_TRANSLATION_BLOCKED"]
@@ -216,3 +214,7 @@ def test_api_reuses_the_unknown_message() -> None:
     from yttoolkit.api import errors
 
     assert errors.UNKNOWN_MESSAGE is MESSAGES["E_UNKNOWN"]
+
+
+def test_m5b_messages_are_verbatim_spec_copy() -> None:
+    assert MESSAGES["E_NO_SHARP_FRAMES"] == 'ภาพคมของคลิปนี้ถูกล้างไปแล้ว กด "ขอภาพคม" ใหม่ได้'

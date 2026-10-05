@@ -3,8 +3,8 @@ import { ApiError } from "@/lib/api"
 import { audioLanguageName } from "@/lib/languages"
 import type { Settings } from "@/lib/types"
 
-/** ค่าที่หน้า "ทั่วไป" แก้ได้ (ทั้งห้าช่อง) */
-export type GeneralKey = "outputDir" | "concurrency" | "audioLanguage" | "videoDefault" | "audioDefault"
+/** ค่าที่หน้า "ทั่วไป" แก้ได้ (ทั้งหกช่อง) */
+export type GeneralKey = "outputDir" | "concurrency" | "audioLanguage" | "videoDefault" | "audioDefault" | "autoSharpFrames"
 export type GeneralPatch = Partial<Pick<Settings, GeneralKey>>
 
 export const CONCURRENCY_CHOICES = [1, 2, 3] as const

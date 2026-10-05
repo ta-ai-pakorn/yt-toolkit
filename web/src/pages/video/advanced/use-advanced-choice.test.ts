@@ -20,6 +20,7 @@ function settings(sponsorblockDefault: SponsorCategory[]): Settings {
     subCustom: PRESETS.medium,
     concurrency: 2,
     sponsorblockDefault,
+    autoSharpFrames: true,
     theme: "system",
     filenameStyle: "title",
     cookies: { enabled: false, source: null, warningAccepted: false },

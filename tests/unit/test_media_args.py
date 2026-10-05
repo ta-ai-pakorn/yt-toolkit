@@ -1,24 +1,30 @@
 from __future__ import annotations
 
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from yttoolkit.core import media as media_module
 from yttoolkit.core.cancel import JobCancelled
 from yttoolkit.core.media import (
     CutCall,
     FakeMediaTools,
     FfmpegTools,
+    FrameCall,
     MediaMeta,
     SubtitleInput,
     cut_args,
+    frame_args,
     iso639_2,
     m4a_args,
     mp3_args,
     mp4_args,
     run_ffmpeg,
+    scale_filter,
+    tonemap_filter,
     wav_args,
 )
 from yttoolkit.core.yterrors import YtError
@@ -237,6 +243,13 @@ def test_run_ffmpeg_disk_full_maps_to_e_disk_full() -> None:
     assert info.value.code == "E_DISK_FULL"
 
 
+def test_run_ffmpeg_returns_as_soon_as_the_process_exits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(media_module, "_POLL_SECONDS", 5.0)  # ถ้ายังหลับเต็มรอบ จะช้ากว่า 5 วินาที
+    started = time.monotonic()
+    run_ffmpeg(_stub("pass"), duration_s=None, cancel=_never, on_progress=_ignore)
+    assert time.monotonic() - started < 3
+
+
 def test_run_ffmpeg_other_failure_maps_to_e_unknown() -> None:
     args = _stub("import sys; sys.stderr.write('boom'); sys.exit(3)")
     with pytest.raises(YtError) as info:
@@ -388,3 +401,120 @@ def test_fake_cut_rejects_what_the_real_cutter_rejects(tmp_path: Path, intervals
                  cancel=lambda: False, on_progress=lambda _: None)
     assert str(faked.value) == str(real.value) == "fast cut takes exactly one interval of an mp4"
     assert fake.cuts == [] and not dst.exists()
+
+
+# ---------- ภาพคม (M5 รอบ B spec 3.4) ----------
+
+SCALE = "scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease"
+FRAME_HEAD = [FF, "-hide_banner", "-nostdin", "-y", "-loglevel", "error"]
+JPG = Path("f.jpg")
+
+
+def _no_cancel() -> bool:
+    return False
+
+
+def test_frame_args_sdr_exact() -> None:
+    assert scale_filter(1280) == SCALE
+    assert frame_args(FF, SRC, JPG, 61_500) == FRAME_HEAD + [
+        "-ss", "61.500", "-i", str(SRC), "-frames:v", "1", "-vf", SCALE, "-q:v", "2", str(JPG)]  # fmt: skip
+
+
+def test_frame_args_hdr_puts_the_tone_map_before_the_scale() -> None:
+    args = frame_args(FF, SRC, JPG, 0, dynamic_range="HDR10")
+    vf = args[args.index("-vf") + 1]
+    assert vf == tonemap_filter("HDR10") + "," + SCALE
+    assert vf.startswith("setparams=range=tv:color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,zscale=t=linear")
+    assert "tonemap=tonemap=hable:desat=0" in vf and "format=yuv420p" in vf
+    assert "color_trc=arib-std-b67" in tonemap_filter("HLG")
+
+
+@pytest.mark.parametrize(
+    ("t_ms", "long_side", "dynamic_range"),
+    [(-1, 1280, None), (0, 0, None), (0, 1280, "SDR"), (0, 1280, ""), (True, 1280, None)],
+)
+def test_frame_args_rejects_bad_input(t_ms, long_side, dynamic_range) -> None:
+    with pytest.raises(ValueError):
+        frame_args(FF, SRC, JPG, t_ms, long_side=long_side, dynamic_range=dynamic_range)
+    with pytest.raises(ValueError):
+        FakeMediaTools(MEDIA_ROOT).extract_frame(
+            MEDIA_ROOT / "video.mp4", JPG, t_ms, long_side=long_side, dynamic_range=dynamic_range, cancel=_no_cancel)
+
+
+def test_fake_extract_frame_copies_the_cover_and_records(tmp_path: Path) -> None:
+    fake = FakeMediaTools(MEDIA_ROOT)
+    dst = tmp_path / "0001.jpg"
+    assert fake.extract_frame(MEDIA_ROOT / "video.mp4", dst, 1000, long_side=1280, dynamic_range=None,
+                              cancel=_no_cancel) is True  # fmt: skip
+    assert dst.read_bytes() == (MEDIA_ROOT / "cover.jpg").read_bytes()
+    assert fake.frames == [FrameCall("video.mp4", "0001.jpg", 1000, 1280, None)]
+
+
+def test_fake_extract_frame_limit_missing_input_and_cancel(tmp_path: Path) -> None:
+    fake = FakeMediaTools(MEDIA_ROOT)
+    fake.frame_limit_ms = 2000
+    late = tmp_path / "late.jpg"
+    assert fake.extract_frame(MEDIA_ROOT / "video.mp4", late, 2000, long_side=1280, dynamic_range=None,
+                              cancel=_no_cancel) is False  # fmt: skip
+    assert not late.exists()
+    gone = tmp_path / "gone.jpg"
+    assert fake.extract_frame(tmp_path / "missing.mp4", gone, 0, long_side=1280, dynamic_range=None,
+                              cancel=_no_cancel) is False  # fmt: skip
+    with pytest.raises(JobCancelled):
+        fake.extract_frame(MEDIA_ROOT / "video.mp4", tmp_path / "c.jpg", 0, long_side=1280, dynamic_range=None,
+                           cancel=lambda: True)  # fmt: skip
+    assert not (tmp_path / "c.jpg").exists()
+
+
+def test_ffmpeg_extract_frame_failure_is_a_dropped_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing(args, **kwargs):
+        Path(args[-1]).write_bytes(b"half")
+        raise YtError("E_UNKNOWN", "ffmpeg exit 234: Nothing was written into output file")
+
+    monkeypatch.setattr(media_module, "run_ffmpeg", failing)
+    dst = tmp_path / "x.jpg"
+    tools = FfmpegTools(lambda: Path("ffmpeg"))
+    assert tools.extract_frame(tmp_path / "in.mp4", dst, 0, long_side=1280, dynamic_range=None, cancel=_no_cancel) is False
+    assert not dst.exists()
+
+
+@pytest.mark.parametrize("code", ["E_DISK_FULL", "E_FFMPEG_MISSING"])
+def test_ffmpeg_extract_frame_passes_other_errors_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str) -> None:
+    def failing(args, **kwargs):
+        raise YtError(code, "x")
+
+    monkeypatch.setattr(media_module, "run_ffmpeg", failing)
+    with pytest.raises(YtError) as err:
+        FfmpegTools(lambda: Path("ffmpeg")).extract_frame(
+            tmp_path / "in.mp4", tmp_path / "x.jpg", 0, long_side=1280, dynamic_range=None, cancel=_no_cancel)
+    assert err.value.code == code
+
+
+def test_ffmpeg_extract_frame_success_and_missing_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[list[str]] = []
+
+    def writing(args, **kwargs):
+        seen.append(args)
+        Path(args[-1]).write_bytes(b"\xff\xd8jpeg")
+
+    monkeypatch.setattr(media_module, "run_ffmpeg", writing)
+    dst = tmp_path / "ok.jpg"
+    assert FfmpegTools(lambda: Path("ffmpeg")).extract_frame(
+        tmp_path / "in.mp4", dst, 2500, long_side=1280, dynamic_range="HDR10", cancel=_no_cancel) is True
+    assert seen[0][seen[0].index("-ss") + 1] == "2.500" and "setparams" in seen[0][seen[0].index("-vf") + 1]
+    with pytest.raises(YtError) as err:
+        FfmpegTools(lambda: None).extract_frame(tmp_path / "in.mp4", dst, 0, long_side=1280, dynamic_range=None,
+                                                cancel=_no_cancel)  # fmt: skip
+    assert err.value.code == "E_FFMPEG_MISSING"
+
+
+def test_ffmpeg_extract_frame_checks_cancel_before_starting_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """เหมือนตัวปลอม: ยกเลิกแล้วต้องไม่เปิด ffmpeg เลย (ffmpeg ภาพเดียวจบเร็วกว่ารอบเช็กยกเลิกของ run_ffmpeg)"""
+
+    def must_not_run(args, **kwargs):
+        raise AssertionError("ffmpeg must not start after a cancel")
+
+    monkeypatch.setattr(media_module, "run_ffmpeg", must_not_run)
+    with pytest.raises(JobCancelled):
+        FfmpegTools(lambda: Path("ffmpeg")).extract_frame(
+            tmp_path / "in.mp4", tmp_path / "c.jpg", 0, long_side=1280, dynamic_range=None, cancel=lambda: True)

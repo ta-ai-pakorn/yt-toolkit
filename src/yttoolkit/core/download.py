@@ -12,11 +12,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from .yterrors import YtError
+
 # งานที่ต้องดึงจากยูทูป (คิวเว้นช่วง 2-5 วินาทีระหว่างงานเหล่านี้) และงานที่ต้องมี ffmpeg
 YOUTUBE_KINDS = frozenset({"video", "audio", "subtitle", "note", "frames_sharp"})  # note: ซับ + คอมเมนต์ปักหมุด
-FFMPEG_KINDS = frozenset({"video", "audio"})
+FFMPEG_KINDS = frozenset({"video", "audio", "frames_sharp"})  # frames_sharp: ffmpeg ดึงภาพจากวิดีโอที่โหลด (M5 รอบ B)
 
 DEFAULT_MAX_HEIGHT = 1080
+SHARP_MAX_SHORT_SIDE = 720  # D4: ภาพคมโหลดด้านสั้นไม่เกิน 720 แล้วย่อให้ด้านยาว 1280
+AUTO_SHARP_MAX_SHORT_SIDE = 1080  # ภาพคมอัตโนมัติ: ไฟล์ใหญ่กว่านี้ (1440p/4K VP9/AV1) ffmpeg ต่อภาพช้าเป็นนาที จึงข้าม
 # wav = PCM 16 บิต: ขนาดคาดการณ์ใช้ 44,100 Hz 2 ช่อง (C8)
 WAV_RATE = 44100
 WAV_CHANNELS = 2
@@ -40,10 +44,40 @@ class DownloadHooks:
 
 
 @dataclass(frozen=True)
+class MediaFacts:
+    """ขนาดภาพและช่วงสีของไฟล์ที่โหลดจริง (M5 รอบ B ภาพคมอัตโนมัติ) ค่าไหนไม่รู้ = None"""
+
+    width: int | None
+    height: int | None
+    dynamic_range: str | None  # "SDR" | "HDR10" | "HLG" | ... (yt-dlp ใส่ "SDR" ให้ format วิดีโอที่ไม่บอก)
+
+    @property
+    def short_side(self) -> int | None:
+        if self.height is None:
+            return None
+        return self.height if self.width is None else min(self.width, self.height)
+
+    @property
+    def hdr(self) -> bool | None:
+        return None if self.dynamic_range is None else self.dynamic_range.upper() != "SDR"
+
+
+def media_facts(fmt: Mapping[str, Any]) -> MediaFacts:
+    width, height = _number(fmt.get("width")), _number(fmt.get("height"))
+    dynamic = fmt.get("dynamic_range")
+    return MediaFacts(
+        round(width) if width is not None else None,
+        round(height) if height is not None else None,
+        dynamic if isinstance(dynamic, str) and dynamic else None,
+    )
+
+
+@dataclass(frozen=True)
 class DownloadResult:
     path: Path  # ไฟล์สื่อใน workdir
     info: dict  # info ของ yt-dlp (sanitize แล้ว) จากการดึงข้อมูลรอบนี้
     choice: DownloadChoice
+    media: MediaFacts | None = None  # ไฟล์ที่โหลดจริง (None = ไม่รู้)
 
 
 SponsorSegment = tuple[int, int, str]  # (startMs, endMs, หมวด) บนเส้นเวลาของคลิป
@@ -304,3 +338,94 @@ def audio_choice(info: dict, params: Mapping[str, Any]) -> DownloadChoice:
         notes=notes,
         expected_bytes=expected,
     )
+
+
+# ---------- ภาพคม (M5 รอบ B spec 3.3) ----------
+
+
+@dataclass(frozen=True)
+class SharpPick:
+    """format ที่งานภาพคมโหลด"""
+
+    format_id: str
+    width: int | None
+    height: int | None
+    dynamic_range: str  # "SDR" เมื่อ format ไม่บอก
+    muxed: bool  # มีเสียงติดมาด้วย (ใช้เมื่อไม่มี format วิดีโอล้วนเลย)
+    size_bytes: int | None
+
+    @property
+    def short_side(self) -> int:
+        return int(_resolution({"width": self.width, "height": self.height}))
+
+    @property
+    def hdr(self) -> bool:
+        return self.dynamic_range.upper() != "SDR"
+
+
+def _dynamic_range(fmt: Mapping[str, Any]) -> str:
+    value = fmt.get("dynamic_range")
+    return value if isinstance(value, str) and value else "SDR"
+
+
+def _codec_rank(vcodec: str) -> int:
+    """avc1 ก่อน vp9 ก่อน av01 (ถอดรหัสเร็วบนเครื่อง iGPU ของผู้ใช้) อื่น ๆ ไว้ท้าย"""
+    if vcodec.startswith("avc1"):
+        return 0
+    if vcodec.startswith(("vp09", "vp9")):
+        return 1
+    if vcodec.startswith("av01"):
+        return 2
+    return 3
+
+
+def _sharp_key(fmt: Mapping[str, Any], *, smallest: bool) -> tuple:
+    res = _resolution(fmt)
+    size = _filesize(fmt)
+    return (
+        _dynamic_range(fmt).upper() != "SDR",  # SDR ก่อน (D8)
+        res if smallest else -res,
+        _codec_rank(str(fmt.get("vcodec") or "")),
+        size is None,
+        size or 0,
+        str(fmt.get("format_id")),
+    )
+
+
+def pick_sharp_format(info: Mapping[str, Any]) -> SharpPick | None:
+    """format ของงานภาพคม: วิดีโอล้วน (ไม่มีเลย = ตัวที่มีเสียง) ด้านสั้นไม่เกิน 720 · SDR ก่อน · ด้านสั้นมากสุด ·
+    avc1 > vp9 > av01 · ไฟล์เล็กสุด · ไม่มีตัวไหนไม่เกิน 720 = ตัวที่ด้านสั้นน้อยสุด · ไม่มีภาพเลย = None"""
+    videos = [f for f in _formats(info) if _is_video(f) and _resolution(f) > 0 and f.get("format_id") is not None]
+    if not videos:
+        return None
+    video_only = [f for f in videos if f.get("acodec") in (None, "none")]
+    pool = video_only or videos
+    under = [f for f in pool if _resolution(f) <= SHARP_MAX_SHORT_SIDE]
+    if under:
+        best = min(under, key=lambda f: _sharp_key(f, smallest=False))
+    else:
+        best = min(pool, key=lambda f: _sharp_key(f, smallest=True))
+    width, height = _number(best.get("width")), _number(best.get("height"))
+    return SharpPick(
+        format_id=str(best["format_id"]),
+        width=round(width) if width is not None else None,
+        height=round(height) if height is not None else None,
+        dynamic_range=_dynamic_range(best),
+        muxed=best.get("acodec") not in (None, "none"),
+        size_bytes=_filesize(best),
+    )
+
+
+def sharp_choice(info: dict) -> tuple[DownloadChoice, SharpPick]:
+    """งาน frames_sharp: โหลด format เดียว (merge_mp4=True แบบงานวิดีโอไม่มีเสียง) ขนาดคาดการณ์ = ขนาดของ format นั้น"""
+    pick = pick_sharp_format(info)
+    if pick is None:
+        raise YtError("E_UNKNOWN", "no video format")
+    choice = DownloadChoice(
+        format_spec=pick.format_id,
+        merge_mp4=True,
+        audio_language=None,
+        notes=(),
+        expected_bytes=pick.size_bytes,
+    )
+    return choice, pick

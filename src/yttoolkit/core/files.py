@@ -17,6 +17,7 @@ import shutil
 import threading
 import unicodedata
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,6 +34,9 @@ CHAPTER_DIR_NO_AUDIO = "แยกตาม chapter ({ext}, ไม่มีเส
 UNIQUE_RESERVE = 5  # " (99)"
 SOURCE_NOTE_NAME = "แหล่งที่มา.txt"
 GROUP_FALLBACK = "YT-Toolkit batch"  # ชื่อโฟลเดอร์กลุ่มที่ทำความสะอาดแล้วว่าง (เช่น "..")
+SHARP_DIR_SUFFIX = " - ภาพคม"  # D2: โฟลเดอร์ภาพคม "<ชื่อคลิป> - ภาพคม" ในโฟลเดอร์ของคลิป
+PARTIAL_MARKER = ".yttoolkit-partial"  # อยู่ในโฟลเดอร์ภาพคมเฉพาะระหว่างย้ายไฟล์เข้า (เจอตอนเปิดโปรแกรม = ของค้าง)
+_LONGEST_FRAME_NAME = "frame_000-00-00_200.jpg"  # ชื่อภาพคมยาวสุด: ชั่วโมง 3 หลัก ภาพที่ 200 ในวินาทีเดียวกัน
 
 _MIN_TITLE = 8
 _FORBIDDEN = frozenset('\\/:*?"<>|')
@@ -159,6 +163,22 @@ def plan_chapter_output(
     return planned
 
 
+def plan_sharp_dir(root: Path, title: str, video_id: str, group: str | None = None) -> Path:
+    """โฟลเดอร์ภาพคม (ยังไม่สร้าง): <โฟลเดอร์ของคลิป>/<ชื่อ> - ภาพคม ชื่อตัดตามกฎของ plan_output แล้วตัดเพิ่มให้
+    "<โฟลเดอร์> (99)/<ชื่อภาพยาวสุด>" ไม่เกิน 240 ไม่เหลือที่ = ใช้ videoId ยังยาวเกิน = E_OUTPUT_NOT_WRITABLE"""
+    planned = plan_output(root, title, video_id, SHARP_DIR_SUFFIX, "jpg", group)
+    folder = planned.with_name(planned.name[: -len(".jpg")])
+    limit = PATH_LIMIT - UNIQUE_RESERVE - 1 - _u16(_LONGEST_FRAME_NAME)
+    excess = _u16(str(folder)) - limit
+    if excess > 0:
+        stem = folder.name[: -len(SHARP_DIR_SUFFIX)]
+        short = truncate_title(stem, _u16(stem) - excess)
+        folder = folder.with_name(f"{short or video_id}{SHARP_DIR_SUFFIX}")
+        if _u16(str(folder)) > limit:
+            raise YtError("E_OUTPUT_NOT_WRITABLE", "path too long")
+    return folder
+
+
 def _candidates(path: Path):
     """path เดิม แล้ว "<ชื่อ> (2)<นามสกุล>" ... "(99)" (ไฟล์ซับ: "<ชื่อ> (2).<lang>.<fmt>")"""
     yield path
@@ -221,6 +241,58 @@ def move_into_place(src: Path, planned: Path) -> Path:
         if err.errno == errno.ENOSPC:
             raise YtError("E_DISK_FULL", str(err)) from err
         raise YtError("E_OUTPUT_NOT_WRITABLE", str(err)) from err
+    return final
+
+
+def _dir_candidates(path: Path):
+    """โฟลเดอร์เดิม แล้ว "<ชื่อ> (2)" ... "(99)" (ต่อท้ายทั้งชื่อ: โฟลเดอร์ไม่มีนามสกุล "Ep.1 - ภาพคม" จึงไม่ถูกตัดที่จุด)"""
+    yield path
+    for n in range(2, 100):
+        yield path.with_name(f"{path.name} ({n})")
+
+
+def _reserve_dir(planned: Path) -> Path:
+    """จองชื่อโฟลเดอร์ด้วย mkdir แบบไม่ยอมให้มีอยู่ก่อน (atomic) หลายงานพร้อมกันจึงไม่ได้ชื่อซ้ำกัน"""
+    for candidate in _dir_candidates(planned):
+        try:
+            candidate.mkdir()
+        except FileExistsError:
+            continue
+        return candidate
+    raise YtError("E_OUTPUT_NOT_WRITABLE", f"no free name for {planned.name}")
+
+
+def move_files_into_dir(items: Sequence[tuple[Path, str]], planned: Path) -> Path:
+    """ย้ายไฟล์จากโฟลเดอร์ทำงานเข้าโฟลเดอร์ใหม่ (ชื่อซ้ำต่อ (2)) คืนโฟลเดอร์จริง
+
+    ระหว่างย้ายมี PARTIAL_MARKER อยู่ในโฟลเดอร์ ลบเมื่อครบทุกไฟล์ · พลาดหรือถูกยกเลิกกลางทาง = ลบโฟลเดอร์ที่เพิ่งสร้างทิ้ง
+    ดับกลางทาง = เหลือโฟลเดอร์ที่มี marker ให้ lifecycle ล้างตอนเปิดโปรแกรม
+    """
+    for _src, name in items:
+        if not name or Path(name).name != name or name in (".", "..", PARTIAL_MARKER):
+            raise ValueError(f"bad file name: {name!r}")
+    final: Path | None = None
+    try:
+        planned.parent.mkdir(parents=True, exist_ok=True)
+        final = _reserve_dir(planned)
+        marker = final / PARTIAL_MARKER
+        marker.write_bytes(b"")
+        for src, name in items:
+            target = final / name
+            try:
+                os.replace(src, target)
+            except OSError as err:
+                if not _is_cross_device(err):
+                    raise
+                _copy_across_devices(src, target)
+        marker.unlink()
+    except BaseException as err:
+        if final is not None:
+            shutil.rmtree(final, ignore_errors=True)
+        if isinstance(err, OSError):
+            code = "E_DISK_FULL" if err.errno == errno.ENOSPC else "E_OUTPUT_NOT_WRITABLE"
+            raise YtError(code, str(err)) from err
+        raise
     return final
 
 

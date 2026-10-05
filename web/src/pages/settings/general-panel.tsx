@@ -13,6 +13,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { th } from "@/i18n/th"
 import { openOutputFolder, patchSettings, SETTINGS_KEY, settingsQuery } from "@/lib/settings-api"
 import type { Settings } from "@/lib/types"
+import { SwitchRow } from "@/pages/video/advanced/switch-row"
 
 import {
   AUDIO_FORMATS,
@@ -72,7 +73,7 @@ export function GeneralPanel() {
   if (settings.isPending) {
     return (
       <div className="flex max-w-xl flex-col gap-5" aria-busy="true">
-        {Array.from({ length: 5 }, (_, i) => (
+        {Array.from({ length: 6 }, (_, i) => (
           <Skeleton key={i} className="h-14 w-full" />
         ))}
       </div>
@@ -178,6 +179,14 @@ export function GeneralPanel() {
           ))}
         </ToggleGroup>
       </Field>
+
+      {/* M5 รอบ B (D6): ภาพคมจากไฟล์วิดีโอที่โหลดแล้ว เปิดไว้ตั้งต้น */}
+      <SwitchRow
+        label={t.autoSharpFrames}
+        hint={t.autoSharpFramesHint}
+        checked={shown.autoSharpFrames}
+        onChange={(checked) => choose(choicePatch("autoSharpFrames", checked, shown))}
+      />
     </FieldGroup>
   )
 }

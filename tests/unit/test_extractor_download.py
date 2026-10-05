@@ -18,6 +18,7 @@ from yttoolkit.core.download import (
     Downloader,
     DownloadHooks,
     DownloadResult,
+    MediaFacts,
     audio_choice,
     video_choice,
 )
@@ -54,6 +55,9 @@ C14 = {
         "ADSNODATA01": {"probeAs": BBB, "title": "คลิปไม่มีข้อมูลโฆษณา"},
         "ADSOFFLINE1": {"probeAs": BBB, "title": "คลิปที่ติดต่อ SponsorBlock ไม่ได้"},
         "CHAPTERS001": {"probeAs": "jNQXAC9IVRw", "title": "คลิปมี 3 chapter"},
+        "SHARPCLIP01": {"probeAs": BBB, "title": "คลิปภาพคม"},
+        "AUTOSHARP01": {"probeAs": BBB, "title": "คลิปภาพคมอัตโนมัติ",
+                        "media": {"width": 1280, "height": 720, "dynamic_range": "SDR"}},
     },
 }
 
@@ -686,3 +690,22 @@ def test_real_bad_id_never_reaches_yt_dlp(dl: type[DownloadYDL], workdir: Path) 
         YtDlpExtractor().download("bad id", _video(), workdir, Recorder().hooks)
     assert exc.value.code == "E_INVALID_INPUT"
     assert dl.instances == []
+
+
+def test_fake_reports_media_facts_only_when_the_behaviour_has_them(fast: FakeExtractor, tmp_path: Path) -> None:
+    auto = fast.download("AUTOSHARP01", _video(), tmp_path / "a", Recorder().hooks)
+    assert auto.media == MediaFacts(1280, 720, "SDR")
+    plain = fast.download(BBB, _video(), tmp_path / "b", Recorder().hooks)
+    assert plain.media is None
+
+
+def test_real_download_reports_the_downloaded_format_facts(dl: type[DownloadYDL], workdir: Path) -> None:
+    dl.result = {"id": BBB, "requested_downloads": [
+        {"filepath": str(workdir / "media.mp4"), "width": 1280, "height": 720, "dynamic_range": "SDR"}]}
+    result = YtDlpExtractor().download(BBB, _video(), workdir, Recorder().hooks)
+    assert result.media == MediaFacts(1280, 720, "SDR")
+
+
+def test_real_download_without_facts_reports_none(dl: type[DownloadYDL], workdir: Path) -> None:
+    result = YtDlpExtractor().download(BBB, _video(), workdir, Recorder().hooks)
+    assert result.media is None

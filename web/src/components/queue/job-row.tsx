@@ -174,15 +174,18 @@ export function DoneRow({ job }: { job: Job }) {
                 <span className="min-w-0 flex-1 truncate text-sm" title={output.name}>
                   {output.name}
                 </span>
-                <a
-                  href={outputUrl(job.id, output.index)}
-                  download={output.name}
-                  aria-label={fill(th.queue.downloadOf, { file: output.name })}
-                  className={buttonVariants({ variant: "ghost", size: "sm", className: "shrink-0" })}
-                >
-                  <Download aria-hidden />
-                  {th.queue.download}
-                </a>
+                {/* ผลแบบโฟลเดอร์ (ภาพคม) ดาวน์โหลดผ่านเบราว์เซอร์ไม่ได้: ใช้ "เปิดโฟลเดอร์" */}
+                {output.files === undefined && (
+                  <a
+                    href={outputUrl(job.id, output.index)}
+                    download={output.name}
+                    aria-label={fill(th.queue.downloadOf, { file: output.name })}
+                    className={buttonVariants({ variant: "ghost", size: "sm", className: "shrink-0" })}
+                  >
+                    <Download aria-hidden />
+                    {th.queue.download}
+                  </a>
+                )}
               </li>
             ))}
           </ul>

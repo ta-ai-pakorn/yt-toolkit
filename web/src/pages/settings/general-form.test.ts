@@ -17,6 +17,7 @@ const SAVED: Settings = {
   subCustom: PRESETS.medium,
   concurrency: 2,
   sponsorblockDefault: [],
+  autoSharpFrames: true,
   theme: "system",
   filenameStyle: "title",
   cookies: { enabled: false, source: null, warningAccepted: false },
@@ -87,5 +88,12 @@ describe("serverMessage", () => {
   })
   it("ไม่ใช่ ApiError ใช้ข้อความกลาง", () => {
     expect(serverMessage(new Error("boom"))).toBe(th.general.saveFailed)
+  })
+})
+
+describe("autoSharpFrames (M5 รอบ B)", () => {
+  it("switching sends only that key, the same value sends nothing", () => {
+    expect(choicePatch("autoSharpFrames", false, SAVED)).toEqual({ autoSharpFrames: false })
+    expect(choicePatch("autoSharpFrames", true, SAVED)).toBeNull()
   })
 })

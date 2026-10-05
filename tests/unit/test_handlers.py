@@ -1010,7 +1010,9 @@ def test_note_job_cancelled_before_writing_leaves_nothing(env):
 
 
 def test_build_handlers_keys(env):
-    assert set(build_handlers(env.deps)) == {"video", "audio", "subtitle", "note", "contact_sheet", "frames_zip"}
+    assert set(build_handlers(env.deps)) == {
+        "video", "audio", "subtitle", "note", "frames_sharp", "contact_sheet", "frames_zip",
+    }  # fmt: skip
     assert isinstance(env.downloader, Downloader)
 
 

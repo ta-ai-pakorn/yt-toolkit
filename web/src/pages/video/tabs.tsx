@@ -76,7 +76,7 @@ export function VideoTabs({ videoId, enabled, video }: Props) {
       </TabsList>
       {/* แท็บภาพเฟรมเริ่มด้วยปุ่มโหลดและภาพที่โฟกัสได้อยู่แล้ว: ไม่ให้แผงเป็นจุด Tab เพิ่ม (ลำดับ Tab เหมือน M2) */}
       <TabsContent value="frames" tabIndex={-1} className={PANEL}>
-        <FramesSection videoId={videoId} enabled={enabled} mostReplayed={mostReplayed} />
+        <FramesSection videoId={videoId} enabled={enabled} mostReplayed={mostReplayed} video={video} />
       </TabsContent>
       {/* แท็บวิดีโอ/เสียงที่มีตัวเลือกเริ่มด้วยช่องเลือกที่โฟกัสได้อยู่แล้ว = แผงไม่เป็นจุด Tab เพิ่ม
           ยังโหลดอยู่หรือคลิปไม่มีไฟล์ให้โหลด (ไม่มีปุ่ม) = แผงรับโฟกัสเอง */}

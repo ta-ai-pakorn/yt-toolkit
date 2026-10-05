@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -40,6 +41,7 @@ from .core.jobs import JobStore
 from .core.media import FakeMediaTools, FfmpegTools, MediaTools
 from .core.queue import QueueRunner
 from .core.settings import SettingsStore
+from .core.sharp_store import sweep_sharp_leftovers
 from .core.subtitles import SubtitleService
 from .core.videos import VideoService
 from .platform import LockFileError, Platform, current
@@ -289,6 +291,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
     try:
         db.migrate()
         purge_cache_once(db, paths.cache)
+        sweep_sharp_cache_once(paths.cache)
         configure_thai(paths)
         videos = VideoService(db, extractor)
         subtitles = SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
@@ -311,6 +314,8 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
             cache_root=paths.cache,
             pinned=pinned.get,
             sponsors=extractor,  # type: ignore[arg-type]  # ทั้งตัวจริงและตัวปลอมมี sponsor_segments (C4)
+            # M5 รอบ B D6: อ่านค่าตั้งทุกงาน (ปิดในหน้าตั้งค่าแล้วมีผลกับงานถัดไปทันที)
+            auto_sharp=lambda: bool(settings.get().get("autoSharpFrames", True)),
         )
         delays = {"delay_range": FAKE_DELAY_RANGE} if fake else {}
         queue = QueueRunner(
@@ -383,6 +388,7 @@ def sweep_interrupted_outputs(store: JobStore, output_root: Path, job_ids: Itera
     งานที่ดู = job_ids (งานที่เพิ่งกู้คืน) + งานที่หยุดกลางคันล่าสุด (เผื่อปิดโปรแกรมตอนกำลังย้ายไฟล์ใหญ่ข้ามไดรฟ์)
     ลบเฉพาะไฟล์ที่ชื่อเป็นแบบที่โปรแกรมสร้างได้ (toolkit_name_pattern) และไม่ใช่ไฟล์ผลลัพธ์ของงานที่เสร็จแล้ว
     การดูงานที่หยุดกลางคันล่าสุดซ้ำทุกครั้งที่เปิดจึงไม่แตะไฟล์ของผู้ใช้
+    โฟลเดอร์ภาพคม "<ชื่อ> - ภาพคม[ (N)]" ที่ยังมี .yttoolkit-partial (ดับระหว่างย้ายภาพเข้า) ลบทั้งโฟลเดอร์ (M5 รอบ B)
     """
     jobs = {job.id: job for job in store.list_status("interrupted", SWEEP_RECENT_INTERRUPTED)}
     for job_id in job_ids:
@@ -405,6 +411,7 @@ def sweep_interrupted_outputs(store: JobStore, output_root: Path, job_ids: Itera
             if folder not in seen:
                 seen.add(folder)
                 removed += _sweep_folder(folder, toolkit_name_pattern(prefix), keep)
+                removed += _sweep_sharp_dirs(folder, sharp_dir_pattern(prefix), keep)
                 for name in _CHAPTER_DIRS:
                     chapters = folder / name
                     removed += _sweep_folder(chapters, _CHAPTER_FILE, keep)
@@ -438,6 +445,35 @@ def toolkit_name_pattern(prefix: str) -> re.Pattern[str]:
     subtitle = rf"{name}{_UNIQUE}\.[A-Za-z0-9-]+\.(?:{subs})"
     subtitle_range = rf"{shrunk}{_RANGE_SUFFIX}{_UNIQUE}\.[A-Za-z0-9-]+\.(?:{subs})"
     return re.compile(rf"(?:{media}|{cut}|{subtitle}|{subtitle_range})(?:\.part)?")
+
+
+def sharp_dir_pattern(prefix: str) -> re.Pattern[str]:
+    """ชื่อโฟลเดอร์ภาพคมที่ตัวทำงานสร้างได้ในโฟลเดอร์ของคลิป (files.plan_sharp_dir): <ชื่อ (ตัดสั้นได้)> - ภาพคม[ (N)]"""
+    return re.compile(rf"{_prefixes(prefix)}{re.escape(files.SHARP_DIR_SUFFIX)}{_UNIQUE}")
+
+
+def _sweep_sharp_dirs(folder: Path, ours: re.Pattern[str], keep: set[str]) -> int:
+    """ลบโฟลเดอร์ภาพคมที่ย้ายภาพเข้าไม่ครบ: ชื่อตรงแบบ ยังมี PARTIAL_MARKER และไม่ใช่ผลของงานที่เสร็จแล้ว
+    โฟลเดอร์ที่ไม่มี marker (ชุดที่เสร็จ ชุดที่ผู้ใช้แก้แล้ว) ไม่ถูกแตะเสมอ"""
+    try:
+        children = list(folder.iterdir())
+    except FileNotFoundError:
+        return 0
+    except OSError as exc:
+        log.warning("อ่านโฟลเดอร์ผลลัพธ์ไม่ได้ตอนล้างภาพคมค้าง: %s", type(exc).__name__)
+        return 0
+    removed = 0
+    for child in children:
+        if not ours.fullmatch(child.name) or os.path.normcase(str(child)) in keep:
+            continue
+        try:
+            if child.is_symlink() or not child.is_dir() or not (child / files.PARTIAL_MARKER).is_file():
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(child, ignore_errors=True)
+        removed += 1
+    return removed
 
 
 def _remove_if_empty(folder: Path) -> None:
@@ -574,6 +610,16 @@ def purge_cache_once(db: Database, cache_root: Path) -> None:
             log.info("ล้าง cache ของคลิปที่ไม่ได้เปิดเกิน 30 วันแล้ว %s คลิป", removed)
     except Exception:
         log.exception("ล้าง cache เก่าไม่สำเร็จ (ข้ามไปก่อน)")
+
+
+def sweep_sharp_cache_once(cache_root: Path) -> None:
+    """ตอนเปิดโปรแกรม (ยังไม่มีงานรัน): ล้างชุดภาพคมที่เตรียมค้าง/สลับค้างใน cache (M5 รอบ B) พลาดแค่บันทึก log"""
+    try:
+        count = sweep_sharp_leftovers(cache_root)
+        if count:
+            log.info("จัดการภาพคมที่ค้างใน cache แล้ว %s โฟลเดอร์", count)
+    except Exception:
+        log.exception("ล้างภาพคมที่ค้างใน cache ไม่สำเร็จ (ข้ามไปก่อน)")
 
 
 def start_periodic_purge(

@@ -31,8 +31,8 @@
 
 ## เลื่อนไป M5
 
-- **ตัวเลือกขั้นสูงของ W2** (ซ่อนไว้ใน M4): ช่วงเวลา แยกตาม chapter ตัดโฆษณา คุกกี้ · ใน M4 API ปฏิเสธ `range` `sponsorblock` `useCookies` `splitChapters: true` และ `frames_sharp` ด้วย 422 · **รอบ A ทำแล้ว** (ช่วงเวลา แยก chapter ตัดโฆษณา: ส่วนตัวเลือกขั้นสูงเปิดแล้ว API รับ `range` `sponsorblock` `splitChapters: true` แล้ว) · `useCookies` (คุกกี้ รอบ C) และ `frames_sharp` (ภาพคม รอบ B) ยังได้ 422
-- **ภาพเฟรมโหมดคม** (`frames_sharp`) และ `source: "sharp"` ของ contact sheet / zip
+- **ตัวเลือกขั้นสูงของ W2** (ซ่อนไว้ใน M4): ช่วงเวลา แยกตาม chapter ตัดโฆษณา คุกกี้ · ใน M4 API ปฏิเสธ `range` `sponsorblock` `useCookies` `splitChapters: true` และ `frames_sharp` ด้วย 422 · **รอบ A ทำแล้ว** (ช่วงเวลา แยก chapter ตัดโฆษณา: ส่วนตัวเลือกขั้นสูงเปิดแล้ว API รับ `range` `sponsorblock` `splitChapters: true` แล้ว) · `useCookies` (คุกกี้ รอบ C) ยังได้ 422 · `frames_sharp` รับแล้วในรอบ B
+- **ภาพเฟรมโหมดคม** (`frames_sharp`) และ `source: "sharp"` ของ contact sheet / zip **(ทำแล้วใน M5 รอบ B)**
 - **คุกกี้ผู้ใช้:** ตอน FR-CK-7 ให้ใช้คุกกี้ต้องใช้แทนเซสชันผู้ชมของการโหลด (ไม่ใช้สองไฟล์พร้อมกัน) เหมือนที่จดไว้ใน M3
 
 ## เลื่อนไป M6

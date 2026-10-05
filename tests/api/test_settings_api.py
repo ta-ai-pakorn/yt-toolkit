@@ -17,6 +17,7 @@ SETTING_KEYS = {
     "subCustom",
     "concurrency",
     "sponsorblockDefault",
+    "autoSharpFrames",
     "theme",
     "filenameStyle",
     "cookies",

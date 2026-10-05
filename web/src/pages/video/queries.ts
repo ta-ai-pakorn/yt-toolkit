@@ -1,7 +1,8 @@
 import { queryOptions } from "@tanstack/react-query"
 
-import { api } from "@/lib/api"
-import type { PinnedCommentResult, Storyboard, VideoInfo } from "@/lib/types"
+import { api, ApiError } from "@/lib/api"
+import { sharpKey } from "@/lib/sharp-frames"
+import type { PinnedCommentResult, SharpSet, Storyboard, VideoInfo } from "@/lib/types"
 
 import { canRetry } from "./errors"
 
@@ -43,6 +44,27 @@ export function storyboardQuery(videoId: string, enabled: boolean) {
     enabled,
     retry: false,
     // URL ภาพมีตัวเลขเวอร์ชัน (?v=) อยู่แล้ว เก็บผลไว้สั้น ๆ พอ ไม่ต้องยิงใหม่ทุกครั้งที่สลับหน้า
+    staleTime: 60_000,
+  })
+}
+
+/**
+ * ชุดภาพคมของคลิป (M5 รอบ B): 404 = ยังไม่มีชุด คืน null (ไม่ใช่ error) · ข่าว SSE ของงานภาพคม/วิดีโอที่เสร็จสั่งโหลดใหม่
+ * URL ภาพมี ?v= อยู่แล้ว เก็บผลไว้สั้น ๆ เหมือน storyboard
+ */
+export function sharpQuery(videoId: string, enabled: boolean) {
+  return queryOptions({
+    queryKey: sharpKey(videoId),
+    queryFn: async ({ signal }): Promise<SharpSet | null> => {
+      try {
+        return await api<SharpSet>(`/videos/${videoId}/sharp`, { signal })
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return null
+        throw error
+      }
+    },
+    enabled,
+    retry: false,
     staleTime: 60_000,
   })
 }
