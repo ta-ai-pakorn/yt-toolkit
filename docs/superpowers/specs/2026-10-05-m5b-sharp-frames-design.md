@@ -273,3 +273,12 @@ Interval maths is shared between the web and the backend (section 3.2). The web 
 - More than one sharp set per clip, or keeping history of sets.
 - Tone-mapping in the automatic step or in the round A cut path.
 - Choosing JPG quality or resolution in the UI.
+
+## Changes after approval (2026-10-05, during build)
+- ffmpeg missing at enqueue is HTTP 409 `E_FFMPEG_MISSING` (the existing API and toast), not 422 (§3.1, §6).
+- The sharp output folder sits inside the clip folder: `<clip folder>/<ชื่อคลิป> - ภาพคม/`, like every other per-clip output (§3.5).
+- Format selection lives in `core/download.py` (`sharp_choice`, a pure chooser); `core/extractor.py` remains the only `yt_dlp` importer (§3.3 wording).
+- The done queue title shows the frames actually kept (the folder's file count), which can be fewer than planned when end frames drop (§3.5).
+- The dialog shows the storyboard interval rounded to one decimal.
+- The "ขอภาพคม" number field no longer switches to "ตั้งเอง" on keyboard focus, only on click/tap or typing, so the default stays reachable by keyboard (§1.3).
+- The automatic step never replaces a manual set; the check is atomic with the swap (§4).
