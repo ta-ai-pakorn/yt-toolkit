@@ -429,6 +429,27 @@ def test_frame_args_hdr_puts_the_tone_map_before_the_scale() -> None:
     assert "color_trc=arib-std-b67" in tonemap_filter("HLG")
 
 
+def test_frame_args_without_long_side_keeps_the_source_size() -> None:  # M5 รอบ B2 ภาพคมตรงจุด
+    assert frame_args(FF, SRC, JPG, 125_400, long_side=None) == FRAME_HEAD + [
+        "-ss", "125.400", "-i", str(SRC), "-frames:v", "1", "-q:v", "2", str(JPG)]  # fmt: skip
+    hdr = frame_args(FF, SRC, JPG, 0, long_side=None, dynamic_range="HDR10")
+    assert hdr[hdr.index("-vf") + 1] == tonemap_filter("HDR10")
+
+
+@pytest.mark.parametrize("long_side", [0, -5, True, 1.5])
+def test_long_side_must_be_none_or_a_positive_int(long_side) -> None:
+    with pytest.raises(ValueError):
+        frame_args(FF, SRC, JPG, 0, long_side=long_side)
+
+
+def test_fake_extract_frame_records_no_long_side(tmp_path: Path) -> None:
+    fake = FakeMediaTools(MEDIA_ROOT)
+    dst = tmp_path / "frame.jpg"
+    assert fake.extract_frame(MEDIA_ROOT / "video.mp4", dst, 400, long_side=None, dynamic_range=None,
+                              cancel=_no_cancel) is True  # fmt: skip
+    assert fake.frames == [FrameCall("video.mp4", "frame.jpg", 400, None, None)]
+
+
 @pytest.mark.parametrize(
     ("t_ms", "long_side", "dynamic_range"),
     [(-1, 1280, None), (0, 0, None), (0, 1280, "SDR"), (0, 1280, ""), (True, 1280, None)],
