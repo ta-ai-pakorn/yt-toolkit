@@ -21,6 +21,7 @@ const SETTINGS: Settings = {
   concurrency: 2,
   sponsorblockDefault: [],
   autoSharpFrames: true,
+  captureQuality: "max",
   theme: "system",
   filenameStyle: "title",
   cookies: { enabled: false, source: null, warningAccepted: false },

@@ -112,6 +112,14 @@ export type Storyboard = { intervalMs: number; frames: StoryboardFrame[] }
 /** ชุดภาพคมของคลิป (GET /videos/{id}/sharp) intervalMs null = เวลาเดียวกับภาพเร็ว */
 export type SharpSet = { origin: "manual" | "auto"; intervalMs: number | null; frames: StoryboardFrame[] }
 
+/** ภาพคมที่ถ่ายตรงจุด (M5 รอบ B2) · id = "c_<tMs>" · url มี ?v= อยู่แล้ว (ภาพ immutable) */
+export type Capture = { id: string; tMs: number; width: number; height: number; url: string }
+
+export type CaptureList = { captures: Capture[] }
+
+/** ความละเอียดภาพที่ถ่าย (เพดานนับที่ด้านสั้น) "max" = สูงสุดที่มี */
+export type CaptureQuality = "max" | "1080" | "720"
+
 export type PlaylistEntry = {
   videoId: string
   title: string
@@ -316,6 +324,7 @@ export type Settings = {
   concurrency: 1 | 2 | 3
   sponsorblockDefault: string[]
   autoSharpFrames: boolean
+  captureQuality: CaptureQuality
   theme: "system" | "dark" | "light"
   filenameStyle: "title" | "title-channel" | "title-quality"
   cookies: { enabled: boolean; source: "file" | "firefox" | null; warningAccepted: boolean; importedAt?: string }
