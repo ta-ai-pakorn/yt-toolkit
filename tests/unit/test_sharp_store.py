@@ -150,6 +150,25 @@ def test_sweep_restores_the_old_set_when_sharp_is_missing(tmp_path: Path) -> Non
     assert len(read_sharp(tmp_path, BBB)["frames"]) == 2
 
 
+def test_sweep_skips_a_broken_old_set_and_restores_the_next_valid_one(tmp_path: Path) -> None:
+    _install(tmp_path, JOB_A, [0, 1000])
+    folder = tmp_path / BBB
+    (folder / FOLDER).rename(folder / "sharp.old-b")  # ชุดดี (เรียงทีหลัง)
+    broken = folder / "sharp.old-a"  # เรียงก่อน แต่เสีย: index อ่านไม่ได้
+    broken.mkdir()
+    (broken / "index.json").write_text("{not json", encoding="utf-8")
+    assert sweep_sharp_leftovers(tmp_path) == 2
+    assert sorted(p.name for p in folder.iterdir()) == [FOLDER]
+    assert len(read_sharp(tmp_path, BBB)["frames"]) == 2
+
+
+def test_sweep_deletes_every_old_set_when_none_is_valid(tmp_path: Path) -> None:
+    (tmp_path / BBB / "sharp.old-a").mkdir(parents=True)
+    (tmp_path / BBB / "sharp.old-b").mkdir()
+    assert sweep_sharp_leftovers(tmp_path) == 2
+    assert list((tmp_path / BBB).iterdir()) == []
+
+
 def test_sweep_of_a_missing_cache_root_is_zero(tmp_path: Path) -> None:
     assert sweep_sharp_leftovers(tmp_path / "nope") == 0
 

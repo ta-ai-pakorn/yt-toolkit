@@ -75,16 +75,20 @@ def _valid(data: object, folder: Path) -> bool:
     return True
 
 
-def read_sharp(cache_root: Path, video_id: str) -> dict | None:
-    """ชุดภาพคมของคลิป ไม่มี / index เสีย / ไฟล์ภาพหาย / id ผิดรูปแบบ = None"""
-    if not VIDEO_ID.fullmatch(video_id):
-        return None
-    folder = Path(cache_root) / video_id / FOLDER
+def _read_folder(folder: Path) -> dict | None:
+    """index ของโฟลเดอร์ชุดภาพคม ถ้าอ่านได้และผ่าน _valid · ไม่งั้น None (กฎเดียวกับ read_sharp และตอนกู้ชุดเดิม)"""
     try:
         data = json.loads((folder / INDEX).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     return data if _valid(data, folder) else None
+
+
+def read_sharp(cache_root: Path, video_id: str) -> dict | None:
+    """ชุดภาพคมของคลิป ไม่มี / index เสีย / ไฟล์ภาพหาย / id ผิดรูปแบบ = None"""
+    if not VIDEO_ID.fullmatch(video_id):
+        return None
+    return _read_folder(Path(cache_root) / video_id / FOLDER)
 
 
 def prepare_sharp(
@@ -192,7 +196,7 @@ def discard_sharp(staged: Path) -> None:
 
 def sweep_sharp_leftovers(cache_root: Path) -> int:
     """ตอนเปิดโปรแกรม (ยังไม่มีงานรัน): ลบ sharp.tmp-* · sharp.old-* คืนเป็น sharp/ ถ้า sharp/ หายไป (ดับกลางการสลับ)
-    ไม่งั้นลบ · คืนจำนวนโฟลเดอร์ที่จัดการ"""
+    และชุดนั้นผ่าน _valid (กฎเดียวกับตอนอ่าน) ตัวที่ใช้ไม่ได้ถูกลบแล้วลองตัวถัดไป ไม่งั้นลบ · คืนจำนวนโฟลเดอร์ที่จัดการ"""
     try:
         clips = [p for p in Path(cache_root).iterdir() if p.is_dir()]
     except OSError:
@@ -209,7 +213,7 @@ def sweep_sharp_leftovers(cache_root: Path) -> int:
                 shutil.rmtree(child, ignore_errors=True)
                 count += 1
             elif child.name.startswith(OLD_PREFIX):
-                if not target.exists():
+                if not target.exists() and _read_folder(child) is not None:
                     try:
                         child.rename(target)
                         count += 1

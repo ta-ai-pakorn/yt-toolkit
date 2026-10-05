@@ -9,7 +9,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 import threading
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -448,7 +447,10 @@ def run_ffmpeg(
                 proc.kill()
                 proc.wait()
                 raise JobCancelled()
-            time.sleep(_POLL_SECONDS)
+            try:
+                proc.wait(timeout=_POLL_SECONDS)  # ffmpeg จบเมื่อไหร่ก็กลับทันที (ไม่รอเต็มรอบ)
+            except subprocess.TimeoutExpired:
+                continue
     except BaseException:
         if proc.poll() is None:
             proc.kill()

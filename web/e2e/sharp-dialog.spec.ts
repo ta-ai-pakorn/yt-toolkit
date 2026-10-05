@@ -96,6 +96,9 @@ test("ลูกศรซ้าย/ขวาที่ขอบช่องตั�
 test("ตั้งเอง ทุก 7 วินาที: 91 ภาพ ส่ง intervalS 7", async ({ page }) => {
   const queue = await mockEnqueue(page)
   await openDialog(page)
+  // ค่าเริ่มต้นของ BBB ก็คือ 7 อยู่แล้ว: fill("7") ไม่เกิด change จึงไม่เปลี่ยนโหมด ผู้ใช้จริงต้องคลิกช่อง (กดเมาส์ลง = โหมดตั้งเอง) แล้วพิมพ์
+  await customField(page).click()
+  await expect(customRadio(page)).toBeChecked()
   await customField(page).fill("7")
   await expect(customRadio(page)).toBeChecked()
   await expect(dialog(page)).toContainText("· 91 ภาพ")

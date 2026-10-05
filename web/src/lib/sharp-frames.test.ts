@@ -140,6 +140,14 @@ describe("sharpDialogModel", () => {
     })
   })
 
+  it.each([
+    [4926, "4.9"],
+    [1450, "1.5"],
+  ])("the same-times interval %d ms rounds half up to %s", (intervalMs, text) => {
+    const fast: SharpFast = { intervalMs, timesMs: steps(intervalMs, 20) }
+    expect(sharpDialogModel({ ...base, fast }).sameInterval).toBe(text)
+  })
+
   it("custom 7 sends intervalS 7", () => {
     const model = sharpDialogModel({ ...base, mode: "custom" })
     expect(model.params).toEqual({ intervalS: 7 })

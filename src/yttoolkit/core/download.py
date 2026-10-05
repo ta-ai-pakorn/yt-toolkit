@@ -20,6 +20,7 @@ FFMPEG_KINDS = frozenset({"video", "audio", "frames_sharp"})  # frames_sharp: ff
 
 DEFAULT_MAX_HEIGHT = 1080
 SHARP_MAX_SHORT_SIDE = 720  # D4: ภาพคมโหลดด้านสั้นไม่เกิน 720 แล้วย่อให้ด้านยาว 1280
+AUTO_SHARP_MAX_SHORT_SIDE = 1080  # ภาพคมอัตโนมัติ: ไฟล์ใหญ่กว่านี้ (1440p/4K VP9/AV1) ffmpeg ต่อภาพช้าเป็นนาที จึงข้าม
 # wav = PCM 16 บิต: ขนาดคาดการณ์ใช้ 44,100 Hz 2 ช่อง (C8)
 WAV_RATE = 44100
 WAV_CHANNELS = 2
