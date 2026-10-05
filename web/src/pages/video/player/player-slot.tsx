@@ -1,6 +1,6 @@
 import { cn } from "cn"
 import { ArrowUpToLine, Play, X } from "lucide-react"
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, type RefObject } from "react"
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -218,17 +218,23 @@ function DockedPlaceholder({ thumbnailUrl, boxRef }: { thumbnailUrl: string; box
  * - ผิดพลาด: ข้อความในช่อง (ดู PlayerErrorView)
  * แถวไทม์ไลน์ใต้ตัวเล่นแยกเป็น PlayerControls (หัวคลิปวางเองตามความกว้างจอ ให้ลำดับ DOM ตรงกับที่ตาเห็น)
  * inView: ช่องนี้อยู่ในจอไหม หัวคลิปวัดเอง (useSlotInView กับกล่องที่ได้จาก onBox) แล้วส่งให้ทั้งช่องนี้และ PlayerControls
+ * portrait (M5 รอบ B2): โหมดโรงภาพยนตร์ของคลิปแนวตั้ง = ช่อง 9:16 สูงราว 80% ของจอ (เปลี่ยนแค่ class ช่องเดิมไม่ถูกสร้างใหม่)
+ * onPlay (M5 รอบ B2): เรียกก่อนเริ่มเล่นเมื่อกด ▶ ในช่องนี้เท่านั้น (หัวคลิปใช้ขยายเป็นโหมดโรงภาพยนตร์)
  */
 export function PlayerSlot({
   video,
   inView,
   onBox,
   className,
+  portrait = false,
+  onPlay,
 }: {
   video: VideoInfo
   inView: boolean
   onBox?: (node: HTMLDivElement | null) => void
   className?: string
+  portrait?: boolean
+  onPlay?: () => void
 }) {
   const { videoId, thumbnailUrl } = video
   const storeVideoId = usePlayerValue((s) => s.videoId)
@@ -267,7 +273,11 @@ export function PlayerSlot({
       ref={setBox}
       tabIndex={-1}
       data-slot="player-slot"
-      className={cn("relative w-full rounded-md outline-none", failed ? "sm:aspect-video" : "aspect-video", className)}
+      className={cn(
+        "relative rounded-md outline-none",
+        portrait ? "aspect-[9/16] h-[min(80vh,760px)]" : cn("w-full", failed ? "sm:aspect-video" : "aspect-video"),
+        className,
+      )}
     >
       {failed ? (
         <div className="sm:absolute sm:inset-0">
@@ -279,7 +289,10 @@ export function PlayerSlot({
           type="button"
           aria-label={t.play}
           data-slot="player-play"
-          onClick={() => playerActions.playFrom()}
+          onClick={() => {
+            onPlay?.()
+            playerActions.playFrom()
+          }}
           className="group/play absolute inset-0 block cursor-pointer rounded-md outline-none hover:ring-2 hover:ring-ring/40 focus-visible:ring-3 focus-visible:ring-ring"
         >
           <Thumbnail src={thumbnailUrl} className="size-full" />
@@ -310,8 +323,20 @@ export function PlayerSlot({
  * แถวใต้ตัวเล่นในหัวคลิป: แถบไทม์ไลน์ + "ช่วง i จาก n" + ปุ่มตั้งจุดเริ่ม/จบ (M5 รอบ A) กับปุ่มหยุด (ตอนเล่นช่วงไฮไลต์)
  * มีเฉพาะหลังเริ่มเล่นและตัวเล่นอยู่ในหัวคลิป (ลอยอยู่ = ไม่มี สถานะช่วงไฮไลต์ไปอยู่บนตัวเล่นลอยแทน)
  * ก่อนเล่นไม่จองที่ไว้ หัวคลิปก่อนเล่นจึงสูงเท่ากันทุกคลิป (ปุ่มช่วงไฮไลต์อยู่ในแถวปุ่มของหัวคลิป)
+ * ยกเว้นหัวคลิปส่ง actions มาตอนตัวเล่นไม่ได้เล่น (M5 รอบ B2: ปิดตัวเล่นตอนอยู่ในโหมดโรงภาพยนตร์) = แถวที่มีแค่ปุ่มเหล่านั้น
  */
-export function PlayerControls({ video, inView, className }: { video: VideoInfo; inView: boolean; className?: string }) {
+export function PlayerControls({
+  video,
+  inView,
+  className,
+  actions,
+}: {
+  video: VideoInfo
+  inView: boolean
+  className?: string
+  /** ปุ่มเพิ่มต่อท้ายแถวปุ่มใต้ตัวเล่น (M5 รอบ B2: ปุ่มโหมดโรงภาพยนตร์) */
+  actions?: ReactNode
+}) {
   const storeVideoId = usePlayerValue((s) => s.videoId)
   const status = usePlayerValue((s) => s.status)
   const started = usePlayerValue((s) => s.started)
@@ -320,11 +345,33 @@ export function PlayerControls({ video, inView, className }: { video: VideoInfo;
   const durationMs = Math.max(0, video.durationS) * 1000
   const timeline = durationMs > 0
   // ลอยอยู่ (เริ่มเล่นแล้วแต่ช่องพ้นจอ) = ไม่มีแถวนี้ · เงื่อนไขเดียวกับ docked ของ PlayerSlot
-  if (!active || !started || !inView || !(timeline || reel)) return null
-  return <ControlsRow video={video} durationMs={timeline ? durationMs : 0} className={className} />
+  if (!inView) return null
+  if (!active || !started) {
+    // ตัวเล่นไม่ได้เล่นอยู่ (เช่นปิดตัวเล่นตอนอยู่ในโหมดโรงภาพยนตร์): เหลือเฉพาะปุ่มเพิ่มจากหัวคลิป (ถ้ามี) ไม่มีไทม์ไลน์หรือปุ่มตั้งจุด
+    if (!actions) return null
+    return (
+      <div data-slot="player-controls" className={cn("flex flex-col gap-2", className)}>
+        <div data-slot="player-actions" className="flex flex-wrap items-center gap-1">
+          {actions}
+        </div>
+      </div>
+    )
+  }
+  if (!(timeline || reel)) return null
+  return <ControlsRow video={video} durationMs={timeline ? durationMs : 0} className={className} actions={actions} />
 }
 
-function ControlsRow({ video, durationMs, className }: { video: VideoInfo; durationMs: number; className?: string }) {
+function ControlsRow({
+  video,
+  durationMs,
+  className,
+  actions,
+}: {
+  video: VideoInfo
+  durationMs: number
+  className?: string
+  actions?: ReactNode
+}) {
   const row = useRef<HTMLDivElement>(null)
   // แถวนี้หายเพราะตัวเล่นลอย (เลื่อนจอลงทั้งที่โฟกัสอยู่ที่แถบ): โฟกัสไป "กลับไปที่หัวคลิป" บนตัวเล่นลอย
   useFocusRescue(row, () => firstSlot(FOCUS_SLOTS.dockBack, FOCUS_SLOTS.cover))
@@ -339,7 +386,11 @@ function ControlsRow({ video, durationMs, className }: { video: VideoInfo; durat
           firstSlot(FOCUS_SLOTS.dockBack, FOCUS_SLOTS.reel, FOCUS_SLOTS.cover)
         }
       />
-      <RangeMarkButtons videoId={video.videoId} />
+      {/* แถวปุ่มใต้ตัวเล่น (spec C2): ตั้งจุดเริ่ม · ตั้งจุดจบ · ปุ่มเพิ่มจากหัวคลิป ตัดขึ้นบรรทัดได้ */}
+      <div data-slot="player-actions" className="flex flex-wrap items-center gap-1">
+        <RangeMarkButtons videoId={video.videoId} />
+        {actions}
+      </div>
     </div>
   )
 }

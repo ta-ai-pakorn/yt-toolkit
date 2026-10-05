@@ -32,7 +32,16 @@ export default defineConfig({
     {
       // spec ทั่วไป: ห้ามสร้างงานจริง (ต้อง mock POST /api/jobs) ดู mockEnqueue ใน e2e/queue-helpers.ts
       name: "chromium",
-      use: { ...devices["Desktop Chrome"], baseURL: `http://127.0.0.1:${PORT}` },
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: `http://127.0.0.1:${PORT}`,
+        // M5 รอบ B2: spec เดิมกด ▶ แล้วตรวจหัวคลิปแบบปกติ จึงจำค่า "แบบปกติ" ไว้ก่อน
+        // theater.spec.ts และ capture.spec.ts ตั้งค่าที่เก็บเอง (test.use storageState)
+        storageState: {
+          cookies: [],
+          origins: [{ origin: `http://127.0.0.1:${PORT}`, localStorage: [{ name: "yt-toolkit:theater", value: "0" }] }],
+        },
+      },
       testIgnore: /queue-.*\.spec\.ts/,
     },
     {
