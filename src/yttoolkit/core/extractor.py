@@ -48,6 +48,7 @@ log = logging.getLogger("yttoolkit")
 LIVE_NOT_READY = frozenset({"is_live", "is_upcoming"})
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_MEDIA_URL = re.compile(r"https?://\S+")  # ลิงก์ในข้อความ error ของ fetch_frame_piece (ลิงก์สื่อมีลายเซ็น)
 _PROBE_OPTS = {
     "quiet": True,
     "no_warnings": True,
@@ -771,14 +772,15 @@ class YtDlpExtractor:
                 exc.close()  # คืนการเชื่อมต่อของคำตอบที่ error ถืออยู่ (ปิดไม่ได้ก็ไม่บัง error เดิม)
             except Exception:
                 pass
-            raise YtError("E_NETWORK" if code == "E_UNKNOWN" else code, detail) from exc
+            raise YtError("E_NETWORK" if code == "E_UNKNOWN" else code, detail) from None
         except RequestError as exc:
-            raise YtError("E_NETWORK", type(exc).__name__) from exc
+            raise YtError("E_NETWORK", type(exc).__name__) from None
         except YoutubeDLError as exc:
             message = _ANSI.sub("", str(exc)) or type(exc).__name__
-            raise YtError(classify(message), message) from exc
+            # classify ดูข้อความเต็ม แต่ detail ตัดลิงก์ทิ้ง (ลิงก์สื่อมีลายเซ็น) และไม่ผูก exception เดิมต่อท้าย (ไม่ให้ log เห็น)
+            raise YtError(classify(message), _MEDIA_URL.sub("<url>", message)) from None
         except Exception as exc:
-            raise YtError("E_UNKNOWN", f"{type(exc).__name__}: {exc}") from exc
+            raise YtError("E_UNKNOWN", type(exc).__name__) from None  # ข้อความของ exception อาจมีลิงก์สื่อ
         write_piece(dest, piece)
         log.info("ถ่ายภาพคม %s: format %s โหลด %d ไบต์", video_id, fmt.get("format_id"), fetched)
         return piece_info(fmt, dest, index.sidx, ref)

@@ -284,3 +284,43 @@ def test_real_probe_uses_the_visitor_session(ydl: type[CaptureYDL], tmp_path: Pa
 def test_real_without_a_session_passes_no_cookiefile(ydl: type[CaptureYDL], tmp_path: Path) -> None:
     YtDlpExtractor().fetch_frame_piece(BBB, 0, None, tmp_path / "p.mp4")
     assert "cookiefile" not in ydl.instances[0].params
+
+
+def _assert_chain_cut(err: YtError) -> None:
+    """log ของ 500 พิมพ์สายโซ่ exception (exc_info): ต้องไม่ผูก exception เดิม (ที่มีลิงก์สื่อ/path) ติดมา"""
+    assert err.__cause__ is None and err.__suppress_context__ is True
+
+
+def test_real_http_error_does_not_chain_the_original(ydl: type[CaptureYDL], tmp_path: Path) -> None:
+    ydl.fail = HTTPError(Response(io.BytesIO(b""), MEDIA_URL, {}, status=503))
+    with pytest.raises(YtError) as info:
+        YtDlpExtractor().fetch_frame_piece(BBB, 0, None, tmp_path / "p.mp4")
+    _assert_chain_cut(info.value)
+
+
+def test_real_request_error_does_not_chain_the_original(ydl: type[CaptureYDL], tmp_path: Path) -> None:
+    ydl.fail = TransportError("connection reset by media.invalid")
+    with pytest.raises(YtError) as info:
+        YtDlpExtractor().fetch_frame_piece(BBB, 0, None, tmp_path / "p.mp4")
+    _assert_chain_cut(info.value)
+
+
+def test_real_yt_dlp_error_drops_the_url_from_the_detail_and_the_chain(ydl: type[CaptureYDL], tmp_path: Path) -> None:
+    ydl.info = DownloadError(
+        "ERROR: unable to download https://media.invalid/x?sig=SECRET: Sign in to confirm you're not a bot"
+    )
+    with pytest.raises(YtError) as info:
+        YtDlpExtractor().fetch_frame_piece(BBB, 0, None, tmp_path / "p.mp4")
+    assert info.value.code == "E_BOT_CHECK"  # classify ยังดูข้อความเต็ม
+    assert "<url>" in info.value.detail
+    assert "media.invalid" not in info.value.detail and "SECRET" not in info.value.detail
+    _assert_chain_cut(info.value)
+
+
+def test_real_unexpected_error_detail_is_the_class_name_only(ydl: type[CaptureYDL], tmp_path: Path) -> None:
+    ydl.info = RuntimeError("boom https://media.invalid/x?sig=SECRET")
+    with pytest.raises(YtError) as info:
+        YtDlpExtractor().fetch_frame_piece(BBB, 0, None, tmp_path / "p.mp4")
+    assert info.value.code == "E_UNKNOWN" and info.value.detail == "RuntimeError"
+    assert "media.invalid" not in info.value.detail and "SECRET" not in info.value.detail
+    _assert_chain_cut(info.value)

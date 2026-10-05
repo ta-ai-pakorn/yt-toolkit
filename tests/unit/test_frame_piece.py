@@ -299,3 +299,24 @@ def test_the_module_never_imports_yt_dlp() -> None:
     names = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
     names |= {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module}
     assert not any(name.split(".")[0] == "yt_dlp" for name in names)
+
+
+def test_write_piece_failure_hides_the_path_and_does_not_chain_the_oserror(tmp_path: Path) -> None:
+    blocker = tmp_path / "secret-work-dir"
+    blocker.write_bytes(b"")  # ชื่อโฟลเดอร์ปลายทางเป็นไฟล์ = mkdir ล้มและข้อความของ OSError มี path
+    with pytest.raises(YtError) as info:
+        write_piece(blocker / "piece.mp4", b"abc")
+    err = info.value
+    assert err.code == "E_UNKNOWN" and "secret-work-dir" not in err.detail
+    assert err.__cause__ is None and err.__suppress_context__ is True
+
+
+def test_write_piece_disk_full_does_not_chain_the_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def full(self: Path, data: bytes) -> int:
+        raise OSError(28, "No space left on device", str(self))
+
+    monkeypatch.setattr(Path, "write_bytes", full)
+    with pytest.raises(YtError) as info:
+        write_piece(tmp_path / "piece.mp4", b"abc")
+    assert info.value.code == "E_DISK_FULL"
+    assert info.value.__cause__ is None and info.value.__suppress_context__ is True
