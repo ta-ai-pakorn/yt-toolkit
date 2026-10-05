@@ -18,6 +18,7 @@ const SEARCH = "ค้นหาคำในทรานสคริปต์"
 const NO_SUBS = "คลิปนี้ไม่มีซับ"
 const PICK_HINT = "คลิปนี้ไม่มีซับจากเจ้าของคลิปหรือซับภาษาต้นฉบับ เลือกแทร็กที่ต้องการจากรายการ"
 // เมนูของภาพเฟรมที่ไม่ขึ้นกับซับ: 4 รายการของ M2 + "เปิดในยูทูปตรงเวลานี้" (owner round 4) + "เล่นจากตรงนี้" (M3.5)
+// + "ถ่ายภาพคมตรงนี้" (M5 รอบ B2) + "ตั้งเป็นจุดเริ่ม"/"ตั้งเป็นจุดจบ" (M5 รอบ A)
 const M2_MENU = [
   "คัดลอกภาพ",
   "โหลดภาพนี้",
@@ -25,6 +26,7 @@ const M2_MENU = [
   "คัดลอกลิงก์ช่วงนี้",
   "เปิดในยูทูปตรงเวลานี้",
   "เล่นจากตรงนี้",
+  "ถ่ายภาพคมตรงนี้",
   "ตั้งเป็นจุดเริ่ม",
   "ตั้งเป็นจุดจบ",
 ]
@@ -287,7 +289,7 @@ test.describe("M3 ภาพเฟรม → ทรานสคริปต์ (Q
     await page.keyboard.press("Shift+F10")
     await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(MENU_WITH_SUBS)
     await expect(page.getByRole("menuitem", { name: "คัดลอกภาพ" })).toBeFocused()
-    for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowDown")
+    for (let i = 0; i < MENU_WITH_SUBS.indexOf("ดูซับช่วงนี้"); i++) await page.keyboard.press("ArrowDown")
     await expect(page.getByRole("menuitem", { name: "ดูซับช่วงนี้" })).toBeFocused()
     await page.keyboard.press("Enter")
 
