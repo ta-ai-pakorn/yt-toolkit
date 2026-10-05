@@ -140,6 +140,13 @@ def _validate_last_used(value: Any) -> dict[str, Any]:
         raise _bad("lastUsed", "must be JSON serialisable") from error
 
 
+def _validate_bool(key: str, value: Any) -> bool:
+    # ชนิดต้องเป็น bool จริง: 1 / "true" ไม่นับ (แบบเดียวกับ _one_of)
+    if type(value) is not bool:
+        raise _bad(key, "must be true or false")
+    return value
+
+
 _VALIDATORS: dict[str, Any] = {
     "outputDir": _validate_output_dir,
     "videoDefault": lambda v: _one_of("videoDefault", v, VIDEO_DEFAULTS),
@@ -150,6 +157,7 @@ _VALIDATORS: dict[str, Any] = {
     "subCustom": _validate_sub_custom,
     "concurrency": lambda v: _one_of("concurrency", v, CONCURRENCY),
     "sponsorblockDefault": _validate_sponsorblock,
+    "autoSharpFrames": lambda v: _validate_bool("autoSharpFrames", v),
     "theme": lambda v: _one_of("theme", v, THEMES),
     "filenameStyle": lambda v: _one_of("filenameStyle", v, FILENAME_STYLES),
     "lastUsed": _validate_last_used,
@@ -170,6 +178,7 @@ class SettingsStore:
             "subCustom": options_to_dict(PRESETS["medium"]),
             "concurrency": 2,
             "sponsorblockDefault": ["sponsor", "selfpromo", "interaction"],
+            "autoSharpFrames": True,  # M5 รอบ B D6: ทำภาพคมอัตโนมัติหลังโหลดวิดีโอ
             "theme": "system",
             "filenameStyle": "title",
             "cookies": {"enabled": False, "source": None, "warningAccepted": False},

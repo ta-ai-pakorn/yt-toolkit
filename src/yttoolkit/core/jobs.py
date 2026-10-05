@@ -28,6 +28,9 @@ STAGES = (
 )  # fmt: skip
 # "splitting:<i>/<n>" = กำลังแยก chapter ที่ i จาก n (M5 รอบ A) หน้าเว็บแสดง "กำลังแยก chapter i/n"
 SPLIT_STAGE = re.compile(r"splitting:(\d{1,4})/(\d{1,4})")
+# M5 รอบ B: "extracting_frames:<i>/<n>" = กำลังดึงภาพคม (งาน frames_sharp) · "sharp_frames:<i>/<n>" = ภาพคมอัตโนมัติหลังโหลดวิดีโอ
+COUNT_STAGES = ("extracting_frames", "sharp_frames")
+COUNT_STAGE = re.compile(r"(extracting_frames|sharp_frames):(\d{1,4})/(\d{1,4})")
 TERMINAL = frozenset({"done", "failed", "cancelled", "interrupted"})
 # PRD 6.1 บวก running -> queued (Q1: เจอเช็กบอทครั้งแรก กลับไปหัวคิว)
 # ทุกคู่ที่ไปเป็น "queued" ทำได้ผ่าน JobStore.requeue() เท่านั้น (ล้างผลรอบก่อนและจัดตำแหน่งคิว)
@@ -46,7 +49,11 @@ NOTES = {
     "SPONSORBLOCK_EMPTY": "ไม่มีข้อมูลจากชุมชน ไม่ได้ตัดโฆษณา",
     "SPONSORBLOCK_UNREACHABLE": "ติดต่อ SponsorBlock ไม่ได้ ไม่ได้ตัดโฆษณา",
     "NO_CHAPTERS": "คลิปนี้ไม่มี chapter ได้ไฟล์เต็ม",
+    "SHARP_LOW_RES": "คลิปนี้มีภาพสูงสุด {h}p ภาพจึงเล็กกว่าปกติ",
+    "SHARP_INTERVAL_RAISED": "ปรับเป็นทุก {n} วินาทีเพื่อไม่ให้เกิน 200 ภาพ",
 }
+# โน้ตที่ข้อความมีค่าเติม (M5 รอบ B) เก็บเป็น "<รหัส>:<ตัวเลข>" เช่น "SHARP_LOW_RES:480" ค่า = ชื่อช่องในข้อความ
+NOTE_VALUES = {"SHARP_LOW_RES": "h", "SHARP_INTERVAL_RAISED": "n"}
 # ตัวเลือกขั้นสูงของงานโหลด (M5 รอบ A) ที่ API ตรวจและตัวทำงานใช้ร่วมกัน
 SPONSORBLOCK_CATEGORIES = (
     "sponsor", "selfpromo", "interaction", "intro", "outro", "preview", "filler", "music_offtopic",
@@ -62,8 +69,40 @@ def split_stage(index: int, total: int) -> str:
     return f"splitting:{index}/{total}"
 
 
+def count_stage(name: str, index: int, total: int) -> str:
+    """ขั้นที่นับทีละภาพของภาพคม: "extracting_frames:<i>/<n>" หรือ "sharp_frames:<i>/<n>" (1 <= i <= n <= 9999)"""
+    if name not in COUNT_STAGES or not 1 <= index <= total <= 9999:
+        raise ValueError(f"count stage out of range: {name}:{index}/{total}")
+    return f"{name}:{index}/{total}"
+
+
 def is_stage(value: str) -> bool:
-    return value in STAGES or SPLIT_STAGE.fullmatch(value) is not None
+    return (
+        value in STAGES
+        or SPLIT_STAGE.fullmatch(value) is not None
+        or COUNT_STAGE.fullmatch(value) is not None
+    )
+
+
+def valued_note(code: str, value: int) -> str:
+    """โน้ตที่มีค่าเติม: "<รหัส>:<ค่า>" (รหัสต้องอยู่ใน NOTE_VALUES ค่าเป็นจำนวนเต็มไม่ติดลบ)"""
+    if code not in NOTE_VALUES or isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"bad valued note: {code}:{value!r}")
+    return f"{code}:{value}"
+
+
+def note_api(raw: str) -> dict | None:
+    """โน้ตที่เก็บไว้ -> {"code", "message"} ของ API (เติมค่าให้โน้ตที่มีค่า) รหัสไม่รู้จักหรือรูปผิด = None (ไม่แสดง)"""
+    code, sep, value = raw.partition(":")
+    template = NOTES.get(code)
+    if template is None:
+        return None
+    field = NOTE_VALUES.get(code)
+    if field is None:
+        return None if sep else {"code": code, "message": template}
+    if not sep or not value.isdigit():
+        return None
+    return {"code": code, "message": template.format(**{field: int(value)})}
 
 
 # ชื่อช่องฝั่ง Python -> คอลัมน์ ที่ transition() เขียนได้
@@ -131,9 +170,10 @@ def uuid7() -> str:
 @dataclass(frozen=True)
 class OutputFile:
     root: str        # โฟลเดอร์ผลลัพธ์ (absolute) ตอนทำงาน ไม่ส่งให้เบราว์เซอร์
-    rel: str         # "<folder>/<file>" ใช้ "/" คั่น
+    rel: str         # "<folder>/<file>" ใช้ "/" คั่น (kind "folder" = ตัวโฟลเดอร์)
     size_bytes: int
-    kind: str        # "video" | "audio" | "subtitle" | "note" | "image" | "archive"
+    kind: str        # "video" | "audio" | "subtitle" | "note" | "image" | "archive" | "folder" (M5 รอบ B ภาพคม)
+    files: int | None = None  # kind "folder": จำนวนไฟล์ในโฟลเดอร์
 
 
 @dataclass(frozen=True)
@@ -217,15 +257,19 @@ class Job:
                 "message": self.error_message or MESSAGES.get(self.error_code, MESSAGES["E_UNKNOWN"]),
                 "detail": self.error_detail,
             }
-        notes = [{"code": code, "message": NOTES[code]} for code in self.notes if code in NOTES]
+        notes = [note for note in (note_api(raw) for raw in self.notes) if note is not None]
         if notes:
             data["notes"] = notes
         if self.outputs:
-            data["outputs"] = [
-                {"index": i, "name": PurePosixPath(out.rel).name, "sizeBytes": out.size_bytes}
-                for i, out in enumerate(self.outputs)
-            ]
+            data["outputs"] = [_output_api(i, out) for i, out in enumerate(self.outputs)]
         return data
+
+
+def _output_api(index: int, out: OutputFile) -> dict:
+    item: dict[str, Any] = {"index": index, "name": PurePosixPath(out.rel).name, "sizeBytes": out.size_bytes}
+    if out.files is not None:
+        item["files"] = out.files
+    return item
 
 
 Handler = Callable[[Job, JobContext], JobResult]
@@ -234,18 +278,25 @@ Handler = Callable[[Job, JobContext], JobResult]
 def _dump_outputs(outputs: Sequence[OutputFile] | None) -> str | None:
     if not outputs:
         return None
-    return json.dumps(
-        [{"root": o.root, "rel": o.rel, "sizeBytes": o.size_bytes, "kind": o.kind} for o in outputs],
-        ensure_ascii=False,
-    )
+    rows: list[dict[str, Any]] = []
+    for o in outputs:
+        row: dict[str, Any] = {"root": o.root, "rel": o.rel, "sizeBytes": o.size_bytes, "kind": o.kind}
+        if o.files is not None:
+            row["files"] = o.files
+        rows.append(row)
+    return json.dumps(rows, ensure_ascii=False)
 
 
 def _load_outputs(text: str | None) -> tuple[OutputFile, ...]:
     if not text:
         return ()
     return tuple(
-        OutputFile(str(o["root"]), str(o["rel"]), int(o["sizeBytes"]), str(o["kind"])) for o in json.loads(text)
-    )
+        OutputFile(
+            str(o["root"]), str(o["rel"]), int(o["sizeBytes"]), str(o["kind"]),
+            int(o["files"]) if o.get("files") is not None else None,
+        )
+        for o in json.loads(text)
+    )  # fmt: skip
 
 
 def _dump_notes(notes: Sequence[str] | None) -> str | None:
