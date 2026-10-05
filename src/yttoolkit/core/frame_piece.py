@@ -60,7 +60,8 @@ class MediaIndex:
 
 @dataclass(frozen=True)
 class PieceInfo:
-    """ไฟล์ชิ้นเล็ก (init + หนึ่งท่อน) ที่เขียนแล้ว · segment_start_ms = เวลาของคลิปที่ท่อนนี้เริ่ม"""
+    """ไฟล์ชิ้นเล็ก (init + หนึ่งท่อน) ที่เขียนแล้ว · segment_start_ms = เวลาของคลิปที่ท่อนนี้เริ่ม
+    segment_duration_ms = ความยาวของท่อน (None = ไม่รู้) ใช้ถอยมาท้ายท่อนเมื่อเวลาที่ขอเลยท่อนสุดท้าย"""
 
     path: Path
     segment_start_ms: int
@@ -68,6 +69,7 @@ class PieceInfo:
     height: int | None
     format_id: str
     dynamic_range: str | None  # None = SDR (แบบเดียวกับ MediaTools.extract_frame)
+    segment_duration_ms: int | None = None
 
 
 def _unsupported(why: str) -> YtError:
@@ -167,12 +169,16 @@ def read_index(read_range: ReadRange) -> MediaIndex:
 
 
 def segment_for(index: SidxIndex, t_ms: int) -> SidxRef | None:
-    """ท่อนที่มีเวลา t_ms: ก่อนท่อนแรก = ท่อนแรก · ตรงรอยต่อ = ท่อนหลัง · เลยท่อนสุดท้าย = None
-    เทียบในหน่วย timescale × 1000 จึงไม่มีเศษปัด"""
+    """ท่อนที่มีเวลา t_ms: ก่อนท่อนแรก = ท่อนแรก · ตรงรอยต่อ = ท่อนหลัง
+    เลยท่อนสุดท้ายไม่ถึงความยาวของท่อนนั้น = ท่อนสุดท้าย (ดูจนจบคลิปแล้วกดถ่าย: เวลาของตัวเล่นเลยภาพสุดท้ายได้เล็กน้อย)
+    เลยไปกว่านั้น = None · เทียบในหน่วย timescale × 1000 จึงไม่มีเศษปัด"""
     target = t_ms * index.timescale
     for ref in index.refs:
         if target < (ref.start + ref.duration) * 1000:
             return ref
+    last = index.refs[-1]
+    if target < (last.start + 2 * last.duration) * 1000:
+        return last
     return None
 
 
@@ -267,11 +273,13 @@ def pick_capture_format(info: Mapping[str, Any], max_short_side: int | None) -> 
 
 
 def piece_info(fmt: Mapping[str, Any], path: Path, index: SidxIndex, ref: SidxRef) -> PieceInfo:
+    start_ms = index.to_ms(ref.start)
     return PieceInfo(
         path=path,
-        segment_start_ms=index.to_ms(ref.start),
+        segment_start_ms=start_ms,
         width=_positive(fmt.get("width")),
         height=_positive(fmt.get("height")),
         format_id=str(fmt.get("format_id") or ""),
         dynamic_range=None if _is_sdr(fmt) else str(fmt.get("dynamic_range")),
+        segment_duration_ms=index.to_ms(ref.start + ref.duration) - start_ms,
     )

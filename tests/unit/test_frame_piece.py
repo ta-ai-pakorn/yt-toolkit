@@ -172,7 +172,15 @@ def test_segment_for_boundaries_before_and_past() -> None:
     assert segment_for(index, 1199) == index.refs[0]
     assert segment_for(index, 1200) == index.refs[1]  # ตรงรอยต่อ = ท่อนหลัง
     assert segment_for(index, 2199) == index.refs[1]
-    assert segment_for(index, 2200) is None
+
+
+def test_a_time_just_past_the_index_uses_the_last_segment() -> None:
+    # ดูจนจบคลิปแล้วกดถ่าย: เวลาเลยท่อนสุดท้ายไม่ถึงความยาวของท่อนนั้น (1 วินาที) = ท่อนสุดท้าย · เลยกว่านั้น = None
+    index = SidxIndex(1000, (SidxRef(0, 10, 200, 1000), SidxRef(10, 10, 1200, 1000)))
+    assert segment_for(index, 2200) == index.refs[1]
+    assert segment_for(index, 3199) == index.refs[1]
+    assert segment_for(index, 3200) is None
+    assert segment_for(index, 60_000) is None
 
 
 def test_segment_for_uses_exact_timescale_maths() -> None:
@@ -189,8 +197,10 @@ def test_fetch_piece_is_init_plus_one_segment() -> None:
     assert ref == index.sidx.refs[1]
     assert piece == index.init + b"\x02" * 1200
     assert reader.calls[-1] == (ref.offset, ref.offset + 1199)
+    tail, last = fetch_piece(reader, index, 14_000)  # เลยท้ายไม่ถึงหนึ่งท่อน (4 วินาที) = ท่อนสุดท้าย
+    assert last == index.sidx.refs[2] and tail == index.init + b"" * 800
     with pytest.raises(YtError) as past:
-        fetch_piece(reader, index, 14_000)
+        fetch_piece(reader, index, 18_000)
     assert past.value.code == "E_UNKNOWN"
     with pytest.raises(YtError) as short:
         fetch_piece(lambda first, last: data[first:last], index, 0)
@@ -289,7 +299,7 @@ def test_nothing_under_the_cap_takes_the_smallest_above() -> None:
 def test_piece_info_reads_the_format_facts(tmp_path: Path) -> None:
     index = SidxIndex(1000, (SidxRef(0, 1, 0, 5000), SidxRef(1, 1, 5000, 5000)))
     sdr = piece_info(_fmt("137", 1920, 1080), tmp_path / "p.mp4", index, index.refs[1])
-    assert sdr == PieceInfo(tmp_path / "p.mp4", 5000, 1920, 1080, "137", None)
+    assert sdr == PieceInfo(tmp_path / "p.mp4", 5000, 1920, 1080, "137", None, segment_duration_ms=5000)
     hdr = piece_info(_fmt("701", 3840, 2160, dynamic_range="HDR10"), tmp_path / "p.mp4", index, index.refs[0])
     assert hdr.dynamic_range == "HDR10" and hdr.segment_start_ms == 0
 

@@ -44,6 +44,10 @@ CAPTURE_INDEX = "index.json"
 OUTPUT_DIR = "ภาพที่ถ่าย"
 CAPTURE_ID = re.compile(r"c_(\d{1,9})")
 NO_FRAME_RETRY_MS = 100  # spec 4: เวลาเศษท้ายคลิปที่ไม่มีภาพ ลองถอยหลัง 100 ms อีกครั้งเดียว
+# ดูจนจบคลิปแล้วกดถ่าย: เวลาของตัวเล่นเท่ากับหรือเลยความยาวที่ปัดเป็นวินาทีได้ (durationS ปัดขึ้นหรือลง)
+# เวลาในช่วง [ความยาว - END_SLACK_MS, ความยาว + END_SLACK_MS) จึงถ่ายที่ ความยาว - END_STEP_MS แทนการปฏิเสธ
+END_SLACK_MS = 1000
+END_STEP_MS = 100
 MAX_SAME_SECOND = 99
 FFMPEG_DEADLINE_S = 60  # ffmpeg ของภาพหนึ่งภาพ (รวมรอบถอย 100 ms) นานกว่านี้ = ค้าง ยกเลิกแล้วปล่อยล็อก
 _OUTPUT_NAME = re.compile(r"frame_\d{2,}-\d{2}-\d{2}(?:_\d{1,2})?\.jpg")
@@ -146,8 +150,10 @@ def _exact_name(folder: Path, name: str) -> bool:
 
 def recorded_output(root_text: str, rel: str) -> Path | None:
     """ไฟล์ในโฟลเดอร์ผลลัพธ์ตามที่บันทึกไว้ ถ้ายังเป็นไฟล์เดิมจริง: อยู่ใต้ root ที่บันทึก ชื่อตรงเป๊ะ ไม่ผ่านลิงก์ใด ๆ
-    ไม่ผ่านเกณฑ์หรือไม่มีไฟล์แล้ว = None (ห้ามลบ/เปิดอย่างอื่น)"""
-    if not root_text or root_text.startswith(("\\\\", "//")) or "\x00" in rel or "\\" in rel or ":" in rel:
+    ไม่ผ่านเกณฑ์หรือไม่มีไฟล์แล้ว = None (ห้ามลบ/เปิดอย่างอื่น)
+    root เป็นโฟลเดอร์ในเครือข่าย (\\\\server\\share) ได้: ค่าตั้งรับไว้ และ root มาจากที่แอพบันทึกเอง ไม่ใช่จากผู้ใช้
+    การตรวจลิงก์และการอยู่ใต้ root ยังใช้เหมือนเดิมทุกข้อ"""
+    if not root_text or "\x00" in root_text or "\x00" in rel or "\\" in rel or ":" in rel:
         return None
     root = Path(root_text)
     parts = PurePosixPath(rel).parts
@@ -258,8 +264,10 @@ class CaptureService:
             raise CaptureRejected("live clip")
         if duration_ms <= 0:
             raise CaptureRejected("duration unknown")
-        if not 0 <= t_ms < duration_ms:
+        if not 0 <= t_ms < duration_ms + END_SLACK_MS:
             raise CaptureRejected(f"tMs {t_ms} outside 0..{duration_ms}")
+        if t_ms >= duration_ms - END_SLACK_MS:
+            t_ms = min(t_ms, max(0, duration_ms - END_STEP_MS))  # ท้ายคลิป: ถ่ายภาพก่อนจบ 100 ms
         existing = self._existing(video_id, t_ms)
         if existing is not None:
             return existing, False
@@ -302,7 +310,8 @@ class CaptureService:
             shutil.rmtree(tmp, ignore_errors=True)
 
     def _extract_frame(self, piece: PieceInfo, frame: Path, offset: int) -> None:
-        """ภาพที่ offset ของชิ้น (ไม่มีภาพ = ถอย 100 ms อีกครั้ง) ffmpeg ทั้งสองครั้งรวมกันไม่เกิน FFMPEG_DEADLINE_S
+        """ภาพที่ offset ของชิ้น (ไม่มีภาพ = ถอย 100 ms อีกครั้ง) · offset เลยท้ายท่อน (เวลาเลยท่อนสุดท้ายของคลิป)
+        แล้วยังไม่มีภาพ = ลองอีกครั้งที่ 100 ms ก่อนท้ายท่อน · ffmpeg ทุกครั้งรวมกันไม่เกิน FFMPEG_DEADLINE_S
         (ค้าง = ล็อกการถ่ายของทั้งแอพค้างตาม) · detail ไม่มีข้อความ stderr ของ ffmpeg (มี path ไฟล์งาน)"""
         deadline = time.monotonic() + FFMPEG_DEADLINE_S
 
@@ -313,8 +322,16 @@ class CaptureService:
             return self._media.extract_frame(piece.path, frame, at_ms, long_side=None,
                                              dynamic_range=piece.dynamic_range, cancel=expired)  # fmt: skip
 
+        attempts = [offset]
+        if offset > 0:
+            attempts.append(max(0, offset - NO_FRAME_RETRY_MS))
+        length = piece.segment_duration_ms
+        if length is not None and offset >= length:
+            tail = max(0, length - NO_FRAME_RETRY_MS)
+            if tail not in attempts:
+                attempts.append(tail)
         try:
-            if extract(offset) or (offset > 0 and extract(max(0, offset - NO_FRAME_RETRY_MS))):
+            if any(extract(at_ms) for at_ms in attempts):
                 return
         except JobCancelled:
             raise YtError("E_UNKNOWN", "ffmpeg timeout") from None
@@ -324,10 +341,27 @@ class CaptureService:
             raise
         raise YtError("E_UNKNOWN", "no frame at this time")
 
+    def _drop_stale_output(self, video_id: str, capture_id: str) -> None:
+        """แถวเดิมของเวลานี้ที่ไฟล์ใน cache หายไปแล้ว (ถึงตรงนี้ได้เพราะ _existing ไม่นับแถวนั้น): ลบสำเนาในโฟลเดอร์ของแถวเดิม
+        ก่อนถ่ายใหม่ ไม่อย่างนั้นแถวใหม่แทนที่แถวเดิมแล้วไฟล์เดิมไม่มีแถวไหนชี้ แอพลบไม่ได้อีกเลย
+        ลบเฉพาะไฟล์ที่ยังเป็นไฟล์เดิมจริง (recorded_output) ไม่มีแล้วหรือลบไม่ได้ = ถ่ายต่อตามปกติ"""
+        with self._clip_lock(video_id):
+            stale = [e for e in self._read_entries(video_id)
+                     if e["id"] == capture_id and not (self._folder(video_id) / e["file"]).is_file()]  # fmt: skip
+        for entry in stale:
+            target = recorded_output(entry["outputRoot"], entry["outputRel"])
+            if target is None:
+                continue
+            try:
+                target.unlink(missing_ok=True)
+            except OSError as err:
+                log.warning("ลบสำเนาเดิมของภาพที่ถ่ายของ %s ไม่ได้ (%s)", video_id, type(err).__name__)
+
     def _store(self, video_id: str, title: str, t_ms: int, frame: Path, width: int, height: int) -> Capture:
         capture = Capture(f"c_{t_ms}", t_ms, width, height, f"c_{t_ms}.jpg")
         folder = self._folder(video_id)
         cached = folder / capture.file
+        self._drop_stale_output(video_id, capture.id)
         try:
             folder.mkdir(parents=True, exist_ok=True)
             part = folder / f".{capture.file}.{uuid.uuid4().hex}.part"
