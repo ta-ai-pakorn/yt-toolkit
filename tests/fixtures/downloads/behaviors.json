@@ -12,6 +12,8 @@
     "ADSCUTCLIP1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปมีช่วงโฆษณา"},
     "ADSNODATA01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปไม่มีข้อมูลโฆษณา"},
     "ADSOFFLINE1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปที่ติดต่อ SponsorBlock ไม่ได้"},
-    "CHAPTERS001": {"probeAs": "jNQXAC9IVRw", "title": "คลิปมี 3 chapter"}
+    "CHAPTERS001": {"probeAs": "jNQXAC9IVRw", "title": "คลิปมี 3 chapter"},
+    "SHARPCLIP01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปภาพคม"},
+    "AUTOSHARP01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปภาพคมอัตโนมัติ", "media": {"width": 1280, "height": 720, "dynamic_range": "SDR"}}
   }
 }

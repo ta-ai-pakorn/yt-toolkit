@@ -11,11 +11,17 @@ from yttoolkit.core.download import (
     FFMPEG_KINDS,
     YOUTUBE_KINDS,
     DownloadChoice,
+    MediaFacts,
+    SharpPick,
     audio_choice,
+    media_facts,
     pick_audio,
+    pick_sharp_format,
+    sharp_choice,
     video_choice,
 )
 from yttoolkit.core.extractor import FakeExtractor
+from yttoolkit.core.yterrors import YtError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 DUB = "8lpOfyoxcvU"
@@ -343,5 +349,81 @@ def test_audio_without_tracks_uses_generic_spec(fake: FakeExtractor) -> None:
 
 def test_kind_sets() -> None:
     assert YOUTUBE_KINDS == {"video", "audio", "subtitle", "note", "frames_sharp"}
-    assert FFMPEG_KINDS == {"video", "audio"}
+    assert FFMPEG_KINDS == {"video", "audio", "frames_sharp"}
     assert isinstance(YOUTUBE_KINDS, frozenset) and isinstance(FFMPEG_KINDS, frozenset)
+
+
+# ---------- ภาพคม (M5 รอบ B spec 3.3) ----------
+
+
+def _v(fid: str, w: int, h: int, vcodec: str = "avc1.4d401f", *, acodec: str = "none", size: int | None = None,
+       dr: str | None = None) -> dict:
+    fmt = {"format_id": fid, "width": w, "height": h, "vcodec": vcodec, "acodec": acodec}
+    if size is not None:
+        fmt["filesize"] = size
+    if dr is not None:
+        fmt["dynamic_range"] = dr
+    return fmt
+
+
+def _pick(*formats: dict) -> SharpPick | None:
+    return pick_sharp_format({"formats": list(formats), "duration": 60})
+
+
+def test_sharp_pick_on_the_bbb_fixture(fake: FakeExtractor) -> None:
+    pick = pick_sharp_format(fake.probe(BBB))
+    assert pick == SharpPick("298", 1280, 720, "SDR", False, 150_524_867)
+    assert pick.short_side == 720 and pick.hdr is False
+
+
+def test_sharp_prefers_sdr_over_a_larger_hdr_format() -> None:
+    pick = _pick(_v("hdr", 1280, 720, "vp09.02.40.10", dr="HDR10"), _v("sdr", 854, 480))
+    assert pick is not None and pick.format_id == "sdr"
+
+
+def test_sharp_takes_the_largest_short_side_up_to_720() -> None:
+    assert _pick(_v("1080", 1920, 1080), _v("720", 1280, 720), _v("480", 854, 480)).format_id == "720"
+    portrait = _pick(_v("p1080", 1080, 1920), _v("p720", 720, 1280), _v("p480", 480, 854))
+    assert portrait.format_id == "p720" and portrait.short_side == 720
+
+
+def test_sharp_codec_order_then_smallest_size() -> None:
+    assert _pick(_v("av1", 1280, 720, "av01.0.08M.08", size=10), _v("vp9", 1280, 720, "vp9", size=20),
+                 _v("h264", 1280, 720, size=30)).format_id == "h264"  # fmt: skip
+    assert _pick(_v("av1", 1280, 720, "av01.0.08M.08"), _v("vp9", 1280, 720, "vp09.00.40.08")).format_id == "vp9"
+    assert _pick(_v("a", 1280, 720, size=30), _v("b", 1280, 720, size=20), _v("c", 1280, 720)).format_id == "b"
+
+
+def test_sharp_video_only_before_muxed_and_muxed_fallback() -> None:
+    assert _pick(_v("muxed720", 1280, 720, acodec="mp4a.40.2"), _v("vo480", 854, 480)).format_id == "vo480"
+    muxed = _pick(_v("18", 640, 360, acodec="mp4a.40.2"))
+    assert muxed is not None and muxed.muxed is True and muxed.short_side == 360
+
+
+def test_sharp_hdr_only_and_nothing_up_to_720() -> None:
+    hdr = _pick(_v("hlg", 1280, 720, "vp09.02.40.10", dr="HLG"))
+    assert hdr.hdr is True and hdr.dynamic_range == "HLG"
+    assert _pick(_v("1440", 2560, 1440, "vp9"), _v("1080", 1920, 1080)).format_id == "1080"
+
+
+def test_sharp_no_video_format() -> None:
+    assert _pick({"format_id": "140", "vcodec": "none", "acodec": "mp4a.40.2"}) is None
+    with pytest.raises(YtError) as err:
+        sharp_choice({"formats": [], "duration": 60})
+    assert err.value.code == "E_UNKNOWN"
+
+
+def test_sharp_choice_is_a_video_only_download(fake: FakeExtractor) -> None:
+    choice, pick = sharp_choice(fake.probe(BBB))
+    assert choice.format_spec == "298" and choice.merge_mp4 is True
+    assert choice.audio_language is None and choice.notes == () and choice.expected_bytes == 150_524_867
+    assert pick.format_id == "298"
+
+
+def test_media_facts() -> None:
+    assert media_facts({"width": 1280, "height": 720, "dynamic_range": "SDR"}) == MediaFacts(1280, 720, "SDR")
+    facts = media_facts({"width": 1080.0, "height": 1920, "dynamic_range": "HDR10"})
+    assert facts.short_side == 1080 and facts.hdr is True
+    unknown = media_facts({"filepath": "x"})
+    assert unknown == MediaFacts(None, None, None) and unknown.short_side is None and unknown.hdr is None
+    assert media_facts({"height": 720}).short_side == 720
