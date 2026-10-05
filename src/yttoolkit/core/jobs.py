@@ -100,7 +100,7 @@ def note_api(raw: str) -> dict | None:
     field = NOTE_VALUES.get(code)
     if field is None:
         return None if sep else {"code": code, "message": template}
-    if not sep or not value.isdigit():
+    if not sep or not (value.isascii() and value.isdecimal()):
         return None
     return {"code": code, "message": template.format(**{field: int(value)})}
 

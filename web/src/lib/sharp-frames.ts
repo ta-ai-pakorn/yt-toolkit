@@ -123,7 +123,7 @@ export function sharpDialogModel(input: {
   const sameAvailable = fast !== null && fast.timesMs.length > 0
   const mode: SharpMode = sameAvailable ? input.mode : "custom"
   const sameCount = sameAvailable ? fast.timesMs.length : null
-  const sameInterval = sameAvailable ? (fast.intervalMs / 1000).toFixed(1) : null
+  const sameInterval = sameAvailable ? (Math.round(fast.intervalMs / 100) / 10).toFixed(1) : null
   const typed = parseIntervalText(customText)
   const usable = Number.isInteger(durationS) && durationS > 0
   const customCount = typed !== null && usable ? countFor(typed, durationS) : null

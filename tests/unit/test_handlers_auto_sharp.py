@@ -114,6 +114,7 @@ def test_auto_sharp_after_a_full_720p_video(env):
         ("unknown file", {}),
         ("hdr file", {}),
         ("below 720", {}),
+        ("above 1080", {}),
         ("no ffmpeg", {}),
     ],
 )
@@ -127,12 +128,25 @@ def test_auto_sharp_is_skipped(env, case, params):
         env.downloader.media = MediaFacts(3840, 2160, "HDR10")
     elif case == "below 720":
         env.downloader.media = MediaFacts(854, 480, "SDR")
+    elif case == "above 1080":
+        env.downloader.media = MediaFacts(2560, 1440, "SDR")
     elif case == "no ffmpeg":
         deps = replace(deps, media=NoFfmpeg(MEDIA))
     result, ctx = env.run("video", BBB, {**VIDEO, **params}, deps=deps)
     assert result.outputs[0].kind == "video" and _video_file(result).is_file()
     assert read_sharp(env.cache, BBB) is None
     assert not any(stage.startswith("sharp_frames:") for stage in ctx.stages)
+
+
+def test_a_1080p_file_still_runs_and_the_1440p_skip_is_logged(env, caplog):
+    env.downloader.media = MediaFacts(1920, 1080, "SDR")
+    env.run("video", BBB, dict(VIDEO))
+    assert read_sharp(env.cache, BBB)["origin"] == "auto"
+    env.downloader.media = MediaFacts(2560, 1440, "SDR")
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        env.run("video", ZOO, dict(VIDEO))
+    assert read_sharp(env.cache, ZOO) is None
+    assert any("ไม่ทำภาพคมอัตโนมัติ (above 1080)" in r.getMessage() for r in caplog.records)
 
 
 def test_a_portrait_720_file_runs(env):

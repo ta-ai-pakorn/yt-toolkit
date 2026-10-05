@@ -384,7 +384,8 @@ def test_valued_notes_fill_their_message():
     assert note_api("SHARP_INTERVAL_RAISED:4") == {
         "code": "SHARP_INTERVAL_RAISED", "message": "ปรับเป็นทุก 4 วินาทีเพื่อไม่ให้เกิน 200 ภาพ"}
     assert note_api("NO_SUBTITLES") == {"code": "NO_SUBTITLES", "message": "คลิปนี้ไม่มีซับ"}
-    for bad in ("SHARP_LOW_RES", "SHARP_LOW_RES:x", "SHARP_LOW_RES:-1", "NO_SUBTITLES:3", "NOPE", "NOPE:1"):
+    bad_values = ("SHARP_LOW_RES", "SHARP_LOW_RES:x", "SHARP_LOW_RES:-1", "SHARP_LOW_RES:²", "SHARP_LOW_RES:٣")
+    for bad in (*bad_values, "NO_SUBTITLES:3", "NOPE", "NOPE:1"):
         assert note_api(bad) is None
     for args in (("NO_SUBTITLES", 1), ("SHARP_LOW_RES", -1)):
         with pytest.raises(ValueError):

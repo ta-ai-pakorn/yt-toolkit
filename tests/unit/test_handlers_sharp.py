@@ -131,9 +131,27 @@ def test_zero_frames_logs_the_cause_without_paths(env, caplog):  # controller ru
     env.media.frame_limit_ms = 0
     with caplog.at_level(logging.INFO, logger="yttoolkit"), pytest.raises(YtError):
         env.run("frames_sharp", BBB, {"intervalS": 60})
-    (line,) = [r.getMessage() for r in caplog.records if "0/11" in r.getMessage()]
+    (line,) = [r.getMessage() for r in caplog.records if "(0/11" in r.getMessage()]
     assert JOB_ID in line and BBB in line and "format 298" in line
     assert str(env.tmp) not in line and BBB_TITLE not in line
+
+
+def test_a_mid_clip_drop_is_logged_once_without_paths(env, caplog):
+    env.media.frame_limit_ms = 300_000  # คลิป 634 วินาที: ภาพที่ 300..600 วินาทีหายทั้ง 6 ภาพ (ยังห่างท้ายคลิป)
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        result, _ = env.run("frames_sharp", BBB, {"intervalS": 60})
+    assert result.outputs[0].files == 5
+    (line,) = [r.getMessage() for r in caplog.records if "ภาพหายกลางคลิป" in r.getMessage()]
+    assert JOB_ID in line and "6/11" in line
+    assert str(env.tmp) not in line and BBB_TITLE not in line and BBB not in line
+
+
+def test_a_tail_only_drop_is_not_logged(env, caplog):
+    env.media.frame_limit_ms = 18_000  # คลิป 19 วินาที: หายแค่ภาพที่ 18 วินาที (วินาทีสุดท้าย) = ท้ายคลิปตามปกติ
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        result, _ = env.run("frames_sharp", ZOO, {"intervalS": 1})
+    assert result.outputs[0].files == 18
+    assert not any("ภาพหายกลางคลิป" in r.getMessage() for r in caplog.records)
 
 
 def test_cancel_during_extraction_keeps_the_previous_set(env):

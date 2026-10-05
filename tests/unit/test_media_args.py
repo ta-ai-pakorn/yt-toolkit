@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -240,6 +241,13 @@ def test_run_ffmpeg_disk_full_maps_to_e_disk_full() -> None:
     with pytest.raises(YtError) as info:
         run_ffmpeg(args, duration_s=None, cancel=_never, on_progress=_ignore)
     assert info.value.code == "E_DISK_FULL"
+
+
+def test_run_ffmpeg_returns_as_soon_as_the_process_exits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(media_module, "_POLL_SECONDS", 5.0)  # ถ้ายังหลับเต็มรอบ จะช้ากว่า 5 วินาที
+    started = time.monotonic()
+    run_ffmpeg(_stub("pass"), duration_s=None, cancel=_never, on_progress=_ignore)
+    assert time.monotonic() - started < 3
 
 
 def test_run_ffmpeg_other_failure_maps_to_e_unknown() -> None:

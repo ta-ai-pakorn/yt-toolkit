@@ -31,6 +31,7 @@ from PIL import Image
 from . import files
 from .advanced import ADS_SUFFIX, ChapterPart, Interval, chapter_parts, keep_intervals, kept_ms, range_suffix
 from .download import (
+    AUTO_SHARP_MAX_SHORT_SIDE,
     SHARP_MAX_SHORT_SIDE,
     DownloadChoice,
     Downloader,
@@ -82,6 +83,7 @@ NOTE_SUFFIX = ".note"  # โน้ต = "<ชื่อ>.note.md" (ชื่อ�
 COVER_JPEG_QUALITY = 90
 SHARP_SIZE_FACTOR = 1.1  # spec 3.5: ที่ว่างสำหรับวิดีโอชั่วคราว = ขนาด × 1.1
 SHARP_FRAME_BYTES = 400_000  # spec 3.5: เผื่อภาพคมภาพละ 400 KB
+_TAIL_FRAME_MS = 1000  # ภาพที่เวลาอยู่ในวินาทีสุดท้ายของคลิปอาจไม่ได้ภาพตามปกติ (ไม่นับเป็นภาพหายผิดปกติ)
 # ยูทูปมีปัญหาชั่วคราว: ให้คิวลองใหม่ / พักคิว แทนการได้วิดีโอที่ไม่มีซับ
 _EMBED_RETRY_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK"})
 
@@ -610,13 +612,16 @@ def _extract_frames(
     *,
     stage: str,
     dynamic_range: str | None,
+    duration_s: int,
 ) -> list[tuple[int, Path]]:
     """ภาพคมทีละเวลาลง workdir/frames (ffmpeg ครั้งละภาพ) ขั้น "<stage>:i/n" ความคืบหน้า (i-1)/n
-    เวลาที่ไม่ได้ภาพ (วินาทีท้ายคลิป) ถูกข้าม · เช็กการยกเลิกก่อนทุกภาพ"""
+    เวลาที่ไม่ได้ภาพ (วินาทีท้ายคลิป) ถูกข้าม · เช็กการยกเลิกก่อนทุกภาพ
+    ภาพที่หายก่อนวินาทีสุดท้ายของคลิป (ผิดปกติ ไม่ใช่แค่ท้ายคลิป) บันทึก log หนึ่งบรรทัด (job id + หาย/ทั้งหมด)"""
     folder = Path(ctx.workdir) / "frames"
     folder.mkdir(parents=True, exist_ok=True)
     made: list[tuple[int, Path]] = []
     total = len(times)
+    mid_drops = 0
     for i, t_ms in enumerate(times, start=1):
         ctx.check_cancelled()
         report.stage(count_stage(stage, i, total))
@@ -625,6 +630,10 @@ def _extract_frames(
         if deps.media.extract_frame(src, dst, t_ms, long_side=SHARP_LONG_SIDE, dynamic_range=dynamic_range,
                                     cancel=ctx.cancelled):  # fmt: skip
             made.append((t_ms, dst))
+        elif t_ms < duration_s * 1000 - _TAIL_FRAME_MS:
+            mid_drops += 1
+    if mid_drops:
+        log.warning("งาน %s ภาพหายกลางคลิป %s/%s ภาพ", ctx.job_id, mid_drops, total)
     ctx.check_cancelled()
     return made
 
@@ -981,7 +990,8 @@ def _frames_sharp(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     if 0 < pick.short_side < SHARP_MAX_SHORT_SIDE:
         notes.append(valued_note("SHARP_LOW_RES", pick.short_side))
     made = _extract_frames(deps, ctx, report, result.path, plan.times_ms, stage="extracting_frames",
-                           dynamic_range=pick.dynamic_range if pick.hdr else None)  # fmt: skip
+                           dynamic_range=pick.dynamic_range if pick.hdr else None,
+                           duration_s=duration_s)  # fmt: skip
     video_bytes = result.path.stat().st_size if result.path.is_file() else None
     result.path.unlink(missing_ok=True)  # AC-FRAME-03: ลบวิดีโอชั่วคราวทันทีที่ดึงภาพครบ
     if not made:
@@ -1003,7 +1013,7 @@ def _frames_sharp(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
 
 def _auto_sharp_skip(deps: HandlerDeps, params: Mapping[str, Any], media: MediaFacts | None) -> str | None:
     """เหตุผลที่ไม่ทำภาพคมอัตโนมัติ (D6) None = ทำ: ต้องเปิดค่าตั้ง เป็นไฟล์ทั้งคลิป (เส้นเวลาตรงกับคลิป)
-    ไฟล์ด้านสั้น ≥ 720 ไม่ใช่ HDR (ไม่ tone-map เอง D8) และมี ffmpeg · ไม่รู้ขนาด/ช่วงสีของไฟล์ = ไม่ทำ"""
+    ไฟล์ด้านสั้น 720..1080 ไม่ใช่ HDR (ไม่ tone-map เอง D8) และมี ffmpeg · ไม่รู้ขนาด/ช่วงสีของไฟล์ = ไม่ทำ"""
     if not deps.auto_sharp():
         return "setting off"
     if params.get("range") is not None or params.get("sponsorblock") or params.get("splitChapters"):
@@ -1012,6 +1022,8 @@ def _auto_sharp_skip(deps: HandlerDeps, params: Mapping[str, Any], media: MediaF
         return "file facts unknown"
     if media.short_side < SHARP_MAX_SHORT_SIDE:
         return "below 720"
+    if media.short_side > AUTO_SHARP_MAX_SHORT_SIDE:
+        return "above 1080"
     if media.hdr:
         return "hdr"
     if not deps.media.available():
@@ -1041,10 +1053,12 @@ def _auto_sharp(
         if existing is not None and existing["origin"] == "manual":
             raise ManualSetKept(clip.video_id)
         fast = fast_times(deps.videos.raw(clip.video_id))
-        plan = plan_sharp(_clip_duration_s(clip), interval_s=None, fast_times=fast)
+        duration_s = _clip_duration_s(clip)
+        plan = plan_sharp(duration_s, interval_s=None, fast_times=fast)
         (out,) = finished.outputs
         video_file = Path(out.root) / out.rel
-        made = _extract_frames(deps, ctx, report, video_file, plan.times_ms, stage="sharp_frames", dynamic_range=None)
+        made = _extract_frames(deps, ctx, report, video_file, plan.times_ms, stage="sharp_frames", dynamic_range=None,
+                               duration_s=duration_s)  # fmt: skip
         if not made:
             raise YtError("E_UNKNOWN", "no frames extracted")
         _cache_sharp_set(deps, job.id, clip.video_id, made, origin="auto", interval_s=plan.interval_s,
