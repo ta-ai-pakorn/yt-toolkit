@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { Captions, ChevronFirst, ChevronLast, Copy, Download, ExternalLink, Flame, ImageIcon, ImageOff, Link2, Play } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react"
 import { toast } from "sonner"
 
 import { AspectRatio } from "@/components/ui/aspect-ratio"
@@ -19,7 +19,8 @@ import { copyImage } from "@/lib/clipboard"
 import { downloadFile } from "@/lib/download"
 import { formatTimecode, youtubeLinkAt, youtubeWatchUrl } from "@/lib/format"
 import { useEnqueue } from "@/lib/jobs"
-import type { FrameSource, ReplaySegment, StoryboardFrame } from "@/lib/types"
+import type { SharpFast } from "@/lib/sharp-frames"
+import type { FrameSource, ReplaySegment, StoryboardFrame, VideoInfo } from "@/lib/types"
 
 import { errorMessage } from "./errors"
 import { nearestFrameIndex, revealAndFocus } from "./frame-target"
@@ -31,6 +32,7 @@ import { nowPlayingFrame } from "./playback-sync"
 import { playerActions, usePlayerValue } from "./player/player-store"
 import { markRange } from "./player/range-mark-buttons"
 import { ReplayedMark } from "./replayed-mark"
+import { SharpRequestButton } from "./sharp-dialog"
 import { sharpQuery, storyboardQuery } from "./queries"
 import { subtitlesQuery } from "./subs-queries"
 import { trackInEffect } from "./track-label"
@@ -427,7 +429,7 @@ function FrameSkeleton() {
   )
 }
 
-function NoStoryboard() {
+function NoStoryboard({ children }: { children: ReactNode }) {
   return (
     <Empty className="border">
       <EmptyHeader>
@@ -436,12 +438,8 @@ function NoStoryboard() {
         </EmptyMedia>
         <EmptyDescription>{t.noStoryboard}</EmptyDescription>
       </EmptyHeader>
-      <EmptyContent>
-        {/* ปุ่มที่กดได้จริงมาใน M5 รอบ B ชิ้นถัดไป (T15) จนกว่าจะถึงตอนนั้นยังปิดอยู่ */}
-        <Button variant="outline" disabled focusableWhenDisabled>
-          {t.requestSharp}
-        </Button>
-      </EmptyContent>
+      {/* M5 รอบ B: ปุ่ม "ขอภาพคม" ใช้ได้จริง (spec 1.1) */}
+      <EmptyContent>{children}</EmptyContent>
     </Empty>
   )
 }
@@ -540,10 +538,12 @@ type FramesSectionProps = {
   enabled: boolean
   /** ช่วงที่คนดูซ้ำมากที่สุดจากข้อมูลคลิป · ไม่มี = ไม่มีป้ายบนภาพ (ปุ่มเวลาของช่วงอยู่ในแท็บข้อมูลคลิป) */
   mostReplayed?: ReplaySegment[]
+  /** ข้อมูลคลิป (ยังไม่มา = ปุ่มขอภาพคมปิด) */
+  video?: VideoInfo
 }
 
 /** ส่วน "ภาพเฟรม" ของ W2 · เริ่มโหลด storyboard เมื่อ `enabled` (หลังข้อมูลคลิปมาแล้ว) */
-export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionProps) {
+export function FramesSection({ videoId, enabled, mostReplayed, video }: FramesSectionProps) {
   const storyboard = useQuery(storyboardQuery(videoId, enabled))
   const sharp = useQuery(sharpQuery(videoId, enabled))
   // รายการแทร็กซับ (cache เดียวกับป้ายแทร็กที่หัวคลิป) ใช้ตัดสินว่าเมนูภาพเฟรมมี "ดูซับช่วงนี้" ไหม
@@ -559,6 +559,11 @@ export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionP
   const [chosen, setChosen] = useState<{ videoId: string; source: FrameSource } | null>(null)
   const hasFast = storyboard.isSuccess && fastFrames.length > 0
   const hasSharp = sharpFrames.length > 0
+  // เวลาของภาพเร็วสำหรับ dialog "ขอภาพคม" (ตัวเลือก "เวลาเดียวกับภาพเร็ว") ไม่มี storyboard = null
+  const fast = useMemo<SharpFast | null>(
+    () => (hasFast && storyboard.data ? { intervalMs: storyboard.data.intervalMs, timesMs: fastFrames.map((f) => f.tMs) } : null),
+    [hasFast, storyboard.data, fastFrames]
+  )
   const shown = frameSetShown({ hasFast, hasSharp, chosen: chosen?.videoId === videoId ? chosen.source : null })
   const frames = shown === "sharp" ? sharpFrames : fastFrames
   // ภาพที่มีป้าย "ดูซ้ำบ่อย" (รวมภาพแทนของช่วงสั้นที่ไม่มีภาพอยู่ข้างใน) คิดครั้งเดียวต่อชุดภาพที่เห็น
@@ -586,7 +591,13 @@ export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionP
   let body
   if (gridShown) body = grid
   else if (sharp.isPending) body = <FrameSkeleton />
-  else if (noStoryboard) body = <NoStoryboard />
+  else if (noStoryboard) {
+    body = (
+      <NoStoryboard>
+        <SharpRequestButton videoId={videoId} video={video} fast={null} hasSharp={false} variant="outline" />
+      </NoStoryboard>
+    )
+  }
   else if (storyboard.isError) {
     body = <LoadError title={t.loadError} error={storyboard.error} onRetry={() => void storyboard.refetch()} />
   } else body = <FrameSkeleton />
@@ -620,6 +631,8 @@ export function FramesSection({ videoId, enabled, mostReplayed }: FramesSectionP
                   />
                 )}
                 <BulkDownloads videoId={videoId} source={shown} />
+                {/* ถัดจากกลุ่มปุ่มโหลด (ไม่อยู่ใน ButtonGroup เดียวกัน): หน้าต่างแคบตัดขึ้นบรรทัดใหม่ได้ ไม่ล้นแนวนอน */}
+                <SharpRequestButton videoId={videoId} video={video} fast={fast} hasSharp={hasSharp} />
               </div>
             </CardAction>
           )}
