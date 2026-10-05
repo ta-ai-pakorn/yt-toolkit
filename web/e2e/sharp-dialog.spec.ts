@@ -222,10 +222,51 @@ test("มีงานภาพคมของคลิปนี้ในคิ�
   await expect(busy).toBeDisabled()
 })
 
+test("งานภาพคมขึ้นคิวขณะ dialog เปิด: dialog ปิดเอง และไม่เด้งกลับมาเองเมื่องานจบ", async ({ page }) => {
+  const sharpJob: Job = {
+    id: "01900000-0000-7000-8000-0000000000e3",
+    videoId: BBB,
+    title: BBB_TITLE,
+    kind: "frames_sharp",
+    params: {},
+    status: "queued",
+    position: 1,
+    createdAt: "2026-10-05T03:00:00Z",
+  }
+  // รายการงานที่ backend ปลอมตอบ (แก้ได้กลางเทส) · ไม่มีงานจริงเลย
+  let jobs: Job[] = []
+  await page.route("**/api/jobs", (route) =>
+    route.request().method() === "GET" ? route.fulfill({ json: { jobs } }) : route.fallback()
+  )
+  // SSE ปลอมที่จบทันทีและให้ต่อใหม่ทุก 300 ms: ทุกครั้งที่ต่อติดหน้าเว็บโหลดรายการงานใหม่ (events.ts onOpen)
+  // นี่คือทางที่แอพใช้จริงเมื่อ SSE หลุดแล้วต่อใหม่ จึงใช้ขับให้รายการงานเปลี่ยนโดยไม่ต้องมีงานจริง
+  await page.route("**/api/events", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" },
+      body: "retry: 300\n\n",
+    })
+  )
+  await openDialog(page)
+  jobs = [sharpJob]
+  await expect(dialog(page)).toBeHidden()
+  const busy = page.getByRole("button", { name: "กำลังดึงภาพคม…" })
+  await expect(busy).toBeDisabled()
+  jobs = []
+  const idle = page.getByRole("button", { name: "ขอภาพคม", exact: true })
+  await expect(idle).toBeEnabled()
+  // รอให้การโหลดใหม่รอบถัดไปผ่านไปแล้วหลายรอบ: dialog ต้องยังปิดอยู่ (ไม่เด้งขึ้นมาเองตอนงานจบ)
+  await page.waitForTimeout(1000)
+  await expect(dialog(page)).toBeHidden()
+  await expect(idle).toBeEnabled()
+})
+
 for (const scheme of ["dark", "light"] as const) {
   test(`axe: dialog ขอภาพคมไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme })
     await openDialog(page)
+    // ยืนยันว่าธีมถูกใช้จริงก่อนตรวจสี (ไม่งั้น axe อาจตรวจธีมผิดแล้วผ่านเฉย ๆ)
+    await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
     await customField(page).fill("2")
     await expect(dialog(page).getByRole("status")).toContainText("เกินที่ดึงได้ 200 ภาพ")
     expect(await seriousViolations(page)).toEqual([])
