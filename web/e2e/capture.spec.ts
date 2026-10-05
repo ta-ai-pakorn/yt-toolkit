@@ -71,6 +71,19 @@ const header = (page: Page) => page.locator('[data-slot="video-header"]')
 /** การสลับเลย์เอาต์ (view transition) จบแล้ว: ระหว่างนั้นคลิกไม่ได้ (ดู theater.spec.ts) */
 const settled = (page: Page) => expect(page.locator("html[data-theater-switching]")).toHaveCount(0)
 
+/** ข้อมูลคลิปจาก backend โหมด fake แต่สลับกว้าง/สูง: คลิปกลายเป็นแนวตั้ง (แบบเดียวกับ theater.spec.ts) */
+async function asPortrait(page: Page) {
+  await page.route(
+    (url) => url.pathname === `/api/videos/${BBB}`,
+    async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as { video: { width?: number; height: number }[] }
+      const video = body.video.map((f) => (f.width ? { ...f, width: f.height, height: f.width } : f))
+      await route.fulfill({ response, json: { ...body, video } })
+    },
+  )
+}
+
 async function open(page: Page) {
   await installFakeYT(page, { durationS: 635, rate: 0.001 })
   await page.goto(`/v/${BBB}`)
@@ -193,8 +206,9 @@ test("ย่อหน้าต่างข้าม 640 px ตอนเปิด
   await expect(dialog).toBeVisible()
 
   await page.setViewportSize({ width: 600, height: 900 })
-  // จอแคบ: แถบย้ายไปอยู่ใต้ชื่อคลิป (คอลัมน์ข้อมูล) แต่เป็น element เดิม
+  // จอแคบ: แถบย้ายไปอยู่ใต้ชื่อคลิป (คอลัมน์ข้อมูล) แต่เป็น element เดิม · หน้าไม่ล้นแนวนอน
   await expect(page.locator('[data-slot="video-info"] [data-slot="capture-strip"]')).toHaveCount(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   expect(await section?.evaluate((node) => node.isConnected)).toBe(true)
   await expect(dialog).toBeVisible()
 
@@ -258,7 +272,7 @@ test("คิวพักเพราะยูทูปขอตรวจสอ�
   await captureButton(page).hover()
   await expect(page.getByText(/^พักการโหลดอยู่เพราะยูทูปขอตรวจสอบ ลองใหม่หลัง \d{2}:\d{2}$/)).toBeVisible()
   await captureButton(page).click({ force: true })
-  expect(state.posts).toEqual([])
+  await expect.poll(() => state.posts, { timeout: 500 }).toEqual([])
 })
 
 test("คลิปสด: ปุ่มกดไม่ได้พร้อมเหตุผล", async ({ page }) => {
@@ -330,16 +344,7 @@ test.describe("โหมดโรงภาพยนตร์แนวนอน",
   test("คลิปแนวตั้ง: โฟกัสปุ่ม 'ถ่ายภาพคมตรงนี้' แล้วกด T แถวใต้ตัวเล่นย้ายคอลัมน์ โฟกัสยังอยู่ที่ปุ่มนี้", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await mockCaptures(page)
-    // ข้อมูลคลิปจาก backend โหมด fake แต่สลับกว้าง/สูง: คลิปกลายเป็นแนวตั้ง (แบบเดียวกับ theater.spec.ts)
-    await page.route(
-      (url) => url.pathname === `/api/videos/${BBB}`,
-      async (route) => {
-        const response = await route.fetch()
-        const body = (await response.json()) as { video: { width?: number; height: number }[] }
-        const video = body.video.map((f) => (f.width ? { ...f, width: f.height, height: f.width } : f))
-        await route.fulfill({ response, json: { ...body, video } })
-      },
-    )
+    await asPortrait(page)
     await open(page)
     await play(page)
     await expect(header(page)).toHaveAttribute("data-layout", "theater-tall")
@@ -350,6 +355,24 @@ test.describe("โหมดโรงภาพยนตร์แนวนอน",
     await expect(header(page)).toHaveAttribute("data-layout", "compact")
     await expect(page.locator('[data-slot="video-info"]').locator('[data-slot="player-controls"]')).toHaveCount(0)
     await expect(captureButton(page)).toBeFocused()
+  })
+
+  test("คลิปแนวตั้ง: โฟกัสภาพในแถบแล้วกด T แถบย้ายคอลัมน์ (element เดิม) โฟกัสยังอยู่ที่ภาพเดิม", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await mockCaptures(page, [item(1000), item(2000), item(3000)])
+    await asPortrait(page)
+    await open(page)
+    await play(page)
+    await expect(header(page)).toHaveAttribute("data-layout", "theater-tall")
+    await expect(page.locator('[data-slot="video-info"] [data-slot="capture-strip"]')).toHaveCount(1)
+    const section = await strip(page).elementHandle()
+    await tile(page, "0:02").focus()
+    await expect(tile(page, "0:02")).toBeFocused()
+    await page.keyboard.press("t")
+    await expect(header(page)).toHaveAttribute("data-layout", "compact")
+    await expect(page.locator('[data-slot="video-info"] [data-slot="capture-strip"]')).toHaveCount(0)
+    expect(await section?.evaluate((node) => node.isConnected)).toBe(true)
+    await expect(tile(page, "0:02")).toBeFocused()
   })
 
   test("จอสูง 1280×1000: ตัวเล่นเต็มความกว้างของเนื้อหา", async ({ page }) => {
@@ -383,5 +406,11 @@ for (const scheme of ["light", "dark"] as const) {
     await expect.poll(() => lightbox.locator("img").evaluate((el) => (el as HTMLImageElement).complete)).toBe(true)
     await lightbox.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)))
     expect(await seriousViolations(page)).toEqual([])
+    // "ลบภาพนี้" พื้นทึบเท่าพื้นหน้าเว็บทั้งตอนปกติและตอนชี้เมาส์ (axe ไม่ตรวจตอนชี้เมาส์) ตัวหนังสือแดงจึงไม่จมพื้นดำ
+    const remove = lightbox.getByRole("button", { name: "ลบภาพนี้" })
+    const pageBackground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+    await expect(remove).toHaveCSS("background-color", pageBackground)
+    await remove.hover()
+    await expect(remove).toHaveCSS("background-color", pageBackground)
   })
 }

@@ -41,6 +41,13 @@ export type StripLayout = "wrap" | "row"
 const TILE_BUTTON =
   "relative block w-full cursor-zoom-in overflow-hidden rounded-md bg-black outline-none hover:ring-2 hover:ring-ring/40 focus-visible:ring-3 focus-visible:ring-ring"
 
+/**
+ * "ลบภาพนี้" ในภาพใหญ่: พื้นปุ่มแบบ destructive โปร่ง (สีแดงจาง) ทับพื้นหลังดำแล้วตัวหนังสือแดงอ่านยาก (axe color-contrast)
+ * จึงใช้พื้นทึบสีพื้นหน้าเว็บทุกสถานะ (ปกติ ชี้เมาส์ ธีมมืด) · ชี้เมาส์ = ขอบแดงแทนพื้นแดง
+ */
+const LIGHTBOX_DELETE =
+  "bg-background hover:bg-background hover:ring-1 hover:ring-destructive/60 dark:bg-background dark:hover:bg-background"
+
 const reducedMotion = () =>
   typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
 
@@ -307,7 +314,7 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
               <Play aria-hidden />
               {th.frames.playFrom}
             </Button>
-            <Button variant="destructive" size="sm" className="bg-background" onClick={() => setConfirming(shown)}>
+            <Button variant="destructive" size="sm" className={LIGHTBOX_DELETE} onClick={() => setConfirming(shown)}>
               <Trash2 aria-hidden />
               {th.capture.delete}
             </Button>
