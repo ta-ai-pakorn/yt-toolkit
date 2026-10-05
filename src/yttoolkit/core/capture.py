@@ -7,7 +7,8 @@
 ลำดับการเขียน: ไฟล์ใน cache → ไฟล์ในโฟลเดอร์ → แถวใน index (แถวมาหลังสุด: ไม่มีแถวไหนชี้ไฟล์ที่ยังไม่มี)
 ไฟล์ชั่วคราวอยู่ใน work/capture-<uuid>/ ลบทุกครั้งที่จบ (ดับกลางทาง = ตัวกวาด work/ ตอนเปิดโปรแกรมลบให้)
 log บอกแค่ id คลิป รหัส error และชนิด error (ไม่มี path ลิงก์ หรือ outputRoot) · core ไม่ import api/platform
-detail ของ error จากงานไฟล์ = ชื่อชนิดของ error เดิมเท่านั้น (API log detail: ห้ามมี path)
+detail ของ error จากงานไฟล์ = ชื่อชนิดของ error เดิมเท่านั้น และตัด error เดิมออกจากสาย (from None):
+API log ทั้ง detail และ traceback ของ error 500 ซึ่งข้อความของ OSError/Pillow/ffmpeg มี path
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -28,6 +30,7 @@ from typing import Any, Protocol
 
 from PIL import Image, UnidentifiedImageError
 
+from .cancel import JobCancelled
 from .files import PATH_LIMIT, ensure_output_root, plan_output
 from .frame_piece import PieceInfo, max_short_side
 from .frames import file_timecode
@@ -42,6 +45,7 @@ OUTPUT_DIR = "ภาพที่ถ่าย"
 CAPTURE_ID = re.compile(r"c_(\d{1,9})")
 NO_FRAME_RETRY_MS = 100  # spec 4: เวลาเศษท้ายคลิปที่ไม่มีภาพ ลองถอยหลัง 100 ms อีกครั้งเดียว
 MAX_SAME_SECOND = 99
+FFMPEG_DEADLINE_S = 60  # ffmpeg ของภาพหนึ่งภาพ (รวมรอบถอย 100 ms) นานกว่านี้ = ค้าง ยกเลิกแล้วปล่อยล็อก
 _OUTPUT_NAME = re.compile(r"frame_\d{2,}-\d{2}-\d{2}(?:_\d{1,2})?\.jpg")
 _LONGEST_NAME = "frame_000-00-00_99.jpg"
 _BANGKOK = timezone(timedelta(hours=7))
@@ -87,10 +91,6 @@ class Capture:
     width: int
     height: int
     file: str
-
-
-def _never() -> bool:
-    return False
 
 
 def _utcnow() -> datetime:
@@ -288,25 +288,41 @@ class CaptureService:
             try:
                 tmp.mkdir(parents=True)
             except OSError as err:
-                raise YtError("E_DISK_FULL" if err.errno == errno.ENOSPC else "E_UNKNOWN", type(err).__name__) from err
+                raise YtError("E_DISK_FULL" if err.errno == errno.ENOSPC else "E_UNKNOWN", type(err).__name__) from None
             try:
                 cap = max_short_side(str(self._settings.get().get("captureQuality", "max")))
             except ValueError:
                 cap = max_short_side("max")  # ค่าตั้งเสีย (ไม่ควรเกิด SettingsStore ตรวจแล้ว) = สูงสุดที่มี
             piece = self._extractor.fetch_frame_piece(video_id, t_ms, cap, tmp / "piece.mp4")
             frame = tmp / "frame.jpg"
-            offset = max(0, t_ms - piece.segment_start_ms)
-            if not self._extract(piece, frame, offset):
-                if offset == 0 or not self._extract(piece, frame, max(0, offset - NO_FRAME_RETRY_MS)):
-                    raise YtError("E_UNKNOWN", "no frame at this time")
+            self._extract_frame(piece, frame, max(0, t_ms - piece.segment_start_ms))
             width, height = _jpeg_size(frame)
             return self._store(video_id, title, t_ms, frame, width, height)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def _extract(self, piece: PieceInfo, frame: Path, offset_ms: int) -> bool:
-        return self._media.extract_frame(piece.path, frame, offset_ms, long_side=None,
-                                         dynamic_range=piece.dynamic_range, cancel=_never)  # fmt: skip
+    def _extract_frame(self, piece: PieceInfo, frame: Path, offset: int) -> None:
+        """ภาพที่ offset ของชิ้น (ไม่มีภาพ = ถอย 100 ms อีกครั้ง) ffmpeg ทั้งสองครั้งรวมกันไม่เกิน FFMPEG_DEADLINE_S
+        (ค้าง = ล็อกการถ่ายของทั้งแอพค้างตาม) · detail ไม่มีข้อความ stderr ของ ffmpeg (มี path ไฟล์งาน)"""
+        deadline = time.monotonic() + FFMPEG_DEADLINE_S
+
+        def expired() -> bool:
+            return time.monotonic() >= deadline
+
+        def extract(at_ms: int) -> bool:
+            return self._media.extract_frame(piece.path, frame, at_ms, long_side=None,
+                                             dynamic_range=piece.dynamic_range, cancel=expired)  # fmt: skip
+
+        try:
+            if extract(offset) or (offset > 0 and extract(max(0, offset - NO_FRAME_RETRY_MS))):
+                return
+        except JobCancelled:
+            raise YtError("E_UNKNOWN", "ffmpeg timeout") from None
+        except YtError as exc:
+            if exc.code == "E_DISK_FULL":
+                raise YtError("E_DISK_FULL", "ffmpeg") from None
+            raise
+        raise YtError("E_UNKNOWN", "no frame at this time")
 
     def _store(self, video_id: str, title: str, t_ms: int, frame: Path, width: int, height: int) -> Capture:
         capture = Capture(f"c_{t_ms}", t_ms, width, height, f"c_{t_ms}.jpg")
@@ -321,7 +337,7 @@ class CaptureService:
             finally:
                 part.unlink(missing_ok=True)
         except OSError as err:
-            raise YtError("E_DISK_FULL" if err.errno == errno.ENOSPC else "E_UNKNOWN", type(err).__name__) from err
+            raise YtError("E_DISK_FULL" if err.errno == errno.ENOSPC else "E_UNKNOWN", type(err).__name__) from None
         output: Path | None = None
         try:
             root = self._settings.output_dir()
@@ -336,7 +352,7 @@ class CaptureService:
                 try:
                     self._write_entries(video_id, [*entries, entry])
                 except OSError as err:
-                    raise YtError("E_DISK_FULL" if err.errno == errno.ENOSPC else "E_UNKNOWN", type(err).__name__) from err
+                    raise YtError("E_DISK_FULL" if err.errno == errno.ENOSPC else "E_UNKNOWN", type(err).__name__) from None
         except BaseException:
             cached.unlink(missing_ok=True)
             if output is not None:
@@ -351,7 +367,7 @@ class CaptureService:
         except YtError as err:
             # detail เดิมเป็นข้อความของ OSError ซึ่งมี path ของโฟลเดอร์ผลลัพธ์: เหลือแค่ชื่อชนิดของ error
             cause = type(err.__cause__).__name__ if err.__cause__ is not None else "OSError"
-            raise YtError("E_OUTPUT_NOT_WRITABLE", cause) from err
+            raise YtError("E_OUTPUT_NOT_WRITABLE", cause) from None
         folder = plan_output(root, title, video_id, "", "jpg").parent / OUTPUT_DIR
         if _u16(str(folder / _LONGEST_NAME)) > PATH_LIMIT:
             raise YtError("E_OUTPUT_NOT_WRITABLE", "path too long")
@@ -372,7 +388,7 @@ class CaptureService:
                     raise
                 return target
         except OSError as err:
-            raise _write_error(err) from err
+            raise _write_error(err) from None
         raise YtError("E_OUTPUT_NOT_WRITABLE", "no free name in the capture folder")
 
     # ---------- รายการ ลบ เปิดโฟลเดอร์ ----------
@@ -406,12 +422,12 @@ class CaptureService:
                 try:
                     target.unlink(missing_ok=True)
                 except OSError as err:
-                    raise YtError("E_OUTPUT_NOT_WRITABLE", type(err).__name__) from err
+                    raise YtError("E_OUTPUT_NOT_WRITABLE", type(err).__name__) from None
             try:
                 (self._folder(video_id) / entry["file"]).unlink(missing_ok=True)
                 self._write_entries(video_id, [e for e in entries if e["id"] != capture_id])
             except OSError as err:
-                raise YtError("E_UNKNOWN", type(err).__name__) from err
+                raise YtError("E_UNKNOWN", type(err).__name__) from None
 
     def reveal_dir(self, video_id: str) -> Path | None:
         """โฟลเดอร์ ภาพที่ถ่าย ที่จะเปิด: ของภาพล่าสุดที่ไฟล์ยังอยู่ · ไม่มี = โฟลเดอร์ตามค่าตั้งปัจจุบันถ้ามีอยู่ · ไม่มีเลย = None"""
@@ -439,4 +455,4 @@ def _jpeg_size(path: Path) -> tuple[int, int]:
         with Image.open(path) as img:
             return int(img.width), int(img.height)
     except (OSError, UnidentifiedImageError) as err:
-        raise YtError("E_UNKNOWN", f"unreadable frame: {type(err).__name__}") from err
+        raise YtError("E_UNKNOWN", f"unreadable frame: {type(err).__name__}") from None

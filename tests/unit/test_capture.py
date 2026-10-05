@@ -6,14 +6,19 @@ import errno
 import json
 import shutil
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from helpers_capture import BBB, MEDIA, TITLE, FakeVideos, FixtureFetcher, StubQueue, StubSettings, clip_info
 from PIL import Image
 
+from yttoolkit.core import capture as capture_module
+from yttoolkit.core.cancel import JobCancelled
 from yttoolkit.core.capture import OUTPUT_DIR, Capture, CaptureRejected, CaptureService, recorded_output
 from yttoolkit.core.media import FakeMediaTools, FrameCall
 from yttoolkit.core.yterrors import YtError
@@ -166,7 +171,110 @@ def test_unwritable_output_root_error_names_no_path(env: Env, tmp_path: Path) ->
     detail = info.value.detail
     assert detail.isidentifier() and detail.endswith("Error")
     assert not any(part.strip("\\/") in str(info.value) for part in root.parts if part.strip("\\/"))
-    assert isinstance(info.value.__cause__, YtError)  # ยังโยงถึงต้นเหตุ (from err)
+    _no_chain(info.value)  # traceback ใน log ของ error 500 ต้องไม่พา OSError (มี path) ตามมาด้วย
+
+
+def _no_chain(exc: BaseException) -> None:
+    assert exc.__cause__ is None and exc.__suppress_context__ is True
+
+
+class HangingMedia(FakeMediaTools):
+    """ffmpeg ที่ค้างจนกว่าจะถูกยกเลิก: เคารพ cancel แบบ run_ffmpeg (ยกเลิก = JobCancelled)"""
+
+    hang = True
+
+    def extract_frame(self, src: Path, dst: Path, t_ms: int, *, long_side: int | None, dynamic_range: str | None,
+                      cancel: Callable[[], bool]) -> bool:  # fmt: skip
+        if self.hang:
+            limit = time.monotonic() + 10
+            while not cancel():
+                assert time.monotonic() < limit, "cancel never tripped"
+                time.sleep(0.01)
+            raise JobCancelled()
+        return super().extract_frame(src, dst, t_ms, long_side=long_side, dynamic_range=dynamic_range, cancel=cancel)
+
+
+def test_a_hung_ffmpeg_times_out_and_frees_the_lock(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    media = HangingMedia(MEDIA)
+    service = CaptureService(env.videos, env.fetcher, media, env.cache, env.settings, env.queue, work_root=env.work)
+    monkeypatch.setattr(capture_module, "FFMPEG_DEADLINE_S", 0.2)
+    with pytest.raises(YtError) as info:
+        service.capture(BBB, 1_000)
+    assert (info.value.code, info.value.detail) == ("E_UNKNOWN", "ffmpeg timeout")
+    _no_chain(info.value)
+    assert _work_is_clean(env) and service.list(BBB) == []
+    media.hang = False
+    assert service.capture(BBB, 1_000)[1] is True  # ล็อกถูกปล่อยแล้ว
+
+
+def test_ffmpeg_gets_the_default_deadline(env: Env) -> None:
+    seen: list[bool] = []
+    real = env.media.extract_frame
+
+    def spy(src: Path, dst: Path, t_ms: int, **kw: Any) -> bool:
+        seen.append(kw["cancel"]())
+        return real(src, dst, t_ms, **kw)
+
+    env.media.extract_frame = spy  # type: ignore[method-assign]
+    env.service.capture(BBB, 1_000)
+    assert capture_module.FFMPEG_DEADLINE_S == 60 and seen == [False]
+
+
+def test_ffmpeg_disk_full_drops_the_stderr_text(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    def full(*_args: object, **_kw: object) -> bool:
+        raise YtError("E_DISK_FULL", f"{env.work}\\capture-x\\frame.jpg: No space left on device")
+
+    monkeypatch.setattr(env.media, "extract_frame", full)
+    with pytest.raises(YtError) as info:
+        env.service.capture(BBB, 1_000)
+    assert (info.value.code, info.value.detail) == ("E_DISK_FULL", "ffmpeg")
+    _no_chain(info.value)
+    assert _work_is_clean(env)
+
+
+def test_temp_dir_failure_names_only_the_error_class(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_mkdir = Path.mkdir
+
+    def denied(self: Path, *args: Any, **kw: Any) -> None:
+        if self.name.startswith("capture-"):
+            raise PermissionError(errno.EACCES, "Access is denied", str(self))
+        real_mkdir(self, *args, **kw)
+
+    monkeypatch.setattr(Path, "mkdir", denied)
+    with pytest.raises(YtError) as info:
+        env.service.capture(BBB, 1_000)
+    assert (info.value.code, info.value.detail) == ("E_UNKNOWN", "PermissionError")
+    _no_chain(info.value)
+    assert env.fetcher.calls == []
+
+
+def test_delete_cache_copy_failure_names_only_the_error_class(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    capture, _ = env.service.capture(BBB, 1_000)
+    real_unlink = Path.unlink
+
+    def locked(self: Path, missing_ok: bool = False) -> None:
+        if self.name == "c_1000.jpg":
+            raise PermissionError(errno.EACCES, "used by another process", str(self))
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    with pytest.raises(YtError) as info:
+        env.service.delete(BBB, capture.id)
+    assert (info.value.code, info.value.detail) == ("E_UNKNOWN", "PermissionError")
+    _no_chain(info.value)
+
+
+def test_delete_index_failure_names_only_the_error_class(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    capture, _ = env.service.capture(BBB, 1_000)
+
+    def full(*_args: object) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device", str(env.captures / "index.json"))
+
+    monkeypatch.setattr(env.service, "_write_entries", full)
+    with pytest.raises(YtError) as info:
+        env.service.delete(BBB, capture.id)
+    assert (info.value.code, info.value.detail) == ("E_UNKNOWN", "OSError")
+    _no_chain(info.value)
 
 
 def test_index_failure_rolls_back_both_copies(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
