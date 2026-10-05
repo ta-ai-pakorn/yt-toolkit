@@ -109,6 +109,9 @@ export type StoryboardFrame = { index: number; tMs: number; url: string }
 
 export type Storyboard = { intervalMs: number; frames: StoryboardFrame[] }
 
+/** ชุดภาพคมของคลิป (GET /videos/{id}/sharp) intervalMs null = เวลาเดียวกับภาพเร็ว */
+export type SharpSet = { origin: "manual" | "auto"; intervalMs: number | null; frames: StoryboardFrame[] }
+
 export type PlaylistEntry = {
   videoId: string
   title: string
@@ -181,14 +184,16 @@ export type JobStage =
   | "cutting"
   | "cutting_ads"
   | `splitting:${number}/${number}`
+  | `extracting_frames:${number}/${number}`
+  | `sharp_frames:${number}/${number}`
 
 export type JobError = { code: string; message: string; detail?: string | null }
 
 /** หมายเหตุสีเทาในแถวงาน เช่น ไม่มีเสียงภาษาที่เลือกจึงใช้เสียงต้นฉบับแทน */
 export type JobNote = { code: string; message: string }
 
-/** ไฟล์ที่งานสร้าง: name = ชื่อไฟล์อย่างเดียว ไม่มีที่อยู่โฟลเดอร์ */
-export type JobOutput = { index: number; name: string; sizeBytes: number }
+/** ไฟล์ที่งานสร้าง: name = ชื่อไฟล์อย่างเดียว · files = งานภาพคม ผลเป็นโฟลเดอร์ (จำนวนภาพ) ไม่มีปุ่มดาวน์โหลด */
+export type JobOutput = { index: number; name: string; sizeBytes: number; files?: number }
 
 export type Job = {
   id: string
@@ -273,9 +278,14 @@ export type AudioJobParams = GroupFolder & {
 
 export type SubtitleJobParams = GroupFolder & { trackId?: string; format: SubExportFormat; options: SubOptions; range?: TimeRange }
 
-export type ContactSheetJobParams = GroupFolder & { source: "fast"; columns: 5 }
+export type FrameSource = "fast" | "sharp"
 
-export type FramesZipJobParams = GroupFolder & { source: "fast" }
+export type ContactSheetJobParams = GroupFolder & { source: FrameSource; columns: 5 }
+
+export type FramesZipJobParams = GroupFolder & { source: FrameSource }
+
+/** ภาพคม (M5 รอบ B): ไม่มี intervalS = เวลาเดียวกับภาพเร็ว */
+export type FramesSharpJobParams = GroupFolder & { intervalS?: number }
 
 /** โน้ต .md ของคลิป (ข้อมูลคลิป คำอธิบาย chapter คอมเมนต์ปักหมุด ทรานสคริปต์) · ไม่มี trackId = backend ใช้แทร็กเริ่มต้นของคลิป */
 export type NoteJobParams = GroupFolder & { trackId?: string }
@@ -286,9 +296,10 @@ export type JobParams =
   | SubtitleJobParams
   | ContactSheetJobParams
   | FramesZipJobParams
+  | FramesSharpJobParams
   | NoteJobParams
 
-export type NewJob = { videoId: string; kind: Exclude<JobKind, "frames_sharp">; params: JobParams; title?: string }
+export type NewJob = { videoId: string; kind: JobKind; params: JobParams; title?: string }
 
 // ---------- คิวและการตั้งค่า (สัญญา C12) ----------
 
@@ -304,6 +315,7 @@ export type Settings = {
   subCustom: SubOptions
   concurrency: 1 | 2 | 3
   sponsorblockDefault: string[]
+  autoSharpFrames: boolean
   theme: "system" | "dark" | "light"
   filenameStyle: "title" | "title-channel" | "title-quality"
   cookies: { enabled: boolean; source: "file" | "firefox" | null; warningAccepted: boolean; importedAt?: string }

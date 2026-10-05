@@ -435,11 +435,10 @@ function NoStoryboard() {
         <EmptyDescription>{t.noStoryboard}</EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        {/* ปุ่มที่ปิดใช้งานยังต้องโฟกัสได้ ไม่งั้นผู้ใช้คีย์บอร์ดไม่เห็นคำอธิบายว่าเปิดเมื่อไร */}
-        <Tooltip>
-          <TooltipTrigger render={<Button variant="outline" disabled focusableWhenDisabled />}>{t.requestSharp}</TooltipTrigger>
-          <TooltipContent>{t.availableLater}</TooltipContent>
-        </Tooltip>
+        {/* ปุ่มที่กดได้จริงมาใน M5 รอบ B ชิ้นถัดไป (T15) จนกว่าจะถึงตอนนั้นยังปิดอยู่ */}
+        <Button variant="outline" disabled focusableWhenDisabled>
+          {t.requestSharp}
+        </Button>
       </EmptyContent>
     </Empty>
   )
