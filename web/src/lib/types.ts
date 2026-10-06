@@ -8,6 +8,9 @@ export type ToolStatus = {
   path: string | null
 }
 
+/** แถว "บัญชียูทูป" ของ /health (M5 รอบ C): สถานะอย่างเดียว ไม่ต่อเน็ต ไม่มีชื่อหรือค่าคุกกี้ */
+export type AccountHealth = { status: "ok"; active: boolean; importedAt: string | null }
+
 export type Health = {
   version: string
   commit: string | null
@@ -16,8 +19,12 @@ export type Health = {
   disk: ToolStatus
   output: ToolStatus
   network: ToolStatus
+  account?: AccountHealth // M5 รอบ C · backend รุ่นก่อนไม่มีแถวนี้
   mode?: "fake" // มีเฉพาะตอน backend รันโหมดข้อมูลปลอม (serve + YT_TOOLKIT_FAKE=1)
 }
+
+/** บัญชียูทูปชั่วคราว (M5 รอบ C, GET /cookies) · expiresAt = เวลาที่จะลบเองเร็วที่สุด (ครบ 2 ชม. หรือคิวว่างครบ 10 นาที) */
+export type AccountStatus = { active: boolean; importedAt?: string; expiresAt?: string; used: boolean }
 
 export type VideoFormat = {
   formatId: string
@@ -327,7 +334,6 @@ export type Settings = {
   captureQuality: CaptureQuality
   theme: "system" | "dark" | "light"
   filenameStyle: "title" | "title-channel" | "title-quality"
-  cookies: { enabled: boolean; source: "file" | "firefox" | null; warningAccepted: boolean; importedAt?: string }
   statsResetAt: string | null
   lastUsed: Record<string, unknown>
 }

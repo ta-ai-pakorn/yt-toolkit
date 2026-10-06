@@ -1,12 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 
+import { openAccountDialog } from "@/components/account/account-store"
+import { REMOVED_TOAST_ID, showRemovedToast } from "@/components/account/use-account"
 import { fill, th } from "@/i18n/th"
+import { ACCOUNT_KEY, showAccountButton, type AccountEvent } from "@/lib/account"
 import { ApiError } from "@/lib/api"
-import { connectEvents } from "@/lib/events"
+import { connectEvents, type ConnectOptions } from "@/lib/events"
 import { cancelJob, JOBS_KEY, jobsQuery, queueQuery, reorderJobs, retryJob, revealOutput } from "@/lib/jobs"
-import type { Job } from "@/lib/types"
+import type { AccountStatus, Job } from "@/lib/types"
 
 import { jobTitle } from "./job-text"
 
@@ -160,7 +163,7 @@ export async function revealWithToast(id: string, index: number): Promise<void> 
   }
 }
 
-function notifyJobChange(before: Job | undefined, after: Job): void {
+function notifyJobChange(client: QueryClient, before: Job | undefined, after: Job): void {
   const kind = jobToast(before, after)
   const title = jobTitle(after)
   if (kind === "finished") {
@@ -172,35 +175,86 @@ function notifyJobChange(before: Job | undefined, after: Job): void {
         : undefined,
     })
   } else if (kind === "failed") {
+    const details = { label: th.queue.details, onClick: () => queueSheet.open(after.id) }
+    // M5 รอบ C: จำกัดอายุ/ส่วนตัว + ยังไม่ได้ใช้บัญชี = ปุ่มหลักของ toast คือ "ใช้บัญชียูทูปชั่วคราว" (ดูรายละเอียดเป็นปุ่มรอง)
+    // นำเข้าแล้วลองงานเดิมใหม่ด้วย runJobAction ตัวเดียวกับปุ่ม "ลองใหม่" ในแถว (ไม่พึ่งแถวที่อาจปิดไปแล้ว)
+    const active = client.getQueryData<AccountStatus>(ACCOUNT_KEY)?.active === true
+    const account = showAccountButton(after.error?.code, active)
+      ? {
+          label: th.account.use,
+          onClick: () => openAccountDialog({ origin: "error", onImported: () => void runJobAction(client, "retry", after.id) }),
+        }
+      : null
     toast.error(fill(th.queue.failed, { title }), {
       id: `job-${after.id}`,
       description: after.error?.message,
       duration: Infinity,
-      action: { label: th.queue.details, onClick: () => queueSheet.open(after.id) },
+      action: account ?? details,
+      cancel: account ? details : undefined,
     })
   }
 }
 
-/** ต่อ SSE ครั้งเดียวต่อหน้า (วางไว้ที่ layout) · เด้ง toast เมื่องานเสร็จหรือพลาดระหว่างเปิดแท็บนี้อยู่ */
-export function useServerEvents(): void {
-  const client = useQueryClient()
-  useEffect(
-    () => connectEvents(client, { onShutdown: () => toast.dismiss(), onJobChange: notifyJobChange }),
-    [client],
-  )
+/**
+ * ข่าวบัญชียูทูปชั่วคราว (M5 รอบ C): บัญชีถูกลบ (active เป็น false มี reason) = toast ให้ไปออกจากระบบในหน้าต่างไม่ระบุตัวตน ทุกแท็บ
+ * ข่าวที่ยังถืออยู่ (grace เริ่ม/ยกเลิก) ไม่เด้ง · ลบแล้วโหลดสถานะจริงจากเซิร์ฟเวอร์ใหม่ (นำเข้าซ้ำที่แซงข่าวลบก็แถบยังถูก)
+ */
+function notifyAccount(client: QueryClient, event: AccountEvent): void {
+  if (event.active) return
+  if (event.reason !== undefined) showRemovedToast()
+  void client.invalidateQueries({ queryKey: ACCOUNT_KEY })
 }
 
-/** ยกเลิก / ลองใหม่ ของงานหนึ่งงาน · ไม่สำเร็จ = toast แล้วโหลดรายการงานใหม่ */
+/**
+ * ตัวจัดการข่าว SSE ของแอพ (แยกออกมาเพื่อเทส) · app.shutdown ล้าง toast ทั้งหมด แต่บัญชีที่เพิ่งถูกลบเพราะปิดโปรแกรม
+ * (ข่าว account reason "shutdown" มาก่อน app.shutdown เสมอ) ต้องยังเตือนให้ไปออกจากระบบ: ล้าง toast อื่นทีละตัวแล้วเก็บ toast
+ * "ลบบัญชีแล้ว" ไว้ (dismiss() ทั้งหมดแล้วสร้าง id เดิมใหม่ทันที = sonner ลบ toast ใหม่ทิ้งตามรอบ dismiss) ไม่มี = แสดงใหม่
+ * reason "expired" ทำแบบเดียวกัน: เครื่องหลับเลย 2 ชม. แล้วปิดโปรแกรม = ตัวเช็กเวลาจริงลบด้วยเหตุผล expired แทน shutdown
+ */
+export function serverEventHandlers(client: QueryClient): Omit<ConnectOptions, "createSource"> {
+  let lastAccountReason: string | undefined
+  return {
+    onShutdown: () => {
+      if (lastAccountReason !== "shutdown" && lastAccountReason !== "expired") {
+        toast.dismiss()
+        return
+      }
+      const shown = toast.getToasts()
+      for (const t of shown) if (t.id !== REMOVED_TOAST_ID) toast.dismiss(t.id)
+      if (!shown.some((t) => t.id === REMOVED_TOAST_ID)) showRemovedToast()
+    },
+    onJobChange: (before, after) => notifyJobChange(client, before, after),
+    onAccount: (event) => {
+      lastAccountReason = event.active ? undefined : event.reason
+      notifyAccount(client, event)
+    },
+  }
+}
+
+/** ต่อ SSE ครั้งเดียวต่อหน้า (วางไว้ที่ layout) · เด้ง toast เมื่องานเสร็จหรือพลาดระหว่างเปิดแท็บนี้อยู่ และเมื่อบัญชีชั่วคราวถูกลบ */
+export function useServerEvents(): void {
+  const client = useQueryClient()
+  useEffect(() => connectEvents(client, serverEventHandlers(client)), [client])
+}
+
+/**
+ * ยกเลิก / ลองใหม่ ของงานหนึ่งงาน แล้วใส่ผลลงแคชแบบไม่ทับข้อมูลใหม่กว่า (applyActionResult)
+ * ไม่สำเร็จ = toast แล้วโหลดรายการงานใหม่ · ไม่โยน error · ใช้ร่วมกันทั้งปุ่มในแถว (useJobAction) และปุ่มใน toast หลังนำเข้าบัญชี
+ */
+export async function runJobAction(client: QueryClient, action: "cancel" | "retry", id: string): Promise<void> {
+  try {
+    const job = await (action === "cancel" ? cancelJob(id) : retryJob(id))
+    client.setQueryData<Job[]>(JOBS_KEY, (old) => applyActionResult(old, job))
+  } catch {
+    toast.error(th.queue.actionFailed)
+    void client.invalidateQueries({ queryKey: JOBS_KEY })
+  }
+}
+
+/** ยกเลิก / ลองใหม่ ของงานหนึ่งงาน · ไม่เคย reject (runJobAction แสดง toast แล้วโหลดรายการงานใหม่เอง) */
 export function useJobAction(action: "cancel" | "retry", id: string) {
   const client = useQueryClient()
-  return useMutation({
-    mutationFn: () => (action === "cancel" ? cancelJob(id) : retryJob(id)),
-    onSuccess: (job) => client.setQueryData<Job[]>(JOBS_KEY, (old) => applyActionResult(old, job)),
-    onError: () => {
-      toast.error(th.queue.actionFailed)
-      void client.invalidateQueries({ queryKey: JOBS_KEY })
-    },
-  })
+  return useMutation({ mutationFn: () => runJobAction(client, action, id) })
 }
 
 /** ส่งลำดับคิวใหม่: เรียงในแคชทันที · backend ไม่รับ = ย้อนกลับที่เดิมพร้อม toast */

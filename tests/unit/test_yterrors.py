@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from yttoolkit.core.yterrors import MESSAGES, MESSAGES_NO_PARAMS, YtError, classify
+from yttoolkit.core.yterrors import (
+    ACCOUNT_CODES,
+    ACCOUNT_TRIED_MESSAGE,
+    MESSAGES,
+    MESSAGES_NO_PARAMS,
+    YtError,
+    classify,
+)
 
 ERRORS_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "errors"
 FIXTURES = sorted(ERRORS_DIR.glob("*.txt"))
@@ -76,6 +83,15 @@ def test_every_code_has_a_fixture() -> None:
 )
 def test_phrases_case_insensitive(message: str, code: str) -> None:
     assert classify(message) == code
+
+
+@pytest.mark.parametrize(
+    "phrase", ["members-only content", "join this channel to get access", "available to this channel's members"]
+)
+def test_each_members_only_phrase_alone_is_private(phrase: str) -> None:
+    # M5 รอบ C: ข้อความเฉพาะสมาชิกแต่ละแบบต้องได้ปุ่ม "ใช้บัญชียูทูปชั่วคราว" (ACCOUNT_CODES) เสมอ
+    assert classify(f"ERROR: [youtube] x: This video is {phrase}") == "E_VIDEO_PRIVATE"
+    assert classify(phrase) == "E_VIDEO_PRIVATE"
 
 
 def test_refused_4xx_is_not_a_network_error() -> None:
@@ -232,3 +248,55 @@ def test_queue_paused_fills_the_time_and_never_shows_the_placeholder() -> None:
     )
     assert YtError("E_QUEUE_PAUSED").message == MESSAGES["E_BOT_CHECK"]
     assert "{time}" not in str(YtError("E_QUEUE_PAUSED"))
+
+
+# ---------- M5 รอบ C: บัญชียูทูปชั่วคราว ----------
+
+
+def test_m5c_messages_are_verbatim_spec_copy() -> None:
+    assert MESSAGES["E_AGE_RESTRICTED"] == "คลิปนี้จำกัดอายุ ต้องเข้าสู่ระบบยูทูปถึงจะเปิดได้"
+    assert MESSAGES["E_VIDEO_PRIVATE"] == "คลิปนี้เป็นส่วนตัวหรือเฉพาะสมาชิก ต้องเข้าสู่ระบบด้วยบัญชีที่มีสิทธิ์ดู"
+    assert MESSAGES["E_COOKIES_INVALID"] == (
+        "ไฟล์นี้ใช้ไม่ได้ ตรวจว่าเข้าสู่ระบบยูทูปแล้วก่อนส่งออก แล้วส่งออก cookies.txt ใหม่"
+    )
+    assert ACCOUNT_TRIED_MESSAGE == (
+        "ลองด้วยบัญชีแล้วยังเปิดไม่ได้ บัญชีนี้อาจไม่มีสิทธิ์ดูคลิปนี้ หรือการเข้าสู่ระบบหมดอายุแล้ว ลองนำเข้าใหม่"
+    )
+    assert "E_COOKIES_UNAVAILABLE" not in MESSAGES  # ไม่มีโหมด Firefox (C4)
+
+
+def test_account_codes_never_include_the_bot_check() -> None:
+    assert ACCOUNT_CODES == {"E_AGE_RESTRICTED", "E_VIDEO_PRIVATE"}
+
+
+@pytest.mark.parametrize("code", sorted(ACCOUNT_CODES))
+def test_account_tried_switches_the_message_and_keeps_the_code(code: str) -> None:
+    err = YtError(code, "signed-in retry failed", account_tried=True)
+    assert err.code == code and err.account_tried is True
+    assert err.message == ACCOUNT_TRIED_MESSAGE
+    assert YtError(code).account_tried is False and YtError(code).message == MESSAGES[code]
+
+
+def test_account_tried_does_not_change_other_codes() -> None:
+    assert YtError("E_NETWORK", account_tried=True).message == MESSAGES["E_NETWORK"]
+    assert YtError("E_BOT_CHECK", account_tried=True).message == MESSAGES["E_BOT_CHECK"]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Join this channel to get access to members-only content like this video, and other exclusive perks.",
+        "This video is available to this channel's members on level: Supporter (or any higher level).",
+        "ERROR: [youtube] x: JOIN THIS CHANNEL TO GET ACCESS to members-only content",
+    ],
+)
+def test_members_only_is_private(message: str) -> None:
+    assert classify(message) == "E_VIDEO_PRIVATE"
+
+
+def test_account_tried_note_is_in_prd() -> None:
+    assert f'"{ACCOUNT_TRIED_MESSAGE}"' in PRD.read_text(encoding="utf-8")
+
+
+def test_prd_has_no_firefox_cookie_code() -> None:
+    assert _prd_row(PRD.read_text(encoding="utf-8"), "E_COOKIES_UNAVAILABLE") is None

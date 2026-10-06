@@ -334,6 +334,7 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
           title={t.loadError}
           error={video.error}
           onRetry={() => void video.refetch()}
+          account={{ onImported: () => void video.refetch() }}
         />
       )
     }

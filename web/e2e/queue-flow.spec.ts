@@ -1,9 +1,9 @@
 import { analyzeSettled } from "./axe-settled"
-import { expect, test, type APIRequestContext, type Locator, type Page, type Request, type Response } from "@playwright/test"
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test"
 
 import type { Job, NewJob } from "../src/lib/types"
 
-import { cancelJobsFor, enqueue, listJobs, openQueueSheet, resumeQueue, token, waitForJob } from "./queue-helpers"
+import { cancelJobsFor, enqueue, gotoReady, listJobs, openQueueSheet, resumeQueue, token, waitForJob } from "./queue-helpers"
 
 // W4 แถบคิว + ชีตคิว และ W7 ยืนยันปิดโปรแกรม กับคิวจริงของ backend ปลอม (โปรเจกต์ queue, ทีละเทส)
 // คลิปของไฟล์นี้ (C14): SLOWDOWNLD1..4, BOTCHECKDL1, NETRETRYDL1, REFUSEDDL01 · พฤติกรรมอยู่ใน tests/fixtures/downloads/behaviors.json
@@ -37,46 +37,6 @@ async function queuedOrder(request: APIRequestContext): Promise<string[]> {
 /** ลำดับของ SLOWDOWNLD3 กับ 4 ในคิว (งานอื่นในคิวไม่สน) */
 async function order34(request: APIRequestContext): Promise<string[]> {
   return (await queuedOrder(request)).filter((id) => id === "SLOWDOWNLD3" || id === "SLOWDOWNLD4")
-}
-
-/**
- * เปิดหน้าแล้วรอจน SSE ต่อติด และรายการงานที่โหลดใหม่ตอน SSE ต่อติดครั้งแรก (events.ts) เสร็จแล้ว ก่อนส่งงานเข้าคิว
- * ไม่งั้นคำตอบของการโหลดใหม่นั้น (คำนวณก่อนส่งงาน) อาจทับงานที่เพิ่งเข้าคิวในแคช
- * รอจน /api/events ตอบแล้ว มี GET /api/jobs อย่างน้อยสองครั้ง (โหลดแรก + โหลดใหม่ตอนต่อติด) และไม่มีคำขอค้าง
- * (เหตุการณ์ "response" ของ /api/events อาจมาถึงหลังหน้าเว็บส่งคำขอโหลดใหม่ไปแล้ว จึงไม่นับตามลำดับเวลา)
- */
-async function gotoReady(page: Page, path = "/") {
-  const isJobsGet = (request: Request) =>
-    new URL(request.url()).pathname === "/api/jobs" && request.method() === "GET"
-  let eventsOpen = false
-  let inFlight = 0
-  let finished = 0
-  const onResponse = (response: Response) => {
-    if (new URL(response.url()).pathname === "/api/events") eventsOpen = true
-  }
-  const onRequest = (request: Request) => {
-    if (isJobsGet(request)) inFlight += 1
-  }
-  const onDone = (request: Request) => {
-    if (!isJobsGet(request)) return
-    inFlight -= 1
-    finished += 1
-  }
-  page.on("response", onResponse)
-  page.on("request", onRequest)
-  page.on("requestfinished", onDone)
-  page.on("requestfailed", onDone)
-  try {
-    await page.goto(path)
-    await expect.poll(() => eventsOpen && finished >= 2 && inFlight === 0).toBe(true)
-    // ให้ react-query ใส่คำตอบลงแคชก่อน (หลังโหลดเนื้อหาครบแล้วยังมีขั้นอ่าน JSON)
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))))
-  } finally {
-    page.off("response", onResponse)
-    page.off("request", onRequest)
-    page.off("requestfinished", onDone)
-    page.off("requestfailed", onDone)
-  }
 }
 
 async function getConcurrency(page: Page): Promise<number> {

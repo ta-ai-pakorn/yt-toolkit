@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
+from .api.account import build_account_router
 from .api.captures import build_captures_router
 from .api.errors import install_error_handlers
 from .api.events import build_events_router
@@ -26,6 +27,7 @@ from .core.videos import VideoService
 from .platform import Platform
 
 if TYPE_CHECKING:  # โมดูลของ M4 ที่ lane อื่นสร้าง ใช้แค่เป็นชนิดของฟิลด์
+    from .core.account_session import AccountService
     from .core.capture import CaptureService
     from .core.events import EventBus
     from .core.media import MediaTools
@@ -72,6 +74,8 @@ class AppContext:
     open_folder: Callable[[Path], None] | None = None
     # M5 รอบ B2 ถ่ายภาพคมตรงจุด (run_app สร้างให้) ไม่มี = ไม่เปิด API /videos/{id}/captures
     captures: CaptureService | None = None
+    # M5 รอบ C บัญชียูทูปชั่วคราว (run_app สร้างให้) ไม่มี = ไม่เปิด API /cookies* ไม่มีแถวบัญชีใน /health ไม่ลองซ้ำด้วยบัญชี
+    accounts: AccountService | None = None
 
 
 def create_app(ctx: AppContext) -> FastAPI:
@@ -83,6 +87,8 @@ def create_app(ctx: AppContext) -> FastAPI:
         app.include_router(build_videos_router(ctx), prefix="/api")
     if ctx.captures is not None:
         app.include_router(build_captures_router(ctx), prefix="/api")
+    if ctx.accounts is not None:
+        app.include_router(build_account_router(ctx), prefix="/api")
     if ctx.subtitles is not None:
         app.include_router(build_subtitles_router(ctx), prefix="/api")
     if ctx.settings is not None:

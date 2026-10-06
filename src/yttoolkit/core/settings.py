@@ -38,7 +38,10 @@ SUB_PRESETS = ("short", "medium", "long", "word", "custom")
 CONCURRENCY = (1, 2, 3)
 THEMES = ("system", "dark", "light")
 FILENAME_STYLES = ("title", "title-channel", "title-quality")
-READ_ONLY = ("cookies", "statsResetAt")
+READ_ONLY = ("statsResetAt",)
+# key ที่เลิกใช้แล้ว: แถวเก่าในฐานข้อมูลถูกข้ามตอนอ่าน (ไม่อยู่ในค่าเริ่มต้น) และถูกลบตอนบันทึกครั้งถัดไป
+# "cookies" = สถานะคุกกี้ของ PRD เดิม M5 รอบ C ใช้บัญชีชั่วคราวในหน่วยความจำแทน (C8)
+RETIRED_KEYS = ("cookies",)
 
 
 class SettingsError(Exception):
@@ -185,7 +188,6 @@ class SettingsStore:
             "captureQuality": "max",  # M5 รอบ B2 spec 2.4: ภาพคมตรงจุดใช้ format ที่ละเอียดที่สุด
             "theme": "system",
             "filenameStyle": "title",
-            "cookies": {"enabled": False, "source": None, "warningAccepted": False},
             "statsResetAt": None,
             "lastUsed": {},
         }
@@ -224,6 +226,8 @@ class SettingsStore:
             ensure_writable(Path(clean["outputDir"]))
         if clean:
             with self._lock, self._db.transaction() as tx:
+                for key in RETIRED_KEYS:
+                    tx.execute("DELETE FROM settings WHERE key = ?", (key,))
                 for key, value in clean.items():
                     tx.execute(
                         "INSERT INTO settings (key, value_json) VALUES (?, ?) "

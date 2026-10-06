@@ -24,7 +24,6 @@ const SETTINGS: Settings = {
   captureQuality: "max",
   theme: "system",
   filenameStyle: "title",
-  cookies: { enabled: false, source: null, warningAccepted: false },
   statsResetAt: null,
   lastUsed: {},
 }

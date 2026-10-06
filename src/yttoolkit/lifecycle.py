@@ -20,16 +20,16 @@ import httpx
 import uvicorn
 
 from . import __version__, runstate
-from .api.errors import redact_home
 from .app import AppContext, create_app
 from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
 from .core import files, thai_fallback, tools
+from .core.account_session import GRACE_S, AccountService
 from .core.advanced import ADS_SUFFIX
 from .core.capture import CaptureService
 from .core.comments import PinnedCommentService
 from .core.db import Database, purge_stale_cache
 from .core.events import CLOSED, Event, EventBus
-from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, visitor_session
+from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, parse_account_cookies, visitor_session
 from .core.handlers import (
     CONTACT_SHEET_SUFFIX,
     FRAMES_ZIP_SUFFIX,
@@ -49,6 +49,7 @@ from .platform import LockFileError, Platform, current
 
 # ตัวจริงอยู่ใน probe (stdlib ล้วน) ที่นี่ส่งต่อชื่อเดิมให้โค้ดและเทสที่เรียกผ่าน lifecycle
 from .probe import base_url, find_running, is_alive, setup_file_log  # noqa: F401
+from .redact import HomePathFilter, SecretFilter, add_redaction, redact_home
 
 log = logging.getLogger("yttoolkit")
 
@@ -59,6 +60,8 @@ LEGACY_PYTHAINLP_ENV = "PYTHAINLP_DATA_DIR"
 # โหมดข้อมูลปลอม (E2E) ไม่ต้องเว้นช่วงเริ่มงานยูทูป 2-5 วินาทีเหมือนของจริง
 FAKE_DELAY_RANGE = (0.05, 0.2)
 QUEUE_SHUTDOWN_TIMEOUT_S = 5.0  # รองานที่กำลังทำหยุดตอนปิดโปรแกรมไม่เกินเท่านี้
+# M5 รอบ C: ย่น grace 10 นาทีของบัญชีชั่วคราว (วินาที) ใช้ได้เฉพาะโหมดข้อมูลปลอม (e2e ของคิว)
+ACCOUNT_GRACE_ENV = "YT_TOOLKIT_ACCOUNT_GRACE_S"
 GRACEFUL_SHUTDOWN_S = 3  # uvicorn รอ request ที่ค้าง (เช่นสตรีมข่าว) ไม่เกินเท่านี้
 TRAY_REFRESH_INTERVAL_S = 1.0  # อัปเดตตัวเลขงานในเมนู tray ไม่เกิน 1 ครั้งต่อวินาที
 # ตอนเปิดโปรแกรม ล้างไฟล์ค้างในโฟลเดอร์ของงานที่หยุดกลางคันล่าสุดไม่เกินเท่านี้งาน (รวมงานที่เพิ่งกู้คืนเสมอ)
@@ -111,30 +114,6 @@ def git_commit(root: Path, plat: Platform) -> str | None:
     return out.stdout.strip() or None
 
 
-class HomePathFilter(logging.Filter):
-    """แทนโฟลเดอร์ผู้ใช้ด้วย ~ ในข้อความ log และ traceback ก่อนเขียนลงไฟล์
-
-    log.exception ของคิวงานและ lifecycle อาจมี path เต็ม ซึ่งมีชื่อผู้ใช้ Windows ติดไปกับไฟล์ log ที่ส่งต่อ
-    """
-
-    _formatter = logging.Formatter()
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            message = record.getMessage()
-        except Exception:
-            return True  # ข้อความจัดรูปไม่ได้ ปล่อยให้ logging รายงานตามปกติ
-        record.msg = redact_home(message)
-        record.args = None
-        if record.exc_info and not record.exc_text:
-            record.exc_text = self._formatter.formatException(record.exc_info)
-        if record.exc_text:
-            record.exc_text = redact_home(record.exc_text)
-        if record.stack_info:
-            record.stack_info = redact_home(record.stack_info)
-        return True
-
-
 class ConnectionResetNoiseFilter(logging.Filter):
     """ทิ้งเฉพาะรายงาน ConnectionResetError ของ asyncio ตอนปิดการเชื่อมต่อ (_call_connection_lost)
 
@@ -163,9 +142,10 @@ def _app_log_handlers(paths: Paths) -> list[logging.Handler]:
 
 
 def install_log_filters(paths: Paths) -> None:
-    """ใส่ HomePathFilter และ ConnectionResetNoiseFilter ให้ handler ของ app.log ที่ตั้งไว้แล้ว (เรียกซ้ำได้ ไม่ใส่ซ้ำ)"""
+    """ใส่ ConnectionResetNoiseFilter, HomePathFilter และ SecretFilter ให้ handler ของ app.log ที่ตั้งไว้แล้ว
+    (เรียกซ้ำได้ ไม่ใส่ซ้ำ · probe.setup_file_log ใส่สองตัวหลังไว้ตั้งแต่สร้าง handler แล้ว)"""
     for handler in _app_log_handlers(paths):
-        for kind in (ConnectionResetNoiseFilter, HomePathFilter):
+        for kind in (ConnectionResetNoiseFilter, HomePathFilter, SecretFilter):
             if not any(isinstance(f, kind) for f in handler.filters):
                 handler.addFilter(kind())
 
@@ -269,6 +249,23 @@ class Services:
     queue: QueueRunner
     pinned: PinnedCommentService | None = None  # ส่งต่อเป็น ctx.pinned (router ข้อมูลคลิปใช้ตัวนี้ ไม่สร้างใหม่)
     captures: CaptureService | None = None  # M5 รอบ B2 ถ่ายภาพคมตรงจุด ส่งต่อเป็น ctx.captures
+    accounts: AccountService | None = None  # M5 รอบ C บัญชียูทูปชั่วคราว ส่งต่อเป็น ctx.accounts
+
+
+def account_grace_s(fake: bool) -> float:
+    """grace ของบัญชีชั่วคราว: ปกติ 10 นาที · โหมดข้อมูลปลอมย่นได้ด้วย YT_TOOLKIT_ACCOUNT_GRACE_S (0 < ค่า ≤ 600)"""
+    raw = os.environ.get(ACCOUNT_GRACE_ENV) if fake else None
+    try:
+        value = float(raw) if raw else GRACE_S
+    except ValueError:
+        return GRACE_S
+    return value if 0 < value <= GRACE_S else GRACE_S
+
+
+def _pause_end(queue: QueueRunner) -> datetime | None:
+    """เวลาที่คิวพักถึง (None = ไม่ได้พัก) ให้ข้อความ E_QUEUE_PAUSED ของบัญชียูทูปชั่วคราว"""
+    pause = queue.pause_state()
+    return None if pause is None else pause.until
 
 
 def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
@@ -331,6 +328,20 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         )
         # ตัวทำงานอ่าน deps ตอนรันงาน: E_BOT_CHECK ที่งานโน้ตกลืนไว้ (คอมเมนต์ปักหมุด) ยังพักคิวได้
         deps.on_bot_check = queue.brake
+        # M5 รอบ C: บัญชียูทูปชั่วคราวในหน่วยความจำ ฟังคิว (grace เมื่อคิวว่าง) ประกาศสถานะทาง SSE
+        # ลบ/แทนบัญชี = ทิ้งข้อมูลคลิปที่ได้มาด้วยบัญชีนั้น · งานในคิวและถ่ายภาพคมลองซ้ำด้วยบัญชีผ่านตัวนี้
+        accounts = AccountService(
+            parse_account_cookies,
+            publish=events.publish,
+            busy=lambda: queue.pending_count() > 0,
+            # spec 4: คิวพักเพราะยูทูปขอตรวจสอบ = ห้ามใช้บัญชี (กันบัญชีโดนล็อก C9) จนคิวทำงานต่อ
+            blocked=lambda: queue.pause_state() is not None,
+            pause_until=lambda: _pause_end(queue),
+            on_clear=videos.forget_signed_in,
+            grace_s=account_grace_s(fake),
+        )
+        queue.listener = accounts
+        deps.accounts = accounts
         # M5 รอบ B2: ถ่ายภาพคมตรงจุดไม่ผ่านคิว แต่เคารพการพักคิว (ยูทูปขอตรวจสอบ) และสั่งพักคิวเองเมื่อเจอ
         captures = CaptureService(
             videos,
@@ -340,6 +351,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
             settings,
             queue,
             work_root=paths.work,
+            accounts=accounts,
         )
     except BaseException:
         db.close()
@@ -355,6 +367,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         queue=queue,
         pinned=pinned,
         captures=captures,
+        accounts=accounts,
     )
 
 
@@ -521,12 +534,18 @@ def _sweep_folder(folder: Path, ours: re.Pattern[str], keep: set[str]) -> int:
 
 
 def shutdown_services(services: Services, timeout: float = QUEUE_SHUTDOWN_TIMEOUT_S) -> None:
-    """ขั้นแรกของการปิดโปรแกรม ก่อนหยุดเซิร์ฟเวอร์: หยุดคิว (งานที่ทำอยู่จบเป็น interrupted) บอกหน้าเว็บว่าแอพปิด
-    แล้วปิด bus สตรีมข่าวที่เปิดค้างจึงจบเอง uvicorn ไม่ต้องรอ"""
+    """ขั้นแรกของการปิดโปรแกรม ก่อนหยุดเซิร์ฟเวอร์: หยุดคิว (งานที่ทำอยู่จบเป็น interrupted) ลบบัญชียูทูปชั่วคราว
+    (clear("shutdown") แท็บที่เปิดอยู่ได้ข่าว account ก่อน) บอกหน้าเว็บว่าแอพปิด แล้วปิด bus สตรีมข่าวที่เปิดค้างจึงจบเอง
+    uvicorn ไม่ต้องรอ"""
     try:
         services.queue.shutdown(timeout=timeout)
     except Exception:
         log.exception("หยุดคิวงานไม่สำเร็จ")
+    if services.accounts is not None:
+        try:
+            services.accounts.clear("shutdown")  # C6 (b): ปิดโปรแกรม = ลบบัญชีชั่วคราว (แท็บที่เปิดอยู่ได้ข่าวก่อน app.shutdown)
+        except Exception:
+            log.exception("ลบบัญชียูทูปชั่วคราวตอนปิดโปรแกรมไม่สำเร็จ")
     services.events.publish("app.shutdown", {})
     services.events.close()
 
@@ -745,6 +764,7 @@ def _run_server(
     )
     # M5 รอบ B2: API ถ่ายภาพคม (create_app เปิด router เมื่อมีค่านี้) ตั้งแบบนี้ lane ของ app.py จึงไม่ชนกัน
     ctx.captures = services.captures
+    ctx.accounts = services.accounts  # M5 รอบ C: API /cookies* แถวบัญชีใน /health และการลองซ้ำของ GET /videos/{id}
     if fake:
         # โหมดข้อมูลปลอมไม่เปิดหน้าต่างจริง (E2E รันบนเครื่องพนักงานได้โดยไม่มีหน้าต่างโผล่)
         ctx.open_folder = _fake_open_folder
@@ -797,7 +817,7 @@ def _run_server(
     except KeyboardInterrupt:
         pass
     finally:
-        # ลำดับ: หยุดคิว -> app.shutdown -> ปิด bus (สตรีมข่าวจบ) -> หยุดเซิร์ฟเวอร์
+        # ลำดับ: หยุดคิว -> ลบบัญชีชั่วคราว (clear shutdown) -> app.shutdown -> ปิด bus (สตรีมข่าวจบ) -> หยุดเซิร์ฟเวอร์
         shutdown_services(services)
         server.stop()
         purge_stop.set()  # หยุด timer ก่อนผู้เรียกปิดฐานข้อมูล
@@ -872,6 +892,8 @@ def serve(port: int | None = None, dev: bool = False) -> int:
     plat = current()
     paths.ensure()
     logging.basicConfig(level=logging.INFO)
+    for handler in logging.getLogger().handlers:  # M5 รอบ C: log ของ serve (stderr) ก็ซ่อนโฟลเดอร์ผู้ใช้และค่าคุกกี้
+        add_redaction(handler)
     prepare_environment()
     try:
         lock = plat.try_lock(paths.run / "app.lock")

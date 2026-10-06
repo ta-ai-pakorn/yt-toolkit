@@ -21,7 +21,13 @@ function backend(port: number, root: string) {
     reuseExistingServer: false,
     timeout: 60_000,
     // FAKE=1: ข้อมูลคลิปมาจาก tests/fixtures ไม่ต่อยูทูปจริง (health ไม่ใช้ตัวดึงข้อมูล จึงไม่กระทบ)
-    env: { YT_TOOLKIT_DATA_ROOT: root, YT_TOOLKIT_FFMPEG_PATH_LOOKUP: "0", YT_TOOLKIT_FAKE: "1" },
+    // ACCOUNT_GRACE_S (M5 รอบ C): ย่น grace 10 นาทีของบัญชีชั่วคราวเหลือ 5 วินาที (backend อ่านเฉพาะโหมดข้อมูลปลอม)
+    env: {
+      YT_TOOLKIT_DATA_ROOT: root,
+      YT_TOOLKIT_FFMPEG_PATH_LOOKUP: "0",
+      YT_TOOLKIT_FAKE: "1",
+      YT_TOOLKIT_ACCOUNT_GRACE_S: "5",
+    },
   }
 }
 

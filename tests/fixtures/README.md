@@ -96,6 +96,8 @@
 | `E_VIDEO_PRIVATE-1` | ข้อความจริงจากการ probe `yZIXLfi8CZQ` (คลิปที่ `extractor/youtube/_video.py` ระบุ `'skip': 'Private video'`) |
 | `E_VIDEO_PRIVATE-2` | เหตุผลแบบยาวของยูทูป ผ่านกิ่ง `'sign in'` ใน `extractor/youtube/_video.py` |
 | `E_VIDEO_PRIVATE-3` | `'skip': 'This playlist is private'` ใน `extractor/youtube/_tab.py` ในรูป `YouTube said: ...` ของ `extractor/youtube/_base.py` |
+| `E_VIDEO_PRIVATE-4` | (M5 รอบ C) **สังเคราะห์ ไม่ได้ probe จริง** (ไม่มีคลิปเฉพาะสมาชิกให้ทดสอบ): เหตุผลที่ยูทูปแสดงบนคลิปเฉพาะสมาชิก ("Join this channel to get access to members-only content like this video, and other exclusive perks.") ซึ่ง yt-dlp ส่งต่อทาง `raise_no_formats(reason)` ใน `extractor/youtube/_video.py` ในรูป `ERROR: [youtube] <id>: <reason>` |
+| `E_VIDEO_PRIVATE-5` | (M5 รอบ C) **สังเคราะห์** แบบเดียวกับ `-4`: เหตุผลที่ระบุระดับสมาชิก ("This video is available to this channel's members on level: ...") ต่อด้วย `subreason` (". " + ประโยคเดียวกับ `-4`) ตามที่ `_video.py` ต่อ `reason += f'. {subreason}'` |
 | `E_VIDEO_UNAVAILABLE-1` | ข้อความจริงจากการ probe id ที่ไม่มีอยู่ (`aaaaaaaaaaa`) |
 | `E_VIDEO_UNAVAILABLE-2` | `'skip': 'Video unavailable'` ใน `extractor/youtube/_video.py` |
 | `E_VIDEO_UNAVAILABLE-3`, `-4` | เหตุผล + subreason ที่ `extractor/youtube/_video.py` ต่อกันเป็น `reason. subreason` ("This video has been removed", "This video is no longer available") |
@@ -194,3 +196,6 @@ Big Buck Bunny © Blender Foundation | www.bigbuckbunny.org
   `ffmpeg -f lavfi -i "testsrc=size=1920x1080:rate=10:duration=4" -c:v libx264 -preset veryslow -crf 40 -bf 0 -g 10 -keyint_min 10 -sc_threshold 0 -pix_fmt yuv420p -an -movflags +frag_keyframe+empty_moov+default_base_moof+global_sidx -fflags +bitexact -flags:v +bitexact piece.mp4`
 - ใช้กับ `core/frame_piece.py` (เทสตัวอ่าน sidx), `FakeExtractor.fetch_frame_piece` (ตัดชิ้นด้วยตัวอ่านตัวจริง เวลาเกิน 4 วินาทีวนกลับด้วย `t % 4000`) และเทส ffmpeg จริงของการถ่ายภาพ (ภาพจากชิ้นต้องตรงกับภาพจากไฟล์เต็มที่เวลาเดียวกัน)
 - คลิปปลอมใน `downloads/behaviors.json` (ทุกตัว `probeAs` BBB): `CAPTURE0001` ถ่ายได้ปกติ · `CAPTURENO01` (`captureError: E_CAPTURE_UNSUPPORTED`) · `CAPTUREBOT1` (`E_BOT_CHECK`) · `CAPTURENET1` (`E_NETWORK`) · คลิปอื่นทุกตัวถ่ายได้จาก fixture เดียวกัน
+
+## บัญชียูทูปชั่วคราว (M5 รอบ C)
+- คลิปปลอมใน `downloads/behaviors.json` (ทุกตัว `probeAs` BBB): `ACCOUNTAGE1` "คลิปจำกัดอายุ" (`needsAccount: E_AGE_RESTRICTED`) · `ACCOUNTMEM1` "คลิปเฉพาะสมาชิก" (`needsAccount: E_VIDEO_PRIVATE`) · `FakeExtractor.probe` ของคลิปที่มี `needsAccount` พลาดด้วยรหัสนั้นเมื่อไม่อยู่ใน `account_scope.signed_in(...)` และผ่านเมื่ออยู่ (`download` และ `fetch_frame_piece` เรียก probe จึงได้กฎเดียวกัน) · `PRIVATEVID1` ส่วนตัวเสมอแม้ใช้บัญชี (บัญชีไม่มีสิทธิ์ดู) · ใช้ใน `test_extractor_account.py`, `test_videos_account.py`, `test_handlers_account.py`, `tests/api/test_videos_api.py`, `test_account_privacy.py`, `test_lifecycle.py` และ `web/e2e/queue-account.spec.ts`

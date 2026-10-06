@@ -44,7 +44,6 @@ def test_defaults_match_the_c5_table(store, tmp_path):
         "captureQuality": "max",
         "theme": "system",
         "filenameStyle": "title",
-        "cookies": {"enabled": False, "source": None, "warningAccepted": False},
         "statsResetAt": None,
         "lastUsed": {},
     }
@@ -158,8 +157,15 @@ def test_non_mapping_patch_is_rejected(store):
     assert info.value.code == "E_BAD_REQUEST"
 
 
-def test_get_exposes_only_cookie_status_fields(store):
-    assert set(store.get()["cookies"]) == {"enabled", "source", "warningAccepted"}
+def test_legacy_cookies_row_is_ignored_then_dropped_on_the_next_save(db, store):  # M5 รอบ C spec 2.5
+    db.execute(
+        "INSERT INTO settings (key, value_json) VALUES ('cookies', ?)",
+        ('{"enabled": true, "source": "file", "warningAccepted": true}',),
+    )
+    assert "cookies" not in store.get()
+    store.patch({"theme": "dark"})
+    assert db.execute("SELECT key FROM settings WHERE key = 'cookies'") == []
+    assert store.get()["theme"] == "dark"
 
 
 def test_corrupt_stored_row_falls_back_to_default(db, store):
