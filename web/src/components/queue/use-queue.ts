@@ -3,7 +3,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 
 import { openAccountDialog } from "@/components/account/account-store"
-import { showRemovedToast } from "@/components/account/use-account"
+import { REMOVED_TOAST_ID, showRemovedToast } from "@/components/account/use-account"
 import { fill, th } from "@/i18n/th"
 import { ACCOUNT_KEY, showAccountButton, type AccountEvent } from "@/lib/account"
 import { ApiError } from "@/lib/api"
@@ -207,14 +207,20 @@ function notifyAccount(client: QueryClient, event: AccountEvent): void {
 
 /**
  * ตัวจัดการข่าว SSE ของแอพ (แยกออกมาเพื่อเทส) · app.shutdown ล้าง toast ทั้งหมด แต่บัญชีที่เพิ่งถูกลบเพราะปิดโปรแกรม
- * (ข่าว account reason "shutdown" มาก่อน app.shutdown เสมอ) ต้องยังเตือนให้ไปออกจากระบบ จึงแสดง toast "ลบบัญชีแล้ว" ใหม่หลังล้าง
+ * (ข่าว account reason "shutdown" มาก่อน app.shutdown เสมอ) ต้องยังเตือนให้ไปออกจากระบบ: ล้าง toast อื่นทีละตัวแล้วเก็บ toast
+ * "ลบบัญชีแล้ว" ไว้ (dismiss() ทั้งหมดแล้วสร้าง id เดิมใหม่ทันที = sonner ลบ toast ใหม่ทิ้งตามรอบ dismiss) ไม่มี = แสดงใหม่
  */
 export function serverEventHandlers(client: QueryClient): Omit<ConnectOptions, "createSource"> {
   let lastAccountReason: string | undefined
   return {
     onShutdown: () => {
-      toast.dismiss()
-      if (lastAccountReason === "shutdown") showRemovedToast()
+      if (lastAccountReason !== "shutdown") {
+        toast.dismiss()
+        return
+      }
+      const shown = toast.getToasts()
+      for (const t of shown) if (t.id !== REMOVED_TOAST_ID) toast.dismiss(t.id)
+      if (!shown.some((t) => t.id === REMOVED_TOAST_ID)) showRemovedToast()
     },
     onJobChange: (before, after) => notifyJobChange(client, before, after),
     onAccount: (event) => {

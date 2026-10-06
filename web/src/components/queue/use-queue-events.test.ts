@@ -7,7 +7,7 @@ import { ApiError } from "@/lib/api"
 import { JOBS_KEY } from "@/lib/jobs"
 import type { Job } from "@/lib/types"
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() }))
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn(), getToasts: vi.fn() }))
 vi.mock("sonner", () => ({ toast }))
 const api = vi.hoisted(() => ({ retryJob: vi.fn() }))
 vi.mock("@/lib/jobs", async (importOriginal) => ({ ...(await importOriginal<object>()), retryJob: api.retryJob }))
@@ -33,6 +33,7 @@ const failed = (code: string) => job({ status: "failed", error: { code, message:
 
 beforeEach(() => {
   for (const fn of [...Object.values(toast), api.retryJob]) fn.mockReset()
+  toast.getToasts.mockReturnValue([])
 })
 afterEach(() => accountDialog.close())
 
@@ -88,15 +89,27 @@ describe("runJobAction: ตัวเดียวทั้งปุ่มใน�
 })
 
 describe("serverEventHandlers: ปิดโปรแกรม", () => {
-  it("บัญชีถูกลบเพราะปิดโปรแกรม: หลังล้าง toast ทั้งหมดต้องแสดง toast ลบบัญชีใหม่", () => {
+  it("บัญชีถูกลบเพราะปิดโปรแกรม: ล้าง toast อื่นทีละตัว แต่ toast ลบบัญชีที่ขึ้นอยู่แล้วยังอยู่ (ไม่สร้างใหม่)", () => {
+    const handlers = serverEventHandlers(new QueryClient())
+    handlers.onAccount?.({ active: false, reason: "shutdown" })
+    expect(toast.info.mock.lastCall?.[0]).toBe(REMOVED)
+    toast.info.mockClear()
+    toast.getToasts.mockReturnValue([{ id: "job-j1" }, { id: "account-removed" }, { id: 7 }])
+    handlers.onShutdown()
+    expect(toast.dismiss.mock.calls).toEqual([["job-j1"], [7]])  // ไม่มี dismiss() แบบล้างทั้งหมด
+    expect(toast.info).not.toHaveBeenCalled()
+  })
+
+  it("บัญชีถูกลบเพราะปิดโปรแกรมแต่ toast ลบบัญชีถูกปิดไปแล้ว = แสดงใหม่หลังล้าง toast อื่น", () => {
     const handlers = serverEventHandlers(new QueryClient())
     handlers.onAccount?.({ active: false, reason: "shutdown" })
     toast.info.mockClear()
+    toast.getToasts.mockReturnValue([{ id: "job-j1" }])
     handlers.onShutdown()
-    expect(toast.dismiss).toHaveBeenCalledTimes(1)
+    expect(toast.dismiss.mock.calls).toEqual([["job-j1"]])
     expect(toast.info).toHaveBeenCalledTimes(1)
     expect(toast.info.mock.lastCall?.[0]).toBe(REMOVED)
-    expect(toast.dismiss.mock.invocationCallOrder[0]).toBeLessThan(toast.info.mock.invocationCallOrder[0])
+    expect(toast.info.mock.lastCall?.[1]).toMatchObject({ id: "account-removed", duration: Infinity })
   })
 
   it("ปิดโปรแกรมโดยไม่มีบัญชี หรือบัญชีถูกลบด้วยเหตุผลอื่น = แค่ล้าง toast", () => {

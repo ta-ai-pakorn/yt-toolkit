@@ -187,3 +187,28 @@ test("หน้าต่างแคบ 640 px: dialog และแถบบน�
   await expect(banner(page)).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(640)
 })
+
+test("ปิดโปรแกรมตอนถือบัญชีอยู่: toast ลบบัญชียังอยู่บนหน้า ปิดโปรแกรมแล้ว (ไม่หายตามรอบล้าง toast)", async ({ page }) => {
+  await mockAccount(page, { active: true })
+  const sse = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`
+  let release!: () => void
+  const ready = new Promise<void>((resolve) => (release = resolve))
+  // ข่าวตามลำดับจริงของ shutdown_services: account (reason shutdown) มาก่อน app.shutdown เสมอ · ส่งหลังหน้าโหลดเสร็จ
+  await page.route("**/api/events", async (route) => {
+    await ready
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" },
+      body: `retry: 600000\n\n${sse("account", { active: false, reason: "shutdown" })}${sse("app.shutdown", {})}`,
+    })
+  })
+  await page.goto("/history")
+  await expect(banner(page)).toBeVisible()
+  release()
+  await expect(page.getByText("ปิดโปรแกรมแล้ว")).toBeVisible()
+  await page.waitForTimeout(500) // พ้นรอบลบ toast ของ sonner (requestAnimationFrame + ราว 200 ms)
+  await expect(toast(page, REMOVED)).toBeVisible()
+  await page.waitForTimeout(1_000)
+  await expect(toast(page, REMOVED)).toBeVisible()
+  await expect(toast(page, REMOVED)).toHaveCount(1)
+})
