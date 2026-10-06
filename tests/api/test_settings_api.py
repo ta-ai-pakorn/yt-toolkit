@@ -21,7 +21,6 @@ SETTING_KEYS = {
     "captureQuality",
     "theme",
     "filenameStyle",
-    "cookies",
     "statsResetAt",
     "lastUsed",
 }
