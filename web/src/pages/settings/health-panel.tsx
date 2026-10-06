@@ -10,10 +10,11 @@ import { Button } from "@/components/ui/button"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
-import { th } from "@/i18n/th"
+import { fill, th } from "@/i18n/th"
+import { localClock } from "@/lib/account"
 import { ApiError, api } from "@/lib/api"
 import { appShutdown } from "@/lib/events"
-import type { Health, ToolState, ToolStatus } from "@/lib/types"
+import type { AccountHealth, Health, ToolState, ToolStatus } from "@/lib/types"
 
 import { useHealth } from "./use-health"
 
@@ -41,6 +42,28 @@ function detail(key: RowKey, tool: ToolStatus): string {
     key === "output" ? tool.path : null,
   ]
   return parts.filter(Boolean).join(" · ")
+}
+
+/** แถว "บัญชียูทูป" (M5 รอบ C spec 1.4): สถานะอย่างเดียว พร้อมเสมอ ไม่ต่อเน็ต */
+function AccountRow({ account }: { account: AccountHealth }) {
+  const text =
+    account.active && account.importedAt !== null
+      ? fill(th.account.healthOn, { time: localClock(account.importedAt) })
+      : th.account.statusOff
+  return (
+    <Item variant="outline" data-testid="tool-account">
+      <ItemMedia>
+        <CircleCheck aria-hidden className={TONE.ok} />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>{th.health.rows.account}</ItemTitle>
+        <ItemDescription>{text}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Badge variant="outline">{th.health.status.ok}</Badge>
+      </ItemActions>
+    </Item>
+  )
 }
 
 export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
@@ -138,6 +161,7 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
             </Item>
           )
         })}
+        {health.data.account && <AccountRow account={health.data.account} />}
       </ItemGroup>
       <div className="flex flex-wrap justify-end gap-2">
         <Button variant="outline" onClick={() => void health.refetch()} disabled={health.isFetching}>
