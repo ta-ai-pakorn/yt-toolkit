@@ -52,6 +52,31 @@ def _hooks() -> DownloadHooks:
                          ffmpeg_location=None)  # fmt: skip
 
 
+def _a_cookie_value(jar: Any) -> bytes:
+    """ค่าคุกกี้หนึ่งค่าจาก jar (ยาวที่สุด) ไว้ค้นในไฟล์ · ห้ามพิมพ์ค่านี้ ห้ามใส่ในข้อความ assert"""
+    values = [c.value for c in jar if c.value and len(c.value) >= 8]
+    assert values, "jar has no cookie value long enough to search for"
+    return max(values, key=len).encode("utf-8")
+
+
+def _ytdlp_cachedir(ext: YtDlpExtractor, jar: Any) -> Path | None:
+    """โฟลเดอร์ cache ของ yt-dlp ที่ตัวดึงข้อมูลใช้ (ถามผ่าน YoutubeDL ของ extractor เทสไม่ import yt_dlp เอง)"""
+    with ext._ydl({"quiet": True, "no_warnings": True}, with_account=jar) as ydl:
+        if not ydl.cache.enabled:
+            return None
+        return Path(ydl.cache._get_root_dir())
+
+
+def _files_with(needle: bytes, roots: list[Path]) -> list[str]:
+    """ชื่อไฟล์ (เทียบกับโฟลเดอร์ที่ค้น) ที่มี needle อยู่ คืนแค่ชื่อไฟล์ ไม่คืนเนื้อหา"""
+    found = []
+    for root in roots:
+        for path in root.rglob("*"):
+            if path.is_file() and needle in path.read_bytes():
+                found.append(f"{root.name}/{path.relative_to(root).as_posix()}")
+    return found
+
+
 def test_without_the_account_the_clip_is_age_restricted(jar: Any) -> None:
     with pytest.raises(YtError) as info:
         YtDlpExtractor().probe(CLIP)
@@ -70,6 +95,13 @@ def test_signed_in_probe_and_a_small_download(jar: Any, tmp_path: Path) -> None:
         result = ext.download(CLIP, _smallest_audio, workdir, _hooks())
     size = result.path.stat().st_size
     assert 0 < size < MAX_AUDIO_BYTES
-    assert [p.name for p in tmp_path.rglob("*") if p.is_file()] == [result.path.name]  # ไม่มีไฟล์คุกกี้ลงดิสก์
+    media = [p for p in tmp_path.rglob("media.*") if p.is_file() and p.stat().st_size > 0]
+    assert [p.name for p in media] == [result.path.name]  # ไฟล์เสียงหนึ่งไฟล์ (yt-dlp อาจทิ้งไฟล์ข้างเคียงอื่นได้ แต่ห้ามมีค่าคุกกี้)
+    roots = [tmp_path]
+    cachedir = _ytdlp_cachedir(ext, jar)
+    if cachedir is not None and cachedir.is_dir():
+        roots.append(cachedir)
+    leaks = _files_with(_a_cookie_value(jar), roots)
+    assert leaks == []  # ไม่มีค่าคุกกี้ลงดิสก์ ทั้งใน temp ของเทสและ cache ของ yt-dlp (รายการนี้มีแค่ชื่อไฟล์)
     print(f"{CLIP}: {result.path.name} {size / 1e6:.1f} MB")
     time.sleep(GAP_S)
