@@ -14,9 +14,10 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import datetime
 from typing import Any, Protocol, TypeVar
 
-from .yterrors import ACCOUNT_CODES, YtError
+from .yterrors import ACCOUNT_CODES, YtError, queue_paused_error
 
 log = logging.getLogger("yttoolkit")
 
@@ -33,6 +34,8 @@ class AccountGate(Protocol):
 
     def jar(self) -> Any | None: ...
     def mark_used(self, job_id: str | None) -> None: ...
+    def blocked(self) -> bool: ...  # ถือบัญชีอยู่แต่คิวพักเพราะยูทูปขอตรวจสอบ
+    def pause_until(self) -> datetime | None: ...
 
 
 def current_jar() -> Any | None:
@@ -57,6 +60,8 @@ def with_account_retry(accounts: AccountGate | None, call: Callable[[], T], *, j
     = เรียก call() ซ้ำอีกครั้งเดียวทั้งก้อนใน signed_in(jar) (ทุกคำขอของงานนั้นใช้บัญชีเดียวกัน)
 
     - รหัสอื่น (E_BOT_CHECK, E_NETWORK ฯลฯ) ไม่ลองด้วยบัญชี โยนต่อทันที (C9)
+    - คิวพักเพราะยูทูปขอตรวจสอบ (accounts.blocked()) = ไม่ลองด้วยบัญชี ไม่อ่าน jar (spec 4) โยน E_QUEUE_PAUSED
+      พร้อมเวลาที่คิวพักถึง · ไม่รู้เวลา (คิวเพิ่งทำงานต่อระหว่างนั้น) = โยน error เดิมของรอบไม่ใช้บัญชี
     - รอบที่ใช้บัญชีพลาด = YtError รหัสเดิม detail กลาง ๆ ไม่มีข้อความดิบของ yt-dlp และตัดสาย exception (from None)
       รหัสใน ACCOUNT_CODES ติด account_tried (ข้อความ "ลองด้วยบัญชีแล้ว...") บัญชียังอยู่
     - อยู่ในขอบเขตที่ใช้บัญชีแล้ว (งานซ้อนงาน) = เรียกตรง ๆ ไม่ลองซ้ำซ้อน
@@ -69,6 +74,11 @@ def with_account_retry(accounts: AccountGate | None, call: Callable[[], T], *, j
     except YtError as exc:
         if exc.code not in ACCOUNT_CODES:
             raise
+        if accounts.blocked():
+            until = accounts.pause_until()
+            if until is None:
+                raise
+            raise queue_paused_error(until) from None
         # ลำดับก่อนอ่าน jar: บัญชีถูกล้างหลังจากนี้ (AccountService ทิ้ง jar ก่อนเรียก on_clear) = ขอบเขตนี้นับเป็นของเก่า
         epoch = account_epoch()
         jar = accounts.jar()

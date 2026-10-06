@@ -397,3 +397,25 @@ def test_before_the_deadline_nothing_is_cleared(env: Env) -> None:
     assert env.service.jar() is not None
     assert env.service.status()["active"] is True
     assert len(env.events) == 1
+
+
+# ---------- I2: คิวพักเพราะยูทูปขอตรวจสอบ = ห้ามใช้บัญชี (spec 4) ----------
+
+
+def test_blocked_only_while_an_account_is_held_and_the_queue_is_paused() -> None:
+    paused: list[datetime] = []
+    service = AccountService(
+        fake_parse, blocked=lambda: bool(paused), pause_until=lambda: paused[0] if paused else None
+    )
+    assert service.blocked() is False
+    paused.append(T0)
+    assert service.blocked() is False  # ไม่ได้ถือบัญชี: ไม่มีอะไรให้กัน
+    service.import_text(GOOD)
+    assert service.blocked() is True and service.pause_until() == T0
+    paused.clear()
+    assert service.blocked() is False and service.pause_until() is None
+
+
+def test_never_blocked_by_default(env: Env) -> None:
+    env.service.import_text(GOOD)
+    assert env.service.blocked() is False and env.service.pause_until() is None

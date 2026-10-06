@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from datetime import datetime, timedelta, timezone
 
 # ข้อความถึงผู้ใช้ คัดลอกตรงตัวจาก PRD ข้อ 7 (เฉพาะรหัสที่ core ใช้)
 # E_NETWORK ใช้รุ่นไม่มีตัวนับครั้ง ตัวนับ "ครั้งที่ n/3" หน้าเว็บสร้างเองจาก Job.attempt (M4)
@@ -198,3 +199,12 @@ class YtError(Exception):
             return template.format_map(self.params or {})
         except (KeyError, ValueError, IndexError):
             return fallback
+
+
+_BANGKOK = timezone(timedelta(hours=7))
+
+
+def queue_paused_error(until: datetime) -> YtError:
+    """E_QUEUE_PAUSED ของคำขอที่ต้องรอคิวพัก (ยูทูปขอตรวจสอบ) {time} = เวลาแบบนาฬิกา HH:MM ของประเทศไทย"""
+    clock = until.astimezone(_BANGKOK).strftime("%H:%M")
+    return YtError("E_QUEUE_PAUSED", "queue paused by a bot check", params={"time": clock})

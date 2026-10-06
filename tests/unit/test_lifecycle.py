@@ -2300,6 +2300,29 @@ def test_only_a_queued_job_that_used_the_account_starts_the_grace_once_the_queue
         services.db.close()
 
 
+def test_a_bot_check_pause_blocks_the_account_until_the_queue_resumes(paths, fake_platform, monkeypatch):
+    monkeypatch.delenv(lifecycle.ACCOUNT_GRACE_ENV, raising=False)
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        accounts, queue = services.accounts, services.queue
+        accounts.import_text(ACCOUNT_FILE)
+        assert accounts.blocked() is False and accounts.pause_until() is None
+        queue.brake("E_BOT_CHECK")  # คิวพักจริง 10 นาที
+        assert accounts.blocked() is True
+        assert accounts.pause_until() == queue.pause_state().until
+        with pytest.raises(YtError) as info:
+            services.captures.capture("ACCOUNTAGE1", 1_000)  # ไม่มีคำขอที่ใช้บัญชีระหว่างคิวพัก
+        assert info.value.code == "E_QUEUE_PAUSED"
+        assert accounts.status()["used"] is False
+        queue.resume()
+        assert accounts.blocked() is False
+        services.captures.capture("ACCOUNTAGE1", 1_000)  # คิวทำงานต่อแล้ว ใช้บัญชีได้อีก
+        assert accounts.status()["used"] is True
+    finally:
+        services.accounts.clear("manual")
+        services.db.close()
+
+
 def test_run_app_puts_the_account_service_on_the_context(paths, fake_platform, monkeypatch):
     from yttoolkit.core.account_session import AccountService
 

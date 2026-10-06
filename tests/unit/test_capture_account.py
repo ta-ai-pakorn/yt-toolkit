@@ -18,15 +18,24 @@ JAR = object()
 
 
 class Gate:
-    def __init__(self, jar: Any | None = JAR) -> None:
+    def __init__(self, jar: Any | None = JAR, paused_until: datetime | None = None) -> None:
         self._jar = jar
+        self._paused_until = paused_until  # ไม่ใช่ None = คิวพักเพราะยูทูปขอตรวจสอบ
         self.used: list[str | None] = []
+        self.jar_reads = 0
 
     def jar(self) -> Any | None:
+        self.jar_reads += 1
         return self._jar
 
     def mark_used(self, job_id: str | None) -> None:
         self.used.append(job_id)
+
+    def blocked(self) -> bool:
+        return self._jar is not None and self._paused_until is not None
+
+    def pause_until(self) -> datetime | None:
+        return self._paused_until
 
 
 class RestrictedVideos(FakeVideos):
@@ -99,3 +108,12 @@ def test_a_bot_check_is_never_retried_with_the_account(tmp_path: Path) -> None:
         service.capture(BBB, 2_000)
     assert info.value.code == "E_BOT_CHECK"
     assert fetcher.jars == [None] and gate.used == []
+
+
+def test_a_paused_queue_never_captures_with_the_account(tmp_path: Path) -> None:
+    gate, fetcher = Gate(paused_until=datetime(2026, 10, 6, 3, 30, tzinfo=UTC)), RecordingFetcher()
+    service = _service(tmp_path, RestrictedVideos({BBB: clip_info()}), fetcher, gate)
+    with pytest.raises(YtError) as info:
+        service.capture(BBB, 2_000)
+    assert info.value.code == "E_QUEUE_PAUSED" and info.value.params == {"time": "10:30"}
+    assert fetcher.jars == [] and gate.jar_reads == 0 and gate.used == []  # ไม่มีคำขอที่ใช้บัญชี

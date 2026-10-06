@@ -262,6 +262,12 @@ def account_grace_s(fake: bool) -> float:
     return value if 0 < value <= GRACE_S else GRACE_S
 
 
+def _pause_end(queue: QueueRunner) -> datetime | None:
+    """เวลาที่คิวพักถึง (None = ไม่ได้พัก) ให้ข้อความ E_QUEUE_PAUSED ของบัญชียูทูปชั่วคราว"""
+    pause = queue.pause_state()
+    return None if pause is None else pause.until
+
+
 def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
     """เปิดฐานข้อมูล (สร้างตารางถ้ายังไม่มี) ล้าง cache เก่า เลือก extractor และสร้างบริการทั้งหมด
 
@@ -328,6 +334,9 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
             parse_account_cookies,
             publish=events.publish,
             busy=lambda: queue.pending_count() > 0,
+            # spec 4: คิวพักเพราะยูทูปขอตรวจสอบ = ห้ามใช้บัญชี (กันบัญชีโดนล็อก C9) จนคิวทำงานต่อ
+            blocked=lambda: queue.pause_state() is not None,
+            pause_until=lambda: _pause_end(queue),
             on_clear=videos.forget_signed_in,
             grace_s=account_grace_s(fake),
         )

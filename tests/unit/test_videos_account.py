@@ -159,6 +159,12 @@ def test_a_clear_right_after_the_retry_took_the_jar_keeps_nothing(env) -> None:
         def mark_used(self, job_id: str | None) -> None:
             pass
 
+        def blocked(self) -> bool:
+            return False
+
+        def pause_until(self) -> None:
+            return None
+
     assert with_account_retry(ClearingGate(), lambda: videos.get(AGE))["videoId"] == AGE
     with pytest.raises(YtError) as info:
         videos.get(AGE)

@@ -1088,6 +1088,12 @@ class _Gate:
     def mark_used(self, job_id: str | None) -> None:
         self.used.append(job_id)
 
+    def blocked(self) -> bool:
+        return False
+
+    def pause_until(self) -> None:
+        return None
+
 
 def test_restricted_clip_is_probed_again_with_the_account(api) -> None:
     client = api()
@@ -1115,3 +1121,31 @@ def test_an_account_without_access_gets_the_tried_copy(api) -> None:
         "message": "ลองด้วยบัญชีแล้วยังเปิดไม่ได้ บัญชีนี้อาจไม่มีสิทธิ์ดูคลิปนี้ หรือการเข้าสู่ระบบหมดอายุแล้ว ลองนำเข้าใหม่",
         "detail": "signed-in retry failed (E_VIDEO_PRIVATE)",
     }
+
+
+class _PausedGate(_Gate):
+    """ถือบัญชีอยู่ แต่คิวพักเพราะยูทูปขอตรวจสอบถึง 10:30 (เวลาประเทศไทย)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.jar_reads = 0
+
+    def jar(self) -> object:
+        self.jar_reads += 1
+        return super().jar()
+
+    def blocked(self) -> bool:
+        return True
+
+    def pause_until(self) -> datetime:  # type: ignore[override]
+        return datetime(2026, 10, 6, 3, 30, tzinfo=UTC)
+
+
+def test_a_paused_queue_keeps_the_restricted_probe_anonymous(api) -> None:
+    client = api()
+    client.app.state.ctx.accounts = gate = _PausedGate()
+    resp = client.get("/api/videos/ACCOUNTAGE1")
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "E_QUEUE_PAUSED"
+    assert resp.json()["error"]["message"] == MESSAGES["E_QUEUE_PAUSED"].format(time="10:30")
+    assert gate.jar_reads == 0 and gate.used == []  # ไม่มี probe ที่ใช้บัญชี

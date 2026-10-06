@@ -39,6 +39,12 @@ class Gate:
     def mark_used(self, job_id: str | None) -> None:
         self.used.append(job_id)
 
+    def blocked(self) -> bool:
+        return False
+
+    def pause_until(self) -> None:
+        return None
+
 
 class Ctx:
     def __init__(self, workdir: Path, output_root: Path) -> None:

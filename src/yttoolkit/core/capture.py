@@ -24,7 +24,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
@@ -36,7 +36,7 @@ from .files import PATH_LIMIT, ensure_output_root, plan_output
 from .frame_piece import PieceInfo, max_short_side
 from .frames import file_timecode
 from .inputs import VIDEO_ID
-from .yterrors import YtError
+from .yterrors import YtError, queue_paused_error
 
 log = logging.getLogger("yttoolkit")
 
@@ -53,7 +53,6 @@ MAX_SAME_SECOND = 99
 FFMPEG_DEADLINE_S = 60  # ffmpeg ของภาพหนึ่งภาพ (รวมรอบถอย 100 ms) นานกว่านี้ = ค้าง ยกเลิกแล้วปล่อยล็อก
 _OUTPUT_NAME = re.compile(r"frame_\d{2,}-\d{2}-\d{2}(?:_\d{1,2})?\.jpg")
 _LONGEST_NAME = "frame_000-00-00_99.jpg"
-_BANGKOK = timezone(timedelta(hours=7))
 
 
 class PieceFetcher(Protocol):
@@ -104,11 +103,6 @@ def _utcnow() -> datetime:
 
 def _u16(text: str) -> int:
     return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
-
-
-def _clock(moment: datetime) -> str:
-    """เวลาแบบนาฬิกา HH:MM ของประเทศไทย (ข้อความ "ลองใหม่หลัง {time}")"""
-    return moment.astimezone(_BANGKOK).strftime("%H:%M")
 
 
 def _write_error(err: OSError) -> YtError:
@@ -279,7 +273,7 @@ class CaptureService:
             return existing, False
         pause = self._queue.pause_state()
         if pause is not None:
-            raise YtError("E_QUEUE_PAUSED", "queue paused by a bot check", params={"time": _clock(pause.until)})
+            raise queue_paused_error(pause.until)
         if not self._media.available():
             raise YtError("E_FFMPEG_MISSING")
         if not self._busy.acquire(blocking=False):

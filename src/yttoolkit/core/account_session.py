@@ -60,6 +60,8 @@ class AccountService:
         *,
         publish: Publish | None = None,
         busy: Callable[[], bool] = lambda: False,
+        blocked: Callable[[], bool] = lambda: False,
+        pause_until: Callable[[], datetime | None] = lambda: None,
         on_clear: Callable[[], None] | None = None,
         now: Callable[[], datetime] = _utcnow,
         schedule: Schedule = _timer_schedule,
@@ -67,10 +69,13 @@ class AccountService:
         grace_s: float = GRACE_S,
     ) -> None:
         """parse(text) -> jar (YtError E_COOKIES_INVALID เมื่ออ่านไม่ได้) · busy() = คิวมีงานรอหรือกำลังทำ
-        on_clear() = ทิ้งข้อมูลที่ได้มาด้วยบัญชีนี้ (VideoService.forget_signed_in) เรียกเมื่อลบหรือแทนบัญชี"""
+        on_clear() = ทิ้งข้อมูลที่ได้มาด้วยบัญชีนี้ (VideoService.forget_signed_in) เรียกเมื่อลบหรือแทนบัญชี
+        blocked() = คิวพักเพราะยูทูปขอตรวจสอบ (spec 4: ระหว่างนั้นห้ามใช้บัญชี) · pause_until() = เวลาที่คิวพักถึง"""
         self._parse = parse
         self._publish = publish
         self._busy = busy
+        self._blocked = blocked
+        self._pause_until = pause_until
         self._on_clear = on_clear
         self._now = now
         self._schedule = schedule
@@ -103,6 +108,19 @@ class AccountService:
             status = self._status_locked()
         self._after_clear(cleared)
         return status
+
+    def blocked(self) -> bool:
+        """ถือบัญชีอยู่แต่คิวพักเพราะยูทูปขอตรวจสอบ = ห้ามส่งคำขอที่ใช้บัญชีจนคิวทำงานต่อ (spec 4 · C9)
+        เรียก blocked() ของคิวนอกล็อกของบัญชี (pause_state ของคิวถือล็อกคิวและอาจประกาศ queue.resumed)"""
+        with self._lock:
+            cleared = self._expire_due_locked()
+            held = self._jar is not None
+        self._after_clear(cleared)
+        return held and bool(self._blocked())
+
+    def pause_until(self) -> datetime | None:
+        """เวลาที่คิวพักถึง (None = ไม่ได้พัก) ใช้เติม {time} ของข้อความ E_QUEUE_PAUSED"""
+        return self._pause_until()
 
     def _status_locked(self) -> dict:
         if self._jar is None or self._imported_at is None:

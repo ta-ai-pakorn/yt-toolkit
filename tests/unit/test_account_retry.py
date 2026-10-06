@@ -6,6 +6,7 @@ test_videos_account.py, test_handlers_account.py, test_capture_account.py แล
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -18,12 +19,24 @@ MARKER = "MARKER-DETAIL"  # แทนข้อความดิบของ yt-
 
 
 class Gate:
-    def __init__(self, jar: Any | None = JAR) -> None:
+    """blocked = ถือบัญชีอยู่แต่คิวพักเพราะยูทูปขอตรวจสอบ · paused_until = เวลาที่คิวพักถึง"""
+
+    def __init__(self, jar: Any | None = JAR, *, blocked: bool = False, paused_until: datetime | None = None) -> None:
         self._jar = jar
+        self._blocked = blocked
+        self._paused_until = paused_until
         self.used: list[str | None] = []
+        self.jar_reads = 0
 
     def jar(self) -> Any | None:
+        self.jar_reads += 1
         return self._jar
+
+    def blocked(self) -> bool:
+        return self._blocked
+
+    def pause_until(self) -> datetime | None:
+        return self._paused_until
 
     def mark_used(self, job_id: str | None) -> None:
         self.used.append(job_id)
@@ -113,3 +126,36 @@ def test_interactive_use_is_marked_without_a_job_id() -> None:
     gate = Gate()
     with_account_retry(gate, Call(anonymous="E_VIDEO_PRIVATE"))
     assert gate.used == [None]
+
+
+# ---------- คิวพักเพราะยูทูปขอตรวจสอบ: ห้ามส่งคำขอที่ใช้บัญชี (spec 4 · C9) ----------
+
+PAUSED_UNTIL = datetime(2026, 10, 6, 3, 30, tzinfo=UTC)  # 10:30 เวลาประเทศไทย
+
+
+@pytest.mark.parametrize("code", ["E_AGE_RESTRICTED", "E_VIDEO_PRIVATE"])
+def test_a_paused_queue_blocks_the_signed_in_retry(code: str) -> None:
+    gate, call = Gate(blocked=True, paused_until=PAUSED_UNTIL), Call(anonymous=code)
+    with pytest.raises(YtError) as info:
+        with_account_retry(gate, call, job_id="job-1")
+    err = info.value
+    assert err.code == "E_QUEUE_PAUSED" and err.params == {"time": "10:30"}
+    assert err.message == MESSAGES["E_QUEUE_PAUSED"].format(time="10:30")
+    assert err.__suppress_context__ is True and MARKER not in str(err)
+    assert call.jars == [None]  # ไม่มีคำขอที่ใช้บัญชี
+    assert gate.jar_reads == 0 and gate.used == []  # ไม่อ่าน jar ไม่นับว่าใช้บัญชี
+
+
+def test_a_paused_queue_without_a_known_end_keeps_the_plain_error() -> None:
+    gate, call = Gate(blocked=True), Call(anonymous="E_AGE_RESTRICTED")
+    with pytest.raises(YtError) as info:
+        with_account_retry(gate, call)
+    assert info.value.code == "E_AGE_RESTRICTED" and info.value.account_tried is False
+    assert call.jars == [None] and gate.jar_reads == 0 and gate.used == []
+
+
+def test_a_paused_queue_leaves_other_codes_alone() -> None:
+    gate, call = Gate(blocked=True, paused_until=PAUSED_UNTIL), Call(anonymous="E_NETWORK")
+    with pytest.raises(YtError) as info:
+        with_account_retry(gate, call)
+    assert info.value.code == "E_NETWORK" and gate.jar_reads == 0
