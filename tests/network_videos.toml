@@ -39,3 +39,8 @@ portrait_clip = "IngFfl6DTqY"   # 60 วิ แนวตั้ง: ต้อง�
 [capture]
 # M5 รอบ B2 (T15): คลิปของ tests/network/test_capture_network.py · ตรวจข้อมูลคลิปซ้ำก่อนรันถ้าห่างหลายเดือน
 landscape = "aqz-KE-bpKQ"  # Big Buck Bunny 635 วิ, CC BY, mp4 avc1 ถึง 1080 และ av01 ถึง 2160 (spike 2026-10-05: 1080p 2.0 MB / 4K 7.5 MB ต่อภาพ)
+
+[account]
+# M5 รอบ C (T13): คลิปของ tests/network/test_account_network.py · ว่าง = ข้าม · พิธเลือกคลิปจำกัดอายุที่สั้นก่อนรัน
+# ไฟล์ cookies.txt ของบัญชีสำรองมาจาก env YT_TOOLKIT_TEST_COOKIES เท่านั้น ห้าม commit
+age_restricted = ""
