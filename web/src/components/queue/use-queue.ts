@@ -209,12 +209,13 @@ function notifyAccount(client: QueryClient, event: AccountEvent): void {
  * ตัวจัดการข่าว SSE ของแอพ (แยกออกมาเพื่อเทส) · app.shutdown ล้าง toast ทั้งหมด แต่บัญชีที่เพิ่งถูกลบเพราะปิดโปรแกรม
  * (ข่าว account reason "shutdown" มาก่อน app.shutdown เสมอ) ต้องยังเตือนให้ไปออกจากระบบ: ล้าง toast อื่นทีละตัวแล้วเก็บ toast
  * "ลบบัญชีแล้ว" ไว้ (dismiss() ทั้งหมดแล้วสร้าง id เดิมใหม่ทันที = sonner ลบ toast ใหม่ทิ้งตามรอบ dismiss) ไม่มี = แสดงใหม่
+ * reason "expired" ทำแบบเดียวกัน: เครื่องหลับเลย 2 ชม. แล้วปิดโปรแกรม = ตัวเช็กเวลาจริงลบด้วยเหตุผล expired แทน shutdown
  */
 export function serverEventHandlers(client: QueryClient): Omit<ConnectOptions, "createSource"> {
   let lastAccountReason: string | undefined
   return {
     onShutdown: () => {
-      if (lastAccountReason !== "shutdown") {
+      if (lastAccountReason !== "shutdown" && lastAccountReason !== "expired") {
         toast.dismiss()
         return
       }

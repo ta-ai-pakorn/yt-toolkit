@@ -112,6 +112,16 @@ describe("serverEventHandlers: ปิดโปรแกรม", () => {
     expect(toast.info.mock.lastCall?.[1]).toMatchObject({ id: "account-removed", duration: Infinity })
   })
 
+  it("บัญชีหมดเวลา (expired) แล้วปิดโปรแกรม = เก็บ toast ลบบัญชีไว้เหมือนกรณีปิดโปรแกรม", () => {
+    const handlers = serverEventHandlers(new QueryClient())
+    handlers.onAccount?.({ active: false, reason: "expired" })
+    toast.info.mockClear()
+    toast.getToasts.mockReturnValue([{ id: "job-j1" }, { id: "account-removed" }])
+    handlers.onShutdown()
+    expect(toast.dismiss.mock.calls).toEqual([["job-j1"]])
+    expect(toast.info).not.toHaveBeenCalled()
+  })
+
   it("ปิดโปรแกรมโดยไม่มีบัญชี หรือบัญชีถูกลบด้วยเหตุผลอื่น = แค่ล้าง toast", () => {
     const handlers = serverEventHandlers(new QueryClient())
     handlers.onShutdown()
