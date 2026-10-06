@@ -21,12 +21,10 @@
 
 ---
 
-## Open questions for the owner (Pete)
+## Owner answers (Pete, 2026-10-06)
 
-Each is kept to one constant/string so the answer is a one-line change after the round; the plan ships the default shown.
-
-- **Q1 — banner countdown wording.** Spec §6/§7 say "ลบอัตโนมัติภายใน HH:MM"; the plan renders the **time remaining** ("02:00" right after import = in 2 hours), which a reader may take for a clock time ("at 02:00"). The alternative is the clock time of deletion ("17:05"). One-line switch: `DELETE_TIME_STYLE` in `web/src/lib/account.ts` (`"remaining"` → `"clock"`), used by the banner and the Settings › ขั้นสูง status (T5, T8, T11). If Pete picks "clock", the e2e literals `02:00` in `account.spec.ts` / `settings-advanced.spec.ts` change with it.
-- **Q2 — file picker label.** Spec §7 has no Thai label for the file input; its accessible name is `cookies.txt` (`th.account.fileLabel`, T5). A Thai label from Pete replaces that one string (e2e `getByLabel("cookies.txt")` follows).
+- **Q1 = A: banner/status countdown in words.** "ลบอัตโนมัติภายใน 1 ชม. 59 นาที" (time remaining, minutes rounded up; "2 ชม." right after import; under an hour "10 นาที"). `DELETE_TIME_STYLE` stays `"remaining"`; `remainingClock` formats with `th.account.remainHours` "{h} ชม." / `remainMinutes` "{m} นาที" (T5). e2e literals are "ลบอัตโนมัติภายใน 2 ชม." (T8, T11).
+- **Q2 = A: file picker label "เลือกไฟล์ cookies.txt"** (`th.account.fileLabel`, T5). e2e `getByLabel("cookies.txt")` still matches (substring).
 
 **Owner inputs needed before the network run (T13 writes the test; nobody runs it without approval):** Pete's approval, one short age-restricted clip ID for `tests/network_videos.toml` `[account] age_restricted`, and the path of a `cookies.txt` exported from **his own backup account** in env `YT_TOOLKIT_TEST_COOKIES` (never copied into the repo). The run downloads one small audio file (about 1-5 MB) to a pytest temp folder; afterwards Pete signs out in the incognito window and deletes the file.
 
@@ -267,7 +265,7 @@ class YtDlpExtractor:
 ### C5. Web strings, types, data layer, SSE (`th.ts`, `types.ts`, `lib/account.ts`, `lib/events.ts`, T5 only)
 ```ts
 // th.ts — new section before `subs` (verbatim spec §7; no "คุกกี้")
-account: { use, title, warning, privateClips, steps: string[6], fileLabel: "cookies.txt", cancel, importRetry, import,
+account: { use, title, warning, privateClips, steps: string[6], fileLabel: "เลือกไฟล์ cookies.txt", remainHours: "{h} ชม.", remainMinutes: "{m} นาที", cancel, importRetry, import,
            invalid, banner: "กำลังใช้บัญชียูทูปชั่วคราว · ลบอัตโนมัติภายใน {time}", removeNow, removed, intro,
            statusOff, statusOn: "ใช้บัญชีชั่วคราวอยู่ ลบอัตโนมัติภายใน {time}", healthOn: "ใช้บัญชีชั่วคราวอยู่ (นำเข้าเมื่อ {time})" }
 settings.tabs.advanced = "ขั้นสูง" · health.rows.account = "บัญชียูทูป"
@@ -287,7 +285,7 @@ export function deleteAccount(): Promise<AccountStatus>
 export function isAccountCode(code: string | null | undefined): boolean
 export function needsAccount(error: unknown): boolean
 export function showAccountButton(code: string | null | undefined, active: boolean): boolean
-export function remainingClock(expiresAt: string, now: number, importedAt?: string): string   // "HH:MM" left, minutes rounded up
+export function remainingClock(expiresAt: string, now: number, importedAt?: string): string   // time left in words ("1 ชม. 59 นาที"), minutes rounded up (Pete Q1 = A)
 export function localClock(iso: string): string                                                // local "HH:MM", "" if unreadable
 export const DELETE_TIME_STYLE: "remaining" | "clock"   // Q1 switch, default "remaining"
 export function deleteTime(status: { expiresAt: string; importedAt?: string }, now: number, style?: "remaining" | "clock"): string
@@ -2933,27 +2931,28 @@ describe("error → ปุ่ม", () => {
   })
 })
 
-describe("remainingClock (แถบบนหน้า: ลบอัตโนมัติภายใน HH:MM)", () => {
-  it("ชั่วโมง:นาทีที่เหลือ ปัดนาทีขึ้น", () => {
-    expect(remainingClock("2026-10-06T05:00:00Z", NOW)).toBe("02:00")
-    expect(remainingClock("2026-10-06T04:59:59Z", NOW)).toBe("02:00")
-    expect(remainingClock("2026-10-06T03:09:01Z", NOW)).toBe("00:10")
-    expect(remainingClock("2026-10-06T03:00:01Z", NOW)).toBe("00:01")
+describe("remainingClock (แถบบนหน้า: ลบอัตโนมัติภายใน …)", () => {
+  it("เวลาที่เหลือเป็นคำ ปัดนาทีขึ้น", () => {
+    expect(remainingClock("2026-10-06T05:00:00Z", NOW)).toBe("2 ชม.")
+    expect(remainingClock("2026-10-06T04:59:59Z", NOW)).toBe("2 ชม.")
+    expect(remainingClock("2026-10-06T04:59:00Z", NOW)).toBe("1 ชม. 59 นาที")
+    expect(remainingClock("2026-10-06T03:09:01Z", NOW)).toBe("10 นาที")
+    expect(remainingClock("2026-10-06T03:00:01Z", NOW)).toBe("1 นาที")
   })
-  it("นาฬิกาของหน้าเว็บช้ากว่าเวลานำเข้า = นับจากเวลานำเข้า (ไม่โชว์ 02:01)", () => {
-    expect(remainingClock("2026-10-06T05:00:00Z", NOW - 14_000, "2026-10-06T03:00:00Z")).toBe("02:00")
-    expect(remainingClock("2026-10-06T03:10:00Z", NOW + 60_000, "2026-10-06T01:00:00Z")).toBe("00:09")
+  it("นาฬิกาของหน้าเว็บช้ากว่าเวลานำเข้า = นับจากเวลานำเข้า (ไม่โชว์ 2 ชม. 1 นาที)", () => {
+    expect(remainingClock("2026-10-06T05:00:00Z", NOW - 14_000, "2026-10-06T03:00:00Z")).toBe("2 ชม.")
+    expect(remainingClock("2026-10-06T03:10:00Z", NOW + 60_000, "2026-10-06T01:00:00Z")).toBe("9 นาที")
   })
-  it("เลยเวลาแล้ว หรืออ่านไม่ได้ = 00:00", () => {
-    expect(remainingClock("2026-10-06T02:00:00Z", NOW)).toBe("00:00")
-    expect(remainingClock("nonsense", NOW)).toBe("00:00")
+  it("เลยเวลาแล้ว หรืออ่านไม่ได้ = 0 นาที", () => {
+    expect(remainingClock("2026-10-06T02:00:00Z", NOW)).toBe("0 นาที")
+    expect(remainingClock("nonsense", NOW)).toBe("0 นาที")
   })
 })
 
 describe("deleteTime (คำถามเปิด Q1: เวลาที่เหลือ หรือเวลาบนนาฬิกา)", () => {
   it("ค่าเริ่มต้นเป็นเวลาที่เหลือตามสเปก", () => {
     expect(DELETE_TIME_STYLE).toBe("remaining")
-    expect(deleteTime({ expiresAt: "2026-10-06T05:00:00+00:00", importedAt: ACTIVE.importedAt }, NOW)).toBe("02:00")
+    expect(deleteTime({ expiresAt: "2026-10-06T05:00:00+00:00", importedAt: ACTIVE.importedAt }, NOW)).toBe("2 ชม.")
   })
   it("แบบ clock = เวลาตามนาฬิกาของเครื่องตอนที่จะลบ", () => {
     const at = new Date(2026, 9, 6, 17, 5)
@@ -3276,7 +3275,9 @@ with:
       "เปิดหน้าต่างนั้นค้างไว้ ไม่ต้องเปิดยูทูปในหน้าต่างนั้น",
       "เลือกไฟล์ด้านล่าง",
     ],
-    fileLabel: "cookies.txt",
+    fileLabel: "เลือกไฟล์ cookies.txt",
+    remainHours: "{h} ชม.",
+    remainMinutes: "{m} นาที",
     cancel: "ยกเลิก",
     importRetry: "นำเข้าแล้วลองใหม่",
     import: "นำเข้า",
@@ -3432,6 +3433,8 @@ export function patchSettings(
 ```ts
 import { queryOptions } from "@tanstack/react-query"
 
+import { fill, th } from "@/i18n/th"
+
 import { api, ApiError } from "./api"
 import type { AccountStatus } from "./types"
 
@@ -3491,7 +3494,7 @@ export function showAccountButton(code: string | null | undefined, active: boole
 }
 
 /**
- * เวลาที่เหลือก่อนลบเอง "HH:MM" (ชั่วโมง:นาที ปัดนาทีขึ้น ไม่ติดลบ) เช่น 2 ชม. = "02:00" · 9 นาที 1 วินาที = "00:10"
+ * เวลาที่เหลือก่อนลบเองเป็นคำ (พี่พิธเลือก Q1 = A) ปัดนาทีขึ้น ไม่ติดลบ เช่น "2 ชม." · "1 ชม. 59 นาที" · 9 นาที 1 วินาที = "10 นาที"
  * importedAt = ไม่นับเวลาก่อนนำเข้า (นาฬิกาของหน้าเว็บเดินทุก 15 วินาที อาจช้ากว่าเวลานำเข้า ห้ามโชว์เกิน 2 ชม.)
  */
 export function remainingClock(expiresAt: string, now: number, importedAt?: string): string {
@@ -3499,7 +3502,12 @@ export function remainingClock(expiresAt: string, now: number, importedAt?: stri
   const start = importedAt === undefined ? Number.NaN : Date.parse(importedAt)
   const from = Number.isNaN(start) ? now : Math.max(now, start)
   const minutes = Number.isNaN(end) ? 0 : Math.max(0, Math.ceil((end - from) / 60_000))
-  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  const hours = fill(th.account.remainHours, { h })
+  const mins = fill(th.account.remainMinutes, { m })
+  if (h === 0) return mins
+  return m === 0 ? hours : `${hours} ${mins}`
 }
 
 /** นาฬิกาตามเครื่อง "HH:MM" ของเวลา ISO (เวลานำเข้าในหน้าตรวจสุขภาพ) อ่านไม่ได้ = "" */
@@ -3510,8 +3518,8 @@ export function localClock(iso: string): string {
 }
 
 /**
- * คำถามเปิด Q1 ของพี่พิธ: "ลบอัตโนมัติภายใน HH:MM" ของแถบบนหน้าและแท็บขั้นสูง
- * "remaining" = เวลาที่เหลือ ("02:00" = อีก 2 ชั่วโมง) ตามสเปก 6 · "clock" = เวลาบนนาฬิกาที่จะลบ (เช่น "17:05")
+ * Q1 ของพี่พิธ (ตอบแล้ว 2026-10-06 = A): "ลบอัตโนมัติภายใน {time}" ของแถบบนหน้าและแท็บขั้นสูง
+ * "remaining" = เวลาที่เหลือเป็นคำ ("1 ชม. 59 นาที") · "clock" = เวลาบนนาฬิกาที่จะลบ (เช่น "17:05")
  * เปลี่ยนแบบที่แสดงได้ด้วยบรรทัดนี้บรรทัดเดียว
  */
 export const DELETE_TIME_STYLE = "remaining" as "remaining" | "clock"
@@ -6876,7 +6884,7 @@ test("นำเข้าไฟล์ที่ใช้ได้: dialog ปิ�
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
   expect(state.videoCalls).toBeGreaterThan(calls)
   expect(state.imports).toEqual([{ text: GOOD_FILE, acceptWarning: true }])
-  await expect(banner(page)).toContainText(/กำลังใช้บัญชียูทูปชั่วคราว · ลบอัตโนมัติภายใน 02:00/)
+  await expect(banner(page)).toContainText(/กำลังใช้บัญชียูทูปชั่วคราว · ลบอัตโนมัติภายใน 2 ชม\./)
   await page.goto("/history") // แถบอยู่ทุกหน้า
   await expect(banner(page)).toBeVisible()
   await banner(page).getByRole("button", { name: "ลบออกตอนนี้" }).click()
@@ -7059,7 +7067,7 @@ test("แท็บขั้นสูง: คำอธิบาย สถาน�
   await dialog.getByLabel("cookies.txt").setInputFiles({ name: "cookies.txt", mimeType: "text/plain", buffer: Buffer.from(GOOD_FILE) })
   await dialog.getByRole("button", { name: "นำเข้า", exact: true }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(panelStatus(page)).toContainText(/ใช้บัญชีชั่วคราวอยู่ ลบอัตโนมัติภายใน 02:00/)
+  await expect(panelStatus(page)).toContainText(/ใช้บัญชีชั่วคราวอยู่ ลบอัตโนมัติภายใน 2 ชม\./)
   await panelStatus(page).getByRole("button", { name: "ลบออกตอนนี้" }).click()
   await expect(panelStatus(page)).toHaveText("ไม่ได้ใช้บัญชี")
   await expect(page.locator("[data-sonner-toast]").filter({ hasText: "ลบบัญชีออกจากแอพแล้ว" })).toBeVisible()
@@ -8041,7 +8049,7 @@ with
 |---|---|---|
 | M5C-ERROR | เปิดคลิปจำกัดอายุ: ข้อความ "คลิปนี้จำกัดอายุ ต้องเข้าสู่ระบบยูทูปถึงจะเปิดได้" และปุ่ม "ใช้บัญชียูทูปชั่วคราว" (ไม่มีปุ่มลองใหม่) · กดแล้ว dialog มีคำเตือนสีแดง ข้อความคลิปส่วนตัว และ 6 ขั้นตอน · ไม่มีคำว่า "คุกกี้" บนจอ (มีแค่ชื่อไฟล์ cookies.txt) · "ยกเลิก" และ Esc ปิดโดยไม่มีอะไรเปลี่ยน | ☐ |
 | M5C-EXPORT | ทำตาม 6 ขั้นตอนใน dialog เองด้วย Chrome (หน้าต่างไม่ระบุตัวตน บัญชีสำรอง `youtube.com/robots.txt` ส่วนขยายที่อนุญาตในหน้าต่างไม่ระบุตัวตน) ได้ไฟล์ cookies.txt โดยไม่ต้องถามใคร | ☐ |
-| M5C-IMPORT | เลือกไฟล์ที่ไม่ใช่ cookies.txt (เช่นไฟล์ข้อความอื่น): ข้อความ "ไฟล์นี้ใช้ไม่ได้…" ใต้ช่อง dialog ยังเปิด · เลือกไฟล์จริงแล้ว "นำเข้าแล้วลองใหม่": dialog ปิด หน้าคลิปเปิดได้ แถบ "กำลังใช้บัญชียูทูปชั่วคราว · ลบอัตโนมัติภายใน 02:00" อยู่ทุกหน้า · คลิปนี้ไม่ขึ้นใน "ล่าสุด" | ☐ |
+| M5C-IMPORT | เลือกไฟล์ที่ไม่ใช่ cookies.txt (เช่นไฟล์ข้อความอื่น): ข้อความ "ไฟล์นี้ใช้ไม่ได้…" ใต้ช่อง dialog ยังเปิด · เลือกไฟล์จริงแล้ว "นำเข้าแล้วลองใหม่": dialog ปิด หน้าคลิปเปิดได้ แถบ "กำลังใช้บัญชียูทูปชั่วคราว · ลบอัตโนมัติภายใน 2 ชม." อยู่ทุกหน้า · คลิปนี้ไม่ขึ้นใน "ล่าสุด" | ☐ |
 | M5C-JOB | โหลด mp4 คลิปจำกัดอายุ (ก่อนนำเข้าก็ได้: งานพลาด toast มีปุ่ม "ใช้บัญชียูทูปชั่วคราว" เป็นปุ่มหลัก "ดูรายละเอียด" เป็นปุ่มรอง แถวในคิวมีปุ่มเดียวกัน · นำเข้าแล้วงานเดิมลองใหม่เอง) ไฟล์เปิดเล่นได้ · "ถ่ายภาพคมตรงนี้" ของคลิปนี้ได้ | ☐ |
 | M5C-GRACE | หลังงานที่ใช้บัญชีเสร็จและคิวว่าง รอราว 10 นาที: แถบหาย toast "ลบบัญชีออกจากแอพแล้ว · กลับไปกดออกจากระบบในหน้าต่างไม่ระบุตัวตน แล้วปิดหน้าต่าง" ค้างจนกดปิด (เปิดสองแท็บไว้ ทั้งสองแท็บเห็น) · ส่งคลิปจำกัดอายุอีกคลิประหว่างรอ = ไม่ถูกลบกลางทาง | ☐ |
 | M5C-REMOVE | "ลบออกตอนนี้" ที่แถบ: หายทันทีไม่ต้องยืนยัน toast เดียวกัน · ปิดโปรแกรมตอนถือบัญชีอยู่แล้วเปิดใหม่: ไม่มีแถบ คลิปจำกัดอายุขึ้นปุ่มอีกครั้ง · ออกจากระบบในหน้าต่างไม่ระบุตัวตนแล้วนำเข้าไฟล์เดิมอีกครั้ง: คลิปจำกัดอายุขึ้นข้อความ "ลองด้วยบัญชีแล้วยังเปิดไม่ได้…" | ☐ |

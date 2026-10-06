@@ -50,7 +50,7 @@ Research and sources for this round are in `docs/m5c-prep.md`, written 2026-10-0
 - **Settings > ขั้นสูง (W6, `/settings/advanced`):**
   - a new tab with a short explanation;
   - the button "ใช้บัญชียูทูปชั่วคราว";
-  - the current status ("ไม่ได้ใช้บัญชี" / "ใช้บัญชีชั่วคราวอยู่ ลบอัตโนมัติภายใน HH:MM");
+  - the current status ("ไม่ได้ใช้บัญชี" / "ใช้บัญชีชั่วคราวอยู่ ลบอัตโนมัติภายใน {เวลาที่เหลือ}");
   - a secondary button "ลบออกตอนนี้" while active.
   - The PRD's switch, source toggle and Chrome-127 note are dropped.
 - **With an account already held**, the same two codes never show the button. They use the "tried with the account" copy instead (§7).
@@ -78,7 +78,7 @@ One dialog, scrolling content, three parts in order:
 
 ### 1.3 Banner while the account is held
 - **Placement:** a thin bar under the top nav on every page, with an accent tint.
-- **Content:** "กำลังใช้บัญชียูทูปชั่วคราว · ลบอัตโนมัติภายใน HH:MM" and a link-style button "ลบออกตอนนี้". The button deletes with no confirm, because it is harmless.
+- **Content:** "กำลังใช้บัญชียูทูปชั่วคราว · ลบอัตโนมัติภายใน {เวลาที่เหลือ}" and a link-style button "ลบออกตอนนี้". The button deletes with no confirm, because it is harmless.
 - **After any deletion:**
   - a toast that does not auto-dismiss: "ลบบัญชีออกจากแอพแล้ว · กลับไปกดออกจากระบบในหน้าต่างไม่ระบุตัวตน แล้วปิดหน้าต่าง";
   - the banner disappears.
@@ -237,7 +237,8 @@ Holds at most one imported sign-in, in memory only. Thread-safe with one lock.
 | Dialog steps | 1. เปิดหน้าต่างไม่ระบุตัวตน (Ctrl+Shift+N) · 2. เข้าสู่ระบบยูทูปด้วยบัญชีสำรอง · 3. เปิด youtube.com/robots.txt ในแท็บเดิม · 4. ส่งออกไฟล์ cookies.txt ด้วยส่วนขยาย (ต้องอนุญาตให้ทำงานในหน้าต่างไม่ระบุตัวตน) · 5. เปิดหน้าต่างนั้นค้างไว้ ไม่ต้องเปิดยูทูปในหน้าต่างนั้น · 6. เลือกไฟล์ด้านล่าง |
 | Dialog buttons | ยกเลิก · นำเข้าแล้วลองใหม่ (from an error) / นำเข้า (from Settings) |
 | `E_COOKIES_INVALID` (inline) | ไฟล์นี้ใช้ไม่ได้ ตรวจว่าเข้าสู่ระบบยูทูปแล้วก่อนส่งออก แล้วส่งออก cookies.txt ใหม่ |
-| Banner | กำลังใช้บัญชียูทูปชั่วคราว · ลบอัตโนมัติภายใน HH:MM · ลบออกตอนนี้ |
+| Banner | กำลังใช้บัญชียูทูปชั่วคราว · ลบอัตโนมัติภายใน {เวลาที่เหลือ} · ลบออกตอนนี้ — เวลาที่เหลือเป็นคำ เช่น "2 ชม.", "1 ชม. 59 นาที", "10 นาที" (Pete Q1 = A, 2026-10-06) |
+| File picker (dialog) | เลือกไฟล์ cookies.txt (Pete Q2 = A, 2026-10-06) |
 | Toast after deletion | ลบบัญชีออกจากแอพแล้ว · กลับไปกดออกจากระบบในหน้าต่างไม่ระบุตัวตน แล้วปิดหน้าต่าง |
 | Health row | บัญชียูทูป: ไม่ได้ใช้บัญชี / ใช้บัญชีชั่วคราวอยู่ (นำเข้าเมื่อ HH:MM) |
 | Settings > ขั้นสูง intro | ใช้เมื่อต้องโหลดคลิปจำกัดอายุ คลิปส่วนตัว หรือคลิปเฉพาะสมาชิก แอพเก็บการเข้าสู่ระบบไว้ชั่วคราวและลบเองเมื่อโหลดเสร็จ |
