@@ -18,6 +18,7 @@ from collections.abc import Callable
 from . import runstate
 from .config import HOST, Paths, default_paths
 from .platform import Platform, current
+from .redact import add_redaction
 
 PING_TIMEOUT = 2
 
@@ -70,9 +71,12 @@ def setup_file_log(paths: Paths) -> None:
     target = os.path.abspath(filename)
     for existing in root.handlers:
         if isinstance(existing, logging.handlers.RotatingFileHandler) and existing.baseFilename == target:
+            add_redaction(existing)
             return
     handler = logging.handlers.RotatingFileHandler(filename, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    # M5 รอบ C: ซ่อนโฟลเดอร์ผู้ใช้และค่าคุกกี้ตั้งแต่สร้าง handler (ก่อนโหลด lifecycle) ไม่มีบรรทัดไหนหลุดก่อนตั้ง log
+    add_redaction(handler)
     root.addHandler(handler)
 
 

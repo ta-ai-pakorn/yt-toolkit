@@ -49,6 +49,7 @@ from .platform import LockFileError, Platform, current
 
 # ตัวจริงอยู่ใน probe (stdlib ล้วน) ที่นี่ส่งต่อชื่อเดิมให้โค้ดและเทสที่เรียกผ่าน lifecycle
 from .probe import base_url, find_running, is_alive, setup_file_log  # noqa: F401
+from .redact import HomePathFilter, SecretFilter, add_redaction
 
 log = logging.getLogger("yttoolkit")
 
@@ -111,30 +112,6 @@ def git_commit(root: Path, plat: Platform) -> str | None:
     return out.stdout.strip() or None
 
 
-class HomePathFilter(logging.Filter):
-    """แทนโฟลเดอร์ผู้ใช้ด้วย ~ ในข้อความ log และ traceback ก่อนเขียนลงไฟล์
-
-    log.exception ของคิวงานและ lifecycle อาจมี path เต็ม ซึ่งมีชื่อผู้ใช้ Windows ติดไปกับไฟล์ log ที่ส่งต่อ
-    """
-
-    _formatter = logging.Formatter()
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            message = record.getMessage()
-        except Exception:
-            return True  # ข้อความจัดรูปไม่ได้ ปล่อยให้ logging รายงานตามปกติ
-        record.msg = redact_home(message)
-        record.args = None
-        if record.exc_info and not record.exc_text:
-            record.exc_text = self._formatter.formatException(record.exc_info)
-        if record.exc_text:
-            record.exc_text = redact_home(record.exc_text)
-        if record.stack_info:
-            record.stack_info = redact_home(record.stack_info)
-        return True
-
-
 class ConnectionResetNoiseFilter(logging.Filter):
     """ทิ้งเฉพาะรายงาน ConnectionResetError ของ asyncio ตอนปิดการเชื่อมต่อ (_call_connection_lost)
 
@@ -163,9 +140,10 @@ def _app_log_handlers(paths: Paths) -> list[logging.Handler]:
 
 
 def install_log_filters(paths: Paths) -> None:
-    """ใส่ HomePathFilter และ ConnectionResetNoiseFilter ให้ handler ของ app.log ที่ตั้งไว้แล้ว (เรียกซ้ำได้ ไม่ใส่ซ้ำ)"""
+    """ใส่ ConnectionResetNoiseFilter, HomePathFilter และ SecretFilter ให้ handler ของ app.log ที่ตั้งไว้แล้ว
+    (เรียกซ้ำได้ ไม่ใส่ซ้ำ · probe.setup_file_log ใส่สองตัวหลังไว้ตั้งแต่สร้าง handler แล้ว)"""
     for handler in _app_log_handlers(paths):
-        for kind in (ConnectionResetNoiseFilter, HomePathFilter):
+        for kind in (ConnectionResetNoiseFilter, HomePathFilter, SecretFilter):
             if not any(isinstance(f, kind) for f in handler.filters):
                 handler.addFilter(kind())
 
@@ -872,6 +850,8 @@ def serve(port: int | None = None, dev: bool = False) -> int:
     plat = current()
     paths.ensure()
     logging.basicConfig(level=logging.INFO)
+    for handler in logging.getLogger().handlers:  # M5 รอบ C: log ของ serve (stderr) ก็ซ่อนโฟลเดอร์ผู้ใช้และค่าคุกกี้
+        add_redaction(handler)
     prepare_environment()
     try:
         lock = plat.try_lock(paths.run / "app.lock")
