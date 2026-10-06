@@ -96,6 +96,8 @@
 | `E_VIDEO_PRIVATE-1` | ข้อความจริงจากการ probe `yZIXLfi8CZQ` (คลิปที่ `extractor/youtube/_video.py` ระบุ `'skip': 'Private video'`) |
 | `E_VIDEO_PRIVATE-2` | เหตุผลแบบยาวของยูทูป ผ่านกิ่ง `'sign in'` ใน `extractor/youtube/_video.py` |
 | `E_VIDEO_PRIVATE-3` | `'skip': 'This playlist is private'` ใน `extractor/youtube/_tab.py` ในรูป `YouTube said: ...` ของ `extractor/youtube/_base.py` |
+| `E_VIDEO_PRIVATE-4` | (M5 รอบ C) **สังเคราะห์ ไม่ได้ probe จริง** (ไม่มีคลิปเฉพาะสมาชิกให้ทดสอบ): เหตุผลที่ยูทูปแสดงบนคลิปเฉพาะสมาชิก ("Join this channel to get access to members-only content like this video, and other exclusive perks.") ซึ่ง yt-dlp ส่งต่อทาง `raise_no_formats(reason)` ใน `extractor/youtube/_video.py` ในรูป `ERROR: [youtube] <id>: <reason>` |
+| `E_VIDEO_PRIVATE-5` | (M5 รอบ C) **สังเคราะห์** แบบเดียวกับ `-4`: เหตุผลที่ระบุระดับสมาชิก ("This video is available to this channel's members on level: ...") ต่อด้วย `subreason` (". " + ประโยคเดียวกับ `-4`) ตามที่ `_video.py` ต่อ `reason += f'. {subreason}'` |
 | `E_VIDEO_UNAVAILABLE-1` | ข้อความจริงจากการ probe id ที่ไม่มีอยู่ (`aaaaaaaaaaa`) |
 | `E_VIDEO_UNAVAILABLE-2` | `'skip': 'Video unavailable'` ใน `extractor/youtube/_video.py` |
 | `E_VIDEO_UNAVAILABLE-3`, `-4` | เหตุผล + subreason ที่ `extractor/youtube/_video.py` ต่อกันเป็น `reason. subreason` ("This video has been removed", "This video is no longer available") |

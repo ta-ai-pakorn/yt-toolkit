@@ -16,10 +16,11 @@ MESSAGES: dict[str, str] = {
     "E_INVALID_INPUT": "ลิงก์นี้ไม่ใช่ลิงก์ยูทูป ลองคัดลอกจากแถบที่อยู่ของเบราว์เซอร์อีกครั้ง",
     # PRD ข้อ 7 "ตั้งแต่ M4" (มีคิวแล้ว): คิวพักเองแบบเบรกฉุกเฉิน
     "E_BOT_CHECK": "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท พักคิวไว้ 10 นาทีก่อนนะ",
-    "E_VIDEO_PRIVATE": "คลิปนี้เป็นส่วนตัว เจ้าของต้องเปิดเป็นสาธารณะก่อน",
+    # M5 รอบ C (spec 7): ข้อความตอนยังไม่ได้ใช้บัญชี หน้าเว็บมีปุ่ม "ใช้บัญชียูทูปชั่วคราว" ต่อท้าย
+    "E_VIDEO_PRIVATE": "คลิปนี้เป็นส่วนตัวหรือเฉพาะสมาชิก ต้องเข้าสู่ระบบด้วยบัญชีที่มีสิทธิ์ดู",
     "E_VIDEO_UNAVAILABLE": "คลิปนี้ถูกลบหรือไม่มีแล้ว",
     "E_GEO_BLOCKED": "คลิปนี้ดูในประเทศไทยไม่ได้",
-    "E_AGE_RESTRICTED": "คลิปนี้จำกัดอายุ ต้องล็อกอินถึงจะโหลดได้ ซึ่งเวอร์ชันนี้ยังไม่รองรับ",
+    "E_AGE_RESTRICTED": "คลิปนี้จำกัดอายุ ต้องเข้าสู่ระบบยูทูปถึงจะเปิดได้",
     "E_LIVE_NOT_READY": "คลิปนี้ยังถ่ายทอดสดอยู่หรือยังไม่เผยแพร่ ลองใหม่หลังจบไลฟ์",
     # M5 รอบ B มีโหมดคมแล้ว (BRD #33): ข้อความชวนไปกด "ขอภาพคม"
     "E_NO_STORYBOARD": 'คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว กด "ขอภาพคม" แทนได้',
@@ -43,6 +44,8 @@ MESSAGES: dict[str, str] = {
     "E_JOB_STATE": "งานนี้เปลี่ยนสถานะไปแล้ว ลองรีเฟรชหน้าเว็บ",
     # ยูทูปตอบ 4xx อื่นที่ไม่ใช่ 429 (เช่น 403 ตอนโหลดไฟล์) ไม่ใช่เน็ตหลุด จึงไม่ลองใหม่อัตโนมัติและไม่พักคิว (Q2)
     "E_YT_REFUSED": "ยูทูปไม่ยอมส่งไฟล์ของคลิปนี้ตอนนี้ ลองใหม่ภายหลัง",
+    # M5 รอบ C: ไฟล์ cookies.txt ที่นำเข้าใช้ไม่ได้ (ไม่ใช่รูปแบบ Netscape ใหญ่เกิน 1 MB หรือไม่มีคุกกี้เข้าสู่ระบบของยูทูป)
+    "E_COOKIES_INVALID": "ไฟล์นี้ใช้ไม่ได้ ตรวจว่าเข้าสู่ระบบยูทูปแล้วก่อนส่งออก แล้วส่งออก cookies.txt ใหม่",
     "E_UNKNOWN": "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล",
 }
 
@@ -53,6 +56,13 @@ MESSAGES_NO_PARAMS: dict[str, str] = {
     # ไม่รู้เวลาที่คิวจะกลับมา (ไม่ควรเกิด capture ส่งเวลาเสมอ): ใช้ข้อความของ E_BOT_CHECK ที่มีอยู่แล้ว
     "E_QUEUE_PAUSED": "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท พักคิวไว้ 10 นาทีก่อนนะ",
 }
+
+# M5 รอบ C: รหัสที่ลองใหม่ด้วยบัญชียูทูปชั่วคราวได้ (spec 2.4) ห้ามเพิ่ม E_BOT_CHECK (C9: ปกป้องบัญชี)
+ACCOUNT_CODES = frozenset({"E_AGE_RESTRICTED", "E_VIDEO_PRIVATE"})
+# ข้อความของ ACCOUNT_CODES เมื่อลองด้วยบัญชีแล้วยังได้รหัสเดิม (spec 7) ใช้แทน MESSAGES ของรหัสนั้น
+ACCOUNT_TRIED_MESSAGE = (
+    "ลองด้วยบัญชีแล้วยังเปิดไม่ได้ บัญชีนี้อาจไม่มีสิทธิ์ดูคลิปนี้ หรือการเข้าสู่ระบบหมดอายุแล้ว ลองนำเข้าใหม่"
+)
 
 # ตรวจตามลำดับนี้ รหัสที่เจาะจงมาก่อนคำกว้าง ๆ เพราะข้อความจริงมักมีหลายวลีปนกัน เช่น
 # "Video unavailable. ... blocked it in your country" = ติดประเทศ ไม่ใช่คลิปหาย
@@ -72,7 +82,15 @@ _RULES: tuple[tuple[str, tuple[str | re.Pattern[str], ...]], ...] = (
     ),
     (
         "E_VIDEO_PRIVATE",
-        ("private video", "this video is private", "this playlist is private"),
+        (
+            "private video",
+            "this video is private",
+            "this playlist is private",
+            # M5 รอบ C: คลิปเฉพาะสมาชิกของช่อง (เหตุผลที่ยูทูปส่งผ่าน raise_no_formats ของ extractor/youtube/_video.py)
+            "members-only content",
+            "join this channel to get access",
+            "available to this channel's members",
+        ),
     ),
     (
         "E_GEO_BLOCKED",
@@ -137,12 +155,14 @@ class YtError(Exception):
 
     retry_after = อีกกี่วินาทีลองใหม่ได้ (มีเฉพาะ E_SESSION_WARMING) API ส่งเป็น retryAfterSeconds และ Retry-After
     params = ค่าที่เติมลงข้อความ (เช่น E_DISK_FULL ใช้ {"size": "3.2 GB"}) ไม่มี = ข้อความตามตาราง
+    account_tried = ลองด้วยบัญชียูทูปชั่วคราวแล้ว (M5 รอบ C) รหัสใน ACCOUNT_CODES ใช้ ACCOUNT_TRIED_MESSAGE
     """
 
     code: str
     detail: str
     retry_after: int | None
     params: Mapping[str, str] | None
+    account_tried: bool
 
     def __init__(
         self,
@@ -151,11 +171,13 @@ class YtError(Exception):
         *,
         retry_after: int | None = None,
         params: Mapping[str, str] | None = None,
+        account_tried: bool = False,
     ) -> None:
         self.code = code
         self.detail = detail
         self.retry_after = retry_after
         self.params = params
+        self.account_tried = account_tried
         super().__init__(f"{code}: {detail or self.message}")
 
     @property
@@ -164,7 +186,10 @@ class YtError(Exception):
 
         ข้อความที่มี {ชื่อ} เติมค่าจาก params ไม่มี params หรือค่าไม่ครบ = ข้อความสำรองใน MESSAGES_NO_PARAMS
         (error ห้ามพังซ้อน และห้ามโชว์ {ชื่อ} ดิบ) ข้อความธรรมดาไม่สน params
+        ลองด้วยบัญชีแล้ว (account_tried) และรหัสอยู่ใน ACCOUNT_CODES = ACCOUNT_TRIED_MESSAGE
         """
+        if self.account_tried and self.code in ACCOUNT_CODES:
+            return ACCOUNT_TRIED_MESSAGE
         template = MESSAGES.get(self.code, MESSAGES["E_UNKNOWN"])
         fallback = MESSAGES_NO_PARAMS.get(self.code)
         if fallback is None:
