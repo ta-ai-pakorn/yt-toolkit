@@ -38,6 +38,10 @@ def build_router(ctx: AppContext) -> APIRouter:
     @router.get("/health")
     def health() -> dict:
         body = {"version": ctx.version, "commit": ctx.commit, **_health()}
+        if ctx.accounts is not None:
+            # M5 รอบ C spec 1.4: บอกแค่สถานะ ไม่ต่อเน็ต ไม่มีชื่อหรือค่าคุกกี้ (status เป็น ok เสมอ)
+            status = ctx.accounts.status()
+            body["account"] = {"status": "ok", "active": status["active"], "importedAt": status.get("importedAt")}
         if ctx.fake:  # มีเฉพาะตอนโหมดข้อมูลปลอม หน้าเว็บจะแสดงแถบบอกไว้
             body["mode"] = "fake"
         return body
