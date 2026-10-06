@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 
+import { th } from "@/i18n/th"
+import { MAX_COOKIE_FILE_BYTES } from "@/lib/account"
+
 import { accountDialog, openAccountDialog } from "./account-store"
-import { canImport, dialogReducer, EMPTY_DIALOG, importLabel } from "./dialog-model"
+import { canImport, dialogReducer, EMPTY_DIALOG, importLabel, pickAction } from "./dialog-model"
 
 describe("dialogReducer", () => {
   it("เลือกไฟล์แล้วกดนำเข้าได้ · กำลังส่งกดซ้ำไม่ได้", () => {
@@ -45,5 +48,31 @@ describe("importLabel และที่เก็บสถานะ dialog", () 
     expect(accountDialog.get()).toEqual({ open: true, request: { origin: "error", onImported } })
     accountDialog.close()
     expect(accountDialog.get()).toEqual({ open: false, request: null })
+  })
+})
+
+describe("pickAction", () => {
+  const file = (size: number, text: () => Promise<string>) => ({ name: "cookies.txt", size, text })
+
+  it("ไม่มีไฟล์ = reset · อ่านได้ = picked", async () => {
+    expect(await pickAction(undefined)).toEqual({ type: "reset" })
+    expect(await pickAction(file(5, async () => "abc"))).toEqual({ type: "picked", fileName: "cookies.txt", text: "abc" })
+  })
+
+  it("ไฟล์เกิน 1 MB = ไฟล์ใช้ไม่ได้ โดยไม่อ่านไฟล์", async () => {
+    let read = false
+    const action = await pickAction(
+      file(MAX_COOKIE_FILE_BYTES + 1, async () => {
+        read = true
+        return "x"
+      }),
+    )
+    expect(action).toEqual({ type: "rejected", fileName: "cookies.txt", message: th.account.invalid })
+    expect(read).toBe(false)
+  })
+
+  it("อ่านไฟล์ไม่ได้ = ไฟล์ใช้ไม่ได้ (ข้อความเดียวกัน) ไม่ throw", async () => {
+    const action = await pickAction(file(5, () => Promise.reject(new Error("NotReadableError"))))
+    expect(action).toEqual({ type: "rejected", fileName: "cookies.txt", message: th.account.invalid })
   })
 })

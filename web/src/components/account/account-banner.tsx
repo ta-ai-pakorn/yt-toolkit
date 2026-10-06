@@ -9,7 +9,7 @@ import { useAccountStatus, useDeleteAccount, useNow } from "./use-account"
 /**
  * แถบบาง ๆ ใต้เมนูบนทุกหน้าเมื่อถือบัญชีชั่วคราวอยู่ (spec 1.3): "กำลังใช้บัญชียูทูปชั่วคราว · ลบอัตโนมัติภายใน 1 ชม. 59 นาที"
  * + ปุ่มแบบลิงก์ "ลบออกตอนนี้" (ไม่ต้องยืนยัน) · ตามสถานะของเซิร์ฟเวอร์ผ่าน SSE (ลบเอง = แถบหายในทุกแท็บ)
- * เวลาเป็นคำ ("2 ชม.") มาจาก deleteTime · ตัวเลขนับถอยหลังไม่ถูกอ่านซ้ำทุกครั้งที่เปลี่ยน (aria-live off)
+ * เวลาเป็นคำ ("2 ชม.") มาจาก deleteTime · ไม่ใช่ live region จึงไม่อ่านซ้ำทุกครั้งที่ตัวเลขเปลี่ยน
  */
 export function AccountBanner() {
   const status = useAccountStatus()
@@ -23,7 +23,7 @@ export function AccountBanner() {
         <UserRound aria-hidden className="size-4 shrink-0 text-accent-text" />
         <p className="min-w-0 flex-1">
           {before}
-          <span aria-live="off" className="tabular-nums">
+          <span className="tabular-nums">
             {deleteTime({ expiresAt: status.expiresAt, importedAt: status.importedAt }, now)}
           </span>
           {after}

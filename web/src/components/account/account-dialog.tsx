@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { TriangleAlert } from "lucide-react"
-import { useId, useReducer } from "react"
+import { useId, useReducer, useRef } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -9,12 +9,12 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { th } from "@/i18n/th"
-import { ACCOUNT_KEY, fileTooBig, importAccount } from "@/lib/account"
+import { ACCOUNT_KEY, importAccount } from "@/lib/account"
 import { ApiError } from "@/lib/api"
 import type { AccountStatus } from "@/lib/types"
 
 import { accountDialog, useAccountDialog } from "./account-store"
-import { canImport, dialogReducer, EMPTY_DIALOG, importLabel } from "./dialog-model"
+import { canImport, dialogReducer, EMPTY_DIALOG, importLabel, pickAction } from "./dialog-model"
 
 const t = th.account
 
@@ -22,6 +22,7 @@ const t = th.account
  * dialog "ใช้บัญชียูทูปชั่วคราว" (spec 1.2) ตัวเดียวทั้งแอพ: คำเตือน (สีอันตราย) · คลิปส่วนตัว · ขั้นตอนส่งออก · ช่องเลือกไฟล์
  * ยกเลิก / Esc / ปิด = ไม่ส่งอะไร · ไฟล์เกิน 1 MB หรือ backend ไม่รับ = ข้อความใต้ช่อง dialog ยังเปิด
  * สำเร็จ = ปิด dialog แคชสถานะเป็นใช้บัญชีอยู่ (แถบบนหน้าขึ้นทันที) แล้วทำสิ่งที่ผู้เปิดขอไว้ (onImported)
+ * กำลังนำเข้า = ปิดไม่ได้ (Esc / พื้นหลัง / ยกเลิก) ผลที่มาช้าจึงไม่ทำต่อหลังผู้ใช้ปิดไปแล้ว · เลือกไฟล์ซ้อนกัน = ใช้อันล่าสุด
  * ช่องเลือกไฟล์มีป้าย "เลือกไฟล์ cookies.txt" ที่มองเห็น (label + htmlFor) เป็นชื่อของช่อง (ข้อความ error ผูกด้วย aria-describedby)
  */
 export function AccountDialog() {
@@ -30,22 +31,18 @@ export function AccountDialog() {
   const [state, dispatch] = useReducer(dialogReducer, EMPTY_DIALOG)
   const inputId = useId()
   const errorId = useId()
+  const latestPick = useRef(0)
 
   const close = () => {
+    latestPick.current += 1
     accountDialog.close()
     dispatch({ type: "reset" })
   }
 
   async function pick(file: File | undefined) {
-    if (file === undefined) {
-      dispatch({ type: "reset" })
-      return
-    }
-    if (fileTooBig(file.size)) {
-      dispatch({ type: "rejected", fileName: file.name, message: t.invalid })
-      return
-    }
-    dispatch({ type: "picked", fileName: file.name, text: await file.text() })
+    const mine = ++latestPick.current
+    const action = await pickAction(file)
+    if (mine === latestPick.current) dispatch(action)
   }
 
   async function submit() {
@@ -63,7 +60,7 @@ export function AccountDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
+    <Dialog open={open} onOpenChange={(next) => (next || state.pending ? undefined : close())}>
       <DialogContent data-testid="account-dialog" className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t.title}</DialogTitle>
@@ -92,7 +89,7 @@ export function AccountDialog() {
           {state.error !== null && <FieldError id={errorId}>{state.error}</FieldError>}
         </Field>
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>{t.cancel}</DialogClose>
+          <DialogClose render={<Button variant="outline" disabled={state.pending} />}>{t.cancel}</DialogClose>
           <Button disabled={!canImport(state)} onClick={() => void submit()}>
             {state.pending && <Spinner aria-hidden />}
             {importLabel(request)}

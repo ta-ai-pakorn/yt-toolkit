@@ -1,4 +1,5 @@
 import { th } from "@/i18n/th"
+import { fileTooBig } from "@/lib/account"
 
 import type { AccountDialogRequest } from "./account-store"
 
@@ -29,6 +30,23 @@ export function dialogReducer(state: DialogState, action: DialogAction): DialogS
       return { ...state, error: action.message, pending: false }
     case "reset":
       return EMPTY_DIALOG
+  }
+}
+
+/** ไฟล์ที่ผู้ใช้เลือก (ส่วนของ File ที่ใช้) */
+export type PickedFile = { name: string; size: number; text: () => Promise<string> }
+
+/**
+ * ผลของการเลือกไฟล์เป็น action: ไม่มีไฟล์ = reset · ใหญ่เกิน 1 MB หรืออ่านไม่ได้ = ข้อความ "ไฟล์นี้ใช้ไม่ได้" (ข้อความเดียวกัน) · อ่านได้ = picked
+ */
+export async function pickAction(file: PickedFile | undefined): Promise<DialogAction> {
+  if (file === undefined) return { type: "reset" }
+  const invalid: DialogAction = { type: "rejected", fileName: file.name, message: th.account.invalid }
+  if (fileTooBig(file.size)) return invalid
+  try {
+    return { type: "picked", fileName: file.name, text: await file.text() }
+  } catch {
+    return invalid
   }
 }
 
