@@ -9,8 +9,9 @@ import {
   parseServerEvent,
   sharpRefreshTarget,
 } from "./events"
+import { ACCOUNT_KEY, INACTIVE } from "./account"
 import { JOBS_KEY, QUEUE_KEY } from "./jobs"
-import type { Job, QueueState } from "./types"
+import type { AccountStatus, Job, QueueState } from "./types"
 
 /** ปล่อยให้ promise ที่ค้าง (ยกเลิกคำขอ แล้วโหลดใหม่) ทำงานจนจบ */
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -271,10 +272,11 @@ describe("connectEvents", () => {
     await flush()
     expect(invalidate).toHaveBeenCalledWith({ queryKey: JOBS_KEY })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: QUEUE_KEY })
-    expect(invalidate).toHaveBeenCalledTimes(2)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ACCOUNT_KEY })
+    expect(invalidate).toHaveBeenCalledTimes(3)
     source.emit("open")
     await flush()
-    expect(invalidate).toHaveBeenCalledTimes(2)
+    expect(invalidate).toHaveBeenCalledTimes(3)
   })
 
   it("open ระหว่างที่คำขอรายการงานแรกยังไม่ตอบ: ยกเลิกคำขอนั้นแล้วโหลดใหม่ (คำตอบเดิมคำนวณก่อนต่อติด)", async () => {
@@ -308,16 +310,17 @@ describe("connectEvents", () => {
     await flush()
     expect(invalidate).toHaveBeenCalledWith({ queryKey: JOBS_KEY })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: QUEUE_KEY })
-    expect(invalidate).toHaveBeenCalledTimes(2)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ACCOUNT_KEY })
+    expect(invalidate).toHaveBeenCalledTimes(3)
     source.emit("open")
     await flush()
-    expect(invalidate).toHaveBeenCalledTimes(2)
+    expect(invalidate).toHaveBeenCalledTimes(3)
   })
 
   it("ฟังก์ชันที่คืนมาถอด listener ทั้งหมดและปิดการเชื่อมต่อ", () => {
     const client = new QueryClient()
     const { source, disconnect } = connect(client)
-    expect(source.count()).toBe(7)
+    expect(source.count()).toBe(8)
     disconnect()
     expect(source.count()).toBe(0)
     expect(source.closed).toBe(true)
@@ -343,5 +346,56 @@ describe("sharpRefreshTarget", () => {
     const { source } = connect(client)
     source.emit("job.updated", { id: JOB.id, status: "done" })
     expect(spy).toHaveBeenCalledWith({ queryKey: ["sharp", "aqz-KE-bpKQ"] })
+  })
+})
+
+describe("ข่าวบัญชียูทูปชั่วคราว (M5 รอบ C)", () => {
+  const ACTIVE: AccountStatus = {
+    active: true,
+    importedAt: "2026-10-06T03:00:00+00:00",
+    expiresAt: "2026-10-06T05:00:00+00:00",
+    used: true,
+  }
+
+  it("parseServerEvent อ่าน account (ไม่มีอย่างอื่นนอกจาก active / expiresAt / reason)", () => {
+    expect(parseServerEvent("account", '{"active":false,"reason":"queue_done"}')).toEqual({
+      type: "account",
+      active: false,
+      reason: "queue_done",
+    })
+    expect(parseServerEvent("account", '{"active":true,"expiresAt":"2026-10-06T03:10:00+00:00","x":1}')).toEqual({
+      type: "account",
+      active: true,
+      expiresAt: "2026-10-06T03:10:00+00:00",
+    })
+    expect(parseServerEvent("account", '{"active":"yes"}')).toBeNull()
+  })
+
+  it("ลบแล้ว: แคชเป็นไม่ได้ใช้บัญชี และเรียก onAccount พร้อม reason", () => {
+    const client = new QueryClient()
+    client.setQueryData(ACCOUNT_KEY, ACTIVE)
+    const onAccount = vi.fn()
+    let source: FakeSource | undefined
+    connectEvents(client, {
+      onShutdown: vi.fn(),
+      onAccount,
+      createSource: (url) => {
+        source = new FakeSource(url)
+        return source as unknown as EventSource
+      },
+    })
+    source!.emit("account", { active: true, expiresAt: "2026-10-06T03:10:00+00:00" })
+    expect(client.getQueryData(ACCOUNT_KEY)).toEqual({ ...ACTIVE, expiresAt: "2026-10-06T03:10:00+00:00" })
+    source!.emit("account", { active: false, reason: "expired" })
+    expect(client.getQueryData(ACCOUNT_KEY)).toEqual(INACTIVE)
+    expect(onAccount).toHaveBeenLastCalledWith({ type: "account", active: false, reason: "expired" })
+  })
+
+  it("นำเข้าจากแท็บอื่น: โหลดสถานะเต็มใหม่", () => {
+    const client = new QueryClient()
+    client.setQueryData(ACCOUNT_KEY, INACTIVE)
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+    applyServerEvent(client, { type: "account", active: true, expiresAt: "2026-10-06T05:00:00+00:00" })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ACCOUNT_KEY })
   })
 })
