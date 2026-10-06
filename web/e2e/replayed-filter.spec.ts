@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import AxeBuilder from "@axe-core/playwright"
+import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Page } from "@playwright/test"
 
 import { mockEnqueue } from "./queue-helpers"
@@ -229,7 +229,7 @@ test.describe("แท็บภาพเฟรม: ตัวกรอง 'ดู�
       await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
       await expect(frameList(page).getByRole("listitem")).toHaveCount(3)
       await expect(frameList(page).locator("[data-replayed]").first()).toBeVisible()
-      const results = await new AxeBuilder({ page }).analyze()
+      const results = await analyzeSettled(page)
       const serious = results.violations
         .filter((v) => v.impact === "serious" || v.impact === "critical")
         .map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))

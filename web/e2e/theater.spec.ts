@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import AxeBuilder from "@axe-core/playwright"
+import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Page } from "@playwright/test"
 
 import { fakeYTLog, installFakeYT } from "./fake-yt"
@@ -78,7 +78,7 @@ async function asPortrait(page: Page, videoId: string) {
 }
 
 async function seriousViolations(page: Page) {
-  const results = await new AxeBuilder({ page }).analyze()
+  const results = await analyzeSettled(page)
   return results.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => v.id)
 }
 

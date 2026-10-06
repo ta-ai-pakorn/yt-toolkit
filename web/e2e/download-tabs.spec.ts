@@ -2,7 +2,7 @@
 import fs from "node:fs"
 import path from "node:path"
 
-import AxeBuilder from "@axe-core/playwright"
+import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Page } from "@playwright/test"
 
 import type { AudioJobParams, VideoJobParams } from "../src/lib/types"
@@ -81,7 +81,7 @@ async function hoverDisabled(page: Page, name: string) {
 }
 
 async function seriousViolations(page: Page) {
-  const results = await new AxeBuilder({ page }).analyze()
+  const results = await analyzeSettled(page)
   return results.violations
     .filter((v) => v.impact === "serious" || v.impact === "critical")
     .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))

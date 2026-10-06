@@ -1,7 +1,7 @@
 import os from "node:os"
 import path from "node:path"
 
-import AxeBuilder from "@axe-core/playwright"
+import { analyzeSettled } from "./axe-settled"
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test"
 
 // W6 แท็บทั่วไป (M4 T17) · ใช้ backend ตัวเดียวกับ spec อื่นใน project chromium
@@ -63,7 +63,7 @@ async function stubSettings(page: Page, request: APIRequestContext): Promise<Stu
 const saved = (page: Page) => page.locator("[data-sonner-toast]", { hasText: "บันทึกแล้ว" })
 
 async function seriousViolations(page: Page) {
-  const results = await new AxeBuilder({ page }).analyze()
+  const results = await analyzeSettled(page)
   return results.violations
     .filter((v) => v.impact === "serious" || v.impact === "critical")
     .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))

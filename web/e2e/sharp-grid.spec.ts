@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import path from "node:path"
 
-import AxeBuilder from "@axe-core/playwright"
+import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Page } from "@playwright/test"
 
 import type { SharpSet } from "../src/lib/types"
@@ -41,7 +41,7 @@ const items = (page: Page) => page.getByRole("list", { name: FRAME_LIST }).getBy
 const toggle = (page: Page) => page.getByRole("group", { name: "ชุดภาพเฟรม" })
 
 async function seriousViolations(page: Page) {
-  const results = await new AxeBuilder({ page }).analyze()
+  const results = await analyzeSettled(page)
   return results.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => v.id)
 }
 
