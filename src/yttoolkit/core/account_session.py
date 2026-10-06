@@ -37,6 +37,15 @@ Schedule = Callable[[float, Callable[[], None]], None]
 Publish = Callable[[str, dict], None]
 
 
+def import_size(text: str) -> int:
+    """ขนาดไบต์แบบ UTF-8 ของข้อความที่นำเข้า · มีตัวอักษรที่เข้ารหัสไม่ได้ (surrogate เดี่ยว จากสคริปต์ ไม่ใช่เบราว์เซอร์)
+    = YtError E_COOKIES_INVALID (ไม่ใช่ 500)"""
+    try:
+        return len(text.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise YtError("E_COOKIES_INVALID", "not valid UTF-8") from None
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -146,7 +155,7 @@ class AccountService:
         ตั้ง timer ลบเองไม่ได้ (schedule พัง) = ถอยสถานะกลับเป็นก่อนนำเข้าแล้วส่ง error ต่อ"""
         if not isinstance(text, str):
             raise YtError("E_COOKIES_INVALID", f"expected text, got {type(text).__name__}")
-        if len(text.encode("utf-8")) > MAX_IMPORT_BYTES:
+        if import_size(text) > MAX_IMPORT_BYTES:
             raise YtError("E_COOKIES_INVALID", f"file larger than {MAX_IMPORT_BYTES} bytes")
         jar = self._parse(text)  # ตรวจก่อนแตะสถานะ: ไฟล์เสีย = บัญชีเดิมยังอยู่ครบ
         with self._lock:

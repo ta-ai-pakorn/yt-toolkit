@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -107,6 +108,22 @@ def test_more_than_1_mb_is_413(client, service) -> None:
     assert resp.json()["error"]["code"] == "E_COOKIES_INVALID"
     assert resp.json()["error"]["message"] == MESSAGES["E_COOKIES_INVALID"]
     assert service.jar() is None
+
+
+def test_a_lone_surrogate_is_422_not_500(client, service) -> None:
+    client.post("/api/cookies/import", json={"text": GOOD, "acceptWarning": True}, headers=AUTH)
+    held = service.jar()
+    raw = json.dumps({"text": GOOD + "\ud800", "acceptWarning": True})  # ensure_ascii: ส่งแบบ escape ใน JSON
+    resp = client.post(
+        "/api/cookies/import", content=raw.encode("ascii"), headers={**AUTH, "Content-Type": "application/json"}
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"] == {
+        "code": "E_COOKIES_INVALID",
+        "message": MESSAGES["E_COOKIES_INVALID"],
+        "detail": "not valid UTF-8",
+    }
+    assert service.jar() is held
 
 
 def test_an_invalid_file_is_422_and_keeps_the_held_account(client, service) -> None:

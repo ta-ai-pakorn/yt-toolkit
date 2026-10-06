@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
 
-from ..core.account_session import MAX_IMPORT_BYTES
+from ..core.account_session import MAX_IMPORT_BYTES, import_size
 from ..core.yterrors import MESSAGES, YtError
 from .errors import BAD_REQUEST_MESSAGE, error_response
 
@@ -37,11 +37,10 @@ def build_account_router(ctx: AppContext) -> APIRouter:
             return error_response(422, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, "body must be {text, acceptWarning}")
         if body.get("acceptWarning") is not True:
             return error_response(409, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, "acceptWarning must be true")
-        if len(body["text"].encode("utf-8")) > MAX_IMPORT_BYTES:
-            return error_response(
-                413, "E_COOKIES_INVALID", MESSAGES["E_COOKIES_INVALID"], f"file larger than {MAX_IMPORT_BYTES} bytes"
-            )
         try:
+            if import_size(body["text"]) > MAX_IMPORT_BYTES:
+                detail = f"file larger than {MAX_IMPORT_BYTES} bytes"
+                return error_response(413, "E_COOKIES_INVALID", MESSAGES["E_COOKIES_INVALID"], detail)
             return accounts.import_text(body["text"])
         except YtError as exc:
             return error_response(422, exc.code, exc.message, exc.detail or None)

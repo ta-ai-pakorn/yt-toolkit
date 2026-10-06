@@ -108,6 +108,13 @@ def test_oversize_text_is_rejected_before_parsing(env: Env) -> None:
     assert calls == [] and service.jar() is None
 
 
+def test_a_lone_surrogate_is_invalid_not_a_crash(env: Env) -> None:
+    with pytest.raises(YtError) as info:
+        env.service.import_text(GOOD + "\ud800")
+    assert info.value.code == "E_COOKIES_INVALID" and info.value.detail == "not valid UTF-8"
+    assert env.service.jar() is None
+
+
 def test_a_bad_file_keeps_the_held_account(env: Env) -> None:
     env.service.import_text(GOOD)
     held = env.service.jar()
