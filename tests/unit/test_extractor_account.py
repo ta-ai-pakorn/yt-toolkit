@@ -65,8 +65,22 @@ def test_keeps_only_youtube_and_google_domains() -> None:
 
 
 def test_bom_crlf_and_no_header_are_fine() -> None:
-    text = "﻿" + _line(".youtube.com", "LOGIN_INFO") + "\r\n" + _line("www.youtube.com", "PREF") + "\r\n"
+    text = "\ufeff" + _line(".youtube.com", "LOGIN_INFO") + "\r\n" + _line("www.youtube.com", "PREF") + "\r\n"
     assert _names(parse_account_cookies(text)) == {(".youtube.com", "LOGIN_INFO"), ("www.youtube.com", "PREF")}
+
+
+def test_indented_comment_and_dollar_lines_are_skipped() -> None:
+    text = HEADER + "   # indented comment\n" + "\t$ dollar line\n" + _line(".youtube.com", "SAPISID") + "\n"
+    assert _names(parse_account_cookies(text)) == {(".youtube.com", "SAPISID")}
+
+
+def test_a_huge_expiry_is_rejected_before_the_python_reader(capsys: pytest.CaptureFixture[str]) -> None:
+    text = HEADER + _line(".youtube.com", "SAPISID", expires="9" * 400) + "\n"
+    with pytest.raises(YtError) as info:
+        parse_account_cookies(text)
+    assert (info.value.code, info.value.detail) == ("E_COOKIES_INVALID", "line 2: expiry is not a number")
+    out = capsys.readouterr()
+    assert out.out == "" and out.err == ""  # ไม่มีคำเตือน "http.cookiejar bug!" หลุดลงจอ
 
 
 def test_a_wrong_domain_flag_is_fixed_not_fatal() -> None:
@@ -81,6 +95,7 @@ def test_a_wrong_domain_flag_is_fixed_not_fatal() -> None:
         _line(".google.com", "SAPISID") + "\n",  # คุกกี้เข้าสู่ระบบของ google.com อย่างเดียวไม่พอ
         "",
         HEADER,
+        _line(".youtube.com", "", value="SAPISID") + "\n",  # ช่องชื่อว่าง: ตัวอ่านของ Python เอาค่าไปเป็นชื่อ แล้วค่าเป็น None
     ],
 )
 def test_no_youtube_sign_in_cookie_is_invalid(text: str) -> None:

@@ -211,7 +211,8 @@ ACCOUNT_FORBIDDEN_OPTS = frozenset(
 )
 _HTTPONLY_PREFIX = "#HttpOnly_"
 _NETSCAPE_HEADER = "# Netscape HTTP Cookie File\n"
-_EXPIRES = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+# จำกัดความยาวไม่ให้ตัวเลขใหญ่เกินจน http.cookiejar คำนวณล้นแล้วเตือนลง stderr
+_EXPIRES = re.compile(r"[0-9]{1,15}(?:\.[0-9]{1,15})?")
 
 
 def _account_domain(domain: str) -> bool:
@@ -233,7 +234,7 @@ def parse_account_cookies(text: str) -> Any:
     kept: list[str] = []
     for number, line in enumerate(text.removeprefix("\ufeff").splitlines(), start=1):
         entry = line[len(_HTTPONLY_PREFIX) :] if line.startswith(_HTTPONLY_PREFIX) else line
-        if not entry.strip() or entry.startswith("#"):
+        if not entry.strip() or entry.strip().startswith(("#", "$")):  # กฎข้ามบรรทัดเดียวกับตัวอ่านของ Python
             continue
         fields = entry.split("\t")
         if len(fields) != 7 or not fields[0].strip():
@@ -251,7 +252,7 @@ def parse_account_cookies(text: str) -> Any:
         jar.load(io.StringIO(_NETSCAPE_HEADER + "".join(f"{entry}\n" for entry in kept)))
     except Exception as exc:
         raise YtError("E_COOKIES_INVALID", type(exc).__name__) from None
-    if not any(c.name in ACCOUNT_SIGN_IN_COOKIES and c.domain.lower().lstrip(".") == "youtube.com" for c in jar):
+    if not any(c.name in ACCOUNT_SIGN_IN_COOKIES and c.value and c.domain.lower().lstrip(".") == "youtube.com" for c in jar):
         raise YtError("E_COOKIES_INVALID", "no YouTube sign-in cookie")
     return jar
 
