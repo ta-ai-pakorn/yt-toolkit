@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import AxeBuilder from "@axe-core/playwright"
+import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Page } from "@playwright/test"
 
 import type { AudioJobParams, Settings, SubtitleJobParams, VideoJobParams } from "../src/lib/types"
@@ -61,7 +61,7 @@ async function mockSettings(page: Page): Promise<{ bodies: Partial<Settings>[] }
 }
 
 async function seriousViolations(page: Page) {
-  const results = await new AxeBuilder({ page }).analyze()
+  const results = await analyzeSettled(page)
   return results.violations
     .filter((v) => v.impact === "serious" || v.impact === "critical")
     .map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))

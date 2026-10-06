@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import AxeBuilder from "@axe-core/playwright"
+import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Page } from "@playwright/test"
 
 import { fakeYTLog, installFakeYT } from "./fake-yt"
@@ -398,7 +398,7 @@ test.describe("M3.5 แท็บข้อมูลคลิป: ปุ่มเ�
 test.describe("M3.5 การเข้าถึงระหว่างเล่น (ต้องมีตัวเล่นที่หัวคลิป)", () => {
   async function seriousViolations(page: Page) {
     // ตัวเล่น (iframe) ตรวจในเทสต์ของตัวเล่นเอง ที่นี่ตรวจภาพเฟรม/ทรานสคริปต์ระหว่างเล่น
-    const results = await new AxeBuilder({ page }).exclude("iframe").analyze()
+    const results = await analyzeSettled(page, (b) => b.exclude("iframe"))
     return results.violations
       .filter((v) => v.impact === "serious" || v.impact === "critical")
       .map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))

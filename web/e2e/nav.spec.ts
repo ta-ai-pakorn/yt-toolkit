@@ -1,4 +1,4 @@
-import AxeBuilder from "@axe-core/playwright"
+import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 
 import type { Job, QueueState } from "../src/lib/types"
@@ -11,7 +11,7 @@ import { openQueueSheet } from "./queue-helpers"
 const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
 
 async function seriousViolations(page: Page) {
-  const results = await new AxeBuilder({ page }).analyze()
+  const results = await analyzeSettled(page)
   return results.violations
     .filter((v) => v.impact === "serious" || v.impact === "critical")
     .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))

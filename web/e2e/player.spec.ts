@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import AxeBuilder from "@axe-core/playwright"
+import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Page } from "@playwright/test"
 
 import { fakeYTLog, installFakeYT } from "./fake-yt"
@@ -785,7 +785,7 @@ test.describe("ตัวเล่นยูทูปแบบที่เจอ�
 test.describe("axe ทุกสถานะของตัวเล่น", () => {
   const axe = async (page: Page) => {
     await settle(page)
-    const results = await new AxeBuilder({ page }).analyze()
+    const results = await analyzeSettled(page)
     expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([])
   }
 
