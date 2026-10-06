@@ -58,6 +58,13 @@ class SettingsView(Protocol):
     def output_dir(self) -> Path: ...
 
 
+class QueueListener(Protocol):
+    """ผู้ฟังสถานะคิว (M5 รอบ C: AccountService นับ grace ของบัญชีชั่วคราว) เรียกนอกล็อกของคิวเสมอ"""
+
+    def job_queued(self) -> None: ...
+    def job_ended(self, job_id: str) -> None: ...
+
+
 def _thread_spawn(fn: Callable[[], None]) -> None:
     threading.Thread(target=fn, daemon=True, name="yt-job").start()
 
@@ -232,6 +239,8 @@ class QueueRunner:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._stopping = False
+        # ผู้ฟัง (lifecycle ต่อ AccountService ให้หลังสร้าง) None = ไม่มีใครฟัง
+        self.listener: QueueListener | None = None
 
     # ---------- ตัวจัดคิว ----------
 
@@ -260,6 +269,7 @@ class QueueRunner:
 
     def tick(self) -> list[str]:
         started: list[str] = []
+        spawn_failed: list[str] = []
         with self._lock:
             if self._stopping or self.pause_state() is not None:
                 return started
@@ -274,12 +284,15 @@ class QueueRunner:
                     continue  # รอเว้นช่วง งานที่ไม่ต้องคุยกับยูทูปข้างหลังยังเริ่มได้
                 outcome = self._start(job)
                 if outcome == _SPAWN_FAILED:
+                    spawn_failed.append(job.id)
                     break  # เปิดเธรดไม่ได้ อย่าลากงานที่เหลือในคิวให้ล้มตามกันหมดในรอบเดียว รอรอบหน้า
                 if outcome == _STARTED:
                     started.append(job.id)
                     slots -= 1
                     if youtube:
                         self._next_youtube_at = self._monotonic() + self._rng.uniform(*self._delay_range)
+        for job_id in spawn_failed:
+            self._notify_ended(job_id)
         return started
 
     def _start(self, job: Job) -> str:
@@ -423,6 +436,7 @@ class QueueRunner:
             return False
         self._forget(job.id, ctx)
         self._publish_job(ended)
+        self._notify_ended(job.id)
         return True
 
     def _forget(self, job_id: str, ctx: _JobContext) -> None:
@@ -445,6 +459,8 @@ class QueueRunner:
             for job in jobs:
                 self._bus.publish("job.created", self.job_api(job))
         self._wake.set()
+        if jobs:
+            self._notify_queued()
         return jobs
 
     def cancel(self, job_id: str) -> Job:
@@ -457,17 +473,17 @@ class QueueRunner:
             if job.status == "queued":
                 job = self.store.transition(job_id, "cancelled")
                 self._publish_job(job)
-                return job
-            if job.status != "running":
+            elif job.status != "running":
                 raise InvalidTransition(f"{job.status} -> cancelled")
-            ctx = self._active.get(job_id)
-            if ctx is None:
+            elif (ctx := self._active.get(job_id)) is None:
                 # running ค้างจากที่ไม่มีเธรดไหนทำอยู่แล้ว ยกเลิกในฐานข้อมูลได้เลย
                 job = self.store.transition(job_id, "cancelled")
                 self._publish_job(job)
-                return job
-            ctx.request_stop(_USER)
-            self._bus.job_updated(job_id, {"cancelling": True})
+            else:
+                ctx.request_stop(_USER)
+                self._bus.job_updated(job_id, {"cancelling": True})
+                return job  # สถานะ cancelled มากับเธรดงาน (_end แจ้งผู้ฟังเอง)
+        self._notify_ended(job_id)
         return job
 
     def retry(self, job_id: str) -> Job:
@@ -481,6 +497,7 @@ class QueueRunner:
             job = self.store.requeue(job_id, reset_bot_checks=True)
             self._publish_job(job)
         self._wake.set()
+        self._notify_queued()
         return job
 
     def reorder(self, ids: Sequence[str]) -> None:
@@ -536,6 +553,24 @@ class QueueRunner:
         if error and error.get("detail"):
             data["error"] = {**error, "detail": self._redact(error["detail"])}
         return data
+
+    def _notify_queued(self) -> None:
+        listener = self.listener
+        if listener is None:
+            return
+        try:
+            listener.job_queued()
+        except Exception:
+            log.exception("แจ้งผู้ฟังว่ามีงานเข้าคิวไม่สำเร็จ")
+
+    def _notify_ended(self, job_id: str) -> None:
+        listener = self.listener
+        if listener is None:
+            return
+        try:
+            listener.job_ended(job_id)
+        except Exception:
+            log.exception("แจ้งผู้ฟังว่างาน %s จบไม่สำเร็จ", job_id)
 
     def _publish_job(self, job: Job) -> None:
         """ข่าวเปลี่ยนสถานะ: ส่งทุกคีย์ ค่าที่ไม่มีแล้วส่งเป็น null (เช่น error เก่าหลังลองใหม่)"""
