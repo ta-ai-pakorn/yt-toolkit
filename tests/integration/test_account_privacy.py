@@ -62,6 +62,7 @@ def app_env(paths, fake_platform, tmp_path, monkeypatch, caplog):
     before = list(root.handlers)
     probe.setup_file_log(paths)  # app.log จริงพร้อมตัวกรอง (แบบเดียวกับ start)
     caplog.set_level(logging.DEBUG)
+    monkeypatch.delenv(lifecycle.ACCOUNT_GRACE_ENV, raising=False)  # grace ที่ย่นไว้ในเชลล์ลบบัญชีก่อนเทสตรวจไม่ได้
     services = lifecycle.open_services(paths, fake_platform, fake=True)
     ctx = AppContext(
         paths=paths, plat=fake_platform, port=PORT, token=TOKEN, version="0.1.0", commit=None,

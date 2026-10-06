@@ -2323,6 +2323,26 @@ def test_a_bot_check_pause_blocks_the_account_until_the_queue_resumes(paths, fak
         services.db.close()
 
 
+def test_a_signed_in_clip_info_probe_never_starts_the_grace(paths, fake_platform, monkeypatch):
+    # spec 2.2: การใช้แบบโต้ตอบ (หน้า W2 GET /videos/{id}) ไม่เริ่ม grace แม้คิวว่างและ grace สั้นมาก
+    import time
+
+    from yttoolkit.core.account_scope import with_account_retry
+
+    monkeypatch.setenv(lifecycle.ACCOUNT_GRACE_ENV, "0.2")
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        accounts = services.accounts
+        accounts.import_text(ACCOUNT_FILE)
+        info = with_account_retry(accounts, lambda: services.videos.get("ACCOUNTAGE1"))  # ทางเดียวกับ route ของ W2
+        assert info["title"] == "คลิปจำกัดอายุ" and accounts.status()["used"] is True
+        time.sleep(0.5)
+        assert accounts.status()["active"] is True
+    finally:
+        services.accounts.clear("manual")
+        services.db.close()
+
+
 def test_run_app_puts_the_account_service_on_the_context(paths, fake_platform, monkeypatch):
     from yttoolkit.core.account_session import AccountService
 

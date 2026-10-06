@@ -85,6 +85,15 @@ def test_phrases_case_insensitive(message: str, code: str) -> None:
     assert classify(message) == code
 
 
+@pytest.mark.parametrize(
+    "phrase", ["members-only content", "join this channel to get access", "available to this channel's members"]
+)
+def test_each_members_only_phrase_alone_is_private(phrase: str) -> None:
+    # M5 รอบ C: ข้อความเฉพาะสมาชิกแต่ละแบบต้องได้ปุ่ม "ใช้บัญชียูทูปชั่วคราว" (ACCOUNT_CODES) เสมอ
+    assert classify(f"ERROR: [youtube] x: This video is {phrase}") == "E_VIDEO_PRIVATE"
+    assert classify(phrase) == "E_VIDEO_PRIVATE"
+
+
 def test_refused_4xx_is_not_a_network_error() -> None:
     # M2 follow-up / Q2: 4xx ที่ไม่ใช่ 429 ห้ามลองใหม่อัตโนมัติ จึงต้องไม่เป็น E_NETWORK
     assert classify("ERROR: unable to download video data: HTTP Error 403: Forbidden") == "E_YT_REFUSED"
