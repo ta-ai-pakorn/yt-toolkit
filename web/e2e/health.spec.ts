@@ -112,3 +112,30 @@ test("ปิดโปรแกรม: ปุ่มหมุนระหว่า
   await expect(page.getByText("ปิดโปรแกรมแล้ว")).toBeVisible()
   await expect(page.getByText("แจ้งเตือนเก่า")).toHaveCount(0)
 })
+
+test("M5 รอบ C: แถว บัญชียูทูป บอกสถานะอย่างเดียว · ไม่ได้ใช้บัญชี", async ({ page }) => {
+  await page.goto("/settings/health")
+  const row = page.getByTestId("tool-account")
+  await expect(row).toContainText("บัญชียูทูป", { timeout: 15_000 })
+  await expect(row).toContainText("ไม่ได้ใช้บัญชี")
+  await expect(row).toContainText("พร้อม")
+})
+
+test("M5 รอบ C: ใช้บัญชีอยู่ = ใช้บัญชีชั่วคราวอยู่ (นำเข้าเมื่อ HH:MM) · backend รุ่นก่อนไม่มีแถวนี้", async ({ page }) => {
+  let withRow = true
+  await page.route("**/api/health", async (route) => {
+    const response = await route.fetch()
+    const body = await response.json()
+    if (withRow) body.account = { status: "ok", active: true, importedAt: "2026-10-06T02:05:00Z" }
+    else delete body.account
+    await route.fulfill({ response, json: body })
+  })
+  await page.goto("/settings/health")
+  await expect(page.getByTestId("tool-account")).toContainText(/ใช้บัญชีชั่วคราวอยู่ \(นำเข้าเมื่อ \d{2}:\d{2}\)/, {
+    timeout: 15_000,
+  })
+  withRow = false
+  await page.reload()
+  await expect(page.getByTestId("tool-network")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId("tool-account")).toHaveCount(0)
+})
