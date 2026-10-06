@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query"
+import { queryOptions, type QueryClient } from "@tanstack/react-query"
 
 import { fill, th } from "@/i18n/th"
 
@@ -112,4 +112,15 @@ export function applyAccountEvent(prev: AccountStatus | undefined, event: Accoun
   if (!event.active) return INACTIVE
   if (prev?.active && event.expiresAt !== undefined) return { ...prev, expiresAt: event.expiresAt }
   return undefined
+}
+
+/**
+ * ใส่ข่าว SSE "account" ลงแคช (events.ts) · ยังถือบัญชี (active:true) = โหลดสถานะเต็มใหม่ทุกครั้งด้วย
+ * (นำเข้าซ้ำจากแท็บอื่น = เวลานำเข้าเปลี่ยน ข่าวไม่มีเวลานำเข้า) · ทุกข่าว = โหลดหน้าตรวจสุขภาพใหม่ (แถวบัญชี)
+ */
+export function syncAccountCache(client: QueryClient, event: AccountEvent): void {
+  const next = applyAccountEvent(client.getQueryData<AccountStatus>(ACCOUNT_KEY), event)
+  if (next !== undefined) client.setQueryData<AccountStatus>(ACCOUNT_KEY, next)
+  if (event.active) void client.invalidateQueries({ queryKey: ACCOUNT_KEY })
+  void client.invalidateQueries({ queryKey: ["health"] })
 }

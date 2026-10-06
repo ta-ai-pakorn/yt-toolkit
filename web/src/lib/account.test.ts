@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { QueryClient } from "@tanstack/react-query"
+import { describe, expect, it, vi } from "vitest"
 
 import {
   ACCOUNT_CODES,
+  ACCOUNT_KEY,
   applyAccountEvent,
   DELETE_TIME_STYLE,
   deleteTime,
@@ -13,6 +15,7 @@ import {
   needsAccount,
   remainingClock,
   showAccountButton,
+  syncAccountCache,
 } from "./account"
 import { ApiError } from "./api"
 import type { AccountStatus } from "./types"
@@ -104,5 +107,37 @@ describe("applyAccountEvent", () => {
   it("เพิ่งนำเข้าจากแท็บอื่น = ไม่รู้เวลานำเข้า ต้องโหลดใหม่", () => {
     expect(applyAccountEvent(INACTIVE, { active: true, expiresAt: "2026-10-06T05:00:00+00:00" })).toBeUndefined()
     expect(applyAccountEvent(undefined, { active: true })).toBeUndefined()
+  })
+})
+
+describe("syncAccountCache", () => {
+  function setup(prev: AccountStatus | undefined) {
+    const client = new QueryClient()
+    if (prev !== undefined) client.setQueryData(ACCOUNT_KEY, prev)
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+    return { client, invalidate }
+  }
+
+  it("ยังถืออยู่ (นำเข้าซ้ำจากแท็บอื่น / grace): เปลี่ยนเวลาลบทันที แล้วโหลดสถานะเต็มใหม่ด้วย (เวลานำเข้าใหม่)", () => {
+    const { client, invalidate } = setup(ACTIVE)
+    syncAccountCache(client, { active: true, expiresAt: "2026-10-06T05:30:00+00:00" })
+    expect(client.getQueryData(ACCOUNT_KEY)).toEqual({ ...ACTIVE, expiresAt: "2026-10-06T05:30:00+00:00" })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ACCOUNT_KEY })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["health"] })
+  })
+
+  it("เพิ่งนำเข้า (แคชไม่ถือบัญชี): โหลดสถานะเต็มใหม่ และหน้าตรวจสุขภาพใหม่", () => {
+    const { client, invalidate } = setup(INACTIVE)
+    syncAccountCache(client, { active: true, expiresAt: "2026-10-06T05:00:00+00:00" })
+    expect(client.getQueryData(ACCOUNT_KEY)).toEqual(INACTIVE)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ACCOUNT_KEY })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["health"] })
+  })
+
+  it("ลบแล้ว: แคชเป็นไม่ได้ใช้บัญชี และโหลดหน้าตรวจสุขภาพใหม่", () => {
+    const { client, invalidate } = setup(ACTIVE)
+    syncAccountCache(client, { active: false, reason: "expired" })
+    expect(client.getQueryData(ACCOUNT_KEY)).toEqual(INACTIVE)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["health"] })
   })
 })

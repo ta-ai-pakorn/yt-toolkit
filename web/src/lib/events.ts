@@ -1,10 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query"
 import { useSyncExternalStore } from "react"
 
-import { ACCOUNT_KEY, applyAccountEvent, type AccountEvent } from "./account"
+import { ACCOUNT_KEY, syncAccountCache, type AccountEvent } from "./account"
 import { JOBS_KEY, mergeJobPatch, QUEUE_KEY, upsertJob } from "./jobs"
 import { sharpKey } from "./sharp-frames"
-import type { AccountStatus, Job, JobPatch, QueueState } from "./types"
+import type { Job, JobPatch, QueueState } from "./types"
 
 /** เหตุการณ์จาก GET /api/events (SSE สัญญา C6) ที่อ่านแล้ว */
 export type ServerEvent =
@@ -103,13 +103,9 @@ export function applyServerEvent(
       return {}
     case "app.shutdown":
       return {}
-    case "account": {
-      const next = applyAccountEvent(client.getQueryData<AccountStatus>(ACCOUNT_KEY), event)
-      // เพิ่งนำเข้า (จากแท็บอื่น) ยังไม่รู้เวลานำเข้า = โหลดสถานะเต็มใหม่
-      if (next === undefined) void client.invalidateQueries({ queryKey: ACCOUNT_KEY })
-      else client.setQueryData<AccountStatus>(ACCOUNT_KEY, next)
+    case "account":
+      syncAccountCache(client, event)
       return {}
-    }
   }
 }
 
