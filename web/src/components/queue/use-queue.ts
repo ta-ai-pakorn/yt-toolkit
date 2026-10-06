@@ -244,7 +244,7 @@ export async function runJobAction(client: QueryClient, action: "cancel" | "retr
   }
 }
 
-/** ยกเลิก / ลองใหม่ ของงานหนึ่งงาน · ไม่สำเร็จ = toast แล้วโหลดรายการงานใหม่ */
+/** ยกเลิก / ลองใหม่ ของงานหนึ่งงาน · ไม่เคย reject (runJobAction แสดง toast แล้วโหลดรายการงานใหม่เอง) */
 export function useJobAction(action: "cancel" | "retry", id: string) {
   const client = useQueryClient()
   return useMutation({ mutationFn: () => runJobAction(client, action, id) })

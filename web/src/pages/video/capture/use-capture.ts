@@ -48,6 +48,7 @@ export async function runCapture(client: QueryClient, videoId: string, ms: numbe
     if (account) {
       const retry = () => void runCapture(client, videoId, ms)
       toast.error(message, {
+        duration: Infinity, // มีปุ่มให้กด: ไม่หายเองก่อนผู้ใช้เห็น (เหมือน toast งานที่พลาด)
         action: { label: th.account.use, onClick: () => openAccountDialog({ origin: "error", onImported: retry }) },
       })
     } else {

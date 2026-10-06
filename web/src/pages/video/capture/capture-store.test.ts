@@ -145,6 +145,7 @@ describe("runCapture", () => {
     const [message, options] = toast.error.mock.lastCall as [string, { action: { label: string; onClick: () => void } }]
     expect(message).toBe("คลิปนี้จำกัดอายุ")
     expect(options.action.label).toBe("ใช้บัญชียูทูปชั่วคราว")
+    expect((options as { duration?: number }).duration).toBe(Infinity)
     options.action.onClick()
     const request = accountDialog.get().request
     expect(request?.origin).toBe("error")
@@ -155,6 +156,13 @@ describe("runCapture", () => {
     expect(api.postCapture).toHaveBeenLastCalledWith(BBB, 2_000)
     expect(toast.success.mock.lastCall?.[0]).toBe("ถ่ายภาพคมแล้ว · 0:02")
     accountDialog.close()
+  })
+
+  it("M5 รอบ C: ยูทูปขอตรวจสอบ (E_BOT_CHECK) = ไม่มีปุ่มบัญชี ข้อความเดิม ไม่ค้างถาวร", async () => {
+    const client = new QueryClient()
+    api.postCapture.mockRejectedValueOnce(new ApiError(429, "E_BOT_CHECK", "ยูทูปขอให้ยืนยัน", null, null))
+    await runCapture(client, BBB, 0)
+    expect(toast.error).toHaveBeenLastCalledWith("ยูทูปขอให้ยืนยัน")
   })
 
   it("M5 รอบ C: ถือบัญชีอยู่แล้ว = ไม่มีปุ่ม (ข้อความ ลองด้วยบัญชีแล้ว… มาจาก backend)", async () => {

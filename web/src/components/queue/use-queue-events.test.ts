@@ -55,6 +55,13 @@ describe("serverEventHandlers: toast ของงานที่พลาด (M5
     await vi.waitFor(() => expect(client.getQueryData<Job[]>(JOBS_KEY)?.[0].status).toBe("queued"))
   })
 
+  it("ยูทูปขอตรวจสอบ (E_BOT_CHECK) = ไม่มีปุ่มบัญชี ปุ่มเดียวคือ ดูรายละเอียด", () => {
+    serverEventHandlers(new QueryClient()).onJobChange?.(job(), failed("E_BOT_CHECK"))
+    const [, options] = toast.error.mock.lastCall as [string, { action: { label: string }; cancel?: unknown }]
+    expect(options.action.label).toBe("ดูรายละเอียด")
+    expect(options.cancel).toBeUndefined()
+  })
+
   it("ถือบัญชีอยู่แล้ว หรือรหัสอื่น = ปุ่มเดียว ดูรายละเอียด ไม่มีปุ่มรอง", () => {
     const client = new QueryClient()
     client.setQueryData(ACCOUNT_KEY, { active: true, used: true })
