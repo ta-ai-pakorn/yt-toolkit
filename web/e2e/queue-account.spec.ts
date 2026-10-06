@@ -58,11 +58,12 @@ test("งานคลิปจำกัดอายุพลาด → ปุ่
     await dialog.getByRole("button", { name: "นำเข้าแล้วลองใหม่" }).click()
     await expect(dialog).toHaveCount(0)
     await expect(banner(page)).toContainText("กำลังใช้บัญชียูทูปชั่วคราว")
+    // ส่งงานของคลิปที่บัญชีไม่มีสิทธิ์ทันที ก่อนงานแรกจบ: คิวไม่ว่างตอนงานแรกจบ จึงไม่มี grace จนกว่างานนี้จะพลาด (ไม่แข่งกับเวลา 5 วินาที)
+    const [denied] = await enqueue(request, [{ videoId: PRIVATE, kind: "video", params: VIDEO }])
     const done = await waitForJob(request, (j) => j.id === job.id && j.status === "done")
     expect(done.outputs?.length).toBe(1)
 
-    // บัญชียังอยู่ (grace เพิ่งเริ่ม) งานใหม่ของคลิปที่บัญชีไม่มีสิทธิ์: ลองด้วยบัญชีแล้วยังพลาด ข้อความเปลี่ยน ไม่มีปุ่ม
-    const [denied] = await enqueue(request, [{ videoId: PRIVATE, kind: "video", params: VIDEO }])
+    // บัญชียังอยู่: ลองด้วยบัญชีแล้วยังพลาด ข้อความเปลี่ยน ไม่มีปุ่ม
     const deniedJob = await waitForJob(request, (j) => j.id === denied.id && j.status === "failed")
     expect(deniedJob.error).toMatchObject({ code: "E_VIDEO_PRIVATE", message: TRIED_MESSAGE })
     const deniedRow = sheet.locator(`[data-job-id="${denied.id}"]`)
@@ -74,7 +75,10 @@ test("งานคลิปจำกัดอายุพลาด → ปุ่
     await expect(banner(page)).toHaveCount(0)
     expect((await accountStatus(request)).active).toBe(false)
   } finally {
-    await cancelJobsFor(request, [AGE, PRIVATE])
-    await dropAccount(page)
+    try {
+      await cancelJobsFor(request, [AGE, PRIVATE])
+    } finally {
+      await dropAccount(page)
+    }
   }
 })
