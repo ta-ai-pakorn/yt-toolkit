@@ -23,12 +23,13 @@ from . import __version__, runstate
 from .app import AppContext, create_app
 from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
 from .core import files, thai_fallback, tools
+from .core.account_session import GRACE_S, AccountService
 from .core.advanced import ADS_SUFFIX
 from .core.capture import CaptureService
 from .core.comments import PinnedCommentService
 from .core.db import Database, purge_stale_cache
 from .core.events import CLOSED, Event, EventBus
-from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, visitor_session
+from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, parse_account_cookies, visitor_session
 from .core.handlers import (
     CONTACT_SHEET_SUFFIX,
     FRAMES_ZIP_SUFFIX,
@@ -59,6 +60,8 @@ LEGACY_PYTHAINLP_ENV = "PYTHAINLP_DATA_DIR"
 # โหมดข้อมูลปลอม (E2E) ไม่ต้องเว้นช่วงเริ่มงานยูทูป 2-5 วินาทีเหมือนของจริง
 FAKE_DELAY_RANGE = (0.05, 0.2)
 QUEUE_SHUTDOWN_TIMEOUT_S = 5.0  # รองานที่กำลังทำหยุดตอนปิดโปรแกรมไม่เกินเท่านี้
+# M5 รอบ C: ย่น grace 10 นาทีของบัญชีชั่วคราว (วินาที) ใช้ได้เฉพาะโหมดข้อมูลปลอม (e2e ของคิว)
+ACCOUNT_GRACE_ENV = "YT_TOOLKIT_ACCOUNT_GRACE_S"
 GRACEFUL_SHUTDOWN_S = 3  # uvicorn รอ request ที่ค้าง (เช่นสตรีมข่าว) ไม่เกินเท่านี้
 TRAY_REFRESH_INTERVAL_S = 1.0  # อัปเดตตัวเลขงานในเมนู tray ไม่เกิน 1 ครั้งต่อวินาที
 # ตอนเปิดโปรแกรม ล้างไฟล์ค้างในโฟลเดอร์ของงานที่หยุดกลางคันล่าสุดไม่เกินเท่านี้งาน (รวมงานที่เพิ่งกู้คืนเสมอ)
@@ -246,6 +249,17 @@ class Services:
     queue: QueueRunner
     pinned: PinnedCommentService | None = None  # ส่งต่อเป็น ctx.pinned (router ข้อมูลคลิปใช้ตัวนี้ ไม่สร้างใหม่)
     captures: CaptureService | None = None  # M5 รอบ B2 ถ่ายภาพคมตรงจุด ส่งต่อเป็น ctx.captures
+    accounts: AccountService | None = None  # M5 รอบ C บัญชียูทูปชั่วคราว ส่งต่อเป็น ctx.accounts
+
+
+def account_grace_s(fake: bool) -> float:
+    """grace ของบัญชีชั่วคราว: ปกติ 10 นาที · โหมดข้อมูลปลอมย่นได้ด้วย YT_TOOLKIT_ACCOUNT_GRACE_S (0 < ค่า ≤ 600)"""
+    raw = os.environ.get(ACCOUNT_GRACE_ENV) if fake else None
+    try:
+        value = float(raw) if raw else GRACE_S
+    except ValueError:
+        return GRACE_S
+    return value if 0 < value <= GRACE_S else GRACE_S
 
 
 def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
@@ -308,6 +322,17 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         )
         # ตัวทำงานอ่าน deps ตอนรันงาน: E_BOT_CHECK ที่งานโน้ตกลืนไว้ (คอมเมนต์ปักหมุด) ยังพักคิวได้
         deps.on_bot_check = queue.brake
+        # M5 รอบ C: บัญชียูทูปชั่วคราวในหน่วยความจำ ฟังคิว (grace เมื่อคิวว่าง) ประกาศสถานะทาง SSE
+        # ลบ/แทนบัญชี = ทิ้งข้อมูลคลิปที่ได้มาด้วยบัญชีนั้น · งานในคิวและถ่ายภาพคมลองซ้ำด้วยบัญชีผ่านตัวนี้
+        accounts = AccountService(
+            parse_account_cookies,
+            publish=events.publish,
+            busy=lambda: queue.pending_count() > 0,
+            on_clear=videos.forget_signed_in,
+            grace_s=account_grace_s(fake),
+        )
+        queue.listener = accounts
+        deps.accounts = accounts
         # M5 รอบ B2: ถ่ายภาพคมตรงจุดไม่ผ่านคิว แต่เคารพการพักคิว (ยูทูปขอตรวจสอบ) และสั่งพักคิวเองเมื่อเจอ
         captures = CaptureService(
             videos,
@@ -317,6 +342,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
             settings,
             queue,
             work_root=paths.work,
+            accounts=accounts,
         )
     except BaseException:
         db.close()
@@ -332,6 +358,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         queue=queue,
         pinned=pinned,
         captures=captures,
+        accounts=accounts,
     )
 
 
@@ -504,6 +531,11 @@ def shutdown_services(services: Services, timeout: float = QUEUE_SHUTDOWN_TIMEOU
         services.queue.shutdown(timeout=timeout)
     except Exception:
         log.exception("หยุดคิวงานไม่สำเร็จ")
+    if services.accounts is not None:
+        try:
+            services.accounts.clear("shutdown")  # C6 (b): ปิดโปรแกรม = ลบบัญชีชั่วคราว (แท็บที่เปิดอยู่ได้ข่าวก่อน app.shutdown)
+        except Exception:
+            log.exception("ลบบัญชียูทูปชั่วคราวตอนปิดโปรแกรมไม่สำเร็จ")
     services.events.publish("app.shutdown", {})
     services.events.close()
 
@@ -722,6 +754,7 @@ def _run_server(
     )
     # M5 รอบ B2: API ถ่ายภาพคม (create_app เปิด router เมื่อมีค่านี้) ตั้งแบบนี้ lane ของ app.py จึงไม่ชนกัน
     ctx.captures = services.captures
+    ctx.accounts = services.accounts  # M5 รอบ C: API /cookies* แถวบัญชีใน /health และการลองซ้ำของ GET /videos/{id}
     if fake:
         # โหมดข้อมูลปลอมไม่เปิดหน้าต่างจริง (E2E รันบนเครื่องพนักงานได้โดยไม่มีหน้าต่างโผล่)
         ctx.open_folder = _fake_open_folder
