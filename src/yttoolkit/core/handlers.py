@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from PIL import Image
 
 from . import files
+from .account_scope import AccountGate, with_account_retry
 from .advanced import ADS_SUFFIX, ChapterPart, Interval, chapter_parts, keep_intervals, kept_ms, range_suffix
 from .download import (
     AUTO_SHARP_MAX_SHORT_SIDE,
@@ -110,6 +111,8 @@ class HandlerDeps:
     sponsors: SponsorSource | None = None
     # ทำภาพคมอัตโนมัติหลังงานวิดีโอ (M5 รอบ B D6) lifecycle อ่านค่าตั้ง autoSharpFrames ทุกงาน · ค่าเริ่มต้น (เทส) = ไม่ทำ
     auto_sharp: Callable[[], bool] = lambda: False
+    # บัญชียูทูปชั่วคราว (M5 รอบ C) lifecycle ต่อให้หลังสร้าง AccountService · None = ไม่มีการลองซ้ำด้วยบัญชี
+    accounts: AccountGate | None = None
 
 
 # ---------- ตัวช่วย ----------
@@ -1107,7 +1110,9 @@ def build_handlers(deps: HandlerDeps) -> dict[str, Handler]:
 
     def bind(fn: Callable[[HandlerDeps, Job, JobContext], JobResult]) -> Handler:
         def handler(job: Job, ctx: JobContext) -> JobResult:
-            return fn(deps, job, ctx)
+            # M5 รอบ C spec 2.4: ทั้งงานลองแบบไม่ใช้บัญชีก่อน ติดจำกัดอายุ/ส่วนตัว + ถือบัญชีอยู่ = ทำทั้งงานใหม่ด้วยบัญชี
+            # (probe + โหลด + ซับ ใช้บัญชีเดียวกันทั้งงาน) อ่าน deps.accounts ตอนรันงาน (lifecycle ต่อให้หลังสร้าง)
+            return with_account_retry(deps.accounts, lambda: fn(deps, job, ctx), job_id=job.id)
 
         handler.__name__ = fn.__name__.lstrip("_")
         return handler

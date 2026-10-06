@@ -30,6 +30,7 @@ from typing import Any, Protocol
 
 from PIL import Image, UnidentifiedImageError
 
+from .account_scope import AccountGate, with_account_retry
 from .cancel import JobCancelled
 from .files import PATH_LIMIT, ensure_output_root, plan_output
 from .frame_piece import PieceInfo, max_short_side
@@ -190,6 +191,7 @@ class CaptureService:
         *,
         work_root: Path,
         now: Callable[[], datetime] = _utcnow,
+        accounts: AccountGate | None = None,
     ) -> None:
         self._videos = videos
         self._extractor = extractor
@@ -199,6 +201,7 @@ class CaptureService:
         self._queue = queue
         self._work_root = Path(work_root)
         self._now = now
+        self._accounts = accounts  # M5 รอบ C: ลองซ้ำด้วยบัญชีชั่วคราว (ทั้งการอ่านคลิปและการโหลดชิ้นภาพ)
         self._busy = threading.Lock()  # ถ่ายได้ครั้งละภาพทั้งแอพ (ไม่รอ: ถือไว้อยู่ = E_CAPTURE_BUSY)
         self._guard = threading.Lock()
         self._clip_locks: dict[str, threading.Lock] = {}
@@ -253,6 +256,10 @@ class CaptureService:
             raise YtError("E_INVALID_INPUT", f"video id ไม่ถูกรูปแบบ: {video_id!r}")
         if isinstance(t_ms, bool) or not isinstance(t_ms, int):
             raise CaptureRejected("tMs must be an integer")
+        # M5 รอบ C spec 2.4: ถ่ายแบบไม่ใช้บัญชีก่อน จำกัดอายุ/ส่วนตัว + ถือบัญชีอยู่ = ถ่ายใหม่ทั้งครั้งด้วยบัญชี (ไม่นับเข้ากฎคิว)
+        return with_account_retry(self._accounts, lambda: self._capture_once(video_id, t_ms))
+
+    def _capture_once(self, video_id: str, t_ms: int) -> tuple[Capture, bool]:
         try:
             info = self._videos.get(video_id, peek=True)  # ไม่มีในที่เก็บ = probe ใหม่ (ติดบอทได้)
         except YtError as exc:
