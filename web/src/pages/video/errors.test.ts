@@ -2,9 +2,29 @@ import { describe, expect, it } from "vitest"
 
 import { ApiError } from "@/lib/api"
 
-import { canRetry, errorMessage, hasCode } from "./errors"
+import { canRetry, errorMessage, hasCode, showRetry } from "./errors"
 
 const err = (code: string) => new ApiError(400, code, "ข้อความ", null, null)
+
+describe("showRetry (M5 รอบ C)", () => {
+  it.each(["E_AGE_RESTRICTED", "E_VIDEO_PRIVATE"])(
+    "%s ในกล่อง W2 + ถือบัญชีอยู่แล้ว = มีปุ่มลองใหม่ (รอบใหม่ใช้บัญชี)",
+    (code) => {
+      expect(showRetry(err(code), true, true)).toBe(true)
+    }
+  )
+  it.each(["E_AGE_RESTRICTED", "E_VIDEO_PRIVATE"])(
+    "%s ยังไม่ถือบัญชี หรือกล่องที่ไม่รับบัญชี = ไม่มีปุ่มลองใหม่",
+    (code) => {
+      expect(showRetry(err(code), true, false)).toBe(false)
+      expect(showRetry(err(code), false, true)).toBe(false)
+    }
+  )
+  it("รหัสอื่นตาม canRetry เหมือนเดิม", () => {
+    expect(showRetry(err("E_BOT_CHECK"), true, true)).toBe(false)
+    expect(showRetry(err("E_NETWORK"), false, false)).toBe(true)
+  })
+})
 
 describe("canRetry", () => {
   it.each([

@@ -10,7 +10,7 @@ import { th } from "@/i18n/th"
 import { showAccountButton } from "@/lib/account"
 import { ApiError } from "@/lib/api"
 
-import { canRetry, errorMessage } from "./errors"
+import { errorMessage, showRetry } from "./errors"
 
 type Props = {
   title: string
@@ -26,8 +26,8 @@ type Props = {
 
 /** กล่อง error ของหน้า W2: ข้อความไทยจาก envelope + ปุ่มลองใหม่ (ซ่อนเมื่อลองใหม่ไม่ช่วย) */
 export function LoadError({ title, error, onRetry, showHome = false, ref, account }: Props) {
-  const retry = canRetry(error)
   const { active } = useAccountStatus()
+  const retry = showRetry(error, account !== undefined, active)
   const offerAccount = account !== undefined && showAccountButton(error instanceof ApiError ? error.code : null, active)
   return (
     <Alert ref={ref} tabIndex={ref ? -1 : undefined} variant="destructive" className="outline-none">
