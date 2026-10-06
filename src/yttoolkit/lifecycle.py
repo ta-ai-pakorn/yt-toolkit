@@ -534,8 +534,9 @@ def _sweep_folder(folder: Path, ours: re.Pattern[str], keep: set[str]) -> int:
 
 
 def shutdown_services(services: Services, timeout: float = QUEUE_SHUTDOWN_TIMEOUT_S) -> None:
-    """ขั้นแรกของการปิดโปรแกรม ก่อนหยุดเซิร์ฟเวอร์: หยุดคิว (งานที่ทำอยู่จบเป็น interrupted) บอกหน้าเว็บว่าแอพปิด
-    แล้วปิด bus สตรีมข่าวที่เปิดค้างจึงจบเอง uvicorn ไม่ต้องรอ"""
+    """ขั้นแรกของการปิดโปรแกรม ก่อนหยุดเซิร์ฟเวอร์: หยุดคิว (งานที่ทำอยู่จบเป็น interrupted) ลบบัญชียูทูปชั่วคราว
+    (clear("shutdown") แท็บที่เปิดอยู่ได้ข่าว account ก่อน) บอกหน้าเว็บว่าแอพปิด แล้วปิด bus สตรีมข่าวที่เปิดค้างจึงจบเอง
+    uvicorn ไม่ต้องรอ"""
     try:
         services.queue.shutdown(timeout=timeout)
     except Exception:
@@ -816,7 +817,7 @@ def _run_server(
     except KeyboardInterrupt:
         pass
     finally:
-        # ลำดับ: หยุดคิว -> app.shutdown -> ปิด bus (สตรีมข่าวจบ) -> หยุดเซิร์ฟเวอร์
+        # ลำดับ: หยุดคิว -> ลบบัญชีชั่วคราว (clear shutdown) -> app.shutdown -> ปิด bus (สตรีมข่าวจบ) -> หยุดเซิร์ฟเวอร์
         shutdown_services(services)
         server.stop()
         purge_stop.set()  # หยุด timer ก่อนผู้เรียกปิดฐานข้อมูล
