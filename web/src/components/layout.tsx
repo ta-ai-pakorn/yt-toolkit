@@ -1,6 +1,8 @@
 import { History, House, Settings, type LucideIcon } from "lucide-react"
 import { Link, Outlet, ScrollRestoration, useLocation, useSearchParams } from "react-router"
 
+import { AccountBanner } from "@/components/account/account-banner"
+import { AccountDialog } from "@/components/account/account-dialog"
 import { QueueBar } from "@/components/queue/queue-bar"
 import { ShutdownDialog } from "@/components/queue/shutdown-dialog"
 import { useServerEvents } from "@/components/queue/use-queue"
@@ -84,6 +86,8 @@ export function Layout() {
           </ul>
         </nav>
       </header>
+      {/* M5 รอบ C: แถบ "กำลังใช้บัญชียูทูปชั่วคราว" ใต้เมนูบนทุกหน้า (ไม่ได้ใช้บัญชี = ไม่มีอะไร) */}
+      {!closed && <AccountBanner />}
       {/*
         เว้นที่ท้ายหน้าเท่าความสูงแถบคิว เนื้อหาล่างสุดจึงไม่ถูกแถบบัง
         ตอนตัวเล่นลอย body เว้นที่ให้ทั้งตัวเล่นและแถบคิวแล้ว (index.css) main จึงกลับเป็น pb-16 ไม่เว้นซ้ำ
@@ -93,6 +97,7 @@ export function Layout() {
       </main>
       {!closed && <QueueBar />}
       {!closed && <ShutdownDialog open={params.get(CONFIRM_SHUTDOWN) === "1"} onClose={closeConfirm} />}
+      {!closed && <AccountDialog />}
       {/* ระยะจากขอบล่างมาจากตัวแปร CSS (index.css): ตัวเล่นลอยอยู่ = toast ขึ้นเหนือตัวเล่น · แถบคิวตั้ง --dock-bottom-offset เท่าความสูงของตัวเอง */}
       <Toaster position="bottom-right" offset={{ bottom: "var(--toast-bottom-offset)" }} mobileOffset={{ bottom: "var(--toast-mobile-bottom-offset)" }} />
       {/* ย้อนกลับ (ปุ่ม back / "รายการที่วาง") = กลับไปตำแหน่งเลื่อนเดิม · เปิดหน้าใหม่ = เริ่มบนสุด */}

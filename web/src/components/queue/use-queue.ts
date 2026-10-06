@@ -1,8 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 
+import { showRemovedToast } from "@/components/account/use-account"
 import { fill, th } from "@/i18n/th"
+import { ACCOUNT_KEY, type AccountEvent } from "@/lib/account"
 import { ApiError } from "@/lib/api"
 import { connectEvents } from "@/lib/events"
 import { cancelJob, JOBS_KEY, jobsQuery, queueQuery, reorderJobs, retryJob, revealOutput } from "@/lib/jobs"
@@ -181,11 +183,26 @@ function notifyJobChange(before: Job | undefined, after: Job): void {
   }
 }
 
-/** ต่อ SSE ครั้งเดียวต่อหน้า (วางไว้ที่ layout) · เด้ง toast เมื่องานเสร็จหรือพลาดระหว่างเปิดแท็บนี้อยู่ */
+/**
+ * ข่าวบัญชียูทูปชั่วคราว (M5 รอบ C): บัญชีถูกลบ (active เป็น false มี reason) = toast ให้ไปออกจากระบบในหน้าต่างไม่ระบุตัวตน ทุกแท็บ
+ * ข่าวที่ยังถืออยู่ (grace เริ่ม/ยกเลิก) ไม่เด้ง · ลบแล้วโหลดสถานะจริงจากเซิร์ฟเวอร์ใหม่ (นำเข้าซ้ำที่แซงข่าวลบก็แถบยังถูก)
+ */
+function notifyAccount(client: QueryClient, event: AccountEvent): void {
+  if (event.active) return
+  if (event.reason !== undefined) showRemovedToast()
+  void client.invalidateQueries({ queryKey: ACCOUNT_KEY })
+}
+
+/** ต่อ SSE ครั้งเดียวต่อหน้า (วางไว้ที่ layout) · เด้ง toast เมื่องานเสร็จหรือพลาดระหว่างเปิดแท็บนี้อยู่ และเมื่อบัญชีชั่วคราวถูกลบ */
 export function useServerEvents(): void {
   const client = useQueryClient()
   useEffect(
-    () => connectEvents(client, { onShutdown: () => toast.dismiss(), onJobChange: notifyJobChange }),
+    () =>
+      connectEvents(client, {
+        onShutdown: () => toast.dismiss(),
+        onJobChange: notifyJobChange,
+        onAccount: (event) => notifyAccount(client, event),
+      }),
     [client],
   )
 }
