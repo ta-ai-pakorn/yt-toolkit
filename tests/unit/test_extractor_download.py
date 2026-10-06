@@ -62,6 +62,8 @@ C14 = {
         "CAPTURENO01": {"probeAs": BBB, "title": "คลิปถ่ายภาพคมไม่ได้", "captureError": "E_CAPTURE_UNSUPPORTED"},
         "CAPTUREBOT1": {"probeAs": BBB, "title": "คลิปถ่ายภาพคมติดบอท", "captureError": "E_BOT_CHECK"},
         "CAPTURENET1": {"probeAs": BBB, "title": "คลิปถ่ายภาพคมเน็ตหลุด", "captureError": "E_NETWORK"},
+        "ACCOUNTAGE1": {"probeAs": BBB, "title": "คลิปจำกัดอายุ", "needsAccount": "E_AGE_RESTRICTED"},
+        "ACCOUNTMEM1": {"probeAs": BBB, "title": "คลิปเฉพาะสมาชิก", "needsAccount": "E_VIDEO_PRIVATE"},
     },
 }
 

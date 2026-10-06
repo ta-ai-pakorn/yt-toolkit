@@ -18,6 +18,8 @@
     "CAPTURE0001": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปถ่ายภาพคม"},
     "CAPTURENO01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปถ่ายภาพคมไม่ได้", "captureError": "E_CAPTURE_UNSUPPORTED"},
     "CAPTUREBOT1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปถ่ายภาพคมติดบอท", "captureError": "E_BOT_CHECK"},
-    "CAPTURENET1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปถ่ายภาพคมเน็ตหลุด", "captureError": "E_NETWORK"}
+    "CAPTURENET1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปถ่ายภาพคมเน็ตหลุด", "captureError": "E_NETWORK"},
+    "ACCOUNTAGE1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปจำกัดอายุ", "needsAccount": "E_AGE_RESTRICTED"},
+    "ACCOUNTMEM1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปเฉพาะสมาชิก", "needsAccount": "E_VIDEO_PRIVATE"}
   }
 }

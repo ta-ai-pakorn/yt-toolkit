@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import functools
 import importlib.metadata
+import io
 import json
 import logging
 import math
@@ -37,6 +38,7 @@ from .download import (
     SponsorSegment,
     media_facts,
 )
+from .account_scope import current_jar
 from .frame_piece import PieceInfo, fetch_piece, pick_capture_format, piece_info, read_index, write_piece
 from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix_id
 from .visitor_session import VisitorSession
@@ -195,6 +197,78 @@ def _cookie_jar(filename: str) -> Any:
     from yt_dlp.cookies import YoutubeDLCookieJar
 
     return YoutubeDLCookieJar(filename)
+
+
+# ---------- บัญชียูทูปชั่วคราว (M5 รอบ C spec 2.1, 2.3) ----------
+
+# คุกกี้ที่บอกว่าเข้าสู่ระบบแล้ว ต้องมีอย่างน้อยหนึ่งตัวของ .youtube.com
+ACCOUNT_SIGN_IN_COOKIES = frozenset({"SAPISID", "__Secure-3PSID", "LOGIN_INFO"})
+ACCOUNT_DOMAINS = ("youtube.com", "google.com")  # เก็บเฉพาะโดเมนนี้และโดเมนย่อย ที่เหลือทิ้ง
+# ค่าตั้งของ yt-dlp ที่พิมพ์คำขอ/หน้าเว็บ (มี header Cookie) ห้ามใช้คู่กับบัญชี
+# "print_traffic" / "dump_pages" คือชื่อของตัวเลือกบรรทัดคำสั่ง ใส่ไว้กันพลาดด้วย
+ACCOUNT_FORBIDDEN_OPTS = frozenset(
+    {"verbose", "debug_printtraffic", "print_traffic", "dump_intermediate_pages", "dump_pages", "write_pages"}
+)
+_HTTPONLY_PREFIX = "#HttpOnly_"
+_NETSCAPE_HEADER = "# Netscape HTTP Cookie File\n"
+# จำกัดความยาวไม่ให้ตัวเลขใหญ่เกินจน http.cookiejar คำนวณล้นแล้วเตือนลง stderr
+_EXPIRES = re.compile(r"[0-9]{1,15}(?:\.[0-9]{1,15})?")
+
+
+def _account_domain(domain: str) -> bool:
+    bare = domain.lower().lstrip(".")
+    return any(bare == d or bare.endswith(f".{d}") for d in ACCOUNT_DOMAINS)
+
+
+def parse_account_cookies(text: str) -> Any:
+    """cookies.txt (Netscape) -> jar ของ yt-dlp ในหน่วยความจำ ไม่มีไฟล์ใด ๆ (อ่านผ่าน io.StringIO)
+
+    - ตัด BOM รับ LF / CRLF · บรรทัด #HttpOnly_ คือคุกกี้ บรรทัด # อื่นและบรรทัดว่างข้าม
+    - ทุกบรรทัดคุกกี้ต้องมี 7 ช่องคั่นด้วยแท็บ วันหมดอายุเป็นตัวเลข ไม่งั้นทั้งไฟล์ใช้ไม่ได้ (ตรวจเองก่อนให้ yt-dlp อ่าน:
+      ตัวอ่านของ yt-dlp พิมพ์บรรทัดที่เสียลงจอ และ http.cookiejar ยกบรรทัดใส่ข้อความ error)
+    - เก็บเฉพาะโดเมน youtube.com / google.com และโดเมนย่อย · ต้องมี SAPISID / __Secure-3PSID / LOGIN_INFO ของ .youtube.com
+    error ทุกแบบ = YtError("E_COOKIES_INVALID") ที่ detail บอกแค่ชนิดปัญหาและเลขบรรทัด ไม่ยกเนื้อหาของบรรทัด
+    """
+    from yt_dlp.cookies import YoutubeDLCookieJar
+
+    kept: list[str] = []
+    for number, line in enumerate(text.removeprefix("\ufeff").splitlines(), start=1):
+        entry = line[len(_HTTPONLY_PREFIX) :] if line.startswith(_HTTPONLY_PREFIX) else line
+        if not entry.strip() or entry.strip().startswith(("#", "$")):  # กฎข้ามบรรทัดเดียวกับตัวอ่านของ Python
+            continue
+        fields = entry.split("\t")
+        if len(fields) != 7 or not fields[0].strip():
+            raise YtError("E_COOKIES_INVALID", f"line {number}: expected 7 tab-separated fields")
+        if fields[4] and not _EXPIRES.fullmatch(fields[4]):
+            raise YtError("E_COOKIES_INVALID", f"line {number}: expiry is not a number")
+        if not _account_domain(fields[0]):
+            continue
+        # ช่องที่ 2 ต้องตรงกับจุดนำหน้าโดเมน (http.cookiejar assert ไว้ ส่วนขยายบางตัวเขียนไม่ตรง) จัดให้ตรงเอง
+        fields[1] = "TRUE" if fields[0].startswith(".") else "FALSE"
+        prefix = _HTTPONLY_PREFIX if line.startswith(_HTTPONLY_PREFIX) else ""
+        kept.append(prefix + "\t".join(fields))
+    jar = YoutubeDLCookieJar()
+    try:
+        jar.load(io.StringIO(_NETSCAPE_HEADER + "".join(f"{entry}\n" for entry in kept)))
+    except Exception as exc:
+        raise YtError("E_COOKIES_INVALID", type(exc).__name__) from None
+    if not any(c.name in ACCOUNT_SIGN_IN_COOKIES and c.value and c.domain.lower().lstrip(".") == "youtube.com" for c in jar):
+        raise YtError("E_COOKIES_INVALID", "no YouTube sign-in cookie")
+    return jar
+
+
+def _no_save() -> None:
+    """save_cookies ของ YoutubeDL ที่ใช้บัญชี: ไม่เขียนอะไรเลย (คุกกี้ที่ยูทูปหมุนให้อยู่ใน jar ก้อนเดิมในหน่วยความจำ)"""
+
+
+def _attach_account(ydl: Any, jar: Any) -> None:
+    """ให้ YoutubeDL ตัวนี้ใช้ jar ของบัญชีชั่วคราว ไม่มี cookiefile และปิดตัวบันทึกคุกกี้
+
+    API ภายในของ yt-dlp แบบเดียวกับ _attach_session (cookiejar เป็น cached_property ใส่ล่วงหน้าใน __dict__ ก่อนคำขอแรก)
+    เทสสัญญา test_attach_account_on_a_real_youtubedl ตรวจกับ YoutubeDL จริงทุกครั้งที่อัปเดต yt-dlp
+    """
+    ydl.__dict__["cookiejar"] = jar
+    ydl.save_cookies = _no_save
 
 
 def visitor_session(folder: Path) -> VisitorSession:
@@ -493,12 +567,25 @@ class YtDlpExtractor:
         self.session = session
 
     @contextmanager
-    def _ydl(self, opts: dict, *, with_session: bool = False) -> Iterator[Any]:
-        """YoutubeDL หนึ่งตัว with_session = ใช้เซสชันผู้ชม (ผ่าน cookiefile) แล้วบันทึกคืนตอนปิด"""
+    def _ydl(self, opts: dict, *, with_session: bool = False, with_account: Any | None = None) -> Iterator[Any]:
+        """YoutubeDL หนึ่งตัว with_session = ใช้เซสชันผู้ชม (ผ่าน cookiefile) แล้วบันทึกคืนตอนปิด
+
+        with_account = jar ของบัญชียูทูปชั่วคราว (M5 รอบ C): ใช้แทนเซสชันผู้ชม ไม่ใช่ทั้งสองอย่าง ไม่มี cookiefile
+        ไม่บันทึกคุกกี้ลงไฟล์ และห้ามมีค่าตั้งที่พิมพ์คำขอ (ACCOUNT_FORBIDDEN_OPTS = ValueError)
+        """
         import yt_dlp
 
         # opts ที่มี logger ของตัวเอง (ตัวโหลดใช้ตัวที่ซ่อน path) ใช้ตัวนั้น ไม่งั้นใช้ตัวปกติ
         params = {"logger": _YtDlpLogger(), **opts}
+        if with_account is not None:
+            forbidden = sorted(key for key in ACCOUNT_FORBIDDEN_OPTS if params.get(key))
+            if forbidden:
+                raise ValueError(f"ค่าตั้งเหล่านี้ใช้คู่กับบัญชีไม่ได้: {forbidden}")
+            params.pop("cookiefile", None)
+            with yt_dlp.YoutubeDL(params) as ydl:
+                _attach_account(ydl, with_account)
+                yield ydl
+            return
         session = self.session if with_session else None
         if session is not None:
             params["cookiefile"] = str(session.path)
@@ -565,7 +652,7 @@ class YtDlpExtractor:
         from yt_dlp.utils import YoutubeDLError
 
         try:
-            with self._ydl(_PROBE_OPTS, with_session=True) as ydl:
+            with self._ydl(_PROBE_OPTS, with_session=True, with_account=current_jar()) as ydl:
                 with ydl.urlopen(_subtitle_request(ydl, url)) as resp:
                     return resp.read()
         except YtError:
@@ -694,7 +781,7 @@ class YtDlpExtractor:
         ทำกับ --load-info-json (sanitize_info แบบ remove_private_keys) ก่อนส่งต่อ
         """
         try:
-            with self._ydl(_PROBE_OPTS, with_session=True) as ydl:
+            with self._ydl(_PROBE_OPTS, with_session=True, with_account=current_jar()) as ydl:
                 raw = ydl.extract_info(url, download=False)
                 if raw is None:
                     raise YtError("E_UNKNOWN", f"yt-dlp ไม่คืนข้อมูลสำหรับ {url}")
@@ -711,8 +798,9 @@ class YtDlpExtractor:
         """YoutubeDL ตัวที่สองโหลดตาม choice แล้วคืนไฟล์ใน workdir กับขนาดภาพของไฟล์นั้น"""
         from yt_dlp.utils import DownloadCancelled
 
+        account = current_jar()
         try:
-            with self._ydl(_download_opts(choice, workdir, hooks), with_session=True) as ydl:
+            with self._ydl(_download_opts(choice, workdir, hooks), with_session=True, with_account=account) as ydl:
                 result = ydl.process_ie_result(source, download=True)
             return _media_path(result, workdir), _downloaded_facts(result)
         except (YtError, JobCancelled):
@@ -741,7 +829,7 @@ class YtDlpExtractor:
 
         fetched = 0
         try:
-            with self._ydl(_PROBE_OPTS, with_session=True) as ydl:
+            with self._ydl(_PROBE_OPTS, with_session=True, with_account=current_jar()) as ydl:
                 raw = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
                 if raw is None:
                     raise YtError("E_UNKNOWN", f"yt-dlp ไม่คืนข้อมูลสำหรับ {video_id}")
@@ -789,8 +877,10 @@ class YtDlpExtractor:
         """เรียก yt-dlp แล้วแปลงทุกความผิดพลาดเป็น YtError (ห้ามมี exception ดิบหลุดออกไป)"""
         from yt_dlp.utils import YoutubeDLError
 
+        # บัญชีชั่วคราวใช้เฉพาะคำขอที่ใช้เซสชันผู้ชมอยู่แล้ว (probe) เพลย์ลิสต์ไม่ใช้ (spec 2.4)
+        account = current_jar() if with_session else None
         try:
-            with self._ydl(opts, with_session=with_session) as ydl:
+            with self._ydl(opts, with_session=with_session, with_account=account) as ydl:
                 info = ydl.extract_info(url, download=False)
                 if info is None:
                     raise YtError("E_UNKNOWN", f"yt-dlp ไม่คืนข้อมูลสำหรับ {url}")
@@ -816,6 +906,8 @@ class FakeExtractor:
     งานโหลด (download) ทำตาม behaviors (C14 ค่าตั้งต้น <fixtures_root>/downloads/behaviors.json):
     จำนวนขั้น เวลาต่อขั้น และ error ที่ตั้งไว้ต่อคลิป แล้วคัดลอกไฟล์จาก media/ ไม่ใช้ ffmpeg ไม่ต่อเน็ต
     ภาพคมตรงจุด (fetch_frame_piece) ตัดชิ้นจาก capture/piece.mp4 ตาม "captureError" ใน behaviors (M5 รอบ B2)
+    "needsAccount" ของคลิป (M5 รอบ C) = probe แบบไม่ใช้บัญชีได้รหัสนั้น ใช้บัญชี (signed_in) แล้วผ่าน
+    (download / fetch_frame_piece เรียก probe จึงได้กฎเดียวกัน) · PRIVATEVID1 ส่วนตัวเสมอ แม้ใช้บัญชี
     """
 
     PRIVATE_ID = "PRIVATEVID1"
@@ -847,6 +939,9 @@ class FakeExtractor:
                 "E_VIDEO_PRIVATE", f"ERROR: [youtube] {video_id}: Private video"
             )
         entry = self._behavior_doc()["videos"].get(video_id) or {}
+        needs = entry.get("needsAccount")
+        if needs and current_jar() is None:
+            raise YtError(str(needs), f"ERROR: [youtube] {video_id}: fake: needs a signed-in account")
         probe_as = entry.get("probeAs")
         info = self._load("probe", probe_as if probe_as else video_id)
         if info is None:
