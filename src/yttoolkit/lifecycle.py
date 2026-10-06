@@ -25,6 +25,7 @@ from .app import AppContext, create_app
 from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
 from .core import files, thai_fallback, tools
 from .core.advanced import ADS_SUFFIX
+from .core.capture import CaptureService
 from .core.comments import PinnedCommentService
 from .core.db import Database, purge_stale_cache
 from .core.events import CLOSED, Event, EventBus
@@ -267,6 +268,7 @@ class Services:
     media: MediaTools
     queue: QueueRunner
     pinned: PinnedCommentService | None = None  # ส่งต่อเป็น ctx.pinned (router ข้อมูลคลิปใช้ตัวนี้ ไม่สร้างใหม่)
+    captures: CaptureService | None = None  # M5 รอบ B2 ถ่ายภาพคมตรงจุด ส่งต่อเป็น ctx.captures
 
 
 def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
@@ -329,6 +331,16 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         )
         # ตัวทำงานอ่าน deps ตอนรันงาน: E_BOT_CHECK ที่งานโน้ตกลืนไว้ (คอมเมนต์ปักหมุด) ยังพักคิวได้
         deps.on_bot_check = queue.brake
+        # M5 รอบ B2: ถ่ายภาพคมตรงจุดไม่ผ่านคิว แต่เคารพการพักคิว (ยูทูปขอตรวจสอบ) และสั่งพักคิวเองเมื่อเจอ
+        captures = CaptureService(
+            videos,
+            extractor,  # type: ignore[arg-type]  # ทั้งตัวจริงและตัวปลอมมี fetch_frame_piece (C6)
+            media,
+            paths.cache,
+            settings,
+            queue,
+            work_root=paths.work,
+        )
     except BaseException:
         db.close()
         raise
@@ -342,6 +354,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         media=media,
         queue=queue,
         pinned=pinned,
+        captures=captures,
     )
 
 
@@ -730,6 +743,8 @@ def _run_server(
         # router อ่านค่านี้ตอนเรียกจริง และเรียกจากเธรดของ FastAPI (brake ถือ lock ของคิวเอง)
         on_bot_check=queue.brake,
     )
+    # M5 รอบ B2: API ถ่ายภาพคม (create_app เปิด router เมื่อมีค่านี้) ตั้งแบบนี้ lane ของ app.py จึงไม่ชนกัน
+    ctx.captures = services.captures
     if fake:
         # โหมดข้อมูลปลอมไม่เปิดหน้าต่างจริง (E2E รันบนเครื่องพนักงานได้โดยไม่มีหน้าต่างโผล่)
         ctx.open_folder = _fake_open_folder

@@ -109,3 +109,16 @@ def test_cancel_stops_the_extraction(clips, tmp_path: Path) -> None:
     with pytest.raises(JobCancelled):
         _tools().extract_frame(clips["wide"], tmp_path / "c.jpg", 0, long_side=1280, dynamic_range=None,
                                cancel=lambda: True)  # fmt: skip
+
+
+def test_no_long_side_keeps_the_source_resolution(clips, tmp_path: Path) -> None:  # M5 รอบ B2 spec 2.4
+    wide, tall = tmp_path / "wide.jpg", tmp_path / "tall.jpg"
+    assert _tools().extract_frame(clips["wide"], wide, 2000, long_side=None, dynamic_range=None, cancel=_never)
+    assert _tools().extract_frame(clips["portrait"], tall, 2000, long_side=None, dynamic_range=None, cancel=_never)
+    assert _size(wide) == (1920, 1080) and _size(tall) == (1080, 1920)
+
+
+def test_no_long_side_with_hdr_tone_maps_at_the_source_size(clips, tmp_path: Path) -> None:
+    dst = tmp_path / "h.jpg"
+    assert _tools().extract_frame(clips["hdr"], dst, 1000, long_side=None, dynamic_range="HDR10", cancel=_never)
+    assert _size(dst) == (1280, 720)

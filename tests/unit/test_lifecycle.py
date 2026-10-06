@@ -2179,3 +2179,40 @@ def test_open_services_wires_auto_sharp_to_the_setting(paths, fake_platform, mon
         assert captured["deps"].auto_sharp() is False
     finally:
         services.db.close()
+
+
+def test_open_services_builds_the_capture_service(paths, fake_platform):  # M5 รอบ B2 C12
+    from yttoolkit.core.capture import CaptureService
+
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        assert isinstance(services.captures, CaptureService)
+        capture, created = services.captures.capture("CAPTURE0001", 1_000)
+        assert created and services.captures.list("CAPTURE0001") == [capture]
+        assert list((paths.data_root / "output").rglob("frame_00-00-01.jpg"))
+        with pytest.raises(YtError) as info:
+            services.captures.capture("CAPTUREBOT1", 1_000)
+        assert info.value.code == "E_BOT_CHECK"
+        assert services.queue.pause_state() is not None  # ยูทูปขอตรวจสอบ = พักคิวจริง
+        assert not list(paths.work.glob("capture-*"))
+    finally:
+        services.db.close()
+
+
+def test_run_app_puts_the_capture_service_on_the_context(paths, fake_platform, monkeypatch):
+    from yttoolkit.core.capture import CaptureService
+
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, fake=True)
+    assert code == 0 and isinstance(ctx.captures, CaptureService)
+
+
+def test_startup_removes_a_capture_left_by_a_crash(paths, fake_platform):
+    leftover = paths.work / "capture-0123456789abcdef"
+    leftover.mkdir(parents=True)
+    (leftover / "piece.mp4").write_bytes(b"half")
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        lifecycle.recover_jobs(services)
+        assert not leftover.exists()
+    finally:
+        services.db.close()

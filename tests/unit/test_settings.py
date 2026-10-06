@@ -41,6 +41,7 @@ def test_defaults_match_the_c5_table(store, tmp_path):
         "concurrency": 2,
         "sponsorblockDefault": ["sponsor", "selfpromo", "interaction"],
         "autoSharpFrames": True,
+        "captureQuality": "max",
         "theme": "system",
         "filenameStyle": "title",
         "cookies": {"enabled": False, "source": None, "warningAccepted": False},
@@ -101,6 +102,9 @@ def test_patch_changes_only_the_named_keys(store):
         {"autoSharpFrames": 1},
         {"autoSharpFrames": "true"},
         {"autoSharpFrames": None},
+        {"captureQuality": "4k"},
+        {"captureQuality": 1080},
+        {"captureQuality": None},
     ],
 )
 def test_invalid_patch_is_rejected_and_changes_nothing(store, bad):
@@ -307,3 +311,8 @@ def test_sponsorblock_default_keeps_order_and_drops_duplicates(store):
 def test_auto_sharp_frames_can_be_switched_off_and_on(store):
     assert store.patch({"autoSharpFrames": False})["autoSharpFrames"] is False
     assert store.patch({"autoSharpFrames": True})["autoSharpFrames"] is True
+
+
+def test_capture_quality_accepts_the_three_choices(store):  # M5 รอบ B2 spec 2.4
+    for value in ("1080", "720", "max"):
+        assert store.patch({"captureQuality": value})["captureQuality"] == value

@@ -1,6 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { ExternalLink, ImageIcon, NotebookPen } from "lucide-react"
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -13,6 +14,7 @@ import { useEnqueue } from "@/lib/jobs"
 import type { SubtitleTrack, VideoInfo } from "@/lib/types"
 import { useNarrowScreen } from "@/lib/use-narrow-screen"
 
+import { CaptureStrip, type StripLayout } from "./capture/capture-strip"
 import { Lightbox } from "./lightbox"
 import { LoadError } from "./load-error"
 import { PlayerControls, PlayerSlot } from "./player/player-slot"
@@ -21,7 +23,10 @@ import { useSlotInView } from "./player/slot-visibility"
 import { useTrackWarming } from "./session-warming"
 import { StatTiles } from "./stats"
 import { subtitlesQuery } from "./subs-queries"
+import { isPortraitVideo, type HeaderLayout } from "./theater"
+import { TheaterToggle } from "./theater-toggle"
 import { trackInEffect, trackLabel } from "./track-label"
+import { useTheater } from "./use-theater"
 import { useVideoParams } from "./url-state"
 
 const t = th.video
@@ -47,6 +52,26 @@ const PLAYER_COLUMN = "max-sm:contents sm:flex sm:w-72 sm:shrink-0 sm:flex-col s
 const FULL_ROW = "max-sm:col-span-2"
 // จอแคบ (มือถือ) ปุ่มสูง 44 px ให้นิ้วกดได้ง่าย
 const TOUCH = "max-sm:h-11"
+
+/**
+ * สามเลย์เอาต์ของหัวคลิป (M5 รอบ B2 spec 1.2) ต้นไม้ของ element เหมือนกันทุกแบบ (รากเดิม → คอลัมน์ตัวเล่น → PlayerSlot ลูกคนแรก)
+ * เปลี่ยนแค่ class ช่องตัวเล่นจึงไม่ถูกสร้างใหม่และ iframe ไม่โหลดใหม่ · ไม่ใช้ CSS order (ลำดับ DOM = ลำดับที่ตาเห็น)
+ * compact = แบบเดิม (ตัวเล่น 288 px ซ้าย) · theater-wide = ตัวเล่นเต็มความกว้าง ข้อมูลอยู่ใต้ · theater-tall = ตัวเล่นแนวตั้งซ้าย ข้อมูลขวา
+ */
+const LAYOUTS: Record<HeaderLayout, { root: string; player: string; info: string }> = {
+  compact: { root: LAYOUT, player: PLAYER_COLUMN, info: "flex min-w-0 flex-1 flex-col gap-2 max-sm:contents" },
+  "theater-wide": { root: "flex flex-col gap-4", player: "flex w-full flex-col gap-2", info: "flex min-w-0 flex-col gap-2" },
+  "theater-tall": { root: "flex flex-row items-start gap-4", player: "flex shrink-0 flex-col gap-2", info: "flex min-w-0 flex-1 flex-col gap-2" },
+}
+
+/**
+ * โรงภาพยนตร์แนวนอนบนจอเตี้ย (owner 2026-10-05 แบบโรงภาพยนตร์ของยูทูป): ตัวเล่นสูงไม่เกินที่เหลือในจอแรก
+ * แถวใต้ตัวเล่น (ไทม์ไลน์ "ถ่ายภาพคมตรงนี้" ปุ่มย่อ/ขยาย) จึงเห็นครบโดยไม่ต้องเลื่อน · คง 16:9 แคบลงแล้วอยู่กลาง จอสูงพอ = เต็มความกว้างเหมือนเดิม
+ * กันที่ 15rem = เหนือตัวเล่น (แถบบนของแอพ + breadcrumb วัดได้ 7.75rem) + แถวใต้ตัวเล่น (ระยะห่าง + ไทม์ไลน์ + ปุ่ม 4.25rem)
+ * + เผื่อแถว "ช่วง i จาก n" ตอนเล่นช่วงไฮไลต์ (ราว 2.5rem) · ลบความสูงแถบคิว (ถ้ามี) ด้วย
+ * ไม่ต่ำกว่า 24rem (จอเตี้ยมาก ๆ ยังดูคลิปได้ ยอมให้เลื่อน)
+ */
+const THEATER_WIDE_SLOT = "mx-auto max-w-[max(24rem,calc((100dvh_-_15rem_-_var(--dock-bottom-offset))_*_16_/_9))]"
 
 function HeaderSkeleton() {
   return (
@@ -238,9 +263,42 @@ function NoteButton({ videoId, trackId }: { videoId: string; trackId: string | n
 const focusLost = () => document.activeElement === null || document.activeElement === document.body
 
 /**
+ * ที่อยู่ของแถบ "ภาพที่ถ่ายไว้" ที่ไม่ถูกสร้างใหม่เมื่อเลย์เอาต์เปลี่ยน (M5 รอบ B2)
+ * แถบต้องอยู่คนละคอลัมน์ตามเลย์เอาต์ (ใต้ตัวเล่น / ใต้แถวไทม์ไลน์ของจอแคบ / ท้ายคอลัมน์ข้อมูลของแนวตั้ง) ถ้าวางตรง ๆ
+ * React จะสร้างแถบใหม่ทุกครั้งที่ย้ายคอลัมน์ (เช่นย่อหน้าต่างข้าม 640 px ตอนเปิดภาพใหญ่อยู่ = ภาพใหญ่ปิดเอง)
+ * จึงวาดแถบลงกล่อง host ตัวเดิมเสมอ (portal) แล้วย้ายกล่องนั้นไปไว้ในช่องวาง (slot) ของเลย์เอาต์ปัจจุบัน
+ * host กับ slot เป็น display: contents ลำดับ DOM จึงยังตรงกับที่ตาเห็น · โฟกัสที่อยู่ในแถบตามไปด้วยหลังย้าย
+ */
+function useStripHost(): { host: HTMLDivElement; placeStrip: (slot: HTMLDivElement | null) => void } {
+  const [host] = useState(() => {
+    const node = document.createElement("div")
+    node.className = "contents"
+    return node
+  })
+  const focused = useRef<HTMLElement | null>(null)
+  const placeStrip = useCallback(
+    (slot: HTMLDivElement | null) => {
+      if (slot === null) {
+        // ช่องเดิมกำลังถูกถอดออก (host ติดไปด้วย โฟกัสจะหลุด): จำไว้ก่อนว่าโฟกัสอยู่ในแถบไหม
+        const active = document.activeElement
+        focused.current = active instanceof HTMLElement && host.contains(active) ? active : null
+        return
+      }
+      slot.appendChild(host)
+      const target = focused.current
+      focused.current = null
+      if (target && target.isConnected && document.activeElement !== target) target.focus({ preventScroll: true })
+    },
+    [host],
+  )
+  return { host, placeStrip }
+}
+
+/**
  * หัวคลิปของ W2 (สูงคงที่ก่อนเล่น): ช่องตัวเล่น (ปก + ▶) ชื่อ แถวป้าย (ช่อง หมวดหมู่ แทร็กซับ) ช่องตัวเลข
  * และปุ่ม "บันทึกเป็นโน้ต (.md)" "เปิดในยูทูป" "ดูภาพปก" "เล่นเฉพาะช่วงที่ดูซ้ำบ่อย" (ถ้ามี) · คำอธิบาย chapter คอมเมนต์ปักหมุด แท็ก อยู่ในแท็บข้อมูลคลิป
  * หลังกดเล่น มีแถวไทม์ไลน์ใต้ตัวเล่น (จอแคบ: ใต้ชื่อคลิป)
+ * M5 รอบ B2: สามเลย์เอาต์ (ปกติ / โรงภาพยนตร์แนวนอน / แนวตั้ง) ด้วยต้นไม้ element เดียวกัน (ดู LAYOUTS)
  * (โหลดอยู่ = Skeleton รูปเดียวกัน, ผิดพลาด = Alert)
  */
 export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error> }) {
@@ -253,6 +311,9 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
   const [slotBox, setSlotBox] = useState<HTMLDivElement | null>(null)
   const slotInView = useSlotInView(slotBox)
   const narrow = useNarrowScreen()
+  // โหมดโรงภาพยนตร์ (M5 รอบ B2): กด ▶ แล้วขยาย · ปุ่ม/T สลับ · คลิปแนวตั้งได้ตัวเล่นสูงทางซ้าย
+  const theater = useTheater({ videoId: videoId ?? null, portrait: data ? isPortraitVideo(data) : false, narrow, inView: slotInView })
+  const { host: stripHost, placeStrip } = useStripHost()
   // เปิดหน้านี้จากลิงก์ (กด Enter ที่ "เปิดดู") โฟกัสหลุดไปที่ body: ย้ายมาที่ชื่อคลิป
   // โปรแกรมอ่านหน้าจอจะอ่านชื่อคลิปให้ และกด Tab ต่อจากตรงนี้ได้เลย · ถ้าผู้ใช้โฟกัสที่อื่นอยู่แล้วไม่ยุ่ง
   useEffect(() => {
@@ -278,16 +339,42 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
     }
     return <HeaderSkeleton />
   }
+  const { layout } = theater
+  const tall = layout === "theater-tall"
+  const classes = LAYOUTS[layout]
+  // แถวใต้ตัวเล่น (ไทม์ไลน์ + ปุ่ม) อยู่ใต้ตัวเล่น ยกเว้นจอแคบ (ใต้ชื่อคลิป) และแนวตั้งในโหมดโรงภาพยนตร์ (ท้ายคอลัมน์ข้อมูล)
+  const controls = (className?: string) => (
+    <PlayerControls
+      key={data.videoId}
+      video={data}
+      inView={slotInView}
+      className={className}
+      actions={theater.canToggle ? <TheaterToggle on={theater.on} onToggle={theater.toggle} /> : undefined}
+    />
+  )
+  // แถบ "ภาพที่ถ่ายไว้" (M5 รอบ B2 spec 2.3) ต่อจากแถวใต้ตัวเล่นทุกเลย์เอาต์ มีภาพเมื่อไรก็แสดง (ไม่ต้องรอกดเล่น)
+  // ตัวแถบวาดครั้งเดียว (portal ลง host) ส่วนที่ย้ายตามเลย์เอาต์คือช่องวางเปล่า ๆ นี้ (ดู useStripHost)
+  const stripLayout: StripLayout = layout === "theater-wide" ? "row" : "wrap"
+  const stripSlot = <div ref={placeStrip} data-slot="capture-strip-slot" className="contents" />
   return (
-    <div className={LAYOUT}>
-      {/* ช่องตัวเล่น (ปก + ▶ ก่อนเล่น) · key: เปิดคลิปถัดไปแล้วเริ่มใหม่
-          แถวไทม์ไลน์ (หลังกดเล่น): จอกว้างอยู่ใต้ตัวเล่นในคอลัมน์ซ้าย · จอแคบอยู่ใต้ชื่อคลิปเต็มความกว้าง
-          วางคนละที่ใน DOM (ไม่ใช้ CSS order) ลำดับ Tab และโปรแกรมอ่านหน้าจอจึงตรงกับที่ตาเห็นทั้งสองแบบ */}
-      <div className={PLAYER_COLUMN}>
-        <PlayerSlot key={data.videoId} video={data} inView={slotInView} onBox={setSlotBox} />
-        {!narrow && <PlayerControls key={data.videoId} video={data} inView={slotInView} />}
+    <div data-slot="video-header" data-layout={layout} className={classes.root}>
+      {/* ช่องตัวเล่น (ปก + ▶ ก่อนเล่น) · key: เปิดคลิปถัดไปแล้วเริ่มใหม่ · ลูกคนแรกของคอลัมน์ตัวเล่นเสมอ (สลับเลย์เอาต์ไม่สร้างใหม่)
+          แถวไทม์ไลน์ (หลังกดเล่น): จอกว้างอยู่ใต้ตัวเล่นในคอลัมน์ซ้าย · จอแคบอยู่ใต้ชื่อคลิปเต็มความกว้าง · แนวตั้งท้ายคอลัมน์ข้อมูล
+          วางคนละที่ใน DOM (ไม่ใช้ CSS order) ลำดับ Tab และโปรแกรมอ่านหน้าจอจึงตรงกับที่ตาเห็นทุกแบบ */}
+      <div className={classes.player}>
+        <PlayerSlot
+          key={data.videoId}
+          video={data}
+          inView={slotInView}
+          onBox={setSlotBox}
+          portrait={tall}
+          className={layout === "theater-wide" ? THEATER_WIDE_SLOT : undefined}
+          onPlay={theater.onPlayPressed}
+        />
+        {!narrow && !tall && controls()}
+        {!narrow && !tall && stripSlot}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:contents">
+      <div data-slot="video-info" className={classes.info}>
         {/* จอแคบ (< 640 px) ตัดชื่อที่ 3 บรรทัด ไม่ให้ชื่อยาวดันแถบแท็บพ้นจอแรก (review I-3: ชื่อไทย 100 ตัวดันไป 805 px)
             ชื่อเต็มยังอยู่ใน title (ชี้เมาส์) และโปรแกรมอ่านหน้าจออ่านครบ (ตัดแค่ที่ตาเห็น) */}
         <h1
@@ -298,7 +385,8 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
         >
           {data.title}
         </h1>
-        {narrow && <PlayerControls key={data.videoId} video={data} inView={slotInView} className={FULL_ROW} />}
+        {narrow && controls(FULL_ROW)}
+        {narrow && stripSlot}
         <Meta video={data} trackName={track ? trackLabel(track) : null} />
         <StatTiles video={data} className={FULL_ROW} />
         <div className={`flex flex-wrap items-center gap-2 ${FULL_ROW}`}>
@@ -309,7 +397,18 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
           {/* เฉพาะคลิปที่มีช่วงดูซ้ำบ่อย: อยู่ในแถวปุ่ม (ไม่ใช่ใต้ตัวเล่น) หัวคลิปก่อนเล่นจึงสูงไม่ขึ้นกับ mostReplayed */}
           <ReelButton ranges={data.mostReplayed} />
         </div>
+        {tall && controls()}
+        {tall && stripSlot}
       </div>
+      {createPortal(
+        <CaptureStrip
+          key={`captures-${data.videoId}`}
+          videoId={data.videoId}
+          layout={stripLayout}
+          className={narrow ? FULL_ROW : undefined}
+        />,
+        stripHost,
+      )}
     </div>
   )
 }

@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from ..core.capture import CAPTURE_FOLDER
 from ..core.comments import PinnedCommentService
 from ..core.frames import file_timecode
 from ..core.inputs import VIDEO_ID, InputItem, scan_text
@@ -69,6 +70,13 @@ STATUS_BY_CODE: dict[str, int] = {
     "E_NETWORK": 502,
     # ยูทูปปฏิเสธการโหลดไฟล์ (HTTP 4xx ที่ไม่ใช่ 429): ปลายทางตอบผิดปกติ ใช้ 502 เหมือน E_NETWORK
     "E_YT_REFUSED": 502,
+    # M5 รอบ B2 ถ่ายภาพคมตรงจุด (api/captures.py)
+    "E_CAPTURE_UNSUPPORTED": 422,
+    "E_CAPTURE_BUSY": 409,
+    "E_QUEUE_PAUSED": 409,
+    "E_FFMPEG_MISSING": 409,
+    "E_DISK_FULL": 507,
+    "E_OUTPUT_NOT_WRITABLE": 409,
 }
 
 # อักขระที่ Windows ห้ามใช้ในชื่อไฟล์
@@ -83,6 +91,7 @@ _CACHE_MEDIA_TYPES = {
 }
 _FRAME_FILE = re.compile(r"f_\d{4,}\.jpg")
 _FRAME_FOLDERS = (STORYBOARD_FOLDER, SHARP_FOLDER)
+_CAPTURE_FILE = re.compile(r"c_(\d{1,9})\.jpg")  # ภาพคมตรงจุด captures/c_<tMs>.jpg (M5 รอบ B2)
 
 
 class ResolveBody(BaseModel):
@@ -308,11 +317,15 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
             raise HTTPException(status_code=404)
         target, parts, media_type = found
         is_frame = len(parts) == 2 and parts[0] in _FRAME_FOLDERS and _FRAME_FILE.fullmatch(parts[1])
+        capture = _CAPTURE_FILE.fullmatch(parts[1]) if len(parts) == 2 and parts[0] == CAPTURE_FOLDER else None
         headers: dict[str, str] = {}
-        if is_frame:
+        if is_frame or capture:
             headers["Cache-Control"] = FRAME_CACHE_CONTROL
         if download:
-            name = _frame_download_name(target.parent, parts[-1]) if is_frame else parts[-1]
+            if capture:
+                name = f"frame_{file_timecode(int(capture.group(1)))}.jpg"
+            else:
+                name = _frame_download_name(target.parent, parts[-1]) if is_frame else parts[-1]
             headers["Content-Disposition"] = f'attachment; filename="{name}"'
         return FileResponse(target, media_type=media_type, headers=headers)
 

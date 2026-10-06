@@ -22,6 +22,7 @@ import { useEnqueue } from "@/lib/jobs"
 import type { SharpFast } from "@/lib/sharp-frames"
 import type { FrameSource, ReplaySegment, StoryboardFrame, VideoInfo } from "@/lib/types"
 
+import { CaptureMenuItem } from "./capture/capture-button"
 import { errorMessage } from "./errors"
 import { nearestFrameIndex, revealAndFocus } from "./frame-target"
 import { FrameLightbox } from "./lightbox"
@@ -277,6 +278,8 @@ function FrameTile({ frame, frames, frameIndex, videoId, highlighted, replayed, 
           <Play aria-hidden />
           {t.playFrom}
         </ContextMenuItem>
+        {/* M5 รอบ B2: ถ่ายภาพคมที่เวลาของภาพนี้ (อยู่ในเมนูที่เปิดเท่านั้น จึงไม่มีตัวนับต่อภาพ) */}
+        <CaptureMenuItem videoId={videoId} tMs={frame.tMs} />
         <ContextMenuItem onClick={() => markRange(videoId, "start", frame.tMs)}>
           <ChevronFirst aria-hidden />
           {th.advanced.frameStart}

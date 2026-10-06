@@ -14,6 +14,10 @@
     "ADSOFFLINE1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปที่ติดต่อ SponsorBlock ไม่ได้"},
     "CHAPTERS001": {"probeAs": "jNQXAC9IVRw", "title": "คลิปมี 3 chapter"},
     "SHARPCLIP01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปภาพคม"},
-    "AUTOSHARP01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปภาพคมอัตโนมัติ", "media": {"width": 1280, "height": 720, "dynamic_range": "SDR"}}
+    "AUTOSHARP01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปภาพคมอัตโนมัติ", "media": {"width": 1280, "height": 720, "dynamic_range": "SDR"}},
+    "CAPTURE0001": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปถ่ายภาพคม"},
+    "CAPTURENO01": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปถ่ายภาพคมไม่ได้", "captureError": "E_CAPTURE_UNSUPPORTED"},
+    "CAPTUREBOT1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปถ่ายภาพคมติดบอท", "captureError": "E_BOT_CHECK"},
+    "CAPTURENET1": {"probeAs": "aqz-KE-bpKQ", "title": "คลิปถ่ายภาพคมเน็ตหลุด", "captureError": "E_NETWORK"}
   }
 }

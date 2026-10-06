@@ -1050,3 +1050,25 @@ def test_sharp_with_a_bad_id_is_422(api):
     resp = api().get("/api/videos/not-an-id/sharp")
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "E_INVALID_INPUT"
+
+
+def test_cache_serves_capture_files_immutable_with_a_timecode_name(api):  # M5 รอบ B2
+    client = api()
+    folder = client.cache_root / BBB / "captures"
+    folder.mkdir(parents=True)
+    Image.new("RGB", (32, 18)).save(folder / "c_3725900.jpg", "JPEG")
+    resp = client.get(f"/api/cache/{BBB}/captures/c_3725900.jpg?download=1")
+    assert resp.status_code == 200 and resp.headers["cache-control"] == "public, max-age=86400, immutable"
+    assert resp.headers["content-disposition"] == 'attachment; filename="frame_01-02-05.jpg"'
+    (folder / "other.jpg").write_bytes((folder / "c_3725900.jpg").read_bytes())
+    assert "cache-control" not in client.get(f"/api/cache/{BBB}/captures/other.jpg").headers
+
+
+def test_capture_codes_have_their_http_status():  # M5 รอบ B2 C11
+    from yttoolkit.api.videos import STATUS_BY_CODE
+
+    assert {code: STATUS_BY_CODE[code] for code in (
+        "E_CAPTURE_UNSUPPORTED", "E_CAPTURE_BUSY", "E_QUEUE_PAUSED", "E_FFMPEG_MISSING", "E_DISK_FULL",
+        "E_OUTPUT_NOT_WRITABLE")} == {
+        "E_CAPTURE_UNSUPPORTED": 422, "E_CAPTURE_BUSY": 409, "E_QUEUE_PAUSED": 409, "E_FFMPEG_MISSING": 409,
+        "E_DISK_FULL": 507, "E_OUTPUT_NOT_WRITABLE": 409}  # fmt: skip

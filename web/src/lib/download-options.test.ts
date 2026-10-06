@@ -589,6 +589,7 @@ describe("paramsFromSettings", () => {
     concurrency: 2,
     sponsorblockDefault: ["sponsor", "selfpromo", "interaction"],
     autoSharpFrames: true,
+    captureQuality: "max",
     theme: "system",
     filenameStyle: "title",
     cookies: { enabled: false, source: null, warningAccepted: false },

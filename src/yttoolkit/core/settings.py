@@ -30,6 +30,8 @@ RESERVED_NAMES = frozenset(
 LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
 
 VIDEO_DEFAULTS = ("compat-1080", "compat-720", "max")
+# M5 รอบ B2 (E2): ความละเอียดภาพคมตรงจุด เพดานนับที่ด้านสั้น "max" = สูงสุดที่มี (ถึง 4K)
+CAPTURE_QUALITIES = ("max", "1080", "720")
 AUDIO_FORMATS = ("m4a", "mp3", "wav")
 MP3_KBPS = (128, 192, 320)
 SUB_PRESETS = ("short", "medium", "long", "word", "custom")
@@ -158,6 +160,7 @@ _VALIDATORS: dict[str, Any] = {
     "concurrency": lambda v: _one_of("concurrency", v, CONCURRENCY),
     "sponsorblockDefault": _validate_sponsorblock,
     "autoSharpFrames": lambda v: _validate_bool("autoSharpFrames", v),
+    "captureQuality": lambda v: _one_of("captureQuality", v, CAPTURE_QUALITIES),
     "theme": lambda v: _one_of("theme", v, THEMES),
     "filenameStyle": lambda v: _one_of("filenameStyle", v, FILENAME_STYLES),
     "lastUsed": _validate_last_used,
@@ -179,6 +182,7 @@ class SettingsStore:
             "concurrency": 2,
             "sponsorblockDefault": ["sponsor", "selfpromo", "interaction"],
             "autoSharpFrames": True,  # M5 รอบ B D6: ทำภาพคมอัตโนมัติหลังโหลดวิดีโอ
+            "captureQuality": "max",  # M5 รอบ B2 spec 2.4: ภาพคมตรงจุดใช้ format ที่ละเอียดที่สุด
             "theme": "system",
             "filenameStyle": "title",
             "cookies": {"enabled": False, "source": None, "warningAccepted": False},
