@@ -9,6 +9,9 @@
 - ลำดับล็อก: busy() ถูกเรียก *ในล็อกของบัญชี* (job_ended ต้องเช็กคิวว่างกับตั้ง grace ในจังหวะเดียวกัน) จึงห้ามแตะล็อกของบัญชี
   หรือเรียกกลับเข้า AccountService และฝั่งคิวห้ามถือล็อกคิวหรือล็อกฐานข้อมูลค้างไว้ตอนเรียกเข้ามาที่นี่ (busy ใช้แค่ pending_count)
 - timer ที่ตั้งไว้ยกเลิกไม่ได้ ใช้ generation / token เทียบ *ในล็อกเดียวกับที่ล้างสถานะ* (ไม่มีช่องว่างให้ re-import หรือ job_queued แทรก)
+- เวลาลบเองยึดนาฬิกาจริง: timer ของ Windows ไม่นับเวลาที่เครื่องหลับ จึงให้ jar / status / mark_used / job_ended / job_queued
+  เทียบ now() กับเวลาลบเองทุกครั้ง เลยแล้ว = ลบในล็อกเดียวกันนั้นเลย (timer ยังเป็นตัวปลุกให้ประกาศข่าวตรงเวลา)
+  ลบแล้ว generation เปลี่ยน timer ที่ครบทีหลังจึงไม่ลบซ้ำ ไม่ประกาศซ้ำ
 - ลบแล้ว jar เดิมถูกปล่อยให้ GC เก็บ (ไม่ได้ลบค่าในหน่วยความจำทิ้ง: ภัยที่กันคือไฟล์บนดิสก์และ log ไม่ใช่การอ่านหน่วยความจำ)
 core ไม่ import api/ หรือ platform/ และโมดูลนี้ไม่ import yt_dlp (ตัวอ่านไฟล์ส่งมาจากผู้สร้าง)
 """
@@ -89,11 +92,17 @@ class AccountService:
 
     def jar(self) -> Any | None:
         with self._lock:
-            return self._jar
+            cleared = self._expire_due_locked()
+            jar = self._jar
+        self._after_clear(cleared)
+        return jar
 
     def status(self) -> dict:
         with self._lock:
-            return self._status_locked()
+            cleared = self._expire_due_locked()
+            status = self._status_locked()
+        self._after_clear(cleared)
+        return status
 
     def _status_locked(self) -> dict:
         if self._jar is None or self._imported_at is None:
@@ -158,40 +167,37 @@ class AccountService:
     def mark_used(self, job_id: str | None) -> None:
         """มีคำขอที่ต้องใช้บัญชี: job_id = งานในคิว (นับเข้ากฎคิวว่าง) · None = หน้าเว็บ/ถ่ายภาพคม (ไม่นับ)"""
         with self._lock:
-            if self._jar is None:
-                return
-            self._used = True
-            if job_id is not None:
-                self._jobs.add(job_id)
+            cleared = self._expire_due_locked()
+            if self._jar is not None:
+                self._used = True
+                if job_id is not None:
+                    self._jobs.add(job_id)
+        self._after_clear(cleared)
 
     # ---------- QueueListener (core/queue.py เรียก) ----------
 
     def job_queued(self) -> None:
         """มีงานเข้าคิว (ใหม่หรือกดลองใหม่): ยกเลิก grace ที่กำลังนับ"""
         with self._lock:
-            if self._grace_token is None:
-                return
-            self._grace_token = None
-            self._grace_until = None
-            event = {"active": True, "expiresAt": _iso(self._deadline_locked())}
-        self._announce(event)
+            cleared = self._expire_due_locked()
+            event = None
+            if self._grace_token is not None:
+                self._grace_token = None
+                self._grace_until = None
+                event = {"active": True, "expiresAt": _iso(self._deadline_locked())}
+        self._after_clear(cleared)
+        if event is not None:
+            self._announce(event)
 
     def job_ended(self, job_id: str) -> None:
         """งานจบ (เสร็จ พลาด ยกเลิก หยุดกลางคัน): งานที่ใช้บัญชีจบแล้ว + คิวว่าง = เริ่ม grace"""
         with self._lock:
-            if job_id in self._jobs:
-                self._jobs.discard(job_id)
-                if self._jar is not None:
-                    self._job_used = True
-            if self._jar is None or not self._job_used or self._grace_token is not None:
-                return
-            if self._busy():
-                return
-            self._grace_seq += 1
-            token = self._grace_seq
-            self._grace_token = token
-            self._grace_until = self._now() + timedelta(seconds=self._grace_s)
-            event = {"active": True, "expiresAt": _iso(self._deadline_locked())}
+            cleared = self._expire_due_locked()
+            token = self._start_grace_locked(job_id)
+            event = None if token is None else {"active": True, "expiresAt": _iso(self._deadline_locked())}
+        self._after_clear(cleared)
+        if token is None or event is None:
+            return
         try:
             self._schedule(self._grace_s, lambda: self._grace_due(token))
         except Exception:
@@ -205,6 +211,22 @@ class AccountService:
 
     # ---------- ภายใน ----------
 
+    def _start_grace_locked(self, job_id: str) -> int | None:
+        """เรียกในล็อก: นับงานที่ใช้บัญชีที่จบ แล้วเริ่ม grace ถ้าครบเงื่อนไข คืน token ของ grace ใหม่ (None = ไม่เริ่ม)"""
+        if job_id in self._jobs:
+            self._jobs.discard(job_id)
+            if self._jar is not None:
+                self._job_used = True
+        if self._jar is None or not self._job_used or self._grace_token is not None:
+            return None
+        if self._busy():
+            return None
+        self._grace_seq += 1
+        token = self._grace_seq
+        self._grace_token = token
+        self._grace_until = self._now() + timedelta(seconds=self._grace_s)
+        return token
+
     def _expire(self, generation: int) -> None:
         self._clear("expired", generation=generation)
 
@@ -212,28 +234,48 @@ class AccountService:
         self._clear("queue_done", token=token)
 
     def _clear(self, reason: str, *, generation: int | None = None, token: int | None = None) -> dict:
-        """ล้างสถานะ: generation / token (ถ้าให้มา) ต้องยังตรงในล็อกเดียวกับที่ล้าง ไม่ตรง = timer เก่า ไม่ทำอะไร"""
+        """ล้างสถานะ: generation / token (ถ้าให้มา) ต้องยังตรงในล็อกเดียวกับที่ล้าง ไม่ตรง = timer เก่า ไม่ทำอะไร
+        เลยเวลาลบเองตามนาฬิกาจริงไปแล้ว = ลบด้วยเหตุผลของเวลานั้น (expired / queue_done) แทน · ประกาศนอกล็อกครั้งเดียว"""
         if reason not in CLEAR_REASONS:
             raise ValueError(f"reason ไม่รู้จัก: {reason!r}")
         with self._lock:
-            if self._jar is None or (generation is not None and generation != self._generation):
-                return self._status_locked()
-            if token is not None and token != self._grace_token:
-                return self._status_locked()
-            self._generation += 1
-            self._jar = None
-            self._imported_at = None
-            self._expires_at = None
-            self._grace_token = None
-            self._grace_until = None
-            self._used = False
-            self._job_used = False
-            self._jobs = set()
+            cleared = self._expire_due_locked()
+            if cleared is None and self._jar is not None:
+                stale = generation is not None and generation != self._generation
+                stale = stale or (token is not None and token != self._grace_token)
+                if not stale:
+                    cleared = self._clear_locked(reason)
             status = self._status_locked()
+        self._after_clear(cleared)
+        return status
+
+    def _expire_due_locked(self) -> str | None:
+        """เรียกในล็อก: เลยเวลาลบเองตามนาฬิกาจริงแล้ว = ล้างเลย คืนเหตุผล (expired / queue_done) ให้ประกาศนอกล็อก"""
+        if self._jar is None or self._expires_at is None or self._now() < self._deadline_locked():
+            return None
+        grace_first = self._grace_until is not None and self._grace_until < self._expires_at
+        return self._clear_locked("queue_done" if grace_first else "expired")
+
+    def _clear_locked(self, reason: str) -> str:
+        """เรียกในล็อก: ทิ้ง jar และสถานะทั้งหมด เปลี่ยน generation (timer ที่ค้างอยู่จึงไม่มีผล) คืนเหตุผลให้ _after_clear"""
+        self._generation += 1
+        self._jar = None
+        self._imported_at = None
+        self._expires_at = None
+        self._grace_token = None
+        self._grace_until = None
+        self._used = False
+        self._job_used = False
+        self._jobs = set()
+        return reason
+
+    def _after_clear(self, reason: str | None) -> None:
+        """นอกล็อก: หลังล้างสถานะหนึ่งครั้ง (reason ไม่ใช่ None) ทิ้งข้อมูลที่ได้ด้วยบัญชีแล้วประกาศหนึ่งครั้ง"""
+        if reason is None:
+            return
         self._forget_signed_in()
         log.info("ลบบัญชียูทูปชั่วคราวออกจากแอพแล้ว (%s)", reason)
         self._announce({"active": False, "reason": reason})
-        return status
 
     def _snapshot_locked(self) -> tuple:
         return (

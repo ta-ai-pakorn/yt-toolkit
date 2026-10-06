@@ -344,3 +344,56 @@ def test_listener_errors_never_break_the_service() -> None:
     service = AccountService(fake_parse, publish=boom, on_clear=boom)
     assert service.import_text(GOOD)["active"] is True
     assert service.clear("manual")["active"] is False
+
+
+# ---------- I3: เวลาจริงของนาฬิกา (timer ของ Windows ไม่นับเวลาที่เครื่องหลับ) ----------
+
+
+def _sleep_through(env: Env, seconds: float) -> None:
+    """เดินนาฬิกาโดยไม่เรียก timer (จำลองเครื่องหลับ: timer ยังไม่ครบแต่เวลาจริงเลยไปแล้ว)"""
+    env.clock.now += timedelta(seconds=seconds)
+
+
+def _account_events(env: Env) -> list[dict]:
+    return [data for name, data in env.events if name == "account"]
+
+
+@pytest.mark.parametrize("read", ["jar", "status", "mark_used", "job_ended"])
+def test_wall_clock_expiry_clears_without_the_timer(env: Env, read: str) -> None:
+    env.service.import_text(GOOD)
+    _sleep_through(env, EXPIRY_S)
+    {
+        "jar": lambda: env.service.jar(),
+        "status": lambda: env.service.status(),
+        "mark_used": lambda: env.service.mark_used("job-1"),
+        "job_ended": lambda: env.service.job_ended("job-1"),
+    }[read]()
+    assert env.service.jar() is None
+    assert env.service.status() == {"active": False, "used": False}
+    assert _account_events(env)[1:] == [{"active": False, "reason": "expired"}]
+    assert env.cleared == 1
+    env.clock.advance(0)  # timer ที่ค้างอยู่ครบเวลาทีหลัง: ไม่ลบซ้ำ ไม่ประกาศซ้ำ
+    assert _account_events(env)[1:] == [{"active": False, "reason": "expired"}]
+    assert env.cleared == 1
+
+
+def test_wall_clock_grace_clears_as_queue_done(env: Env) -> None:
+    env.service.import_text(GOOD)
+    env.service.mark_used("job-1")
+    env.service.job_ended("job-1")  # เริ่ม grace
+    _sleep_through(env, GRACE_S)
+    assert env.service.jar() is None
+    assert env.service.status() == {"active": False, "used": False}
+    cleared = [data for data in _account_events(env) if not data["active"]]
+    assert cleared == [{"active": False, "reason": "queue_done"}]
+    env.clock.advance(EXPIRY_S)  # ทั้ง timer ของ grace และของ 2 ชม. ครบทีหลัง: ไม่มีอะไรเพิ่ม
+    assert [data for data in _account_events(env) if not data["active"]] == cleared
+    assert env.cleared == 1
+
+
+def test_before_the_deadline_nothing_is_cleared(env: Env) -> None:
+    env.service.import_text(GOOD)
+    _sleep_through(env, EXPIRY_S - 1)
+    assert env.service.jar() is not None
+    assert env.service.status()["active"] is True
+    assert len(env.events) == 1
