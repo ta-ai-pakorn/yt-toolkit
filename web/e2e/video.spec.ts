@@ -8,7 +8,7 @@ const BBB = "aqz-KE-bpKQ"
 const ZOO = "jNQXAC9IVRw"
 const UPCOMING = "UPCOMINGLV1"
 const PRIVATE = "PRIVATEVID1"
-const PRIVATE_MESSAGE = "คลิปนี้เป็นส่วนตัว เจ้าของต้องเปิดเป็นสาธารณะก่อน"
+const PRIVATE_MESSAGE = "คลิปนี้เป็นส่วนตัวหรือเฉพาะสมาชิก ต้องเข้าสู่ระบบด้วยบัญชีที่มีสิทธิ์ดู"
 const BOT_MESSAGE = "ยูทูปขอให้ยืนยันว่าไม่ใช่บอท รอสัก 10 นาทีแล้วค่อยลองใหม่"
 const NO_STORYBOARD_MESSAGE = 'คลิปนี้ไม่มีภาพตัวอย่างแบบเร็ว กด "ขอภาพคม" แทนได้'
 const FRAME_LIST = "รายการภาพเฟรม"
@@ -77,11 +77,12 @@ test.describe("W2 หัวคลิป", () => {
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
   })
 
-  test("คลิปส่วนตัว: Alert ข้อความจาก backend + กลับหน้าแรก ไม่มีปุ่มลองใหม่ และไม่มีส่วนภาพเฟรม", async ({ page }) => {
+  test("คลิปส่วนตัว: Alert ข้อความจาก backend + ใช้บัญชียูทูปชั่วคราว + กลับหน้าแรก ไม่มีปุ่มลองใหม่ และไม่มีส่วนภาพเฟรม", async ({ page }) => {
     await page.goto(`/v/${PRIVATE}`)
     const alert = page.getByRole("alert")
     await expect(alert).toContainText("เปิดข้อมูลคลิปไม่สำเร็จ")
     await expect(alert).toContainText(PRIVATE_MESSAGE)
+    await expect(alert.getByRole("button", { name: "ใช้บัญชียูทูปชั่วคราว" })).toBeVisible() // M5 รอบ C
     await expect(alert.getByRole("button", { name: "ลองใหม่" })).toHaveCount(0)
     await expect(alert.getByRole("link", { name: "กลับหน้าแรก" })).toHaveAttribute("href", "/")
     await expect(page.getByRole("heading", { name: "ภาพเฟรม" })).toHaveCount(0)
