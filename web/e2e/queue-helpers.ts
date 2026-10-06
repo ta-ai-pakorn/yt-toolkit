@@ -5,6 +5,8 @@ import {
   type APIRequestContext,
   type Locator,
   type Page,
+  type Request,
+  type Response,
 } from "@playwright/test"
 
 import type { Job, JobStatus, NewJob } from "../src/lib/types"
@@ -192,4 +194,44 @@ export async function mockEnqueue(page: Page): Promise<{ bodies: NewJob[][] }> {
     })
   })
   return { bodies }
+}
+
+/**
+ * เปิดหน้าแล้วรอจน SSE ต่อติด และรายการงานที่โหลดใหม่ตอน SSE ต่อติดครั้งแรก (events.ts) เสร็จแล้ว ก่อนส่งงานเข้าคิว
+ * ไม่งั้นคำตอบของการโหลดใหม่นั้น (คำนวณก่อนส่งงาน) อาจทับงานที่เพิ่งเข้าคิวในแคช
+ * รอจน /api/events ตอบแล้ว มี GET /api/jobs อย่างน้อยสองครั้ง (โหลดแรก + โหลดใหม่ตอนต่อติด) และไม่มีคำขอค้าง
+ * (เหตุการณ์ "response" ของ /api/events อาจมาถึงหลังหน้าเว็บส่งคำขอโหลดใหม่ไปแล้ว จึงไม่นับตามลำดับเวลา)
+ */
+export async function gotoReady(page: Page, path = "/") {
+  const isJobsGet = (request: Request) =>
+    new URL(request.url()).pathname === "/api/jobs" && request.method() === "GET"
+  let eventsOpen = false
+  let inFlight = 0
+  let finished = 0
+  const onResponse = (response: Response) => {
+    if (new URL(response.url()).pathname === "/api/events") eventsOpen = true
+  }
+  const onRequest = (request: Request) => {
+    if (isJobsGet(request)) inFlight += 1
+  }
+  const onDone = (request: Request) => {
+    if (!isJobsGet(request)) return
+    inFlight -= 1
+    finished += 1
+  }
+  page.on("response", onResponse)
+  page.on("request", onRequest)
+  page.on("requestfinished", onDone)
+  page.on("requestfailed", onDone)
+  try {
+    await page.goto(path)
+    await expect.poll(() => eventsOpen && finished >= 2 && inFlight === 0).toBe(true)
+    // ให้ react-query ใส่คำตอบลงแคชก่อน (หลังโหลดเนื้อหาครบแล้วยังมีขั้นอ่าน JSON)
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))))
+  } finally {
+    page.off("response", onResponse)
+    page.off("request", onRequest)
+    page.off("requestfinished", onDone)
+    page.off("requestfailed", onDone)
+  }
 }

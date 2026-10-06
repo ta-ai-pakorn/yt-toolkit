@@ -1,7 +1,8 @@
 /// <reference lib="dom" />
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test"
 
-import { cancelJobsFor, enqueue, openQueueSheet, token, waitForJob } from "./queue-helpers"
+import { analyzeSettled } from "./axe-settled"
+import { cancelJobsFor, enqueue, gotoReady, openQueueSheet, token, waitForJob } from "./queue-helpers"
 
 /**
  * M5 รอบ C บัญชียูทูปชั่วคราวกับ backend โหมดปลอมจริง (project queue รันทีละ spec --workers=1):
@@ -27,6 +28,11 @@ const VIDEO = { maxQuality: false, splitChapters: false, noAudio: false, audioLa
 const banner = (page: Page) => page.getByTestId("account-banner")
 const toast = (page: Page, text: string) => page.locator("[data-sonner-toast]").filter({ hasText: text })
 
+async function seriousViolations(page: Page) {
+  const results = await analyzeSettled(page)
+  return results.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => v.id)
+}
+
 async function accountStatus(request: APIRequestContext): Promise<{ active: boolean }> {
   return (await (await request.get("/api/cookies")).json()) as { active: boolean }
 }
@@ -42,18 +48,36 @@ test("งานคลิปจำกัดอายุพลาด → ปุ่
   request,
 }) => {
   test.setTimeout(60_000)
-  await page.goto("/")
+  // รอ SSE ต่อติดก่อนส่งงาน: งานที่พลาดก่อนนั้นไม่มี toast (หน้าเว็บเห็นแค่สถานะสุดท้ายจากการโหลดใหม่)
+  await gotoReady(page)
   try {
     expect((await accountStatus(request)).active).toBe(false)
     const [job] = await enqueue(request, [{ videoId: AGE, kind: "video", params: VIDEO, title: "คลิปจำกัดอายุ" }])
     const failed = await waitForJob(request, (j) => j.id === job.id && j.status === "failed")
     expect(failed.error).toMatchObject({ code: "E_AGE_RESTRICTED", message: AGE_MESSAGE })
 
+    // toast งานพลาดที่มีปุ่ม "ใช้บัญชียูทูปชั่วคราว" + "ดูรายละเอียด": axe ทั้งธีมสว่างและมืด ไม่มีปัญหาระดับ serious/critical
+    const failedToast = toast(page, "โหลดไม่สำเร็จ · คลิปจำกัดอายุ")
+    await expect(failedToast.getByRole("button", { name: USE })).toBeVisible()
+    await expect(failedToast.getByRole("button", { name: "ดูรายละเอียด" })).toBeVisible()
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme })
+      await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
+      expect(await seriousViolations(page)).toEqual([])
+    }
+
     const sheet = await openQueueSheet(page)
     const row = sheet.locator(`[data-job-id="${job.id}"]`)
     await expect(row).toContainText(AGE_MESSAGE)
-    await row.getByRole("button", { name: USE }).click()
     const dialog = page.getByRole("dialog", { name: USE })
+    // Esc ใน dialog ที่เปิดจากแถวในชีตคิว: ปิดแค่ dialog ชีตคิวยังเปิดอยู่
+    await row.getByRole("button", { name: USE }).click()
+    await expect(dialog).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(dialog).toHaveCount(0)
+    await expect(sheet).toBeVisible()
+    await expect(row).toContainText(AGE_MESSAGE)
+    await row.getByRole("button", { name: USE }).click()
     await dialog.getByLabel("cookies.txt").setInputFiles({ name: "cookies.txt", mimeType: "text/plain", buffer: Buffer.from(COOKIES) })
     await dialog.getByRole("button", { name: "นำเข้าแล้วลองใหม่" }).click()
     await expect(dialog).toHaveCount(0)
