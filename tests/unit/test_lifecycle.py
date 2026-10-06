@@ -2216,3 +2216,120 @@ def test_startup_removes_a_capture_left_by_a_crash(paths, fake_platform):
         assert not leftover.exists()
     finally:
         services.db.close()
+
+
+# ---------- M5 รอบ C: บัญชียูทูปชั่วคราว ----------
+
+ACCOUNT_FILE = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t1999999999\tSAPISID\tlifecycle-test\n"
+
+
+def test_open_services_wires_the_account_service(paths, fake_platform, monkeypatch):
+    from yttoolkit.core.account_session import AccountService
+
+    monkeypatch.delenv(lifecycle.ACCOUNT_GRACE_ENV, raising=False)
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        accounts = services.accounts
+        assert isinstance(accounts, AccountService)
+        assert services.queue.listener is accounts
+        with pytest.raises(YtError) as info:
+            services.captures.capture("ACCOUNTAGE1", 1_000)
+        assert info.value.code == "E_AGE_RESTRICTED"
+        sub = services.events.subscribe()
+        accounts.import_text(ACCOUNT_FILE)
+        capture, created = services.captures.capture("ACCOUNTAGE1", 1_000)  # ถ่ายภาพคมลองซ้ำด้วยบัญชี
+        assert created
+        assert services.videos.get("ACCOUNTAGE1")["title"] == "คลิปจำกัดอายุ"  # ข้อมูลจากรอบที่ใช้บัญชี (หน่วยความจำ)
+        accounts.clear("manual")
+        with pytest.raises(YtError):
+            services.videos.get("ACCOUNTAGE1")  # ลบบัญชีแล้ว ข้อมูลที่ได้มาด้วยบัญชีหายด้วย
+        names = []
+        while (item := sub.get(0)) is not None:
+            names.append((item.name, item.data.get("active")))
+        assert ("account", True) in names and ("account", False) in names
+    finally:
+        services.db.close()
+
+
+def test_reimporting_the_account_drops_clip_info_got_with_the_old_one(paths, fake_platform):
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        services.accounts.import_text(ACCOUNT_FILE)
+        services.captures.capture("ACCOUNTAGE1", 1_000)
+        assert services.videos.get("ACCOUNTAGE1")["title"] == "คลิปจำกัดอายุ"
+        services.accounts.import_text(ACCOUNT_FILE)  # แทนบัญชี = on_clear (VideoService.forget_signed_in)
+        with pytest.raises(YtError) as info:
+            services.videos.get("ACCOUNTAGE1")
+        assert info.value.code == "E_AGE_RESTRICTED"
+    finally:
+        services.accounts.clear("manual")
+        services.db.close()
+
+
+def _seconds_left(status: dict) -> float:
+    from datetime import UTC, datetime
+
+    return (datetime.fromisoformat(status["expiresAt"]) - datetime.now(UTC)).total_seconds()
+
+
+def test_only_a_queued_job_that_used_the_account_starts_the_grace_once_the_queue_is_empty(
+    paths, fake_platform, monkeypatch
+):
+    monkeypatch.setenv(lifecycle.ACCOUNT_GRACE_ENV, "300")  # โหมดข้อมูลปลอมย่น grace ได้: ต่างจาก 10 นาทีปกติ
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        accounts, queue = services.accounts, services.queue
+        accounts.import_text(ACCOUNT_FILE)
+        two_hours = accounts.status()["expiresAt"]
+        services.captures.capture("ACCOUNTAGE1", 1_000)  # ใช้บัญชีแบบหน้าเว็บ (mark_used(None)) ไม่เริ่ม grace
+        (plain,) = queue.enqueue([NewJob("aqz-KE-bpKQ", "video", {})])  # คิวยังไม่เริ่ม: งานค้าง queued
+        queue.cancel(plain.id)  # งานที่ไม่ได้ใช้บัญชีจบ คิวว่าง: ยังไม่เริ่ม grace
+        status = accounts.status()
+        assert status["used"] is True and status["expiresAt"] == two_hours
+        used, waiting = queue.enqueue([NewJob("aqz-KE-bpKQ", "video", {}), NewJob("aqz-KE-bpKQ", "audio", {})])
+        accounts.mark_used(used.id)
+        queue.cancel(used.id)  # งานที่ใช้บัญชีจบ แต่ยังมีงานรอในคิว (busy = pending_count() > 0)
+        assert accounts.status()["expiresAt"] == two_hours
+        queue.brake()  # คิวพักอยู่แต่ยังมีงานรอ = ยังไม่ว่าง
+        accounts.job_ended(used.id)
+        assert accounts.status()["expiresAt"] == two_hours
+        queue.cancel(waiting.id)  # คิวว่างแล้ว: เริ่ม grace ตามค่าที่ย่นไว้
+        assert 290 <= _seconds_left(accounts.status()) <= 300
+    finally:
+        services.accounts.clear("manual")
+        services.db.close()
+
+
+def test_run_app_puts_the_account_service_on_the_context(paths, fake_platform, monkeypatch):
+    from yttoolkit.core.account_session import AccountService
+
+    code, ctx = _run_capturing_ctx(paths, fake_platform, monkeypatch, fake=True)
+    assert code == 0 and isinstance(ctx.accounts, AccountService)
+
+
+def test_shutdown_clears_the_account_before_announcing_the_shutdown(paths, fake_platform):
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        services.accounts.import_text(ACCOUNT_FILE)
+        sub = services.events.subscribe()
+        lifecycle.shutdown_services(services, timeout=0.5)
+        seen = []
+        while isinstance(item := sub.get(0), Event):
+            seen.append((item.name, item.data))
+        assert seen == [("account", {"active": False, "reason": "shutdown"}), ("app.shutdown", {})]
+        assert services.accounts.jar() is None
+    finally:
+        services.db.close()
+
+
+@pytest.mark.parametrize(
+    ("fake", "raw", "expected"),
+    [(True, "3", 3.0), (True, None, 600.0), (True, "0", 600.0), (True, "x", 600.0), (True, "601", 600.0),
+     (False, "3", 600.0)],
+)
+def test_account_grace_can_be_shortened_only_in_fake_mode(monkeypatch, fake, raw, expected):
+    if raw is None:
+        monkeypatch.delenv(lifecycle.ACCOUNT_GRACE_ENV, raising=False)
+    else:
+        monkeypatch.setenv(lifecycle.ACCOUNT_GRACE_ENV, raw)
+    assert lifecycle.account_grace_s(fake) == expected
