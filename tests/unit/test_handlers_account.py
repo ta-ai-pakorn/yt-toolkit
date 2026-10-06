@@ -159,3 +159,5 @@ def test_every_youtube_job_kind_uses_the_same_rule(env, kind: str, params: dict)
     result = _run(env, _job(AGE, kind, params))
     assert result.outputs or result.notes  # ซับ: คลิปนี้ไม่มีซับ = จบแบบมีโน้ต NO_SUBTITLES (ไม่ใช่ error)
     assert gate.used == [f"job-{AGE}"]
+    if kind != "subtitle":  # ขั้นหลัง probe (โหลดไฟล์) รันใต้บัญชีด้วย ไม่ใช่แค่ probe
+        assert fake.download_jars == [JAR]
