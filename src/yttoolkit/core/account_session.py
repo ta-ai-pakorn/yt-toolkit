@@ -6,6 +6,9 @@
   การดึงข้อมูลคลิปหรือถ่ายภาพคมที่ใช้บัญชี (mark_used(None)) ไม่เริ่ม grace
 - ทุกครั้งที่สถานะเปลี่ยนประกาศข่าว "account" ทาง publish: {active, expiresAt?, reason?} ไม่มีชื่อหรือค่าคุกกี้
 - เธรดไหนเรียกก็ได้ (ล็อกเดียว) · publish / on_clear เรียกนอกล็อก
+- ลำดับล็อก: busy() ถูกเรียก *ในล็อกของบัญชี* (job_ended ต้องเช็กคิวว่างกับตั้ง grace ในจังหวะเดียวกัน) จึงห้ามแตะล็อกของบัญชี
+  หรือเรียกกลับเข้า AccountService และฝั่งคิวห้ามถือล็อกคิวหรือล็อกฐานข้อมูลค้างไว้ตอนเรียกเข้ามาที่นี่ (busy ใช้แค่ pending_count)
+- timer ที่ตั้งไว้ยกเลิกไม่ได้ ใช้ generation / token เทียบ *ในล็อกเดียวกับที่ล้างสถานะ* (ไม่มีช่องว่างให้ re-import หรือ job_queued แทรก)
 - ลบแล้ว jar เดิมถูกปล่อยให้ GC เก็บ (ไม่ได้ลบค่าในหน่วยความจำทิ้ง: ภัยที่กันคือไฟล์บนดิสก์และ log ไม่ใช่การอ่านหน่วยความจำ)
 core ไม่ import api/ หรือ platform/ และโมดูลนี้ไม่ import yt_dlp (ตัวอ่านไฟล์ส่งมาจากผู้สร้าง)
 """
@@ -112,11 +115,15 @@ class AccountService:
     # ---------- นำเข้า / ลบ ----------
 
     def import_text(self, text: str) -> dict:
-        """นำเข้า cookies.txt (ข้อความ) แทนบัญชีเดิม คืน status() · ใช้ไม่ได้ = YtError E_COOKIES_INVALID บัญชีเดิมไม่เปลี่ยน"""
-        if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_IMPORT_BYTES:
+        """นำเข้า cookies.txt (ข้อความ) แทนบัญชีเดิม คืน status() · ใช้ไม่ได้ = YtError E_COOKIES_INVALID บัญชีเดิมไม่เปลี่ยน
+        ตั้ง timer ลบเองไม่ได้ (schedule พัง) = ถอยสถานะกลับเป็นก่อนนำเข้าแล้วส่ง error ต่อ"""
+        if not isinstance(text, str):
+            raise YtError("E_COOKIES_INVALID", f"expected text, got {type(text).__name__}")
+        if len(text.encode("utf-8")) > MAX_IMPORT_BYTES:
             raise YtError("E_COOKIES_INVALID", f"file larger than {MAX_IMPORT_BYTES} bytes")
         jar = self._parse(text)  # ตรวจก่อนแตะสถานะ: ไฟล์เสีย = บัญชีเดิมยังอยู่ครบ
         with self._lock:
+            snapshot = self._snapshot_locked()
             replaced = self._jar is not None
             self._generation += 1
             generation = self._generation
@@ -127,36 +134,24 @@ class AccountService:
             self._grace_until = None
             self._used = False
             self._job_used = False
-            self._jobs.clear()
+            self._jobs = set()
             status = self._status_locked()
+        try:
+            self._schedule(self._expiry_s, lambda: self._expire(generation))
+        except Exception:
+            with self._lock:
+                if self._generation == generation:  # ยังเป็นรุ่นของเรา (ไม่มีใครนำเข้าหรือลบแทรก): คืนสถานะเดิม
+                    self._restore_locked(snapshot)
+            raise
         if replaced:
             self._forget_signed_in()
-        self._schedule(self._expiry_s, lambda: self._expire(generation))
         log.info("นำเข้าบัญชียูทูปชั่วคราวแล้ว ลบเองภายใน %s", status["expiresAt"])
         self._announce({"active": True, "expiresAt": status["expiresAt"]})
         return status
 
     def clear(self, reason: str) -> dict:
         """ลบบัญชีที่ถืออยู่ (ไม่มี = ไม่ทำอะไร ไม่ประกาศ) คืน status() · งานที่กำลังโหลดด้วยบัญชีนี้ใช้ต่อจนจบ"""
-        if reason not in CLEAR_REASONS:
-            raise ValueError(f"reason ไม่รู้จัก: {reason!r}")
-        with self._lock:
-            if self._jar is None:
-                return self._status_locked()
-            self._generation += 1
-            self._jar = None
-            self._imported_at = None
-            self._expires_at = None
-            self._grace_token = None
-            self._grace_until = None
-            self._used = False
-            self._job_used = False
-            self._jobs.clear()
-            status = self._status_locked()
-        self._forget_signed_in()
-        log.info("ลบบัญชียูทูปชั่วคราวออกจากแอพแล้ว (%s)", reason)
-        self._announce({"active": False, "reason": reason})
-        return status
+        return self._clear(reason)
 
     # ---------- การใช้งาน ----------
 
@@ -197,23 +192,58 @@ class AccountService:
             self._grace_token = token
             self._grace_until = self._now() + timedelta(seconds=self._grace_s)
             event = {"active": True, "expiresAt": _iso(self._deadline_locked())}
+        try:
+            self._schedule(self._grace_s, lambda: self._grace_due(token))
+        except Exception:
+            with self._lock:
+                if self._grace_token == token:  # ไม่มี timer = ไม่มี grace: ถอน token ให้ job_ended ครั้งหน้าลองเริ่มใหม่ได้
+                    self._grace_token = None
+                    self._grace_until = None
+            raise
         log.info("คิวว่างแล้ว ลบบัญชียูทูปชั่วคราวในอีก %d วินาที", int(self._grace_s))
-        self._schedule(self._grace_s, lambda: self._grace_due(token))
         self._announce(event)
 
     # ---------- ภายใน ----------
 
     def _expire(self, generation: int) -> None:
-        with self._lock:
-            if generation != self._generation or self._jar is None:
-                return
-        self.clear("expired")
+        self._clear("expired", generation=generation)
 
     def _grace_due(self, token: int) -> None:
+        self._clear("queue_done", token=token)
+
+    def _clear(self, reason: str, *, generation: int | None = None, token: int | None = None) -> dict:
+        """ล้างสถานะ: generation / token (ถ้าให้มา) ต้องยังตรงในล็อกเดียวกับที่ล้าง ไม่ตรง = timer เก่า ไม่ทำอะไร"""
+        if reason not in CLEAR_REASONS:
+            raise ValueError(f"reason ไม่รู้จัก: {reason!r}")
         with self._lock:
-            if token != self._grace_token or self._jar is None:
-                return
-        self.clear("queue_done")
+            if self._jar is None or (generation is not None and generation != self._generation):
+                return self._status_locked()
+            if token is not None and token != self._grace_token:
+                return self._status_locked()
+            self._generation += 1
+            self._jar = None
+            self._imported_at = None
+            self._expires_at = None
+            self._grace_token = None
+            self._grace_until = None
+            self._used = False
+            self._job_used = False
+            self._jobs = set()
+            status = self._status_locked()
+        self._forget_signed_in()
+        log.info("ลบบัญชียูทูปชั่วคราวออกจากแอพแล้ว (%s)", reason)
+        self._announce({"active": False, "reason": reason})
+        return status
+
+    def _snapshot_locked(self) -> tuple:
+        return (
+            self._generation, self._jar, self._imported_at, self._expires_at, self._grace_token,
+            self._grace_until, self._used, self._job_used, set(self._jobs),
+        )
+
+    def _restore_locked(self, snapshot: tuple) -> None:
+        (self._generation, self._jar, self._imported_at, self._expires_at, self._grace_token,
+         self._grace_until, self._used, self._job_used, self._jobs) = snapshot
 
     def _forget_signed_in(self) -> None:
         if self._on_clear is None:

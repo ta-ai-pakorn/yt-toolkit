@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
@@ -224,6 +225,116 @@ def test_stale_timers_after_clear_do_nothing(env: Env) -> None:
     env.service.import_text(GOOD)
     env.clock.advance(GRACE_S)  # grace ของบัญชีก่อนหน้าครบเวลา
     assert env.service.status()["active"] is True
+
+
+class HookLock:
+    """ล็อกจริงที่เรียกงานของเทส (ครั้งเดียว) ทันทีหลังปล่อยล็อกครั้งแรกที่ถูกตั้งไว้ ใช้จำลองเธรดอื่นแทรกกลาง timer"""
+
+    def __init__(self) -> None:
+        self._real = threading.Lock()
+        self.after_release: Callable[[], None] | None = None
+
+    def __enter__(self) -> HookLock:
+        self._real.acquire()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._real.release()
+        hook, self.after_release = self.after_release, None
+        if hook is not None:
+            hook()
+
+
+def test_reimport_between_the_expiry_check_and_the_clear_keeps_the_new_account(env: Env) -> None:
+    env.service.import_text(GOOD)
+    hook = env.service._lock = HookLock()  # type: ignore[assignment]
+    other = GOOD.replace("value-1", "value-2")
+    hook.after_release = lambda: env.service.import_text(other)  # เกิดหลังเช็ก generation ของ timer
+    env.clock.advance(EXPIRY_S)
+    jar = env.service.jar()
+    assert jar is not None and jar.text == other
+    assert env.service.status()["active"] is True
+
+
+def test_job_queued_between_the_grace_check_and_the_clear_never_loses_the_account(env: Env) -> None:
+    env.service.import_text(GOOD)
+    env.service.mark_used("job-1")
+    env.service.job_ended("job-1")
+    hook = env.service._lock = HookLock()  # type: ignore[assignment]
+    heard: list[bool] = []
+
+    def new_job_arrives() -> None:
+        before = len(env.events)
+        env.service.job_queued()
+        heard.append(len(env.events) > before)  # True = job_queued ยกเลิก grace ได้จริง
+
+    hook.after_release = new_job_arrives
+    env.clock.advance(GRACE_S)
+    assert heard, "the hook never ran"
+    # job_queued ที่ยกเลิก grace ได้จริงต้องไม่เสียบัญชี · ถ้าบัญชีถูกลบไปก่อนแล้ว job_queued ก็ไม่มีอะไรให้ยกเลิก
+    assert env.service.status()["active"] is heard[0]
+
+
+def test_a_failing_schedule_leaves_a_first_import_unchanged() -> None:
+    def broken(_delay: float, _fn: Callable[[], None]) -> None:
+        raise RuntimeError("can't start new thread")
+
+    events: list[tuple[str, dict]] = []
+    cleared: list[int] = []
+    service = AccountService(
+        fake_parse, publish=lambda n, d: events.append((n, d)), on_clear=lambda: cleared.append(1), schedule=broken
+    )
+    with pytest.raises(RuntimeError):
+        service.import_text(GOOD)
+    assert service.status() == {"active": False, "used": False}
+    assert service.jar() is None and events == [] and cleared == []
+
+
+def test_a_failing_schedule_keeps_the_previous_account_and_its_timer(env: Env) -> None:
+    first = env.service.import_text(GOOD)
+    first_jar = env.service.jar()
+    real_schedule = env.clock.schedule
+
+    def broken(_delay: float, _fn: Callable[[], None]) -> None:
+        raise RuntimeError("can't start new thread")
+
+    env.service._schedule = broken  # type: ignore[assignment]
+    with pytest.raises(RuntimeError):
+        env.service.import_text(GOOD.replace("value-1", "value-2"))
+    assert env.service.status() == first and env.service.jar() is first_jar
+    assert env.cleared == 0 and len(env.events) == 1
+    env.service._schedule = real_schedule  # type: ignore[assignment]
+    env.clock.advance(EXPIRY_S)  # timer ของบัญชีเดิมยังใช้ได้
+    assert env.service.status()["active"] is False and env.last() == {"active": False, "reason": "expired"}
+
+
+def test_a_failing_schedule_rolls_the_grace_back(env: Env) -> None:
+    status = env.service.import_text(GOOD)
+    env.service.mark_used("job-1")
+    env.service.mark_used("job-2")
+    real_schedule = env.clock.schedule
+
+    def broken(_delay: float, _fn: Callable[[], None]) -> None:
+        raise RuntimeError("can't start new thread")
+
+    env.service._schedule = broken  # type: ignore[assignment]
+    with pytest.raises(RuntimeError):
+        env.service.job_ended("job-1")
+    assert env.service.status()["expiresAt"] == status["expiresAt"]  # ไม่มี grace ค้าง
+    assert len(env.events) == 1
+    env.service._schedule = real_schedule  # type: ignore[assignment]
+    env.service.job_ended("job-2")  # ครั้งหน้าเริ่ม grace ได้ ไม่ติดค้างกับ token เก่า
+    assert env.service.status()["expiresAt"] == _iso(T0 + timedelta(seconds=GRACE_S))
+    env.clock.advance(GRACE_S)
+    assert env.last() == {"active": False, "reason": "queue_done"}
+
+
+def test_non_text_input_is_not_reported_as_too_large(env: Env) -> None:
+    with pytest.raises(YtError) as raised:
+        env.service.import_text(b"cookie bytes")  # type: ignore[arg-type]
+    assert raised.value.code == "E_COOKIES_INVALID"
+    assert raised.value.detail == "expected text, got bytes"  # ชื่อชนิดเท่านั้น ไม่มีเนื้อหาไฟล์
+    assert env.service.status()["active"] is False
 
 
 def test_listener_errors_never_break_the_service() -> None:
