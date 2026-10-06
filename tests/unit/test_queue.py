@@ -869,3 +869,113 @@ def test_context_rejects_an_unknown_stage(runner_factory):
     r.tick()
     spawn.run_all()
     assert (r.store.get(job.id).status, r.store.get(job.id).error_code) == ("failed", "E_UNKNOWN")
+
+
+# ---------- M5 รอบ C: ผู้ฟังคิว (grace ของบัญชียูทูปชั่วคราว) ----------
+
+
+class RecordingListener:
+    """จดทุกครั้งที่คิวแจ้ง: ("queued",) / ("ended", job_id, สถานะในฐานข้อมูลตอนนั้น, จำนวนงานค้าง, ถือล็อกคิวอยู่ไหม)"""
+
+    def __init__(self, runner) -> None:
+        self.runner = runner
+        self.calls: list[tuple] = []
+
+    def _queue_lock_held(self) -> bool:
+        """ลองจับล็อกคิวจากอีกเธรด: จับไม่ได้ = เธรดที่เรียกผู้ฟังยังถือล็อกอยู่ (RLock ของเธรดเดียวกันจับซ้ำได้เสมอ จึงต้องข้ามเธรด)"""
+        got: list[bool] = []
+
+        def probe() -> None:
+            if self.runner._lock.acquire(blocking=False):
+                self.runner._lock.release()
+                got.append(True)
+            else:
+                got.append(False)
+
+        thread = threading.Thread(target=probe)
+        thread.start()
+        thread.join(5.0)
+        return not got[0]
+
+    def job_queued(self) -> None:
+        self.calls.append(("queued", self._queue_lock_held()))
+
+    def job_ended(self, job_id: str) -> None:
+        job = self.runner.store.get(job_id)
+        self.calls.append(("ended", job_id, job.status, self.runner.pending_count(), self._queue_lock_held()))
+
+
+def test_listener_hears_enqueue_and_retry_once_per_call(runner_factory):
+    r, spawn, h = runner_factory(concurrency=1, fail={"vid00000001": "E_YT_REFUSED"})
+    heard = r.listener = RecordingListener(r)
+    a, _b = r.enqueue(jobs_of("frames_zip", 2))
+    assert heard.calls == [("queued", False)]
+    r.tick()
+    spawn.run_all()
+    heard.calls.clear()
+    r.retry(a.id)
+    assert heard.calls == [("queued", False)]
+
+
+def test_listener_hears_every_final_state_after_it_is_stored(runner_factory):
+    r, spawn, h = runner_factory(concurrency=2, fail={"vid00000002": "E_YT_REFUSED"})
+    heard = r.listener = RecordingListener(r)
+    a, b, c = r.enqueue(jobs_of("frames_zip", 3))
+    r.cancel(c.id)
+    r.tick()
+    spawn.run_all()
+    ended = [call[1:] for call in heard.calls if call[0] == "ended"]
+    # c ยกเลิกตอนรอคิว (a, b ยังรอ) · a เสร็จตอน b ยังทำอยู่ · b จบเป็นงานสุดท้าย · ไม่มีครั้งไหนถือล็อกคิว
+    assert ended == [(c.id, "cancelled", 2, False), (a.id, "done", 1, False), (b.id, "failed", 0, False)]
+
+
+def test_cancelling_a_running_job_is_heard_exactly_once(runner_factory):
+    def handler(job, ctx):
+        ctx.check_cancelled()
+        return JobResult()
+
+    r, spawn, _ = runner_factory(handler=handler)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    r.tick()
+    heard = r.listener = RecordingListener(r)
+    r.cancel(job.id)
+    assert heard.calls == []  # แค่ส่งสัญญาณหยุด: ยังไม่มีสถานะสุดท้ายให้แจ้ง
+    spawn.run_all()
+    assert r.store.get(job.id).status == "cancelled"
+    assert heard.calls == [("ended", job.id, "cancelled", 0, False)]
+
+
+def test_last_job_ends_with_an_empty_queue(runner_factory):
+    r, spawn, h = runner_factory(concurrency=1)
+    heard = r.listener = RecordingListener(r)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    r.tick()
+    spawn.run_all()
+    assert heard.calls[-1] == ("ended", job.id, "done", 0, False)
+
+
+def test_spawn_failure_is_heard_as_ended(runner_factory):
+    def broken_spawn(fn):
+        raise RuntimeError("can't start new thread")
+
+    r, spawn, h = runner_factory(spawn=broken_spawn)
+    heard = r.listener = RecordingListener(r)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    r.tick()
+    assert heard.calls[-1] == ("ended", job.id, "failed", 0, False)
+
+
+def test_listener_errors_do_not_break_the_queue(runner_factory):
+    class Broken:
+        def job_queued(self) -> None:
+            raise RuntimeError("boom")
+
+        def job_ended(self, job_id: str) -> None:
+            raise RuntimeError("boom")
+
+    r, spawn, h = runner_factory()
+    r.listener = Broken()
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    r.tick()
+    spawn.run_all()
+    assert r.store.get(job.id).status == "done"
