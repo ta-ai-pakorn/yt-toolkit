@@ -446,7 +446,7 @@ def _finish_chapters(
         )  # fmt: skip
         final = files.move_into_place(path, planned)
         rel = final.relative_to(clip.root).as_posix()
-        log.info("งาน %s บันทึกไฟล์ %s", ctx.job_id, rel)
+        log.info("งาน %s คลิป %s บันทึกไฟล์ %s", ctx.job_id, clip.video_id, final.suffix)  # ไม่ log ชื่อคลิป
         outputs.append(OutputFile(root=str(clip.root), rel=rel, size_bytes=final.stat().st_size, kind=kind))
     clip_folder = files.plan_output(clip.root, clip.title, clip.video_id, "", ext, clip.group).parent
     _write_note(deps, ctx, clip, clip_folder)
@@ -550,7 +550,7 @@ def _finish(
     final = files.move_into_place(src, planned)
     rel = final.relative_to(clip.root).as_posix()
     _write_note(deps, ctx, clip, final.parent)
-    log.info("งาน %s บันทึกไฟล์ %s", ctx.job_id, rel)
+    log.info("งาน %s คลิป %s บันทึกไฟล์ %s", ctx.job_id, clip.video_id, final.suffix)  # ไม่ log ชื่อคลิป
     output = OutputFile(root=str(clip.root), rel=rel, size_bytes=final.stat().st_size, kind=kind)
     return JobResult(outputs=(output,), notes=_unique(notes), title=clip.title or None)
 

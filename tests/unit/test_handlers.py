@@ -552,9 +552,26 @@ def test_logs_have_no_absolute_paths(env, caplog):
     caplog.set_level(logging.DEBUG, logger="yttoolkit")
     env.run("video", BBB, video_params())
 
-    planned = env.planned(BBB, BBB_TITLE, "", "mp4")
-    assert f"{planned.parent.name}/{planned.name}" in caplog.text
+    assert f"คลิป {BBB} บันทึกไฟล์ .mp4" in caplog.text
     assert str(env.tmp) not in caplog.text
+
+
+def test_logs_have_no_clip_title(env, caplog):
+    """กฎโปรเจกต์: log ห้ามมีชื่อคลิป (ชื่อไฟล์จริงอยู่ในผลของงาน ไม่ใช่ใน log)"""
+    caplog.set_level(logging.DEBUG, logger="yttoolkit")
+    result, _ = env.run("video", BBB, video_params())
+    assert "Big Buck Bunny" in result.outputs[0].rel  # ชื่อไฟล์ยังอยู่ในผลของงานให้หน้าเว็บใช้
+    assert BBB_TITLE not in caplog.text
+    assert "Big Buck Bunny" not in caplog.text
+
+
+def test_chapter_split_logs_have_no_clip_or_chapter_title(env, caplog):
+    caplog.set_level(logging.DEBUG, logger="yttoolkit")
+    result, _ = env.run("video", ZOO, video_params(splitChapters=True))
+    assert len(result.outputs) == 3
+    assert ZOO_TITLE not in caplog.text
+    assert not any(name in caplog.text for name in ["Intro", "The cool thing"])
+    assert caplog.text.count("บันทึกไฟล์ .mp4") == 3
 
 
 # ---------- audio ----------
