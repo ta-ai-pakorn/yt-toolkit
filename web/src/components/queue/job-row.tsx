@@ -2,12 +2,15 @@ import { ChevronDown, CircleCheck, CirclePause, CircleX, Copy, Download, FolderO
 import { useState, type ComponentProps, type ReactNode } from "react"
 import { toast } from "sonner"
 
+import { UseAccountButton } from "@/components/account/account-button"
+import { useAccountStatus } from "@/components/account/use-account"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
 import { fill, th } from "@/i18n/th"
+import { showAccountButton } from "@/lib/account"
 import { outputUrl } from "@/lib/jobs"
 import type { Job } from "@/lib/types"
 import { cn } from "cn"
@@ -110,12 +113,20 @@ export function FailedRow({ job, expanded }: { job: Job; expanded: boolean }) {
   const Icon = interrupted ? CirclePause : CircleX
   const code = job.error?.code
   const detail = job.error?.detail
+  // M5 รอบ C: จำกัดอายุ/ส่วนตัว + ยังไม่ได้ใช้บัญชี = ปุ่ม "ใช้บัญชียูทูปชั่วคราว" นำเข้าแล้วลองงานนี้ใหม่ (params เดิม)
+  const { active } = useAccountStatus()
+  const offerAccount = showAccountButton(code, active)
   return (
     <li className={ROW} data-job-id={job.id}>
       <Icon aria-hidden className={cn("mt-0.5 size-4 shrink-0", interrupted ? "text-warning" : "text-destructive")} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <RowTitle job={job} />
         <p className={cn("text-sm", !interrupted && "text-destructive")}>{job.error?.message ?? th.queue.interrupted}</p>
+        {offerAccount && (
+          <div className="pt-1">
+            <UseAccountButton onImported={() => retry.mutate()} />
+          </div>
+        )}
         {code && (
           <Collapsible open={open} onOpenChange={setOpen}>
             <CollapsibleTrigger

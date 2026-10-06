@@ -1,6 +1,8 @@
 import { QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { accountDialog } from "@/components/account/account-store"
+import { ACCOUNT_KEY } from "@/lib/account"
 import { ApiError } from "@/lib/api"
 import { QUEUE_KEY } from "@/lib/jobs"
 import type { Capture } from "@/lib/types"
@@ -134,5 +136,32 @@ describe("runCapture", () => {
     await runCapture(client, BBB, 0)
     expect(invalidate).toHaveBeenCalledWith({ queryKey: QUEUE_KEY })
     expect(captureStore.get().busy).toBe(false)
+  })
+
+  it("M5 รอบ C: จำกัดอายุ/ส่วนตัวและยังไม่ได้ใช้บัญชี = toast มีปุ่ม ใช้บัญชียูทูปชั่วคราว นำเข้าแล้วถ่ายเวลาเดิมใหม่", async () => {
+    const client = new QueryClient()
+    api.postCapture.mockRejectedValueOnce(new ApiError(409, "E_AGE_RESTRICTED", "คลิปนี้จำกัดอายุ", null, null))
+    await runCapture(client, BBB, 2_000)
+    const [message, options] = toast.error.mock.lastCall as [string, { action: { label: string; onClick: () => void } }]
+    expect(message).toBe("คลิปนี้จำกัดอายุ")
+    expect(options.action.label).toBe("ใช้บัญชียูทูปชั่วคราว")
+    options.action.onClick()
+    const request = accountDialog.get().request
+    expect(request?.origin).toBe("error")
+    api.postCapture.mockResolvedValueOnce(item(2_000))
+    request?.onImported?.()
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1))
+    expect(api.postCapture).toHaveBeenCalledTimes(2)
+    expect(api.postCapture).toHaveBeenLastCalledWith(BBB, 2_000)
+    expect(toast.success.mock.lastCall?.[0]).toBe("ถ่ายภาพคมแล้ว · 0:02")
+    accountDialog.close()
+  })
+
+  it("M5 รอบ C: ถือบัญชีอยู่แล้ว = ไม่มีปุ่ม (ข้อความ ลองด้วยบัญชีแล้ว… มาจาก backend)", async () => {
+    const client = new QueryClient()
+    client.setQueryData(ACCOUNT_KEY, { active: true, used: true })
+    api.postCapture.mockRejectedValueOnce(new ApiError(404, "E_VIDEO_PRIVATE", "ลองด้วยบัญชีแล้วยังเปิดไม่ได้", null, null))
+    await runCapture(client, BBB, 0)
+    expect(toast.error).toHaveBeenLastCalledWith("ลองด้วยบัญชีแล้วยังเปิดไม่ได้")
   })
 })

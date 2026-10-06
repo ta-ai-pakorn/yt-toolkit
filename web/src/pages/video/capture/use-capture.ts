@@ -2,9 +2,12 @@ import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-quer
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
+import { openAccountDialog } from "@/components/account/account-store"
 import { fill, th } from "@/i18n/th"
+import { ACCOUNT_KEY, showAccountButton } from "@/lib/account"
+import { ApiError } from "@/lib/api"
 import { QUEUE_KEY, queueQuery } from "@/lib/jobs"
-import type { Capture, VideoInfo } from "@/lib/types"
+import type { AccountStatus, Capture, VideoInfo } from "@/lib/types"
 
 import { errorMessage, hasCode } from "../errors"
 import { capturesKey, postCapture, withCapture } from "./capture-api"
@@ -38,7 +41,18 @@ export async function runCapture(client: QueryClient, videoId: string, ms: numbe
       action: { label: th.capture.view, onClick: () => captureStore.view({ videoId, id: capture.id }) },
     })
   } catch (error) {
-    toast.error(errorMessage(error, th.errors.unknown))
+    // M5 รอบ C: จำกัดอายุ/ส่วนตัว + ยังไม่ได้ใช้บัญชี = toast มีปุ่ม "ใช้บัญชียูทูปชั่วคราว" นำเข้าแล้วถ่ายเวลาเดิมใหม่
+    const active = client.getQueryData<AccountStatus>(ACCOUNT_KEY)?.active === true
+    const account = showAccountButton(error instanceof ApiError ? error.code : null, active)
+    const message = errorMessage(error, th.errors.unknown)
+    if (account) {
+      const retry = () => void runCapture(client, videoId, ms)
+      toast.error(message, {
+        action: { label: th.account.use, onClick: () => openAccountDialog({ origin: "error", onImported: retry }) },
+      })
+    } else {
+      toast.error(message)
+    }
     if (hasCode(error, "E_BOT_CHECK") || hasCode(error, "E_QUEUE_PAUSED")) {
       void client.invalidateQueries({ queryKey: QUEUE_KEY })
     }
