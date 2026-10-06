@@ -582,6 +582,7 @@ class YtDlpExtractor:
             if forbidden:
                 raise ValueError(f"ค่าตั้งเหล่านี้ใช้คู่กับบัญชีไม่ได้: {forbidden}")
             params.pop("cookiefile", None)
+            params.pop("cookiesfrombrowser", None)  # ไม่ให้ jar จากเบราว์เซอร์มาปนกับบัญชี (ตอนนี้ไม่มีใครตั้ง กันไว้ก่อน)
             with yt_dlp.YoutubeDL(params) as ydl:
                 _attach_account(ydl, with_account)
                 yield ydl

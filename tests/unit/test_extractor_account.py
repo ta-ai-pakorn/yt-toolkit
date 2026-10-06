@@ -150,6 +150,16 @@ def test_attach_account_on_a_real_youtubedl(tmp_path: Path, monkeypatch: pytest.
     assert "ROTATED" in {c.name for c in jar}  # คุกกี้ใหม่อยู่ใน jar ก้อนเดิมในหน่วยความจำ
 
 
+def test_a_browser_jar_is_never_attached_next_to_the_account(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    jar = parse_account_cookies(GOOD)
+    opts = {"quiet": True, "no_warnings": True, "cookiesfrombrowser": ("chrome",)}
+    with YtDlpExtractor()._ydl(opts, with_account=jar) as ydl:
+        assert ydl.params.get("cookiesfrombrowser") is None  # ไม่อ่านคุกกี้จากเบราว์เซอร์มาปนกับบัญชี
+        assert ydl.cookiejar is jar
+    assert opts["cookiesfrombrowser"] == ("chrome",)  # ไม่แก้ dict ของผู้เรียก
+
+
 @pytest.mark.parametrize("key", sorted(ACCOUNT_FORBIDDEN_OPTS))
 def test_traffic_printing_options_are_refused_with_an_account(key: str) -> None:
     jar = parse_account_cookies(GOOD)
