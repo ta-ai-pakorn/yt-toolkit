@@ -20,7 +20,6 @@ import httpx
 import uvicorn
 
 from . import __version__, runstate
-from .api.errors import redact_home
 from .app import AppContext, create_app
 from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
 from .core import files, thai_fallback, tools
@@ -49,7 +48,7 @@ from .platform import LockFileError, Platform, current
 
 # ตัวจริงอยู่ใน probe (stdlib ล้วน) ที่นี่ส่งต่อชื่อเดิมให้โค้ดและเทสที่เรียกผ่าน lifecycle
 from .probe import base_url, find_running, is_alive, setup_file_log  # noqa: F401
-from .redact import HomePathFilter, SecretFilter, add_redaction
+from .redact import HomePathFilter, SecretFilter, add_redaction, redact_home
 
 log = logging.getLogger("yttoolkit")
 

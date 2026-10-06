@@ -33,16 +33,32 @@ SIGN_IN_COOKIE_NAMES = (
     "__Secure-1PSIDCC",
     "__Secure-3PSIDCC",
 )
-# Cookie: a=b · Set-Cookie: a=b · 'Cookie': 'a=b' (repr ของ dict header) ปิดค่าถึงท้ายบรรทัดหรืออัญประกาศ
-_HEADER = re.compile(r"(?i)(\b(?:set-)?cookie['\"]?\s*:\s*['\"]?)[^\r\n'\"]*")
-# SAPISID=abc · SAPISID<TAB>abc (บรรทัดของ cookies.txt) · "SAPISID": "abc" · ไม่จับชื่อที่เป็นส่วนของชื่ออื่น
+# Cookie: a=b · Set-Cookie: a=b · 'Cookie': 'a=b' (repr ของ dict header) · Cookie: SID="v" (ค่ามีอัญประกาศ)
+# ถ้าค่าเปิดด้วยอัญประกาศ ปิดถึงอัญประกาศปิดตัวเดียวกัน ถ้าไม่ใช่ ปิดถึงท้ายบรรทัด (ข้ามส่วนที่อยู่ในอัญประกาศคู่)
+_HEADER = re.compile(
+    r"(?i)(\b(?:set-)?cookie['\"]?\s*:\s*)(?:(['\"])[^\r\n]*?(?=\2|[\r\n]|\Z)|(?:[^\r\n'\"]|\"[^\"\r\n]*\")*)"
+)
+# Authorization: SAPISIDHASH <ts>_<hash> SAPISID1PHASH <ts>_<hash> (โทเคนเข้าสู่ระบบที่คำนวณจาก SAPISID)
+_AUTH = re.compile(r"\b(SAPISID(?:1P|3P)?HASH\s+)[^\s'\",;]+")
+# SAPISID=abc · SAPISID<TAB>abc (บรรทัดของ cookies.txt) · SAPISID\tabc (repr ของบรรทัดนั้น: tab กลายเป็น \ กับ t สองตัวอักษร)
+# · "SAPISID": "abc" · ไม่จับชื่อที่เป็นส่วนของชื่ออื่น
 _NAMES = "|".join(re.escape(n) for n in sorted(SIGN_IN_COOKIE_NAMES, key=len, reverse=True))
-_NAMED = re.compile(rf"(?<![A-Za-z0-9_-])({_NAMES})(['\"]?(?:\s*[=:]\s*|\t+)['\"]?)([^\s;,'\"]+)")
+_NAMED = re.compile(
+    rf"(?:(?<![A-Za-z0-9_-])|(?<=\\t))({_NAMES})(['\"]?(?:\s*[=:]\s*|(?:\t|\\t)+)['\"]?)([^\s;,'\"]+)"
+)
+# name='SAPISID', value='abc' (repr ของ http.cookiejar.Cookie) · {"name": "SAPISID", ..., "value": "abc"} (JSON ของส่วนเสริมส่งออกคุกกี้)
+# ชื่อมาก่อนค่าในวัตถุเดียวกัน (ระหว่างกลางมีคีย์อื่นได้ แต่ห้ามข้ามปีกกาหรือวงเล็บ)
+_PAIR = re.compile(
+    rf"(\bname['\"]?\s*[=:]\s*['\"]?(?:{_NAMES})(?![A-Za-z0-9_-])['\"]?[^{{}}()]{{0,500}}?"
+    r"\bvalue['\"]?\s*[=:]\s*['\"]?)([^'\"\s,;}]+)"
+)
 
 
 def redact_secrets(text: str) -> str:
-    """ปิดค่าคุกกี้ใน text: header Cookie / Set-Cookie ทั้งค่า และค่าของคุกกี้เข้าสู่ระบบที่รู้จักชื่อ"""
-    text = _HEADER.sub(lambda m: f"{m.group(1)}{MASK}", text)
+    """ปิดค่าคุกกี้ใน text: header Cookie / Set-Cookie ทั้งค่า, Authorization: SAPISIDHASH และค่าของคุกกี้เข้าสู่ระบบที่รู้จักชื่อ"""
+    text = _HEADER.sub(lambda m: f"{m.group(1)}{m.group(2) or ''}{MASK}", text)
+    text = _AUTH.sub(lambda m: f"{m.group(1)}{MASK}", text)
+    text = _PAIR.sub(lambda m: f"{m.group(1)}{MASK}", text)
     return _NAMED.sub(lambda m: f"{m.group(1)}{m.group(2)}{MASK}", text)
 
 
@@ -85,11 +101,12 @@ class _RewriteFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
-            message = record.getMessage()
-        except Exception:
-            return True  # ข้อความจัดรูปไม่ได้ ปล่อยให้ logging รายงานตามปกติ
-        record.msg = self.rewrite(message)
-        record.args = None
+            message = self.rewrite(record.getMessage())
+        except Exception as error:
+            # จัดรูปข้อความไม่ได้: ไม่ปล่อย args ดิบให้ handleError พิมพ์ออก stderr ใส่ข้อความคงที่ (ชื่อชนิดของ error เท่านั้น)
+            message = f"(จัดรูปข้อความ log ไม่ได้: {type(error).__name__})"
+        record.msg = message
+        record.args = ()
         if record.exc_info and not record.exc_text:
             record.exc_text = self._formatter.formatException(record.exc_info)
         if record.exc_text:
