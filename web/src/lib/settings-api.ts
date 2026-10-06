@@ -19,7 +19,7 @@ export function settingsQuery(deps?: ApiDeps): {
 
 /** เปลี่ยนเฉพาะค่าที่ส่งไป (ทั้งหมดหรือไม่เปลี่ยนเลย) คืนการตั้งค่าทั้งหมดหลังเปลี่ยน · ค่าผิด = ApiError 422 */
 export function patchSettings(
-  partial: Partial<Omit<Settings, "cookies" | "statsResetAt">>,
+  partial: Partial<Omit<Settings, "statsResetAt">>,
   deps?: ApiDeps
 ): Promise<Settings> {
   return api<Settings>(

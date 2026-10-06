@@ -1,9 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query"
 import { useSyncExternalStore } from "react"
 
+import { ACCOUNT_KEY, applyAccountEvent, type AccountEvent } from "./account"
 import { JOBS_KEY, mergeJobPatch, QUEUE_KEY, upsertJob } from "./jobs"
 import { sharpKey } from "./sharp-frames"
-import type { Job, JobPatch, QueueState } from "./types"
+import type { AccountStatus, Job, JobPatch, QueueState } from "./types"
 
 /** เหตุการณ์จาก GET /api/events (SSE สัญญา C6) ที่อ่านแล้ว */
 export type ServerEvent =
@@ -12,6 +13,7 @@ export type ServerEvent =
   | { type: "queue.paused"; until: string; reason: string }
   | { type: "queue.resumed" }
   | { type: "app.shutdown" }
+  | ({ type: "account" } & AccountEvent)
 
 export const EVENTS_URL = "/api/events"
 
@@ -21,6 +23,7 @@ const EVENT_NAMES = [
   "queue.paused",
   "queue.resumed",
   "app.shutdown",
+  "account",
 ] as const
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -55,6 +58,14 @@ export function parseServerEvent(
       return { type: "queue.resumed" }
     case "app.shutdown":
       return { type: "app.shutdown" }
+    case "account": {
+      // M5 รอบ C: {active, expiresAt?, reason?} ไม่มีชื่อหรือค่าคุกกี้
+      if (typeof body.active !== "boolean") return null
+      const event: { type: "account" } & AccountEvent = { type: "account", active: body.active }
+      if (typeof body.expiresAt === "string") event.expiresAt = body.expiresAt
+      if (typeof body.reason === "string") event.reason = body.reason
+      return event
+    }
     default:
       return null
   }
@@ -92,6 +103,13 @@ export function applyServerEvent(
       return {}
     case "app.shutdown":
       return {}
+    case "account": {
+      const next = applyAccountEvent(client.getQueryData<AccountStatus>(ACCOUNT_KEY), event)
+      // เพิ่งนำเข้า (จากแท็บอื่น) ยังไม่รู้เวลานำเข้า = โหลดสถานะเต็มใหม่
+      if (next === undefined) void client.invalidateQueries({ queryKey: ACCOUNT_KEY })
+      else client.setQueryData<AccountStatus>(ACCOUNT_KEY, next)
+      return {}
+    }
   }
 }
 
@@ -132,6 +150,8 @@ export type ConnectOptions = {
   onShutdown: () => void
   /** สถานะของงานเปลี่ยนในแท็บนี้ (before = ไม่รู้จักงานนี้มาก่อน) */
   onJobChange?: (before: Job | undefined, after: Job) => void
+  /** ข่าวบัญชียูทูปชั่วคราว (M5 รอบ C) หลังใส่ลงแคชแล้ว: มี reason = เพิ่งถูกลบ (ทุกแท็บเด้ง toast) */
+  onAccount?: (event: AccountEvent) => void
   /** สำหรับเทส: สร้าง EventSource ปลอม */
   createSource?: (url: string) => EventSource
 }
@@ -166,6 +186,10 @@ export function connectEvents(
         return
       }
       const { before, after } = applyServerEvent(client, event)
+      if (event.type === "account") {
+        opts.onAccount?.(event)
+        return
+      }
       if (after !== undefined && before?.status !== after.status) {
         const refresh = sharpRefreshTarget(before, after)
         if (refresh !== null)
@@ -184,6 +208,7 @@ export function connectEvents(
     lostConnection = false
     reload(client, JOBS_KEY)
     reload(client, QUEUE_KEY)
+    reload(client, ACCOUNT_KEY) // ข่าวบัญชีที่พลาดไประหว่างหลุด (เช่นถูกลบเพราะครบเวลา)
   }
 
   for (const [name, handler] of handlers) source.addEventListener(name, handler)
