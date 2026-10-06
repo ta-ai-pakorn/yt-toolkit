@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
@@ -15,6 +16,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .account_scope import account_epoch, current_jar, scope_epoch
 from .db import PEEK_SENTINEL, Database
 from .extractor import Extractor
 from .inputs import PLAYLIST_ID, VIDEO_ID, is_mix_id
@@ -559,6 +561,24 @@ class VideoService:
         self._now = now
         self._guard = threading.Lock()
         self._id_locks: dict[str, threading.Lock] = {}
+        # M5 รอบ C: ข้อมูลคลิปที่ probe ด้วยบัญชีชั่วคราว (trim_probe แล้ว) อยู่ในหน่วยความจำเท่านั้น ไม่ลงฐานข้อมูล
+        # ทิ้งทั้งหมดเมื่อบัญชีถูกลบหรือถูกแทน (AccountService on_clear -> forget_signed_in)
+        self._signed: dict[str, dict] = {}
+        self._signed_lock = threading.Lock()
+        # ลำดับ (account_scope.account_epoch) ของ forget_signed_in ครั้งล่าสุด ขอบเขตที่ได้ jar มาก่อนนี้ห้ามเก็บผล
+        self._forgot_at = 0
+
+    def forget_signed_in(self) -> None:
+        """ทิ้งข้อมูลคลิปทุกคลิปที่ได้มาด้วยบัญชีชั่วคราว (ลบบัญชีแล้ว เปิดคลิปนั้นใหม่ = probe ใหม่แบบไม่ใช้บัญชี)
+        งานที่ยังรันด้วยบัญชีเดิม (หรือ probe ที่ค้างอยู่) ใช้ผลของตัวเองต่อได้ แต่เก็บกลับเข้ามาไม่ได้อีก"""
+        with self._signed_lock:
+            self._forgot_at = account_epoch()
+            self._signed.clear()
+
+    def _signed_raw(self, video_id: str) -> dict | None:
+        with self._signed_lock:
+            data = self._signed.get(video_id)
+        return copy.deepcopy(data) if data is not None else None
 
     def _id_lock(self, video_id: str) -> threading.Lock:
         with self._guard:
@@ -591,6 +611,11 @@ class VideoService:
             info = self._cached_hit(video_id, peek)
             if info is not None:
                 return info
+            kept = self._signed_raw(video_id)
+            if kept is not None:
+                return to_video_info(kept)
+        if current_jar() is not None:
+            return to_video_info(self._probe_signed_in(video_id))
         lock = self._id_lock(video_id)
         contended = not lock.acquire(blocking=False)
         if contended:
@@ -653,6 +678,17 @@ class VideoService:
                 "UPDATE videos SET opened_at = ? WHERE video_id = ?", (stamp, video_id)
             )
         return info
+
+    def _probe_signed_in(self, video_id: str) -> dict:
+        """probe ด้วยบัญชีชั่วคราว (อยู่ใน account_scope.signed_in) คืนข้อมูลดิบที่ตัดแล้ว (สำเนา)
+        เก็บในหน่วยความจำเท่านั้น ไม่แตะฐานข้อมูลเลย (ไม่มีแถวใน videos ไม่ขึ้นใน "ล่าสุด" spec 2.4 "Cache")
+        ขอบเขตที่ได้ jar มาก่อน forget_signed_in ครั้งล่าสุด (บัญชีถูกลบ/ถูกแทนระหว่างงาน) = คืนผลให้งานนั้นแต่ไม่เก็บ"""
+        since = scope_epoch()
+        trimmed = trim_probe(self._extractor.probe(video_id))
+        with self._signed_lock:
+            if since is not None and since > self._forgot_at:
+                self._signed[video_id] = trimmed
+        return copy.deepcopy(trimmed)
 
     def _probe_and_store(self, video_id: str, peek: bool = False) -> dict:
         trimmed = trim_probe(self._extractor.probe(video_id))
@@ -725,6 +761,11 @@ class VideoService:
                     data = None
                 if isinstance(data, dict):
                     return data
+            kept = self._signed_raw(video_id)
+            if kept is not None:
+                return kept
+            if current_jar() is not None:
+                return self._probe_signed_in(video_id)  # งานที่ใช้บัญชี (ผลอาจไม่ถูกเก็บถ้าบัญชีถูกลบไปแล้ว)
             self.get(video_id, refresh=True, peek=True)
         raise YtError("E_UNKNOWN", f"อ่านข้อมูลคลิป {video_id} ที่เก็บไว้ไม่ได้")
 

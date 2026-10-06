@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from ..core.account_scope import AccountGate, with_account_retry
 from ..core.capture import CAPTURE_FOLDER
 from ..core.comments import PinnedCommentService
 from ..core.frames import file_timecode
@@ -185,6 +186,12 @@ def ctx_bot_check(ctx: AppContext) -> Callable[[], None]:
     return call
 
 
+def ctx_accounts(ctx: AppContext) -> AccountGate | None:
+    """บัญชียูทูปชั่วคราวของแอพ (M5 รอบ C) อ่านตอนเรียกจริง: lifecycle ใส่ ctx.accounts หลังสร้าง router ได้
+    (getattr: AppContext ที่ยังไม่มีฟิลด์นี้ = ไม่มีบัญชี)"""
+    return getattr(ctx, "accounts", None)
+
+
 # ---------- resolve ----------
 
 
@@ -237,7 +244,8 @@ def build_videos_router(ctx: AppContext) -> APIRouter:
     @maps_yt_errors
     def video_info(video_id: str, refresh: bool = False, peek: bool = False) -> dict:
         # peek=1: หน้าเว็บขอแค่ชื่อ/ภาพปก (รายการผล W1) ไม่นับว่าเปิดคลิป จึงไม่ขึ้น "ล่าสุด"
-        return videos.get(video_id, refresh=refresh, peek=peek)
+        # M5 รอบ C: จำกัดอายุ/ส่วนตัว + ถือบัญชีชั่วคราวอยู่ = probe ซ้ำด้วยบัญชีหนึ่งครั้ง (ผลอยู่ในหน่วยความจำเท่านั้น)
+        return with_account_retry(ctx_accounts(ctx), lambda: videos.get(video_id, refresh=refresh, peek=peek))
 
     @router.get("/videos/{video_id}/pinned-comment", response_model=None)
     @maps_yt_errors
