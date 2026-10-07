@@ -14,7 +14,7 @@ from yttoolkit.core.db import Database
 from yttoolkit.core.events import Event
 from yttoolkit.core.jobs import STATUSES, InvalidTransition, JobResult, JobStore, NewJob, OutputFile
 from yttoolkit.core.queue import QueueRunner
-from yttoolkit.core.yterrors import MESSAGES, YtError
+from yttoolkit.core.yterrors import MESSAGES, YtError, queue_paused_error
 
 KINDS = ("video", "audio", "subtitle", "contact_sheet", "frames_zip")
 WALL0 = datetime(2026, 10, 2, 9, 0, tzinfo=UTC)
@@ -979,3 +979,61 @@ def test_listener_errors_do_not_break_the_queue(runner_factory):
     r.tick()
     spawn.run_all()
     assert r.store.get(job.id).status == "done"
+
+
+# ---------- E_QUEUE_PAUSED from a running job (M5 round C follow-up) ----------
+
+
+class PausedOnceHandler:
+    """รอบแรก: งานอื่นเบรกคิวกลางทาง แล้ว with_account_retry โยน E_QUEUE_PAUSED · รอบต่อไปสำเร็จ"""
+
+    def __init__(self, brake: bool = True) -> None:
+        self.runner: QueueRunner | None = None
+        self.brake = brake
+        self.calls = 0
+
+    def __call__(self, job, ctx) -> JobResult:
+        self.calls += 1
+        if self.calls == 1:
+            if self.brake:
+                self.runner.brake("E_BOT_CHECK")
+            raise queue_paused_error(WALL0 + timedelta(seconds=600))
+        return JobResult(title="จบ")
+
+
+def test_queue_paused_mid_run_requeues_at_front_and_runs_after_pause(runner_factory):
+    handler = PausedOnceHandler()
+    r, spawn, h = runner_factory(concurrency=1, handler=handler)
+    handler.runner = r
+    first, second = r.enqueue(jobs_of("video", 2))
+    r.tick()
+    spawn.run_all()
+    job = r.store.get(first.id)
+    assert (job.status, job.bot_checks, job.error_code) == ("queued", 0, None)
+    assert job.position < r.store.get(second.id).position
+    patch = r.bus.updates(first.id)[-1]
+    assert patch["status"] == "queued"
+    paused = [e for e in r.bus_events() if e.name == "queue.paused"]
+    assert len(paused) == 1  # only the brake from the other call, the requeue does not brake again
+    assert r.tick() == []  # still paused
+    r.wall.now += timedelta(seconds=601)
+    r.clock.t += 10
+    started = r.tick()
+    assert started == [first.id]  # same id, front of the queue
+    spawn.run_all()
+    done = r.store.get(first.id)
+    assert (done.status, done.bot_checks) == ("done", 0)
+    assert handler.calls == 2
+
+
+def test_queue_paused_without_an_active_pause_fails_as_before(runner_factory):
+    handler = PausedOnceHandler(brake=False)
+    r, spawn, h = runner_factory(concurrency=1, handler=handler)
+    handler.runner = r
+    (job,) = r.enqueue(jobs_of("video", 1))
+    r.tick()
+    spawn.run_all()
+    failed = r.store.get(job.id)
+    assert (failed.status, failed.error_code, failed.bot_checks) == ("failed", "E_QUEUE_PAUSED", 0)
+    assert r.pause_state() is None
+    assert [e for e in r.bus_events() if e.name == "queue.paused"] == []

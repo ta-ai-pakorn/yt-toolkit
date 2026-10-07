@@ -34,6 +34,9 @@ function backend(port: number, root: string) {
 export default defineConfig({
   testDir: "e2e",
   timeout: 30_000,
+  // ค่าเริ่มต้นของ Playwright คือครึ่งหนึ่งของจำนวนคอร์ (8 บนเครื่อง 16 คอร์) ทำให้ CPU เต็ม 100% และ RAM 16 GB แทบหมด
+  // เทสที่รอหน้าโหลดจึงหลุดเวลาแบบสุ่มทีละตัว (backend ตอบเร็ว ไม่ใช่คอขวด) จำกัดไว้ 4 พอ ส่ง --workers ทับได้
+  workers: 4,
   projects: [
     {
       // spec ทั่วไป: ห้ามสร้างงานจริง (ต้อง mock POST /api/jobs) ดู mockEnqueue ใน e2e/queue-helpers.ts
