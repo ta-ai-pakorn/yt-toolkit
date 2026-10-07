@@ -366,6 +366,8 @@ class QueueRunner:
                 return self._stopped(job, ctx)  # error ที่เกิดเพราะถูกสั่งหยุด (เช่น ffmpeg ถูก kill)
             if exc.code == "E_BOT_CHECK":
                 return self._bot_check(job, ctx, exc)
+            if exc.code == "E_QUEUE_PAUSED" and self.pause_state() is not None:
+                return self._paused(job, ctx)
             return self._fail(job, ctx, exc.code, exc.message, exc.detail)
         except Exception as exc:
             if ctx.reason is not None:
@@ -426,6 +428,24 @@ class QueueRunner:
         if ctx.reason is not None:
             return self._stopped(job, ctx)
         return self._fail(job, ctx, "E_BOT_CHECK", exc.message, exc.detail)
+
+    def _paused(self, job: Job, ctx: _JobContext) -> str:
+        """E_QUEUE_PAUSED ระหว่างงานรันอยู่ (คำขออื่นเบรกคิวกลางทาง แล้ว with_account_retry ไม่ยอมลองด้วยบัญชี)
+        = กลับหัวคิวรหัสงานเดิม รันใหม่เมื่อคิวหายพัก ไม่นับเป็นเช็กบอท (bot_checks คงเดิม ไม่เบรกซ้ำ)
+        ผู้เรียกเช็กแล้วว่าคิวยังพักอยู่ คิวไม่พักแล้ว = จบ failed ตามปกติ (ไม่วนลองซ้ำ)"""
+        self._clear_workdir(ctx)
+        with self._lock:
+            # เช็กการยกเลิกกับส่งกลับเข้าคิวใน lock เดียวกับ cancel() เหมือน _bot_check
+            if ctx.reason is None:
+                ctx.close()
+                try:
+                    requeued = self.store.requeue(job.id, front=True)
+                except (KeyError, InvalidTransition):
+                    return "E_QUEUE_PAUSED (สถานะเปลี่ยนไปแล้ว)"
+                self._forget(job.id, ctx)
+                self._publish_job(requeued)
+                return "E_QUEUE_PAUSED (กลับหัวคิว)"
+        return self._stopped(job, ctx)
 
     def _end(self, job: Job, ctx: _JobContext, status: str, **fields: Any) -> bool:
         """running -> สถานะจบ คืน False เมื่องานไม่ได้ running แล้ว (เช่นตอนปิดโปรแกรมถูกตั้ง interrupted ไปก่อน)"""
