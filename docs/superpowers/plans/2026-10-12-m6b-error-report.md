@@ -2558,6 +2558,925 @@ EOF
 ```
 
 
+### Task 8: Web — clip page (W2), history and batch: every `LoadError` and every W2 error toast
+
+**Files:**
+- Modify: `web/src/pages/video/load-error.tsx` (required `context`, optional `videoId`, renders `ErrorDetails`)
+- Modify (all `LoadError` callers, spec §1.3 table): `web/src/pages/video/header.tsx`, `subtitle-gate.tsx`, `subs/preview.tsx` (+ `videoId` prop, P7), `subs-panel.tsx` (passes it), `transcript-panel.tsx`, `frames.tsx` (also the file-download toast), `clip-details.tsx`, `web/src/pages/history.tsx`, `web/src/pages/batch.tsx`
+- Modify (W2 toasts): `web/src/pages/video.tsx` (background refresh), `web/src/pages/video/capture/use-capture.ts`, `web/src/pages/video/capture/capture-strip.tsx` (download / delete / reveal), `web/src/pages/video/advanced/use-advanced-choice.ts` (SponsorBlock default save, spec Q5)
+- Modify: `web/src/pages/video/capture/capture-store.test.ts`
+
+**Interfaces:**
+- Consumes (T4): `ErrorDetails`, `showErrorToast`, `reportRequest`.
+- Produces: `LoadError` props `context: string` (required) and `videoId?: string`; `SubsPreview` prop `videoId: string`. Contexts / ids from K7: `video-header`, `video-subtitles`, `video-subs-preview`, `video-transcript`, `video-frames`, `video-pinned`, `history`, `batch`; toasts `frames-download` (loading-toast id), `capture` → `capture-error`, `capture-download` (loading-toast id), `capture-delete`, `capture-reveal`, `video-refresh`, `advanced-save`.
+
+Why these files are one lane: `context` becomes a required prop of `LoadError`, so every caller must change in the same commit (typecheck). The W2 toasts live in the same folder.
+
+- [ ] **Step 1: Update the failing unit tests (capture toast)**
+
+`web/src/pages/video/capture/capture-store.test.ts`:
+
+Replace (1):
+```ts
+vi.mock("./capture-api", async (importOriginal) => ({ ...(await importOriginal<object>()), postCapture: api.postCapture }))
+
+const BBB = "aqz-KE-bpKQ"
+const item = (tMs: number): Capture => ({ id: `c_${tMs}`, tMs, width: 1920, height: 1080, url: `/api/cache/${BBB}/captures/c_${tMs}.jpg?v=1` })
+
+beforeEach(() => {
+```
+with:
+```ts
+vi.mock("./capture-api", async (importOriginal) => ({ ...(await importOriginal<object>()), postCapture: api.postCapture }))
+
+const BBB = "aqz-KE-bpKQ"
+type ErrorOptions = { id?: string; duration?: number; action?: { label: string; onClick: () => void } }
+/** ข้อความและตัวเลือกของ toast error ล่าสุด (M6 รอบ B: ทุกตัวผ่าน showErrorToast) */
+const lastError = () => toast.error.mock.lastCall as unknown as [string, ErrorOptions]
+const item = (tMs: number): Capture => ({ id: `c_${tMs}`, tMs, width: 1920, height: 1080, url: `/api/cache/${BBB}/captures/c_${tMs}.jpg?v=1` })
+
+beforeEach(() => {
+```
+
+Replace (2):
+```ts
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+    api.postCapture.mockRejectedValueOnce(new ApiError(422, "E_CAPTURE_UNSUPPORTED", "ถ่ายไม่ได้", null, null))
+    await runCapture(client, BBB, 0)
+    expect(toast.error).toHaveBeenCalledWith("ถ่ายไม่ได้")
+    expect(client.getQueryData(capturesKey(BBB))).toBeUndefined()
+    expect(invalidate).not.toHaveBeenCalled()
+    api.postCapture.mockRejectedValueOnce(new ApiError(429, "E_BOT_CHECK", "ยูทูปขอให้ยืนยัน", null, null))
+```
+with:
+```ts
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+    api.postCapture.mockRejectedValueOnce(new ApiError(422, "E_CAPTURE_UNSUPPORTED", "ถ่ายไม่ได้", null, null))
+    await runCapture(client, BBB, 0)
+    const [message, options] = lastError()
+    expect(message).toBe("ถ่ายไม่ได้")
+    expect(options.id).toBe("capture-error") // M6 รอบ B: id คงที่ ค้างจนกดปิด ไม่มีปุ่มบัญชี
+    expect(options.duration).toBe(Infinity)
+    expect(options.action).toBeUndefined()
+    expect(client.getQueryData(capturesKey(BBB))).toBeUndefined()
+    expect(invalidate).not.toHaveBeenCalled()
+    api.postCapture.mockRejectedValueOnce(new ApiError(429, "E_BOT_CHECK", "ยูทูปขอให้ยืนยัน", null, null))
+```
+
+Replace (3):
+```ts
+    accountDialog.close()
+  })
+
+  it("M5 รอบ C: ยูทูปขอตรวจสอบ (E_BOT_CHECK) = ไม่มีปุ่มบัญชี ข้อความเดิม ไม่ค้างถาวร", async () => {
+    const client = new QueryClient()
+    api.postCapture.mockRejectedValueOnce(new ApiError(429, "E_BOT_CHECK", "ยูทูปขอให้ยืนยัน", null, null))
+    await runCapture(client, BBB, 0)
+    expect(toast.error).toHaveBeenLastCalledWith("ยูทูปขอให้ยืนยัน")
+  })
+
+  it("M5 รอบ C: ถือบัญชีอยู่แล้ว = ไม่มีปุ่ม (ข้อความ ลองด้วยบัญชีแล้ว… มาจาก backend)", async () => {
+```
+with:
+```ts
+    accountDialog.close()
+  })
+
+  it("M5 รอบ C: ยูทูปขอตรวจสอบ (E_BOT_CHECK) = ไม่มีปุ่มบัญชี ข้อความเดิม (M6 รอบ B: ค้างจนกดปิดเหมือน error อื่น)", async () => {
+    const client = new QueryClient()
+    api.postCapture.mockRejectedValueOnce(new ApiError(429, "E_BOT_CHECK", "ยูทูปขอให้ยืนยัน", null, null))
+    await runCapture(client, BBB, 0)
+    const [message, options] = lastError()
+    expect(message).toBe("ยูทูปขอให้ยืนยัน")
+    expect(options.action).toBeUndefined()
+    expect(options.duration).toBe(Infinity)
+  })
+
+  it("M5 รอบ C: ถือบัญชีอยู่แล้ว = ไม่มีปุ่ม (ข้อความ ลองด้วยบัญชีแล้ว… มาจาก backend)", async () => {
+```
+
+Replace (4):
+```ts
+    client.setQueryData(ACCOUNT_KEY, { active: true, used: true })
+    api.postCapture.mockRejectedValueOnce(new ApiError(404, "E_VIDEO_PRIVATE", "ลองด้วยบัญชีแล้วยังเปิดไม่ได้", null, null))
+    await runCapture(client, BBB, 0)
+    expect(toast.error).toHaveBeenLastCalledWith("ลองด้วยบัญชีแล้วยังเปิดไม่ได้")
+  })
+})
+```
+with:
+```ts
+    client.setQueryData(ACCOUNT_KEY, { active: true, used: true })
+    api.postCapture.mockRejectedValueOnce(new ApiError(404, "E_VIDEO_PRIVATE", "ลองด้วยบัญชีแล้วยังเปิดไม่ได้", null, null))
+    await runCapture(client, BBB, 0)
+    const [message, options] = lastError()
+    expect(message).toBe("ลองด้วยบัญชีแล้วยังเปิดไม่ได้")
+    expect(options.action).toBeUndefined()
+  })
+})
+```
+
+(The old test name said "ไม่ค้างถาวร": D1 makes every error toast stay until dismissed — a deliberate change, spec §1.3.)
+
+- [ ] **Step 2: Run, expect FAIL**
+
+Run: `cd "$WORKTREE/web" && npx vitest run src/pages/video/capture/capture-store.test.ts`
+Expected: 3 failures (`options.id` is `undefined`, `duration` is `undefined`).
+
+- [ ] **Step 3: `LoadError` gets the details section** — `web/src/pages/video/load-error.tsx`:
+
+Replace (1):
+```tsx
+
+import { UseAccountButton } from "@/components/account/account-button"
+import { useAccountStatus } from "@/components/account/use-account"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { th } from "@/i18n/th"
+```
+with:
+```tsx
+
+import { UseAccountButton } from "@/components/account/account-button"
+import { useAccountStatus } from "@/components/account/use-account"
+import { ErrorDetails } from "@/components/error-report/error-details"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { th } from "@/i18n/th"
+```
+
+Replace (2):
+```tsx
+  ref?: Ref<HTMLDivElement>
+  /** M5 รอบ C: error จำกัดอายุ/ส่วนตัว + ยังไม่ได้ใช้บัญชี = ปุ่มหลัก "ใช้บัญชียูทูปชั่วคราว" แล้วทำ onImported หลังนำเข้า */
+  account?: { onImported: () => void }
+}
+
+/** กล่อง error ของหน้า W2: ข้อความไทยจาก envelope + ปุ่มลองใหม่ (ซ่อนเมื่อลองใหม่ไม่ช่วย) */
+export function LoadError({ title, error, onRetry, showHome = false, ref, account }: Props) {
+  const { active } = useAccountStatus()
+  const retry = showRetry(error, account !== undefined, active)
+  const offerAccount = account !== undefined && showAccountButton(error instanceof ApiError ? error.code : null, active)
+```
+with:
+```tsx
+  ref?: Ref<HTMLDivElement>
+  /** M5 รอบ C: error จำกัดอายุ/ส่วนตัว + ยังไม่ได้ใช้บัญชี = ปุ่มหลัก "ใช้บัญชียูทูปชั่วคราว" แล้วทำ onImported หลังนำเข้า */
+  account?: { onImported: () => void }
+  /** M6 รอบ B: แท็กหน้าจอของรายงานแจ้งปัญหา (spec 1.3 เช่น "video-header") */
+  context: string
+  /** คลิปที่ error นี้เป็นของ (ไม่มี = หน้าที่ไม่ใช่ของคลิปเดียว เช่นประวัติ) */
+  videoId?: string
+}
+
+/**
+ * กล่อง error ของหน้า W2 / ประวัติ / หลายคลิป: ข้อความไทยจาก envelope + ปุ่มลองใหม่ (ซ่อนเมื่อลองใหม่ไม่ช่วย)
+ * M6 รอบ B: ใต้แถวปุ่มมีส่วนพับ "ดูรายละเอียด" (รหัส + ข้อความเทคนิค + "คัดลอกข้อมูลแจ้งปัญหา")
+ */
+export function LoadError({ title, error, onRetry, showHome = false, ref, account, context, videoId }: Props) {
+  const { active } = useAccountStatus()
+  const retry = showRetry(error, account !== undefined, active)
+  const offerAccount = account !== undefined && showAccountButton(error instanceof ApiError ? error.code : null, active)
+```
+
+Replace (3):
+```tsx
+          )}
+        </div>
+      )}
+    </Alert>
+  )
+}
+```
+with:
+```tsx
+          )}
+        </div>
+      )}
+      <ErrorDetails error={error} context={context} videoId={videoId} className="col-start-2" />
+    </Alert>
+  )
+}
+```
+
+- [ ] **Step 4: Every `LoadError` caller passes its context**
+
+`web/src/pages/video/header.tsx` (the clip info failed, so `data` is empty: the report's `videoId` comes from the route):
+
+Replace (1):
+```tsx
+import { ExternalLink, ImageIcon, NotebookPen } from "lucide-react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { createPortal } from "react-dom"
+
+import { Badge } from "@/components/ui/badge"
+import { Button, buttonVariants } from "@/components/ui/button"
+```
+with:
+```tsx
+import { ExternalLink, ImageIcon, NotebookPen } from "lucide-react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { createPortal } from "react-dom"
+import { useParams } from "react-router"
+
+import { Badge } from "@/components/ui/badge"
+import { Button, buttonVariants } from "@/components/ui/button"
+```
+
+Replace (2):
+```tsx
+  }, [videoId])
+  // เปิดคลิปที่เปิดไม่ได้ (เช่นกด "ถัดไป" แล้วคลิปนั้นถูกลบ) ไม่มีชื่อคลิป: โฟกัสกล่อง error แทน ไม่ปล่อยไว้ที่ body
+  const errorRef = useRef<HTMLDivElement>(null)
+  const failed = !data && video.isError
+  useEffect(() => {
+    if (failed && focusLost()) errorRef.current?.focus({ preventScroll: true })
+```
+with:
+```tsx
+  }, [videoId])
+  // เปิดคลิปที่เปิดไม่ได้ (เช่นกด "ถัดไป" แล้วคลิปนั้นถูกลบ) ไม่มีชื่อคลิป: โฟกัสกล่อง error แทน ไม่ปล่อยไว้ที่ body
+  const errorRef = useRef<HTMLDivElement>(null)
+  // เปิดคลิปไม่ได้ = ยังไม่มีข้อมูลคลิป: videoId ของรายงานมาจาก URL (/v/:videoId)
+  const { videoId: pageId } = useParams()
+  const failed = !data && video.isError
+  useEffect(() => {
+    if (failed && focusLost()) errorRef.current?.focus({ preventScroll: true })
+```
+
+Replace (3):
+```tsx
+          error={video.error}
+          onRetry={() => void video.refetch()}
+          account={{ onImported: () => void video.refetch() }}
+        />
+      )
+    }
+```
+with:
+```tsx
+          error={video.error}
+          onRetry={() => void video.refetch()}
+          account={{ onImported: () => void video.refetch() }}
+          context="video-header"
+          videoId={pageId}
+        />
+      )
+    }
+```
+
+`web/src/pages/video/subtitle-gate.tsx`:
+
+Replace (1):
+```tsx
+export function SubtitleGate({ videoId, enabled, children }: Props) {
+  const subtitles = useQuery(subtitlesQuery(videoId, enabled))
+  if (subtitles.isError) {
+    return <LoadError title={t.loadError} error={subtitles.error} onRetry={() => void subtitles.refetch()} />
+  }
+  if (!subtitles.isSuccess) return <SubsSkeleton />
+  if (subtitles.data.tracks.length === 0) return <NoSubtitles />
+```
+with:
+```tsx
+export function SubtitleGate({ videoId, enabled, children }: Props) {
+  const subtitles = useQuery(subtitlesQuery(videoId, enabled))
+  if (subtitles.isError) {
+    return (
+      <LoadError
+        title={t.loadError}
+        error={subtitles.error}
+        onRetry={() => void subtitles.refetch()}
+        context="video-subtitles"
+        videoId={videoId}
+      />
+    )
+  }
+  if (!subtitles.isSuccess) return <SubsSkeleton />
+  if (subtitles.data.tracks.length === 0) return <NoSubtitles />
+```
+
+`web/src/pages/video/subs/preview.tsx`:
+
+Replace (1):
+```tsx
+}
+
+type Props = {
+  /** ผลของ tokensQuery สำหรับแทร็กที่ใช้อยู่ */
+  query: UseQueryResult<SubTokens>
+  options: SubOptions
+```
+with:
+```tsx
+}
+
+type Props = {
+  /** คลิปของซับนี้ (M6 รอบ B: videoId ของรายงานแจ้งปัญหา) */
+  videoId: string
+  /** ผลของ tokensQuery สำหรับแทร็กที่ใช้อยู่ */
+  query: UseQueryResult<SubTokens>
+  options: SubOptions
+```
+
+Replace (2):
+```tsx
+ * ยูทูปไม่ให้โหลดซับแปล = คำแนะนำ + ปุ่มใช้ซับภาษาต้นฉบับ · ซับแปลรอเซสชัน = กล่องนับถอยหลัง (โหลดให้เองเมื่อครบ)
+ * ผิดพลาดอื่น = Alert + ลองใหม่ (ถ้าลองแล้วช่วย)
+ */
+export function SubsPreview({ query, options, onUseOriginal, range }: Props) {
+  if (query.isError) {
+    if (hasCode(query.error, "E_NO_SUBTITLES")) return <NoTokens />
+    if (hasCode(query.error, "E_TRANSLATION_BLOCKED")) return <TranslationBlocked onUseOriginal={onUseOriginal} />
+    if (isWarming(query.error)) return <SessionWarming key={query.errorUpdatedAt} query={query} onUseOriginal={onUseOriginal} />
+    return <LoadError title={t.loadError} error={query.error} onRetry={() => void query.refetch()} />
+  }
+  if (!query.isSuccess) return <PreviewSkeleton />
+  return <PreviewBody data={query.data} options={options} range={range} />
+```
+with:
+```tsx
+ * ยูทูปไม่ให้โหลดซับแปล = คำแนะนำ + ปุ่มใช้ซับภาษาต้นฉบับ · ซับแปลรอเซสชัน = กล่องนับถอยหลัง (โหลดให้เองเมื่อครบ)
+ * ผิดพลาดอื่น = Alert + ลองใหม่ (ถ้าลองแล้วช่วย)
+ */
+export function SubsPreview({ videoId, query, options, onUseOriginal, range }: Props) {
+  if (query.isError) {
+    if (hasCode(query.error, "E_NO_SUBTITLES")) return <NoTokens />
+    if (hasCode(query.error, "E_TRANSLATION_BLOCKED")) return <TranslationBlocked onUseOriginal={onUseOriginal} />
+    if (isWarming(query.error)) return <SessionWarming key={query.errorUpdatedAt} query={query} onUseOriginal={onUseOriginal} />
+    return (
+      <LoadError
+        title={t.loadError}
+        error={query.error}
+        onRetry={() => void query.refetch()}
+        context="video-subs-preview"
+        videoId={videoId}
+      />
+    )
+  }
+  if (!query.isSuccess) return <PreviewSkeleton />
+  return <PreviewBody data={query.data} options={options} range={range} />
+```
+
+`web/src/pages/video/subs-panel.tsx`:
+
+Replace (1):
+```tsx
+          {track && (
+            <>
+              <Separator />
+              <SubsPreview query={tokens} options={settings.options} onUseOriginal={backToOriginal} range={range} />
+            </>
+          )}
+          {advanced.values.sponsorblock && !advanced.split && (
+```
+with:
+```tsx
+          {track && (
+            <>
+              <Separator />
+              <SubsPreview
+                videoId={videoId}
+                query={tokens}
+                options={settings.options}
+                onUseOriginal={backToOriginal}
+                range={range}
+              />
+            </>
+          )}
+          {advanced.values.sponsorblock && !advanced.split && (
+```
+
+`web/src/pages/video/transcript-panel.tsx`:
+
+Replace (1):
+```tsx
+  else if (hasCode(tokens.error, "E_TRANSLATION_BLOCKED")) body = <TranslationBlocked onUseOriginal={onUseOriginal} />
+  else if (isWarming(tokens.error)) body = <SessionWarming key={tokens.errorUpdatedAt} query={tokens} onUseOriginal={onUseOriginal} />
+  else if (tokens.isError) {
+    body = <LoadError title={th.subs.loadError} error={tokens.error} onRetry={() => void tokens.refetch()} />
+  } else if (!tokens.isSuccess) body = <LinesSkeleton />
+  else if (cues.length === 0) body = <NoLines />
+  else body = <TranscriptLines cues={cues} at={at} segments={segments} onPick={onPick} />
+```
+with:
+```tsx
+  else if (hasCode(tokens.error, "E_TRANSLATION_BLOCKED")) body = <TranslationBlocked onUseOriginal={onUseOriginal} />
+  else if (isWarming(tokens.error)) body = <SessionWarming key={tokens.errorUpdatedAt} query={tokens} onUseOriginal={onUseOriginal} />
+  else if (tokens.isError) {
+    body = (
+      <LoadError
+        title={th.subs.loadError}
+        error={tokens.error}
+        onRetry={() => void tokens.refetch()}
+        context="video-transcript"
+        videoId={videoId}
+      />
+    )
+  } else if (!tokens.isSuccess) body = <LinesSkeleton />
+  else if (cues.length === 0) body = <NoLines />
+  else body = <TranscriptLines cues={cues} at={at} segments={segments} onPick={onPick} />
+```
+
+`web/src/pages/video/clip-details.tsx`:
+
+Replace (1):
+```tsx
+
+  let body: ReactNode
+  if (pinned.isError) {
+    body = <LoadError title={t.pinned.loadError} error={pinned.error} onRetry={() => void pinned.refetch()} />
+  } else if (!pinned.isSuccess) body = <PinnedSkeleton />
+  else if (comment) body = <PinnedText comment={comment} />
+  else body = <p className="text-sm text-muted-foreground">{t.pinned.none}</p>
+```
+with:
+```tsx
+
+  let body: ReactNode
+  if (pinned.isError) {
+    body = (
+      <LoadError
+        title={t.pinned.loadError}
+        error={pinned.error}
+        onRetry={() => void pinned.refetch()}
+        context="video-pinned"
+        videoId={videoId}
+      />
+    )
+  } else if (!pinned.isSuccess) body = <PinnedSkeleton />
+  else if (comment) body = <PinnedText comment={comment} />
+  else body = <p className="text-sm text-muted-foreground">{t.pinned.none}</p>
+```
+
+`web/src/pages/history.tsx` (both boxes):
+
+Replace (1):
+```tsx
+      {history.isPending ? (
+        <HistoryTableSkeleton />
+      ) : history.isError && !history.data ? (
+        <LoadError title={th.history.loadError} error={history.error} onRetry={() => void history.refetch()} />
+      ) : items.length === 0 ? (
+        urlQ ? (
+          <p role="status" className="py-8 text-center text-muted-foreground [overflow-wrap:anywhere]">
+```
+with:
+```tsx
+      {history.isPending ? (
+        <HistoryTableSkeleton />
+      ) : history.isError && !history.data ? (
+        <LoadError
+          title={th.history.loadError}
+          error={history.error}
+          onRetry={() => void history.refetch()}
+          context="history"
+        />
+      ) : items.length === 0 ? (
+        urlQ ? (
+          <p role="status" className="py-8 text-center text-muted-foreground [overflow-wrap:anywhere]">
+```
+
+Replace (2):
+```tsx
+              title={th.history.loadError}
+              error={history.error}
+              onRetry={() => void (history.isFetchNextPageError ? history.fetchNextPage() : history.refetch())}
+            />
+          )}
+          <div className="flex flex-col items-center gap-3 pt-2">
+```
+with:
+```tsx
+              title={th.history.loadError}
+              error={history.error}
+              onRetry={() => void (history.isFetchNextPageError ? history.fetchNextPage() : history.refetch())}
+              context="history"
+            />
+          )}
+          <div className="flex flex-col items-center gap-3 pt-2">
+```
+
+`web/src/pages/batch.tsx`:
+
+Replace (1):
+```tsx
+          title={failure === settings ? th.general.loadError : t.loadError}
+          error={failure.error}
+          onRetry={() => void failure.refetch()}
+        />
+      ) : loadingPlaylist ? (
+        <div aria-busy="true">
+```
+with:
+```tsx
+          title={failure === settings ? th.general.loadError : t.loadError}
+          error={failure.error}
+          onRetry={() => void failure.refetch()}
+          context="batch"
+        />
+      ) : loadingPlaylist ? (
+        <div aria-busy="true">
+```
+
+- [ ] **Step 5: W2 toasts become `showErrorToast`**
+
+`web/src/pages/video/frames.tsx` (the storyboard `LoadError` and the file-download toast, which keeps the loading toast's id so the error replaces it):
+
+Replace (1):
+```tsx
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react"
+import { toast } from "sonner"
+
+import { AspectRatio } from "@/components/ui/aspect-ratio"
+import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
+```
+with:
+```tsx
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react"
+import { toast } from "sonner"
+
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { AspectRatio } from "@/components/ui/aspect-ratio"
+import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
+```
+
+Replace (2):
+```tsx
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { fill, th } from "@/i18n/th"
+import { ApiError } from "@/lib/api"
+import { copyImage } from "@/lib/clipboard"
+import { downloadFile } from "@/lib/download"
+import { formatTimecode, youtubeLinkAt, youtubeWatchUrl } from "@/lib/format"
+```
+with:
+```tsx
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { fill, th } from "@/i18n/th"
+import { ApiError } from "@/lib/api"
+import { reportRequest } from "@/lib/report"
+import { copyImage } from "@/lib/clipboard"
+import { downloadFile } from "@/lib/download"
+import { formatTimecode, youtubeLinkAt, youtubeWatchUrl } from "@/lib/format"
+```
+
+Replace (3):
+```tsx
+    await downloadFile(url, fallbackName)
+    toast.dismiss(id)
+  } catch (error) {
+    toast.error(errorMessage(error, th.errors.downloadFailed), { id })
+  }
+}
+```
+with:
+```tsx
+    await downloadFile(url, fallbackName)
+    toast.dismiss(id)
+  } catch (error) {
+    // M6 รอบ B: id เดิมของ toast "กำลังเตรียม" = แทนที่ toast นั้นด้วย error ที่มีปุ่มคัดลอก
+    showErrorToast(errorMessage(error, th.errors.downloadFailed), {
+      id,
+      request: reportRequest(error, { context: "frames-download" }),
+    })
+  }
+}
+```
+
+Replace (4):
+```tsx
+    )
+  }
+  else if (storyboard.isError) {
+    body = <LoadError title={t.loadError} error={storyboard.error} onRetry={() => void storyboard.refetch()} />
+  } else body = <FrameSkeleton />
+
+  return (
+```
+with:
+```tsx
+    )
+  }
+  else if (storyboard.isError) {
+    body = (
+      <LoadError
+        title={t.loadError}
+        error={storyboard.error}
+        onRetry={() => void storyboard.refetch()}
+        context="video-frames"
+        videoId={videoId}
+      />
+    )
+  } else body = <FrameSkeleton />
+
+  return (
+```
+
+`web/src/pages/video.tsx` (background refresh; `toast` is no longer used in this file):
+
+Replace (1):
+```tsx
+import { useQuery } from "@tanstack/react-query"
+import { useEffect } from "react"
+import { useLocation, useParams } from "react-router"
+import { toast } from "sonner"
+
+import { fill, th } from "@/i18n/th"
+
+import { homeStore, useHomeState } from "./home/state"
+import { readFromList, useAnalyze, useGlobalPaste } from "./home/use-analyze"
+```
+with:
+```tsx
+import { useQuery } from "@tanstack/react-query"
+import { useEffect } from "react"
+import { useLocation, useParams } from "react-router"
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { fill, th } from "@/i18n/th"
+import { reportRequest } from "@/lib/report"
+
+import { homeStore, useHomeState } from "./home/state"
+import { readFromList, useAnalyze, useGlobalPaste } from "./home/use-analyze"
+```
+
+Replace (2):
+```tsx
+
+  // รีเฟรชเบื้องหลังล้มเหลวทั้งที่มีข้อมูลเดิมอยู่: ไม่ล้มทั้งหน้า แจ้งด้วย toast
+  useEffect(() => {
+    if (video.isError && hasData) toast.error(errorMessage(video.error, th.errors.unknown))
+  }, [video.isError, video.error, hasData])
+
+  return (
+    <div className="flex flex-col gap-6 pt-2">
+```
+with:
+```tsx
+
+  // รีเฟรชเบื้องหลังล้มเหลวทั้งที่มีข้อมูลเดิมอยู่: ไม่ล้มทั้งหน้า แจ้งด้วย toast
+  useEffect(() => {
+    if (!video.isError || !hasData) return
+    showErrorToast(errorMessage(video.error, th.errors.unknown), {
+      id: "video-refresh",
+      request: reportRequest(video.error, { context: "video-refresh", videoId }),
+    })
+  }, [video.isError, video.error, hasData, videoId])
+
+  return (
+    <div className="flex flex-col gap-6 pt-2">
+```
+
+`web/src/pages/video/capture/use-capture.ts` (one stable id; the account action is kept, D1 makes it persistent in every branch):
+
+Replace (1):
+```ts
+import { toast } from "sonner"
+
+import { openAccountDialog } from "@/components/account/account-store"
+import { fill, th } from "@/i18n/th"
+import { ACCOUNT_KEY, showAccountButton } from "@/lib/account"
+import { ApiError } from "@/lib/api"
+import { QUEUE_KEY, queueQuery } from "@/lib/jobs"
+import type { AccountStatus, Capture, VideoInfo } from "@/lib/types"
+
+import { errorMessage, hasCode } from "../errors"
+```
+with:
+```ts
+import { toast } from "sonner"
+
+import { openAccountDialog } from "@/components/account/account-store"
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { fill, th } from "@/i18n/th"
+import { ACCOUNT_KEY, showAccountButton } from "@/lib/account"
+import { ApiError } from "@/lib/api"
+import { QUEUE_KEY, queueQuery } from "@/lib/jobs"
+import { reportRequest } from "@/lib/report"
+import type { AccountStatus, Capture, VideoInfo } from "@/lib/types"
+
+import { errorMessage, hasCode } from "../errors"
+```
+
+Replace (2):
+```ts
+    const active = client.getQueryData<AccountStatus>(ACCOUNT_KEY)?.active === true
+    const account = showAccountButton(error instanceof ApiError ? error.code : null, active)
+    const message = errorMessage(error, th.errors.unknown)
+    if (account) {
+      const retry = () => void runCapture(client, videoId, ms)
+      toast.error(message, {
+        duration: Infinity, // มีปุ่มให้กด: ไม่หายเองก่อนผู้ใช้เห็น (เหมือน toast งานที่พลาด)
+        action: { label: th.account.use, onClick: () => openAccountDialog({ origin: "error", onImported: retry }) },
+      })
+    } else {
+      toast.error(message)
+    }
+    if (hasCode(error, "E_BOT_CHECK") || hasCode(error, "E_QUEUE_PAUSED")) {
+      void client.invalidateQueries({ queryKey: QUEUE_KEY })
+    }
+```
+with:
+```ts
+    const active = client.getQueryData<AccountStatus>(ACCOUNT_KEY)?.active === true
+    const account = showAccountButton(error instanceof ApiError ? error.code : null, active)
+    const message = errorMessage(error, th.errors.unknown)
+    const retry = () => void runCapture(client, videoId, ms)
+    // M6 รอบ B: toast เดียว (id คงที่) ค้างจนกดปิด มีปุ่มคัดลอก · มีปุ่มบัญชีเมื่อจำกัดอายุ/ส่วนตัวและยังไม่ได้ใช้บัญชี
+    showErrorToast(message, {
+      id: "capture-error",
+      request: reportRequest(error, { context: "capture", videoId }),
+      action: account
+        ? { label: th.account.use, onClick: () => openAccountDialog({ origin: "error", onImported: retry }) }
+        : undefined,
+    })
+    if (hasCode(error, "E_BOT_CHECK") || hasCode(error, "E_QUEUE_PAUSED")) {
+      void client.invalidateQueries({ queryKey: QUEUE_KEY })
+    }
+```
+
+`web/src/pages/video/capture/capture-strip.tsx` (download keeps the loading-toast id; delete and reveal get their own ids):
+
+Replace (1):
+```tsx
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { AspectRatio } from "@/components/ui/aspect-ratio"
+import { Button } from "@/components/ui/button"
+import { fill, th } from "@/i18n/th"
+import { copyImage } from "@/lib/clipboard"
+import { downloadFile } from "@/lib/download"
+import { youtubeWatchUrl } from "@/lib/format"
+import type { Capture } from "@/lib/types"
+import { cn } from "cn"
+```
+with:
+```tsx
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { AspectRatio } from "@/components/ui/aspect-ratio"
+import { Button } from "@/components/ui/button"
+import { fill, th } from "@/i18n/th"
+import { copyImage } from "@/lib/clipboard"
+import { downloadFile } from "@/lib/download"
+import { youtubeWatchUrl } from "@/lib/format"
+import { reportRequest } from "@/lib/report"
+import type { Capture } from "@/lib/types"
+import { cn } from "cn"
+```
+
+Replace (2):
+```tsx
+    await downloadFile(captureDownloadUrl(capture.url), captureFileName(capture.tMs))
+    toast.dismiss(id)
+  } catch (error) {
+    toast.error(errorMessage(error, th.errors.downloadFailed), { id })
+  }
+}
+```
+with:
+```tsx
+    await downloadFile(captureDownloadUrl(capture.url), captureFileName(capture.tMs))
+    toast.dismiss(id)
+  } catch (error) {
+    showErrorToast(errorMessage(error, th.errors.downloadFailed), {
+      id,
+      request: reportRequest(error, { context: "capture-download" }),
+    })
+  }
+}
+```
+
+Replace (3):
+```tsx
+      } catch (error) {
+        // ภาพหายไปแล้ว (ถูกลบจากที่อื่น) = ถือว่าลบสำเร็จ · พลาดแบบอื่น = แจ้งแล้วโหลดรายการใหม่ให้ตรงกับของจริง
+        if (!hasCode(error, "E_NOT_FOUND")) {
+          toast.error(errorMessage(error, th.errors.unknown))
+          void client.invalidateQueries({ queryKey: capturesKey(videoId) })
+          return
+        }
+```
+with:
+```tsx
+      } catch (error) {
+        // ภาพหายไปแล้ว (ถูกลบจากที่อื่น) = ถือว่าลบสำเร็จ · พลาดแบบอื่น = แจ้งแล้วโหลดรายการใหม่ให้ตรงกับของจริง
+        if (!hasCode(error, "E_NOT_FOUND")) {
+          showErrorToast(errorMessage(error, th.errors.unknown), {
+            id: "capture-delete",
+            request: reportRequest(error, { context: "capture-delete", videoId }),
+          })
+          void client.invalidateQueries({ queryKey: capturesKey(videoId) })
+          return
+        }
+```
+
+Replace (4):
+```tsx
+    try {
+      await revealCaptures(videoId)
+    } catch (error) {
+      toast.error(errorMessage(error, th.errors.unknown))
+    }
+  }
+```
+with:
+```tsx
+    try {
+      await revealCaptures(videoId)
+    } catch (error) {
+      showErrorToast(errorMessage(error, th.errors.unknown), {
+        id: "capture-reveal",
+        request: reportRequest(error, { context: "capture-reveal", videoId }),
+      })
+    }
+  }
+```
+
+`web/src/pages/video/advanced/use-advanced-choice.ts` (spec Q5: keep the text `th.general.saveFailed`, pass the dropped error; `toast` is no longer used in this file):
+
+Replace (1):
+```ts
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+
+import { fill, th } from "@/i18n/th"
+import {
+  chapterBlock,
+```
+with:
+```ts
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { fill, th } from "@/i18n/th"
+import {
+  chapterBlock,
+```
+
+Replace (2):
+```ts
+  type RangeCheck,
+} from "@/lib/advanced-options"
+import { NO_ADVANCED, SPONSOR_CATEGORIES, sponsorCategories, type AdvancedParams } from "@/lib/download-options"
+import { patchSettings, SETTINGS_KEY, settingsQuery } from "@/lib/settings-api"
+import type { Settings, SponsorCategory, VideoInfo } from "@/lib/types"
+```
+with:
+```ts
+  type RangeCheck,
+} from "@/lib/advanced-options"
+import { NO_ADVANCED, SPONSOR_CATEGORIES, sponsorCategories, type AdvancedParams } from "@/lib/download-options"
+import { reportRequest } from "@/lib/report"
+import { patchSettings, SETTINGS_KEY, settingsQuery } from "@/lib/settings-api"
+import type { Settings, SponsorCategory, VideoInfo } from "@/lib/types"
+```
+
+Replace (3):
+```ts
+      if (previous) client.setQueryData<Settings>(SETTINGS_KEY, { ...previous, sponsorblockDefault: next })
+      return { previous }
+    },
+    onError: (_error: unknown, _next: SponsorCategory[], context: { previous: Settings | undefined } | undefined) => {
+      if (context?.previous) client.setQueryData(SETTINGS_KEY, context.previous)
+      toast.error(th.general.saveFailed)
+    },
+    onSuccess: (saved: Settings) => {
+      if (client.isMutating({ mutationKey: SPONSOR_MUTATION_KEY }) <= 1) client.setQueryData(SETTINGS_KEY, saved)
+```
+with:
+```ts
+      if (previous) client.setQueryData<Settings>(SETTINGS_KEY, { ...previous, sponsorblockDefault: next })
+      return { previous }
+    },
+    onError: (error: unknown, _next: SponsorCategory[], context: { previous: Settings | undefined } | undefined) => {
+      if (context?.previous) client.setQueryData(SETTINGS_KEY, context.previous)
+      showErrorToast(th.general.saveFailed, { id: "advanced-save", request: reportRequest(error, { context: "advanced-save" }) })
+    },
+    onSuccess: (saved: Settings) => {
+      if (client.isMutating({ mutationKey: SPONSOR_MUTATION_KEY }) <= 1) client.setQueryData(SETTINGS_KEY, saved)
+```
+
+Not changed on purpose (spec §1.3 "still excluded"): the copy-failure toasts in `capture-strip.tsx` (`copyCapture`), `clip-details.tsx`, `frames.tsx` (`copyFrameImage`, `copyText`), `subs/export-buttons.tsx`, and the local validation toast in `player/range-mark-buttons.tsx`.
+
+- [ ] **Step 6: Run, expect PASS**
+
+Run: `cd "$WORKTREE/web" && npm run typecheck && npm run lint && npm test` (prototype: 1,032 tests passed, ESLint clean). Then `cd "$WORKTREE/web" && git grep -n "<LoadError" -- src | grep -v "context=" ` must print only the multi-line JSX openings (every `LoadError` element has a `context=` line; check by eye that each of the 9 sites has one).
+
+- [ ] **Step 7: Commit**
+```bash
+cd "$WORKTREE" && git add web/src/pages/video.tsx web/src/pages/history.tsx web/src/pages/batch.tsx web/src/pages/video && git commit -F- <<'EOF'
+feat(web): details section and copy button on every clip-page, history and batch error
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+
 ---
 
-> **WIP:** tasks T8-T12, the spec-coverage table and the execution handoff follow in the next commit of this plan. Do not execute before the plan is complete.
+> **WIP:** tasks T9-T12, the spec-coverage table and the execution handoff follow in the next commit of this plan. Do not execute before the plan is complete.
