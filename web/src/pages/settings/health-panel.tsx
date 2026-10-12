@@ -3,6 +3,10 @@ import { useState } from "react"
 import { CircleAlert, CircleCheck, CircleX, FlaskConical, Power, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
+import { CopyReportButton } from "@/components/error-report/copy-report-button"
+import { ErrorDetails } from "@/components/error-report/error-details"
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { PLAIN_TOAST } from "@/components/error-report/model"
 import { ShutdownDialog } from "@/components/queue/shutdown-dialog"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -14,6 +18,7 @@ import { fill, th } from "@/i18n/th"
 import { localClock } from "@/lib/account"
 import { ApiError, api } from "@/lib/api"
 import { appShutdown } from "@/lib/events"
+import { reportRequest } from "@/lib/report"
 import type { AccountHealth, Health, ToolState, ToolStatus } from "@/lib/types"
 
 import { useHealth } from "./use-health"
@@ -74,16 +79,24 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
 
   const install = useMutation({
     mutationFn: () => api<ToolStatus>("/tools/ffmpeg/install", { method: "POST" }),
-    onMutate: () => toast.loading(th.health.installing, { id: "ffmpeg" }),
+    // ...PLAIN_TOAST: id "ffmpeg" เดียวกับ toast error ของการติดตั้งครั้งก่อน ไม่ให้ปุ่มคัดลอก/เวลาค้างติดมา (P5)
+    onMutate: () => toast.loading(th.health.installing, { ...PLAIN_TOAST, id: "ffmpeg" }),
     onSuccess: (status) => {
       // backend ตอบ 200 ทั้งที่ติดตั้งไม่สำเร็จได้ ดูสถานะจริงก่อนบอกว่าสำเร็จ
       // warn = มีการโหลดค้างอยู่แล้ว เป็นแค่ข้อมูล ไม่ใช่ข้อผิดพลาด จึงไม่ต้องค้างบนจอ
-      if (status.status === "ok") toast.success(th.health.installed, { id: "ffmpeg" })
-      else if (status.status === "warn") toast.info(status.message ?? th.health.installing, { id: "ffmpeg" })
-      else toast.error(status.message ?? th.errors.unknown, { id: "ffmpeg", duration: Infinity })
+      if (status.status === "ok") toast.success(th.health.installed, { ...PLAIN_TOAST, id: "ffmpeg" })
+      else if (status.status === "warn") toast.info(status.message ?? th.health.installing, { ...PLAIN_TOAST, id: "ffmpeg" })
+      else {
+        // ไม่มี ApiError (ตอบ 200 แต่ status error): ใช้รหัสของ PRD ข้อ 7 สำหรับกรณีนี้ (spec 1.3)
+        showErrorToast(status.message ?? th.errors.unknown, {
+          id: "ffmpeg",
+          request: { code: "E_TOOL_INSTALL_FAILED", detail: status.message ?? undefined, context: "ffmpeg-install" },
+        })
+      }
       void queryClient.invalidateQueries({ queryKey: ["health"] })
     },
-    onError: (error) => toast.error(error.message, { id: "ffmpeg", duration: Infinity }),
+    onError: (error) =>
+      showErrorToast(error.message, { id: "ffmpeg", request: reportRequest(error, { context: "ffmpeg-install" }) }),
   })
 
   const shutdown = useMutation({
@@ -98,7 +111,7 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
         setPendingJobs((error.body as { pendingJobs?: number } | null)?.pendingJobs ?? 0)
         return
       }
-      toast.error(error.message)
+      showErrorToast(error.message, { id: "shutdown-error", request: reportRequest(error, { context: "shutdown" }) })
     },
   })
 
@@ -118,6 +131,7 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
         <CircleX aria-hidden />
         <AlertTitle>{th.health.loadError}</AlertTitle>
         <AlertDescription>{health.error.message}</AlertDescription>
+        <ErrorDetails key={health.errorUpdatedAt} error={health.error} context="health-load" className="col-start-2" />
         <AlertAction>
           <Button variant="outline" size="sm" onClick={() => void health.refetch()}>
             {th.health.retry}
@@ -163,11 +177,13 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
         })}
         {health.data.account && <AccountRow account={health.data.account} />}
       </ItemGroup>
-      <div className="flex flex-wrap justify-end gap-2">
+      <div data-testid="health-actions" className="flex flex-wrap justify-end gap-2">
         <Button variant="outline" onClick={() => void health.refetch()} disabled={health.isFetching}>
           <RefreshCw aria-hidden />
           {th.health.recheck}
         </Button>
+        {/* M6 รอบ B (D4): รายงานของหน้าตรวจสุขภาพไม่มีหัวข้อ error · ถัดจาก "ตรวจอีกครั้ง" ก่อน "ปิดโปรแกรม" */}
+        <CopyReportButton request={{ context: "health" }} size="default" />
         <Button variant="outline" onClick={() => shutdown.mutate()} disabled={shutdown.isPending}>
           {shutdown.isPending ? <Spinner /> : <Power aria-hidden />}
           {th.health.shutdown}

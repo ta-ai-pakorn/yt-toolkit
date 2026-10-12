@@ -3,6 +3,9 @@ import { CircleX, FolderOpen } from "lucide-react"
 import { useId, useRef, useState } from "react"
 import { toast } from "sonner"
 
+import { ErrorDetails } from "@/components/error-report/error-details"
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { PLAIN_TOAST } from "@/components/error-report/model"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldTitle } from "@/components/ui/field"
@@ -11,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { th } from "@/i18n/th"
+import { reportRequest } from "@/lib/report"
 import { openOutputFolder, patchSettings, SETTINGS_KEY, settingsQuery } from "@/lib/settings-api"
 import type { Settings } from "@/lib/types"
 import { SwitchRow } from "@/pages/video/advanced/switch-row"
@@ -44,18 +48,20 @@ export function GeneralPanel() {
       queryClient.setQueryData<Settings>(SETTINGS_KEY, next)
       // บันทึกช่องอื่นสำเร็จ ไม่ลบข้อความผิดของช่องโฟลเดอร์ที่ยังแก้ไม่เสร็จ
       if ("outputDir" in patch) setDirError(null)
-      toast.success(t.saved, { id: TOAST_ID })
+      // ...PLAIN_TOAST: id เดียวกับ toast error ของการบันทึก ไม่ให้ปุ่มคัดลอก/เวลาค้างติดมากับ "บันทึกแล้ว" (P5)
+      toast.success(t.saved, { ...PLAIN_TOAST, id: TOAST_ID })
     },
     onError: (error, patch) => {
       // ช่องโฟลเดอร์แสดงข้อความของเซิร์ฟเวอร์ใต้ช่อง ช่องอื่น (เลือกจากรายการ) แจ้งด้วย toast
       if ("outputDir" in patch) setDirError(serverMessage(error))
-      else toast.error(serverMessage(error), { id: TOAST_ID })
+      else showErrorToast(serverMessage(error), { id: TOAST_ID, request: reportRequest(error, { context: "settings-general" }) })
     },
   })
 
   const open = useMutation({
     mutationFn: () => openOutputFolder(),
-    onError: (error) => toast.error(serverMessage(error)),
+    onError: (error) =>
+      showErrorToast(serverMessage(error), { id: "settings-open", request: reportRequest(error, { context: "settings-general" }) }),
   })
 
   // บันทึกล่าสุดที่ยังรออยู่: "เปิดโฟลเดอร์" รอให้บันทึกจบก่อน จะได้เปิดโฟลเดอร์ที่เพิ่งตั้ง (ไม่ปิดปุ่ม เพราะกดปุ่มทำให้ช่องเสียโฟกัสและบันทึกอัตโนมัติ)
@@ -87,6 +93,7 @@ export function GeneralPanel() {
         <CircleX aria-hidden />
         <AlertTitle>{t.loadError}</AlertTitle>
         <AlertDescription>{settings.error.message}</AlertDescription>
+        <ErrorDetails key={settings.errorUpdatedAt} error={settings.error} context="settings-general" className="col-start-2" />
         <AlertAction>
           <Button variant="outline" size="sm" disabled={settings.isFetching} onClick={() => void settings.refetch()}>
             {th.common.retry}

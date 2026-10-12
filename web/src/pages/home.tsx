@@ -1,6 +1,7 @@
 import { CircleX } from "lucide-react"
 import { useRef, useState } from "react"
 
+import { ErrorDetails } from "@/components/error-report/error-details"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui/input-group"
@@ -143,6 +144,7 @@ export function HomePage() {
             <CircleX aria-hidden />
             <AlertTitle>{th.home.resolveFailed}</AlertTitle>
             <AlertDescription>{error.message}</AlertDescription>
+            <ErrorDetails error={error} context="home" className="col-start-2" />
           </Alert>
         )}
       </form>
