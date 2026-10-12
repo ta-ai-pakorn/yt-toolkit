@@ -150,7 +150,7 @@ for (const scheme of ["light", "dark"] as const) {
     expect(await seriousViolations(page)).toEqual([])
 
     await page.goto("/settings/health")
-    await expect(page.getByRole("button", { name: COPY })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole("button", { name: COPY })).toBeVisible(REPORT)
     // ทั้งหน้ามีปัญหาเดิมที่ไม่เกี่ยวกับรอบนี้ (แถว ffmpeg ที่ใช้ไม่ได้ในโหมดข้อมูลปลอม) จึงตรวจแถวปุ่มที่เพิ่มปุ่ม
     expect(await seriousViolations(page, '[data-testid="health-actions"]')).toEqual([])
 
@@ -169,6 +169,7 @@ test("หน้าต่างกว้าง 640 px: ข้อความเ�
   await page.goto(`/v/${BBB}`)
   await errorCard(page).getByRole("button", { name: "ดูรายละเอียด" }).click()
   await expect(errorCard(page).getByText("รหัส E_YT_REFUSED")).toBeVisible()
+  await expect(errorCard(page).getByText("x".repeat(300), { exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(640)
 })
 

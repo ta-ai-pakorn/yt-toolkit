@@ -19,7 +19,8 @@ export function ErrorPanel({ error }: { error: unknown }) {
   const chunk = isChunkLoadError(error)
   return (
     <div className="pt-8">
-      <Alert variant="destructive">
+      {/* ปุ่มอยู่ในแถวใต้ข้อความ (ไม่ลอยมุมขวา) จึงไม่ต้องเว้นที่ขวาให้ AlertAction (pr-18 ของ ui/alert) */}
+      <Alert variant="destructive" className="has-data-[slot=alert-action]:pr-2.5">
         <CircleX aria-hidden />
         <AlertTitle>{th.errors.pageTitle}</AlertTitle>
         <AlertDescription>
