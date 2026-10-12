@@ -319,8 +319,28 @@ def test_an_unhandled_500_logs_a_warning_line_and_the_traceback_line(make_client
     (line,) = _api_lines(caplog)
     assert line.levelno == logging.WARNING
     assert line.getMessage() == "api_error method=GET path=/api/test-boom status=500 code=E_UNKNOWN"
-    traced = [r for r in caplog.records if r.exc_info]
+    traced = [r for r in caplog.records if "Traceback (most recent call last)" in r.getMessage()]
     assert len(traced) == 1 and "code=E_UNKNOWN" in traced[0].getMessage()
+    assert "RuntimeError: kaboom" in traced[0].getMessage()
+
+
+def test_an_unhandled_500_traceback_masks_paths_below_the_output_folder(env, caplog) -> None:
+    # รีวิวท้ายรอบ M3: traceback ของ crash ไม่รู้ชื่อคลิป จึงปิดทุกอย่างที่อยู่ใต้โฟลเดอร์ผลลัพธ์
+    app = env.client.app
+    clip = env.client.app.state.ctx.settings.output_dir() / f"{TITLE} [{BBB}]" / "03 Chapter Name.mp4"
+
+    @app.get("/api/test-oserror")
+    def broken():
+        raise PermissionError(13, "Permission denied", str(clip))
+
+    app.router.routes.insert(0, app.router.routes.pop())
+    client = TestClient(app, base_url=BASE, raise_server_exceptions=False)
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        assert client.get("/api/test-oserror").status_code == 500
+    (traced,) = [r for r in caplog.records if "Traceback (most recent call last)" in r.getMessage()]
+    assert "PermissionError" in traced.getMessage() and "<path>" in traced.getMessage()
+    assert TITLE not in caplog.text and "Chapter Name" not in caplog.text
+    assert not any(r.exc_info for r in caplog.records)  # traceback อยู่ในข้อความ (ผ่านตัวปิดแล้ว) ไม่ใช่ exc_info
 
 
 def test_a_502_from_a_route_is_a_warning(make_client, caplog) -> None:
@@ -336,3 +356,119 @@ def test_a_502_from_a_route_is_a_warning(make_client, caplog) -> None:
     (line,) = _api_lines(caplog)
     assert line.levelno == logging.WARNING and line.getMessage().endswith("status=502 code=E_YT_REFUSED")
     assert "detail-should-not-be-logged" not in caplog.text
+
+
+def test_the_local_only_421_is_logged_by_the_middleware(env, caplog) -> None:
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        resp = env.client.post("/api/diagnostics", json={}, headers={**AUTH, "Host": "evil.example:8787"})
+    assert resp.status_code == 421
+    (record,) = _api_lines(caplog)
+    assert record.getMessage() == "api_error method=POST path=/api/diagnostics status=421 code=E_FORBIDDEN"
+
+
+# ---------- รีวิวท้ายรอบ I1: ชื่อ chapter และชื่อโฟลเดอร์ playlist ไม่อยู่ในรายงาน ----------
+
+
+def test_the_report_hides_chapter_titles_and_the_playlist_folder(env) -> None:
+    chapter, folder = "Chapter About Somchai", "Secret Playlist Name"
+    env.db.execute(
+        "INSERT INTO videos (video_id, title, chapters_json, probe_json, probed_at, opened_at)"
+        " VALUES (?, ?, ?, '{}', 'x', 'x')",
+        (BBB, TITLE, f'[{{"start_s": 0, "end_s": 5, "title": "{chapter}"}}]'),
+    )
+    (job,) = env.store.add([NewJob(BBB, "video", {"folder": folder}, TITLE)])
+    env.store.transition(job.id, "running")
+    detail = f"no free name for 03 {chapter}.mp4 in ~/Downloads/{folder}/{TITLE} [{BBB}]"
+    env.store.transition(job.id, "failed", error_code="E_OUTPUT_NOT_WRITABLE", error_message="m", error_detail=detail)
+    report = env.report({"jobId": job.id})
+    assert chapter not in report and folder not in report and TITLE not in report
+    assert "no free name for 03 <title>.mp4" in report
+
+
+def test_a_videos_only_report_hides_that_clips_chapter_titles(env) -> None:
+    env.db.execute(
+        "INSERT INTO videos (video_id, title, chapters_json, probe_json, probed_at, opened_at)"
+        " VALUES (?, ?, ?, '{}', 'x', 'x')",
+        (BBB, TITLE, '[{"title": "Chapter About Somchai"}]'),
+    )
+    report = env.report({"code": "E_NETWORK", "detail": "split 03 Chapter About Somchai failed", "videoId": BBB})
+    assert "Chapter About Somchai" not in report and "<title>" in report
+
+
+# ---------- รีวิวท้ายรอบ M1: body ซ้อนลึกเป็น 422 ไม่ใช่ 500 ----------
+
+
+def test_a_deeply_nested_body_is_422(env, caplog) -> None:
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        resp = env.client.post("/api/diagnostics", content=b"[" * 100_000,
+                               headers={**AUTH, "Content-Type": "application/json"})  # fmt: skip
+    assert resp.status_code == 422
+    assert resp.json()["error"] == {"code": "E_BAD_REQUEST", "message": errors.BAD_REQUEST_MESSAGE,
+                                    "detail": "body must be a JSON object"}  # fmt: skip
+    assert "E_UNKNOWN" not in caplog.text
+
+
+# ---------- ความเร็วของรายงาน: สถานะเครื่องมือจำไว้ 60 วินาที ----------
+
+
+@pytest.fixture
+def counted_tools(monkeypatch):
+    calls = {"ytdlp": 0, "ffmpeg": 0, "js": 0}
+
+    def ytdlp(**kwargs):
+        calls["ytdlp"] += 1
+        return ToolStatus("ok", name="yt-dlp", version="2026.09.20")
+
+    def ffmpeg(paths, plat):
+        calls["ffmpeg"] += 1
+        return ToolStatus("error", name="ffmpeg", message="x")
+
+    def js(plat):
+        calls["js"] += 1
+        return ToolStatus("ok", name="deno", version="2.9.7")
+
+    monkeypatch.setattr(tools, "ytdlp_status", ytdlp)
+    monkeypatch.setattr(tools, "ffmpeg_status", ffmpeg)
+    monkeypatch.setattr(tools, "find_js_runtime", js)
+    return calls
+
+
+def test_two_quick_reports_compute_the_tool_status_once(env, counted_tools, paths) -> None:
+    env.report({})
+    paths.logs.mkdir(parents=True, exist_ok=True)
+    (paths.logs / "app.log").write_text("INFO yttoolkit: fresh-tail-line\n", encoding="utf-8")
+    (job,) = env.store.add([NewJob(BBB, "video", {}, "")])
+    env.store.transition(job.id, "running")
+    env.store.transition(job.id, "failed", error_code="E_DISK_FULL", error_message="m", error_detail="d")
+    second = env.report({"jobId": job.id})
+    assert counted_tools == {"ytdlp": 1, "ffmpeg": 1, "js": 1}
+    assert "fresh-tail-line" in second and "- รหัส: E_DISK_FULL" in second  # ส่วน error กับ log ไม่ถูกจำ
+
+
+def test_the_tool_status_is_computed_again_after_60_seconds(env, counted_tools, monkeypatch) -> None:
+    from yttoolkit.api import diagnostics
+
+    now = [1000.0]
+    monkeypatch.setattr(diagnostics.time, "monotonic", lambda: now[0])
+    env.report({})
+    now[0] += diagnostics.STATUS_CACHE_S - 1
+    env.report({})
+    assert counted_tools["ytdlp"] == 1
+    now[0] += 2
+    env.report({})
+    assert counted_tools == {"ytdlp": 2, "ffmpeg": 2, "js": 2}
+
+
+def test_the_tool_status_is_not_cached_while_ffmpeg_installs(env, counted_tools, monkeypatch) -> None:
+    import threading
+
+    installing = threading.Event()
+    installing.set()
+    monkeypatch.setattr(tools, "_ffmpeg_installing", installing)
+    env.report({})
+    env.report({})
+    assert counted_tools["ffmpeg"] == 2
+    installing.clear()
+    env.report({})
+    env.report({})
+    assert counted_tools["ffmpeg"] == 3
