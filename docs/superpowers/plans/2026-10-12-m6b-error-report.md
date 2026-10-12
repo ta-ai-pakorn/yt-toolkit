@@ -4230,6 +4230,647 @@ EOF
 ```
 
 
+### Task 10: Web — home (W1), settings tabs, health page, enqueue toast
+
+**Files:**
+- Modify: `web/src/pages/home.tsx`, `web/src/pages/home/result-list.tsx`, `web/src/pages/home/use-analyze.tsx`
+- Modify: `web/src/pages/settings/advanced-panel.tsx`, `web/src/pages/settings/general-panel.tsx`, `web/src/pages/settings/health-panel.tsx`
+- Modify: `web/src/lib/jobs.ts`, `web/src/lib/jobs.test.ts`
+
+**Interfaces:**
+- Consumes (T4): `ErrorDetails`, `CopyReportButton`, `showErrorToast`, `PLAIN_TOAST`, `reportRequest`.
+- Produces: `lib/jobs.ENQUEUE_TOAST_ID = "enqueue-error"`; K7 contexts `home`, `home-playlist`, `settings-advanced`, `settings-general`, `health-load`, `health`; toast ids `analyze-error`, `settings-general` (existing `TOAST_ID`), `settings-open`, `ffmpeg`, `shutdown-error`, `enqueue-error`. The health page's copy button sits right after "ตรวจอีกครั้ง" and before "ปิดโปรแกรม" (spec §1.6), `variant="outline"`, default size; its request is `{ context: "health" }` (no error section, D4).
+
+Spec §1.3 notes honoured here: the output-folder field message (`dirError`) gets no details section (field feedback); the "ไปหน้าตรวจสุขภาพ" action of the enqueue toast stays; `health-panel.tsx:83` (backend 200 with `status: "error"`, no `ApiError`) sends `{ code: "E_TOOL_INSTALL_FAILED", detail: status.message, context: "ffmpeg-install" }`; `lib/jobs.ts` importing from `components/error-report/` is the accepted first `lib → components` import.
+
+- [ ] **Step 1: Update the failing tests** — `web/src/lib/jobs.test.ts`:
+
+Replace (1):
+```ts
+    const [text, options] = toastMock.error.mock.calls[0]
+    expect(text).toBe("ยังไม่มี ffmpeg")
+    expect(options.action.label).toBe("ไปหน้าตรวจสุขภาพ")
+    options.action.onClick()
+    expect(navigate).toHaveBeenCalledWith(HEALTH_PATH)
+    expect(HEALTH_PATH).toBe("/settings/health")
+```
+with:
+```ts
+    const [text, options] = toastMock.error.mock.calls[0]
+    expect(text).toBe("ยังไม่มี ffmpeg")
+    expect(options.action.label).toBe("ไปหน้าตรวจสุขภาพ")
+    // M6 รอบ B: ค้างจนกดปิด id คงที่ ปุ่มคัดลอกอยู่ในแถว description
+    expect(options.id).toBe("enqueue-error")
+    expect(options.duration).toBe(Infinity)
+    expect(options.description.props.children[1].props.request).toEqual({ code: "E_FFMPEG_MISSING", context: "enqueue" })
+    options.action.onClick()
+    expect(navigate).toHaveBeenCalledWith(HEALTH_PATH)
+    expect(HEALTH_PATH).toBe("/settings/health")
+```
+
+Replace (2):
+```ts
+    await expect(submitEnqueue(client, [newJob], messages, env)).resolves.toBe(
+      false
+    )
+    expect(toastMock.error.mock.calls).toEqual([
+      ["ค่าไม่ถูกต้อง"],
+      ["ส่งไม่สำเร็จ"],
+    ])
+  })
+})
+```
+with:
+```ts
+    await expect(submitEnqueue(client, [newJob], messages, env)).resolves.toBe(
+      false
+    )
+    expect(toastMock.error.mock.calls.map((call) => call[0])).toEqual([
+      "ค่าไม่ถูกต้อง",
+      "ส่งไม่สำเร็จ",
+    ])
+    expect(toastMock.error.mock.calls.map((call) => call[1].id)).toEqual([
+      "enqueue-error",
+      "enqueue-error",
+    ])
+  })
+})
+```
+
+- [ ] **Step 2: Run, expect FAIL**
+
+Run: `cd "$WORKTREE/web" && npx vitest run src/lib/jobs.test.ts`
+Expected: `options.id` is `undefined` in the `E_FFMPEG_MISSING` test; `call[1]` is `undefined` in the "error อื่น" test.
+
+- [ ] **Step 3: Enqueue toast** — `web/src/lib/jobs.ts`:
+
+Replace (1):
+```ts
+import { useNavigate } from "react-router"
+import { toast } from "sonner"
+
+import { fill } from "@/i18n/th"
+
+import { api, ApiError } from "./api"
+import type { Job, JobPatch, NewJob, QueueState } from "./types"
+
+/** ทางลัดสำหรับเทส: ส่ง fetch/token ปลอมต่อให้ api() (ผู้ใช้จริงไม่ต้องส่ง) */
+```
+with:
+```ts
+import { useNavigate } from "react-router"
+import { toast } from "sonner"
+
+// M6 รอบ B: lib → components ครั้งแรก (toast ต้องมี JSX ของปุ่มคัดลอก) · lib/report.ts ยังไม่มี React
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { fill } from "@/i18n/th"
+
+import { api, ApiError } from "./api"
+import { reportRequest } from "./report"
+import type { Job, JobPatch, NewJob, QueueState } from "./types"
+
+/** ทางลัดสำหรับเทส: ส่ง fetch/token ปลอมต่อให้ api() (ผู้ใช้จริงไม่ต้องส่ง) */
+```
+
+Replace (2):
+```ts
+/** ที่อยู่หน้าตรวจสุขภาพ (ติดตั้ง ffmpeg) สำหรับปุ่มใน toast เมื่อเครื่องยังไม่มี ffmpeg */
+export const HEALTH_PATH = "/settings/health"
+
+type EnqueueEnv = { navigate: (path: string) => void; deps?: ApiDeps }
+
+/**
+```
+with:
+```ts
+/** ที่อยู่หน้าตรวจสุขภาพ (ติดตั้ง ffmpeg) สำหรับปุ่มใน toast เมื่อเครื่องยังไม่มี ffmpeg */
+export const HEALTH_PATH = "/settings/health"
+
+/** id ของ toast "ส่งเข้าคิวไม่สำเร็จ" (M6 รอบ B): พลาดซ้ำแทนที่ toast เดิม ไม่ซ้อนกัน */
+export const ENQUEUE_TOAST_ID = "enqueue-error"
+
+type EnqueueEnv = { navigate: (path: string) => void; deps?: ApiDeps }
+
+/**
+```
+
+Replace (3):
+```ts
+    )
+    return true
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      error.status === 409 &&
+      error.code === "E_FFMPEG_MISSING"
+    ) {
+      toast.error(error.message, {
+        action: {
+          label: messages.goHealth,
+          onClick: () => env.navigate(HEALTH_PATH),
+        },
+      })
+    } else {
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : messages.failed
+      )
+    }
+    return false
+```
+with:
+```ts
+    )
+    return true
+  } catch (error) {
+    const request = reportRequest(error, { context: "enqueue" })
+    if (
+      error instanceof ApiError &&
+      error.status === 409 &&
+      error.code === "E_FFMPEG_MISSING"
+    ) {
+      showErrorToast(error.message, {
+        id: ENQUEUE_TOAST_ID,
+        request,
+        action: {
+          label: messages.goHealth,
+          onClick: () => env.navigate(HEALTH_PATH),
+        },
+      })
+    } else {
+      showErrorToast(
+        error instanceof Error && error.message
+          ? error.message
+          : messages.failed,
+        { id: ENQUEUE_TOAST_ID, request }
+      )
+    }
+    return false
+```
+
+- [ ] **Step 4: W1 (home)**
+
+`web/src/pages/home.tsx`:
+
+Replace (1):
+```tsx
+import { CircleX } from "lucide-react"
+import { useRef, useState } from "react"
+
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui/input-group"
+```
+with:
+```tsx
+import { CircleX } from "lucide-react"
+import { useRef, useState } from "react"
+
+import { ErrorDetails } from "@/components/error-report/error-details"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui/input-group"
+```
+
+Replace (2):
+```tsx
+            <CircleX aria-hidden />
+            <AlertTitle>{th.home.resolveFailed}</AlertTitle>
+            <AlertDescription>{error.message}</AlertDescription>
+          </Alert>
+        )}
+      </form>
+```
+with:
+```tsx
+            <CircleX aria-hidden />
+            <AlertTitle>{th.home.resolveFailed}</AlertTitle>
+            <AlertDescription>{error.message}</AlertDescription>
+            <ErrorDetails error={error} context="home" className="col-start-2" />
+          </Alert>
+        )}
+      </form>
+```
+
+`web/src/pages/home/result-list.tsx` (playlist row error):
+
+Replace (1):
+```tsx
+import { useEffect, useId, useRef, useState, type ReactNode } from "react"
+import { Link } from "react-router"
+
+import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { Button, buttonVariants } from "@/components/ui/button"
+```
+with:
+```tsx
+import { useEffect, useId, useRef, useState, type ReactNode } from "react"
+import { Link } from "react-router"
+
+import { ErrorDetails } from "@/components/error-report/error-details"
+import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { Button, buttonVariants } from "@/components/ui/button"
+```
+
+Replace (2):
+```tsx
+          <AlertDescription>
+            {t.playlistError} · {playlist.error.message}
+          </AlertDescription>
+          <AlertAction>
+            <Button
+              variant="outline"
+```
+with:
+```tsx
+          <AlertDescription>
+            {t.playlistError} · {playlist.error.message}
+          </AlertDescription>
+          <ErrorDetails error={playlist.error} context="home-playlist" className="col-start-2" />
+          <AlertAction>
+            <Button
+              variant="outline"
+```
+
+`web/src/pages/home/use-analyze.tsx` (analyze from a non-home page; `toast` is no longer used in this file):
+
+Replace (1):
+```tsx
+import { useMutation } from "@tanstack/react-query"
+import { useEffect, useEffectEvent, useState, type ReactNode } from "react"
+import { useLocation, useNavigate } from "react-router"
+import { toast } from "sonner"
+
+import { th } from "@/i18n/th"
+import { api } from "@/lib/api"
+import { looksLikeYoutube } from "@/lib/paste"
+import type { ResolveItem, ResolveResult } from "@/lib/types"
+
+import { AmbiguousDialog } from "./ambiguous-dialog"
+```
+with:
+```tsx
+import { useMutation } from "@tanstack/react-query"
+import { useEffect, useEffectEvent, useState, type ReactNode } from "react"
+import { useLocation, useNavigate } from "react-router"
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { th } from "@/i18n/th"
+import { api } from "@/lib/api"
+import { looksLikeYoutube } from "@/lib/paste"
+import { reportRequest } from "@/lib/report"
+import type { ResolveItem, ResolveResult } from "@/lib/types"
+
+import { AmbiguousDialog } from "./ambiguous-dialog"
+```
+
+Replace (2):
+```tsx
+    },
+    onError: (error) => {
+      // W1 แสดงข้อความใต้ช่องเอง ส่วนหน้าอื่นไม่มีช่อง จึงแจ้งด้วย toast
+      if (!onHome) toast.error(`${th.home.resolveFailed} · ${error.message}`)
+    },
+  })
+```
+with:
+```tsx
+    },
+    onError: (error) => {
+      // W1 แสดงข้อความใต้ช่องเอง ส่วนหน้าอื่นไม่มีช่อง จึงแจ้งด้วย toast
+      if (!onHome) {
+        showErrorToast(`${th.home.resolveFailed} · ${error.message}`, {
+          id: "analyze-error",
+          request: reportRequest(error, { context: "analyze" }),
+        })
+      }
+    },
+  })
+```
+
+- [ ] **Step 5: Settings tabs**
+
+`web/src/pages/settings/advanced-panel.tsx` (account status load error):
+
+Replace (1):
+```tsx
+
+import { UseAccountButton } from "@/components/account/account-button"
+import { useDeleteAccount, useNow } from "@/components/account/use-account"
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+```
+with:
+```tsx
+
+import { UseAccountButton } from "@/components/account/account-button"
+import { useDeleteAccount, useNow } from "@/components/account/use-account"
+import { ErrorDetails } from "@/components/error-report/error-details"
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+```
+
+Replace (2):
+```tsx
+        <CircleX aria-hidden />
+        <AlertTitle>{th.general.loadError}</AlertTitle>
+        <AlertDescription>{account.error instanceof ApiError ? account.error.message : th.errors.unknown}</AlertDescription>
+        <AlertAction>
+          <Button variant="outline" size="sm" onClick={() => void account.refetch()}>
+            {th.common.retry}
+```
+with:
+```tsx
+        <CircleX aria-hidden />
+        <AlertTitle>{th.general.loadError}</AlertTitle>
+        <AlertDescription>{account.error instanceof ApiError ? account.error.message : th.errors.unknown}</AlertDescription>
+        <ErrorDetails error={account.error} context="settings-advanced" className="col-start-2" />
+        <AlertAction>
+          <Button variant="outline" size="sm" onClick={() => void account.refetch()}>
+            {th.common.retry}
+```
+
+`web/src/pages/settings/general-panel.tsx` (load error box; save and open-folder toasts; "บันทึกแล้ว" spreads `PLAIN_TOAST` because it shares `TOAST_ID` with the save error):
+
+Replace (1):
+```tsx
+import { useId, useRef, useState } from "react"
+import { toast } from "sonner"
+
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldTitle } from "@/components/ui/field"
+```
+with:
+```tsx
+import { useId, useRef, useState } from "react"
+import { toast } from "sonner"
+
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { ErrorDetails } from "@/components/error-report/error-details"
+import { PLAIN_TOAST } from "@/components/error-report/model"
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldTitle } from "@/components/ui/field"
+```
+
+Replace (2):
+```tsx
+import { Skeleton } from "@/components/ui/skeleton"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { th } from "@/i18n/th"
+import { openOutputFolder, patchSettings, SETTINGS_KEY, settingsQuery } from "@/lib/settings-api"
+import type { Settings } from "@/lib/types"
+import { SwitchRow } from "@/pages/video/advanced/switch-row"
+```
+with:
+```tsx
+import { Skeleton } from "@/components/ui/skeleton"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { th } from "@/i18n/th"
+import { reportRequest } from "@/lib/report"
+import { openOutputFolder, patchSettings, SETTINGS_KEY, settingsQuery } from "@/lib/settings-api"
+import type { Settings } from "@/lib/types"
+import { SwitchRow } from "@/pages/video/advanced/switch-row"
+```
+
+Replace (3):
+```tsx
+      queryClient.setQueryData<Settings>(SETTINGS_KEY, next)
+      // บันทึกช่องอื่นสำเร็จ ไม่ลบข้อความผิดของช่องโฟลเดอร์ที่ยังแก้ไม่เสร็จ
+      if ("outputDir" in patch) setDirError(null)
+      toast.success(t.saved, { id: TOAST_ID })
+    },
+    onError: (error, patch) => {
+      // ช่องโฟลเดอร์แสดงข้อความของเซิร์ฟเวอร์ใต้ช่อง ช่องอื่น (เลือกจากรายการ) แจ้งด้วย toast
+      if ("outputDir" in patch) setDirError(serverMessage(error))
+      else toast.error(serverMessage(error), { id: TOAST_ID })
+    },
+  })
+
+  const open = useMutation({
+    mutationFn: () => openOutputFolder(),
+    onError: (error) => toast.error(serverMessage(error)),
+  })
+
+  // บันทึกล่าสุดที่ยังรออยู่: "เปิดโฟลเดอร์" รอให้บันทึกจบก่อน จะได้เปิดโฟลเดอร์ที่เพิ่งตั้ง (ไม่ปิดปุ่ม เพราะกดปุ่มทำให้ช่องเสียโฟกัสและบันทึกอัตโนมัติ)
+```
+with:
+```tsx
+      queryClient.setQueryData<Settings>(SETTINGS_KEY, next)
+      // บันทึกช่องอื่นสำเร็จ ไม่ลบข้อความผิดของช่องโฟลเดอร์ที่ยังแก้ไม่เสร็จ
+      if ("outputDir" in patch) setDirError(null)
+      // ...PLAIN_TOAST: id เดียวกับ toast error ของการบันทึก ไม่ให้ปุ่มคัดลอก/เวลาค้างติดมากับ "บันทึกแล้ว" (P5)
+      toast.success(t.saved, { ...PLAIN_TOAST, id: TOAST_ID })
+    },
+    onError: (error, patch) => {
+      // ช่องโฟลเดอร์แสดงข้อความของเซิร์ฟเวอร์ใต้ช่อง ช่องอื่น (เลือกจากรายการ) แจ้งด้วย toast
+      if ("outputDir" in patch) setDirError(serverMessage(error))
+      else showErrorToast(serverMessage(error), { id: TOAST_ID, request: reportRequest(error, { context: "settings-general" }) })
+    },
+  })
+
+  const open = useMutation({
+    mutationFn: () => openOutputFolder(),
+    onError: (error) =>
+      showErrorToast(serverMessage(error), { id: "settings-open", request: reportRequest(error, { context: "settings-general" }) }),
+  })
+
+  // บันทึกล่าสุดที่ยังรออยู่: "เปิดโฟลเดอร์" รอให้บันทึกจบก่อน จะได้เปิดโฟลเดอร์ที่เพิ่งตั้ง (ไม่ปิดปุ่ม เพราะกดปุ่มทำให้ช่องเสียโฟกัสและบันทึกอัตโนมัติ)
+```
+
+Replace (4):
+```tsx
+        <CircleX aria-hidden />
+        <AlertTitle>{t.loadError}</AlertTitle>
+        <AlertDescription>{settings.error.message}</AlertDescription>
+        <AlertAction>
+          <Button variant="outline" size="sm" disabled={settings.isFetching} onClick={() => void settings.refetch()}>
+            {th.common.retry}
+```
+with:
+```tsx
+        <CircleX aria-hidden />
+        <AlertTitle>{t.loadError}</AlertTitle>
+        <AlertDescription>{settings.error.message}</AlertDescription>
+        <ErrorDetails error={settings.error} context="settings-general" className="col-start-2" />
+        <AlertAction>
+          <Button variant="outline" size="sm" disabled={settings.isFetching} onClick={() => void settings.refetch()}>
+            {th.common.retry}
+```
+
+- [ ] **Step 6: Health page**
+
+`web/src/pages/settings/health-panel.tsx` (load-error details, ffmpeg install toasts with `PLAIN_TOAST` on the non-error ones, shutdown toast, the copy button in the action row):
+
+Replace (1):
+```tsx
+import { CircleAlert, CircleCheck, CircleX, FlaskConical, Power, RefreshCw } from "lucide-react"
+import { toast } from "sonner"
+
+import { ShutdownDialog } from "@/components/queue/shutdown-dialog"
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+```
+with:
+```tsx
+import { CircleAlert, CircleCheck, CircleX, FlaskConical, Power, RefreshCw } from "lucide-react"
+import { toast } from "sonner"
+
+import { CopyReportButton } from "@/components/error-report/copy-report-button"
+import { ErrorDetails } from "@/components/error-report/error-details"
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { PLAIN_TOAST } from "@/components/error-report/model"
+import { ShutdownDialog } from "@/components/queue/shutdown-dialog"
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+```
+
+Replace (2):
+```tsx
+import { localClock } from "@/lib/account"
+import { ApiError, api } from "@/lib/api"
+import { appShutdown } from "@/lib/events"
+import type { AccountHealth, Health, ToolState, ToolStatus } from "@/lib/types"
+
+import { useHealth } from "./use-health"
+```
+with:
+```tsx
+import { localClock } from "@/lib/account"
+import { ApiError, api } from "@/lib/api"
+import { appShutdown } from "@/lib/events"
+import { reportRequest } from "@/lib/report"
+import type { AccountHealth, Health, ToolState, ToolStatus } from "@/lib/types"
+
+import { useHealth } from "./use-health"
+```
+
+Replace (3):
+```tsx
+
+  const install = useMutation({
+    mutationFn: () => api<ToolStatus>("/tools/ffmpeg/install", { method: "POST" }),
+    onMutate: () => toast.loading(th.health.installing, { id: "ffmpeg" }),
+    onSuccess: (status) => {
+      // backend ตอบ 200 ทั้งที่ติดตั้งไม่สำเร็จได้ ดูสถานะจริงก่อนบอกว่าสำเร็จ
+      // warn = มีการโหลดค้างอยู่แล้ว เป็นแค่ข้อมูล ไม่ใช่ข้อผิดพลาด จึงไม่ต้องค้างบนจอ
+      if (status.status === "ok") toast.success(th.health.installed, { id: "ffmpeg" })
+      else if (status.status === "warn") toast.info(status.message ?? th.health.installing, { id: "ffmpeg" })
+      else toast.error(status.message ?? th.errors.unknown, { id: "ffmpeg", duration: Infinity })
+      void queryClient.invalidateQueries({ queryKey: ["health"] })
+    },
+    onError: (error) => toast.error(error.message, { id: "ffmpeg", duration: Infinity }),
+  })
+
+  const shutdown = useMutation({
+```
+with:
+```tsx
+
+  const install = useMutation({
+    mutationFn: () => api<ToolStatus>("/tools/ffmpeg/install", { method: "POST" }),
+    // ...PLAIN_TOAST: id "ffmpeg" เดียวกับ toast error ของการติดตั้งครั้งก่อน ไม่ให้ปุ่มคัดลอก/เวลาค้างติดมา (P5)
+    onMutate: () => toast.loading(th.health.installing, { ...PLAIN_TOAST, id: "ffmpeg" }),
+    onSuccess: (status) => {
+      // backend ตอบ 200 ทั้งที่ติดตั้งไม่สำเร็จได้ ดูสถานะจริงก่อนบอกว่าสำเร็จ
+      // warn = มีการโหลดค้างอยู่แล้ว เป็นแค่ข้อมูล ไม่ใช่ข้อผิดพลาด จึงไม่ต้องค้างบนจอ
+      if (status.status === "ok") toast.success(th.health.installed, { ...PLAIN_TOAST, id: "ffmpeg" })
+      else if (status.status === "warn") toast.info(status.message ?? th.health.installing, { ...PLAIN_TOAST, id: "ffmpeg" })
+      else {
+        // ไม่มี ApiError (ตอบ 200 แต่ status error): ใช้รหัสของ PRD ข้อ 7 สำหรับกรณีนี้ (spec 1.3)
+        showErrorToast(status.message ?? th.errors.unknown, {
+          id: "ffmpeg",
+          request: { code: "E_TOOL_INSTALL_FAILED", detail: status.message ?? undefined, context: "ffmpeg-install" },
+        })
+      }
+      void queryClient.invalidateQueries({ queryKey: ["health"] })
+    },
+    onError: (error) =>
+      showErrorToast(error.message, { id: "ffmpeg", request: reportRequest(error, { context: "ffmpeg-install" }) }),
+  })
+
+  const shutdown = useMutation({
+```
+
+Replace (4):
+```tsx
+        setPendingJobs((error.body as { pendingJobs?: number } | null)?.pendingJobs ?? 0)
+        return
+      }
+      toast.error(error.message)
+    },
+  })
+```
+with:
+```tsx
+        setPendingJobs((error.body as { pendingJobs?: number } | null)?.pendingJobs ?? 0)
+        return
+      }
+      showErrorToast(error.message, { id: "shutdown-error", request: reportRequest(error, { context: "shutdown" }) })
+    },
+  })
+```
+
+Replace (5):
+```tsx
+        <CircleX aria-hidden />
+        <AlertTitle>{th.health.loadError}</AlertTitle>
+        <AlertDescription>{health.error.message}</AlertDescription>
+        <AlertAction>
+          <Button variant="outline" size="sm" onClick={() => void health.refetch()}>
+            {th.health.retry}
+```
+with:
+```tsx
+        <CircleX aria-hidden />
+        <AlertTitle>{th.health.loadError}</AlertTitle>
+        <AlertDescription>{health.error.message}</AlertDescription>
+        <ErrorDetails error={health.error} context="health-load" className="col-start-2" />
+        <AlertAction>
+          <Button variant="outline" size="sm" onClick={() => void health.refetch()}>
+            {th.health.retry}
+```
+
+Replace (6):
+```tsx
+          <RefreshCw aria-hidden />
+          {th.health.recheck}
+        </Button>
+        <Button variant="outline" onClick={() => shutdown.mutate()} disabled={shutdown.isPending}>
+          {shutdown.isPending ? <Spinner /> : <Power aria-hidden />}
+          {th.health.shutdown}
+```
+with:
+```tsx
+          <RefreshCw aria-hidden />
+          {th.health.recheck}
+        </Button>
+        {/* M6 รอบ B (D4): รายงานของหน้าตรวจสุขภาพไม่มีหัวข้อ error · ถัดจาก "ตรวจอีกครั้ง" ก่อน "ปิดโปรแกรม" */}
+        <CopyReportButton request={{ context: "health" }} size="default" />
+        <Button variant="outline" onClick={() => shutdown.mutate()} disabled={shutdown.isPending}>
+          {shutdown.isPending ? <Spinner /> : <Power aria-hidden />}
+          {th.health.shutdown}
+```
+
+- [ ] **Step 7: Run, expect PASS**
+
+Run: `cd "$WORKTREE/web" && npm run typecheck && npm run lint && npm test` (prototype after T8-T10: 1,034 passed, ESLint clean).
+
+- [ ] **Step 8: Commit**
+```bash
+cd "$WORKTREE" && git add web/src/pages/home.tsx web/src/pages/home web/src/pages/settings web/src/lib/jobs.ts web/src/lib/jobs.test.ts && git commit -F- <<'EOF'
+feat(web): details and report button on home, settings and health; enqueue toast
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+
 ---
 
-> **WIP:** tasks T10-T12, the spec-coverage table and the execution handoff follow in the next commit of this plan. Do not execute before the plan is complete.
+> **WIP:** tasks T11-T12, the spec-coverage table and the execution handoff follow in the next commit of this plan. Do not execute before the plan is complete.
