@@ -55,7 +55,10 @@ export function reportRequest(error: unknown, where: ReportWhere): ReportRequest
   } else if (error instanceof Error) {
     req.code = "E_UNKNOWN"
     const head = `${error.name}: ${error.message}`
-    const stack = error.stack ? error.stack.split("\n").slice(0, STACK_LINES).join("\n") : ""
+    // Chrome (V8) ขึ้นต้น stack ด้วย "<name>: <message>" อยู่แล้ว: ตัดบรรทัดนั้นทิ้งไม่ให้หัวซ้ำ และยังได้เฟรมจริงครบ STACK_LINES
+    const frames = error.stack ? error.stack.split("\n") : []
+    if (frames[0] === head) frames.shift()
+    const stack = frames.slice(0, STACK_LINES).join("\n")
     req.detail = stack ? `${head}\n${stack}` : head
   } else {
     req.code = "E_UNKNOWN"
@@ -93,7 +96,11 @@ export async function copyReport(req: ReportRequest, deps: CopyDeps = {}): Promi
   text.catch(() => {})
   try {
     if (clipboard?.write && Item) {
-      await clipboard.write([new Item({ "text/plain": text.then((t) => new Blob([t], { type: "text/plain" })) })])
+      const blob = text.then((t) => new Blob([t], { type: "text/plain" }))
+      // เบราว์เซอร์อาจปฏิเสธ write ก่อนอ่าน item (เช่น "Document is not focused"): ถ้าขอรายงานพลาดด้วย
+      // Promise<Blob> นี้จะไม่มีใครรับ จึงกันไว้เหมือน text (ผลลัพธ์ยังมาจาก catch ข้างล่าง)
+      blob.catch(() => {})
+      await clipboard.write([new Item({ "text/plain": blob })])
     } else if (clipboard?.writeText) {
       await clipboard.writeText(await text)
     } else {

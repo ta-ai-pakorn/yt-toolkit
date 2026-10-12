@@ -39,8 +39,18 @@ export function CopyReportButton({ request, variant = "outline", size = "sm", cl
   }
 
   return (
-    <Button type="button" variant={variant} size={size} className={className} disabled={pending} onClick={onClick}>
-      {pending ? <Spinner /> : <Copy aria-hidden />}
+    // aria-disabled แทน disabled: ปุ่มที่ disabled ตอนโฟกัสอยู่ทำให้โฟกัสคีย์บอร์ดหลุดไป <body> (Chromium)
+    // การกดซ้ำถูกกันด้วย busy · วงหมุนซ่อนจาก a11y (role="status" ไม่ซ้อนในชื่อปุ่ม) สถานะรอบอกด้วย aria-busy แทน
+    <Button
+      type="button"
+      variant={variant}
+      size={size}
+      className={className}
+      aria-disabled={pending || undefined}
+      aria-busy={pending || undefined}
+      onClick={onClick}
+    >
+      {pending ? <Spinner aria-hidden role={undefined} aria-label={undefined} /> : <Copy aria-hidden />}
       {th.errors.copyReport}
     </Button>
   )

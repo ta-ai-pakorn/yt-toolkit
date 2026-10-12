@@ -40,13 +40,24 @@ describe("reportRequest", () => {
 
   it("Error อื่น = E_UNKNOWN + ชื่อ: ข้อความ + stack ไม่เกิน 10 บรรทัด", () => {
     const error = new TypeError("x is undefined")
-    error.stack = Array.from({ length: 30 }, (_, i) => `    at f${i} (app.js:${i})`).join("\n")
+    // แบบ Chrome (V8): บรรทัดแรกของ stack คือ "<name>: <message>" อยู่แล้ว ต้องไม่ซ้ำ และยังได้ครบ 10 เฟรม
+    error.stack = ["TypeError: x is undefined", ...Array.from({ length: 30 }, (_, i) => `    at f${i} (app.js:${i})`)].join("\n")
     const req = reportRequest(error, { context: "crash" })
     expect(req.code).toBe("E_UNKNOWN")
     const lines = req.detail!.split("\n")
     expect(lines[0]).toBe("TypeError: x is undefined")
     expect(lines).toHaveLength(1 + STACK_LINES)
+    expect(lines[1]).toBe("    at f0 (app.js:0)")
     expect(lines.at(-1)).toBe("    at f9 (app.js:9)")
+  })
+
+  it("stack ที่ไม่มีบรรทัดหัว (เบราว์เซอร์อื่น) = หัว + 10 เฟรม", () => {
+    const error = new Error("boom")
+    error.stack = Array.from({ length: 30 }, (_, i) => `f${i}@app.js:${i}`).join("\n")
+    const lines = reportRequest(error, { context: "crash" }).detail!.split("\n")
+    expect(lines[0]).toBe("Error: boom")
+    expect(lines).toHaveLength(1 + STACK_LINES)
+    expect(lines.at(-1)).toBe("f9@app.js:9")
   })
 
   it("ค่าที่ไม่ใช่ error = E_UNKNOWN ไม่มี detail", () => {
@@ -139,6 +150,17 @@ describe("copyReport", () => {
     const write = vi.fn(() => Promise.reject(new DOMException("Document is not focused", "NotAllowedError")))
     const outcome = await copyReport({}, { clipboard: { write }, ClipboardItem: Item, fetchReport: async () => REPORT })
     expect(outcome).toEqual({ ok: false, message: "คัดลอกไม่สำเร็จ ลองอีกครั้ง" })
+  })
+
+  it("ขอรายงานพลาด + เบราว์เซอร์ปฏิเสธ write โดยไม่อ่าน item = ข้อความของเซิร์ฟเวอร์ ไม่มี unhandled rejection", async () => {
+    const write = vi.fn(() => Promise.reject(new DOMException("Document is not focused", "NotAllowedError")))
+    const fetchReport = () => Promise.reject(new ApiError(0, "E_OFFLINE", th.errors.offline, null, null))
+    await expect(copyReport({}, { clipboard: { write }, ClipboardItem: Item, fetchReport })).resolves.toEqual({
+      ok: false,
+      message: th.errors.offline,
+    })
+    // ให้ Promise<Blob> ที่ไม่มีใครอ่านทำงานจนจบ ก่อน vitest ตัดสิน unhandled rejection
+    await new Promise((r) => setTimeout(r, 0))
   })
 
   it("ไม่มีคลิปบอร์ดเลย = copyFailed", async () => {
