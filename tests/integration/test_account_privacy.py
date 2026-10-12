@@ -5,7 +5,8 @@
 งานที่ใช้บัญชีแล้วพลาด /health และ GET /cookies · แล้วตรวจว่า canary ไม่อยู่ใน log (ทั้งที่จับได้และ app.log)
 ข้อความที่พิมพ์ออกหน้าจอ (stdout/stderr: yt-dlp write_string ไม่ผ่าน logging) ข่าว SSE คำตอบของ API ทุกคำตอบ
 และไม่มีไฟล์ใดในโฟลเดอร์ข้อมูลหรือโฟลเดอร์ temp ที่มี canary
-รายงานแจ้งปัญหา (/api/diagnostics) ยังไม่มีในแอพ (M6) จึงยังไม่ได้ตรวจ ดู docs/m4-followups.md
+(M6 รอบ B · AC-SET-06) รายงานแจ้งปัญหา POST /api/diagnostics ทั้งสามแบบ (งานที่พลาด error จากหน้าเว็บ หน้าตรวจสุขภาพ)
+ผ่านเงื่อนไขเดียวกัน ไม่มีชื่อคุกกี้เลย และพูดถึงบัญชีแค่บรรทัดสถานะ
 """
 
 from __future__ import annotations
@@ -113,6 +114,23 @@ def test_canaries_never_leave_memory(app_env, paths, caplog, capsys) -> None:
     call("GET", "/api/jobs")
     call("GET", "/api/health")
     assert call("GET", "/api/cookies")["active"] is True
+    # M6 รอบ B (AC-SET-06): รายงานแจ้งปัญหาตอนถือบัญชีอยู่ ทั้งงานที่พลาด error จากหน้าเว็บ และหน้าตรวจสุขภาพ
+    reports = [
+        call("POST", "/api/diagnostics", headers=AUTH, json={"jobId": failed.id})["report"],
+        call("POST", "/api/diagnostics", headers=AUTH, json={
+            "code": "E_VIDEO_PRIVATE", "detail": failed.error_detail or "-", "context": "video-header",
+            "videoId": "PRIVATEVID1",
+        })["report"],
+        call("POST", "/api/diagnostics", headers=AUTH, json={})["report"],
+    ]  # fmt: skip
+    for report in reports:
+        _assert_clean(report, "รายงานแจ้งปัญหา")
+        for name in ("SAPISID", "__Secure-3PSID", "LOGIN_INFO", CANARIES[3]):
+            assert name not in report, f"ชื่อคุกกี้ {name} อยู่ในรายงาน"
+        # ส่วนหัวและหัวข้อ error พูดถึงบัญชีแค่บรรทัดสถานะ (log ล่าสุดเป็นบรรทัดของแอพเอง ผ่านกฎ canary เดียวกันแล้วด้านบน)
+        head = report.split("### log ล่าสุด", 1)[0]
+        assert [line for line in head.splitlines() if "บัญชี" in line] == ["- บัญชียูทูป: ใช้บัญชีชั่วคราวอยู่"]
+    assert "- รหัส: E_VIDEO_PRIVATE · งาน: video (videoId PRIVATEVID1)" in reports[0]
     assert call("DELETE", "/api/cookies", headers=AUTH)["active"] is False
 
     for text in bodies:
