@@ -1,11 +1,12 @@
 import { useMutation } from "@tanstack/react-query"
 import { useEffect, useEffectEvent, useState, type ReactNode } from "react"
 import { useLocation, useNavigate } from "react-router"
-import { toast } from "sonner"
 
+import { showErrorToast } from "@/components/error-report/error-toast"
 import { th } from "@/i18n/th"
 import { api } from "@/lib/api"
 import { looksLikeYoutube } from "@/lib/paste"
+import { reportRequest } from "@/lib/report"
 import type { ResolveItem, ResolveResult } from "@/lib/types"
 
 import { AmbiguousDialog } from "./ambiguous-dialog"
@@ -97,7 +98,12 @@ export function useAnalyze() {
     },
     onError: (error) => {
       // W1 แสดงข้อความใต้ช่องเอง ส่วนหน้าอื่นไม่มีช่อง จึงแจ้งด้วย toast
-      if (!onHome) toast.error(`${th.home.resolveFailed} · ${error.message}`)
+      if (!onHome) {
+        showErrorToast(`${th.home.resolveFailed} · ${error.message}`, {
+          id: "analyze-error",
+          request: reportRequest(error, { context: "analyze" }),
+        })
+      }
     },
   })
 

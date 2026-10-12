@@ -6,9 +6,12 @@ import {
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
+// M6 รอบ B: lib → components ครั้งแรก (toast ต้องมี JSX ของปุ่มคัดลอก) · lib/report.ts ยังไม่มี React
+import { showErrorToast } from "@/components/error-report/error-toast"
 import { fill } from "@/i18n/th"
 
 import { api, ApiError } from "./api"
+import { reportRequest } from "./report"
 import type { Job, JobPatch, NewJob, QueueState } from "./types"
 
 /** ทางลัดสำหรับเทส: ส่ง fetch/token ปลอมต่อให้ api() (ผู้ใช้จริงไม่ต้องส่ง) */
@@ -195,6 +198,9 @@ export type EnqueueMessages = {
 /** ที่อยู่หน้าตรวจสุขภาพ (ติดตั้ง ffmpeg) สำหรับปุ่มใน toast เมื่อเครื่องยังไม่มี ffmpeg */
 export const HEALTH_PATH = "/settings/health"
 
+/** id ของ toast "ส่งเข้าคิวไม่สำเร็จ" (M6 รอบ B): พลาดซ้ำแทนที่ toast เดิม ไม่ซ้อนกัน */
+export const ENQUEUE_TOAST_ID = "enqueue-error"
+
 type EnqueueEnv = { navigate: (path: string) => void; deps?: ApiDeps }
 
 /**
@@ -224,22 +230,26 @@ export async function submitEnqueue(
     )
     return true
   } catch (error) {
+    const request = reportRequest(error, { context: "enqueue" })
     if (
       error instanceof ApiError &&
       error.status === 409 &&
       error.code === "E_FFMPEG_MISSING"
     ) {
-      toast.error(error.message, {
+      showErrorToast(error.message, {
+        id: ENQUEUE_TOAST_ID,
+        request,
         action: {
           label: messages.goHealth,
           onClick: () => env.navigate(HEALTH_PATH),
         },
       })
     } else {
-      toast.error(
+      showErrorToast(
         error instanceof Error && error.message
           ? error.message
-          : messages.failed
+          : messages.failed,
+        { id: ENQUEUE_TOAST_ID, request }
       )
     }
     return false

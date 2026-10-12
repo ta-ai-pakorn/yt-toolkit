@@ -349,6 +349,10 @@ describe("submitEnqueue", () => {
     const [text, options] = toastMock.error.mock.calls[0]
     expect(text).toBe("ยังไม่มี ffmpeg")
     expect(options.action.label).toBe("ไปหน้าตรวจสุขภาพ")
+    // M6 รอบ B: ค้างจนกดปิด id คงที่ ปุ่มคัดลอกอยู่ในแถว description
+    expect(options.id).toBe("enqueue-error")
+    expect(options.duration).toBe(Infinity)
+    expect(options.description.props.children[1].props.request).toEqual({ code: "E_FFMPEG_MISSING", context: "enqueue" })
     options.action.onClick()
     expect(navigate).toHaveBeenCalledWith(HEALTH_PATH)
     expect(HEALTH_PATH).toBe("/settings/health")
@@ -374,9 +378,13 @@ describe("submitEnqueue", () => {
     await expect(submitEnqueue(client, [newJob], messages, env)).resolves.toBe(
       false
     )
-    expect(toastMock.error.mock.calls).toEqual([
-      ["ค่าไม่ถูกต้อง"],
-      ["ส่งไม่สำเร็จ"],
+    expect(toastMock.error.mock.calls.map((call) => call[0])).toEqual([
+      "ค่าไม่ถูกต้อง",
+      "ส่งไม่สำเร็จ",
+    ])
+    expect(toastMock.error.mock.calls.map((call) => call[1].id)).toEqual([
+      "enqueue-error",
+      "enqueue-error",
     ])
   })
 })
