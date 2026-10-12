@@ -106,11 +106,23 @@ def test_setup_file_log_is_idempotent_and_shared_with_lifecycle(paths, restore_r
     assert len(added) == 1
     handler = added[0]
     assert isinstance(handler, logging.handlers.RotatingFileHandler)
-    assert handler.maxBytes == 1_000_000
-    assert handler.backupCount == 3
+    assert handler.maxBytes == 5_000_000  # M6 รอบ B: PRD 7.1 หมุนไฟล์ที่ 5 MB เก็บ 3 ไฟล์ (app.log + .1 + .2)
+    assert handler.backupCount == 2
     assert handler.encoding == "utf-8"
     assert handler.baseFilename == str((paths.logs / "app.log").resolve())
     assert root.level == logging.INFO
+
+
+def test_setup_file_log_quiets_httpx_info_lines(paths, restore_root_logging):
+    httpx_logger = logging.getLogger("httpx")
+    before = httpx_logger.level
+    try:
+        httpx_logger.setLevel(logging.NOTSET)
+        probe.setup_file_log(paths)
+        assert httpx_logger.level == logging.WARNING  # M6 รอบ B: ไม่มีบรรทัด INFO ของทุกคำขอ (มี URL ภาพเต็ม)
+        assert not httpx_logger.isEnabledFor(logging.INFO)
+    finally:
+        httpx_logger.setLevel(before)
 
 
 def test_cli_start_logs_crash_and_exits_1(tmp_path, monkeypatch, restore_root_logging):

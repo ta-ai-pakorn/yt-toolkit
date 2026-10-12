@@ -32,6 +32,7 @@ Status = Literal["ok", "warn", "error"]
 YTDLP_MAX_AGE_DAYS = 30
 YTDLP_UPDATE_GRACE_DAYS = 7  # bot อัปเดต uv.lock ทุกวัน ให้เวลามันทำงานก่อนเตือนเรื่องเวอร์ชันใหม่
 FFMPEG_INSTALLING_MESSAGE = "กำลังโหลด ffmpeg อาจใช้เวลา 1-3 นาที"
+JS_RUNTIME_MISSING_MESSAGE = "บางคุณภาพอาจไม่แสดง เพราะเครื่องยังไม่มีตัวช่วยที่ yt-dlp ต้องใช้"
 MIN_FREE_BYTES = 2 * 1024**3
 PYPI_YTDLP_URL = "https://pypi.org/pypi/yt-dlp/json"
 LATEST_YTDLP_CACHE_SECONDS = 3600
@@ -121,7 +122,8 @@ def find_js_runtime(plat: Platform) -> ToolStatus:
             version = parts[1] if len(parts) > 1 else line
             return ToolStatus("ok", name="deno", version=version, path=exe)
         return ToolStatus("warn", name="node", version=line.lstrip("v"), path=exe, message="ใช้ node แทน deno")
-    return ToolStatus("warn", name=None, message="ไม่พบตัวช่วยของ yt-dlp (deno)")
+    # M6 รอบ B (D2): ข้อความของ E_JS_RUNTIME_MISSING ใน PRD ข้อ 7 เป็นคำเตือนของหน้าตรวจสุขภาพ ไม่ใช่ error ของการโหลด
+    return ToolStatus("warn", name=None, message=JS_RUNTIME_MISSING_MESSAGE)
 
 
 def _fetch_latest_ytdlp() -> str:

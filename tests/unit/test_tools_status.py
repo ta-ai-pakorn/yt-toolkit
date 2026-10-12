@@ -115,7 +115,7 @@ def test_find_js_runtime_none(monkeypatch, tmp_path, fake_platform):
     status = tools.find_js_runtime(fake_platform)
     assert status.status == "warn"
     assert status.name is None
-    assert status.message == "ไม่พบตัวช่วยของ yt-dlp (deno)"
+    assert status.message == "บางคุณภาพอาจไม่แสดง เพราะเครื่องยังไม่มีตัวช่วยที่ yt-dlp ต้องใช้"  # PRD ข้อ 7 E_JS_RUNTIME_MISSING
 
 
 def test_ytdlp_status_age():
