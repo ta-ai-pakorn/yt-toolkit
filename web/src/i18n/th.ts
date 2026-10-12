@@ -496,7 +496,6 @@ export const th = {
     downloadOf: "ดาวน์โหลด {file}",
     details: "ดูรายละเอียด",
     errorCode: "รหัส {code}",
-    copyDetails: "คัดลอกรายละเอียด",
     dragHandle: "ลากเพื่อเปลี่ยนลำดับ {title}",
     dnd: {
       picked: "ยก {title} ขึ้นแล้ว กดลูกศรขึ้นหรือลงเพื่อย้าย แล้วกด Space เพื่อวาง",

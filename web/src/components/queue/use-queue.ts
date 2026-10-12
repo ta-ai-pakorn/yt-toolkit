@@ -4,11 +4,14 @@ import { toast } from "sonner"
 
 import { openAccountDialog } from "@/components/account/account-store"
 import { REMOVED_TOAST_ID, showRemovedToast } from "@/components/account/use-account"
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { PLAIN_TOAST } from "@/components/error-report/model"
 import { fill, th } from "@/i18n/th"
 import { ACCOUNT_KEY, showAccountButton, type AccountEvent } from "@/lib/account"
 import { ApiError } from "@/lib/api"
 import { connectEvents, type ConnectOptions } from "@/lib/events"
 import { cancelJob, JOBS_KEY, jobsQuery, queueQuery, reorderJobs, retryJob, revealOutput } from "@/lib/jobs"
+import { reportRequest } from "@/lib/report"
 import type { AccountStatus, Job } from "@/lib/types"
 
 import { jobTitle } from "./job-text"
@@ -159,7 +162,11 @@ export async function revealWithToast(id: string, index: number): Promise<void> 
   try {
     await revealOutput(id, index)
   } catch (error) {
-    toast.error(error instanceof ApiError && error.status === 404 ? th.queue.fileMissing : th.queue.revealFailed)
+    // M6 รอบ B (spec Q5): ข้อความเดิม + ปุ่มคัดลอก (ส่ง error จริงไปกับรายงาน)
+    showErrorToast(error instanceof ApiError && error.status === 404 ? th.queue.fileMissing : th.queue.revealFailed, {
+      id: `queue-reveal-${id}`,
+      request: reportRequest(error, { context: "queue-reveal", jobId: id }),
+    })
   }
 }
 
@@ -168,7 +175,9 @@ function notifyJobChange(client: QueryClient, before: Job | undefined, after: Jo
   const title = jobTitle(after)
   if (kind === "finished") {
     const first = after.outputs?.[0]
+    // ...PLAIN_TOAST: งานที่เคยพลาดแล้วลองใหม่จนเสร็จใช้ id เดิม sonner รวมค่าทับ toast พลาดตัวเดิม (P5)
     toast.success(fill(th.queue.finished, { title }), {
+      ...PLAIN_TOAST,
       id: `job-${after.id}`,
       action: first
         ? { label: th.queue.openFolder, onClick: () => void revealWithToast(after.id, first.index) }
@@ -185,12 +194,13 @@ function notifyJobChange(client: QueryClient, before: Job | undefined, after: Jo
           onClick: () => openAccountDialog({ origin: "error", onImported: () => void runJobAction(client, "retry", after.id) }),
         }
       : null
-    toast.error(fill(th.queue.failed, { title }), {
+    // M6 รอบ B: ปุ่มคัดลอกอยู่ในแถว description (action / cancel เป็นของปุ่มบัญชีกับ "ดูรายละเอียด" เหมือนเดิม)
+    showErrorToast(fill(th.queue.failed, { title }), {
       id: `job-${after.id}`,
       description: after.error?.message,
-      duration: Infinity,
       action: account ?? details,
       cancel: account ? details : undefined,
+      request: { jobId: after.id, code: after.error?.code, detail: after.error?.detail ?? undefined, context: "queue" },
     })
   }
 }
@@ -245,8 +255,11 @@ export async function runJobAction(client: QueryClient, action: "cancel" | "retr
   try {
     const job = await (action === "cancel" ? cancelJob(id) : retryJob(id))
     client.setQueryData<Job[]>(JOBS_KEY, (old) => applyActionResult(old, job))
-  } catch {
-    toast.error(th.queue.actionFailed)
+  } catch (error) {
+    showErrorToast(th.queue.actionFailed, {
+      id: `queue-action-${id}`,
+      request: reportRequest(error, { context: "queue-action", jobId: id }),
+    })
     void client.invalidateQueries({ queryKey: JOBS_KEY })
   }
 }
@@ -271,9 +284,9 @@ export function useReorder(): (ids: string[]) => Promise<void> {
       client.setQueryData<Job[]>(JOBS_KEY, next)
       try {
         await reorderJobs(ids)
-      } catch {
+      } catch (error) {
         client.setQueryData<Job[]>(JOBS_KEY, (old) => (old === undefined ? old : rollbackReorder(old, snapshot)))
-        toast.error(th.queue.actionFailed)
+        showErrorToast(th.queue.actionFailed, { id: "queue-reorder", request: reportRequest(error, { context: "queue-reorder" }) })
       }
     },
     [client],

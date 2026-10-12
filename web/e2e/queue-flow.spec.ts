@@ -203,6 +203,9 @@ test.describe("W4 คิวงาน", () => {
     await expect(failed).toContainText("ยูทูปไม่ยอมส่งไฟล์ของคลิปนี้ตอนนี้ ลองใหม่ภายหลัง")
     await failed.getByRole("button", { name: "ดูรายละเอียด" }).click()
     await expect(failed.getByText("รหัส E_YT_REFUSED")).toBeVisible()
+    // M6 รอบ B: แถวที่พลาดมีปุ่มคัดลอกรายงานแทนปุ่มคัดลอกรายละเอียดเดิม
+    await expect(failed.getByRole("button", { name: "คัดลอกข้อมูลแจ้งปัญหา" })).toBeVisible()
+    await expect(failed.getByRole("button", { name: "คัดลอกรายละเอียด" })).toHaveCount(0)
 
     const retried = page.waitForResponse((r) => r.url().endsWith(`/api/jobs/${job.id}/retry`) && r.request().method() === "POST")
     await failed.getByRole("button", { name: `ลองใหม่ ${TITLE.REFUSEDDL01}` }).click()

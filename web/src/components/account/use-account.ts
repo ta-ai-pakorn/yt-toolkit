@@ -2,8 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
+import { showErrorToast } from "@/components/error-report/error-toast"
 import { th } from "@/i18n/th"
 import { ACCOUNT_KEY, accountQuery, deleteAccount, INACTIVE } from "@/lib/account"
+import { reportRequest } from "@/lib/report"
 import type { AccountStatus } from "@/lib/types"
 
 /** toast หลังลบบัญชี (ทุกเหตุผล ทุกแท็บ): ไม่หายเอง มีปุ่ม "ปิด" · id เดียว = ลบในแท็บนี้แล้วข่าว SSE ตามมาไม่เด้งซ้ำ */
@@ -31,7 +33,9 @@ export function useDeleteAccount(): { remove: () => void; pending: boolean } {
       client.setQueryData<AccountStatus>(ACCOUNT_KEY, status)
       showRemovedToast()
     },
-    onError: () => toast.error(th.queue.actionFailed),
+    // M6 รอบ B (spec Q5): รายงานมีแค่บรรทัดสถานะบัญชีเหมือนทุกรายงาน (C4)
+    onError: (error) =>
+      showErrorToast(th.queue.actionFailed, { id: "account-delete", request: reportRequest(error, { context: "account-delete" }) }),
   })
   return { remove: () => mutation.mutate(), pending: mutation.isPending }
 }

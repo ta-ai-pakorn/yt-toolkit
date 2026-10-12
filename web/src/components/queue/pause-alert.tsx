@@ -1,13 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Hourglass } from "lucide-react"
 import { useEffect, useState } from "react"
-import { toast } from "sonner"
 
+import { showErrorToast } from "@/components/error-report/error-toast"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { th } from "@/i18n/th"
 import { QUEUE_KEY, resumeQueue } from "@/lib/jobs"
+import { reportRequest } from "@/lib/report"
 import type { QueueState } from "@/lib/types"
 import { cn } from "cn"
 
@@ -34,7 +35,8 @@ export function PauseAlert({ pausedUntil, variant }: { pausedUntil: string; vari
     mutationFn: () => resumeQueue(),
     onSuccess: () =>
       client.setQueryData<QueueState>(QUEUE_KEY, (old) => (old === undefined ? old : { ...old, pausedUntil: null, reason: null })),
-    onError: () => toast.error(th.queue.actionFailed),
+    onError: (error) =>
+      showErrorToast(th.queue.actionFailed, { id: "queue-resume", request: reportRequest(error, { context: "queue-resume" }) }),
   })
 
   if (pausedRemainingMs(pausedUntil, now) <= 0) return null
