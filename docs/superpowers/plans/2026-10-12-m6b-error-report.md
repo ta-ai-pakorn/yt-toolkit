@@ -3477,6 +3477,759 @@ EOF
 ```
 
 
+### Task 9: Web — queue (failed row, failed-job toast, small action toasts), crash panel, account delete
+
+**Files:**
+- Modify: `web/src/components/queue/job-row.tsx` (FailedRow uses `ErrorDetails`; `copyDetails` deleted)
+- Modify: `web/src/components/queue/use-queue.ts` (failed-job toast, finished toast `PLAIN_TOAST`, `revealWithToast`, `runJobAction`, `useReorder`)
+- Modify: `web/src/components/queue/use-queue-events.test.ts`
+- Modify: `web/src/components/queue/pause-alert.tsx`, `web/src/components/queue/shutdown-dialog.tsx`, `web/src/components/account/use-account.ts`
+- Modify: `web/src/components/error-panel.tsx`, `web/src/components/route-error.tsx`
+- Modify: `web/src/i18n/th.ts` (remove `queue.copyDetails` only)
+- Modify: `web/e2e/nav.spec.ts` (`:222`), `web/e2e/queue-flow.spec.ts` (`:205`)
+
+**Interfaces:**
+- Consumes (T4): `ErrorDetails` (`request` + `open` / `onOpenChange`), `CopyReportButton`, `showErrorToast`, `PLAIN_TOAST`, `reportRequest`.
+- Produces: K7 ids `job-<id>` (failed-job request `{ jobId, code, detail, context: "queue" }`), `queue-action-<id>`, `queue-reorder`, `queue-resume`, `queue-reveal-<id>`, `account-delete`, `shutdown-error`; contexts `chunk` / `crash` in `ErrorPanel`; `RouteError` renders its own `<Toaster position="bottom-right" />`.
+
+Planner ruling P12 (layout, C9): `ErrorPanel` keeps the `AlertAction` slot but makes it a static row under the message (`static col-start-2 mt-2 flex flex-wrap gap-2`). Two buttons in the default absolute top-right slot would cover the title at 640 px.
+
+- [ ] **Step 1: Write the failing tests** — `web/src/components/queue/use-queue-events.test.ts`:
+
+Replace (1):
+```ts
+import { QueryClient } from "@tanstack/react-query"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { accountDialog } from "@/components/account/account-store"
+import { ACCOUNT_KEY } from "@/lib/account"
+import { ApiError } from "@/lib/api"
+import { JOBS_KEY } from "@/lib/jobs"
+```
+with:
+```ts
+import { QueryClient } from "@tanstack/react-query"
+import type { ReactElement, ReactNode } from "react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { accountDialog } from "@/components/account/account-store"
+import { CopyReportButton } from "@/components/error-report/copy-report-button"
+import { ACCOUNT_KEY } from "@/lib/account"
+import { ApiError } from "@/lib/api"
+import { JOBS_KEY } from "@/lib/jobs"
+```
+
+Replace (2):
+```ts
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+    api.retryJob.mockRejectedValueOnce(new ApiError(500, "E_UNKNOWN", "พัง", null, null))
+    await runJobAction(client, "retry", "j1")
+    expect(toast.error).toHaveBeenCalledWith("ทำรายการนี้ไม่สำเร็จ ลองรีเฟรชหน้าเว็บ")
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: JOBS_KEY })
+  })
+})
+
+describe("serverEventHandlers: ปิดโปรแกรม", () => {
+  it("บัญชีถูกลบเพราะปิดโปรแกรม: ล้าง toast อื่นทีละตัว แต่ toast ลบบัญชีที่ขึ้นอยู่แล้วยังอยู่ (ไม่สร้างใหม่)", () => {
+    const handlers = serverEventHandlers(new QueryClient())
+```
+with:
+```ts
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+    api.retryJob.mockRejectedValueOnce(new ApiError(500, "E_UNKNOWN", "พัง", null, null))
+    await runJobAction(client, "retry", "j1")
+    const [message, options] = toast.error.mock.lastCall as unknown as [string, ToastOptions]
+    expect(message).toBe("ทำรายการนี้ไม่สำเร็จ ลองรีเฟรชหน้าเว็บ")
+    expect(options.id).toBe("queue-action-j1") // M6 รอบ B (spec Q5): ค้างจนกดปิด มีปุ่มคัดลอก ส่ง error จริงไปกับรายงาน
+    expect(options.duration).toBe(Infinity)
+    expect(copyButton(options).props.request).toEqual({ code: "E_UNKNOWN", context: "queue-action", jobId: "j1" })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: JOBS_KEY })
+  })
+})
+
+type ToastOptions = {
+  id?: string
+  duration?: number
+  description?: ReactElement<{ children: ReactNode[] }>
+  action?: { label: string }
+  cancel?: { label: string }
+}
+const copyButton = (options: ToastOptions) =>
+  options.description!.props.children[1] as ReactElement<{ request: Record<string, string | undefined> }>
+
+describe("serverEventHandlers: toast ของงาน (M6 รอบ B)", () => {
+  it("งานพลาด = ค้างจนกดปิด id job-<id> ข้อความ error อยู่ก่อนปุ่มคัดลอก รายงานหางานจาก jobId", () => {
+    serverEventHandlers(new QueryClient()).onJobChange?.(job(), failed("E_YT_REFUSED"))
+    const [message, options] = toast.error.mock.lastCall as unknown as [string, ToastOptions]
+    expect(message).toBe("โหลดไม่สำเร็จ · คลิปจำกัดอายุ")
+    expect(options.id).toBe("job-j1")
+    expect(options.duration).toBe(Infinity)
+    expect(options.description!.props.children[0]).toBe("คลิปนี้จำกัดอายุ")
+    const button = copyButton(options)
+    expect(button.type).toBe(CopyReportButton)
+    expect(button.props.request).toEqual({ jobId: "j1", code: "E_YT_REFUSED", detail: "x", context: "queue" })
+  })
+
+  it("งานที่เคยพลาดแล้วเสร็จ = toast เสร็จล้างปุ่มคัดลอกและเวลาค้างของ toast พลาดตัวเดิม (P5)", () => {
+    serverEventHandlers(new QueryClient()).onJobChange?.(failed("E_NETWORK"), job({ status: "done" }))
+    const [message, options] = toast.success.mock.lastCall as unknown as [string, ToastOptions & Record<string, unknown>]
+    expect(message).toBe("โหลดเสร็จแล้ว · คลิปจำกัดอายุ")
+    expect(options.id).toBe("job-j1")
+    for (const key of ["description", "duration", "cancel"]) {
+      expect(key in options).toBe(true)
+      expect(options[key]).toBeUndefined()
+    }
+  })
+})
+
+describe("serverEventHandlers: ปิดโปรแกรม", () => {
+  it("บัญชีถูกลบเพราะปิดโปรแกรม: ล้าง toast อื่นทีละตัว แต่ toast ลบบัญชีที่ขึ้นอยู่แล้วยังอยู่ (ไม่สร้างใหม่)", () => {
+    const handlers = serverEventHandlers(new QueryClient())
+```
+
+- [ ] **Step 2: Run, expect FAIL**
+
+Run: `cd "$WORKTREE/web" && npx vitest run src/components/queue/use-queue-events.test.ts`
+Expected: the `runJobAction` test fails (`options` is `undefined`), the new failed-toast test fails on `options.description!.props` (description is a string today), the finished-toast test fails on `"description" in options`.
+
+- [ ] **Step 3: Queue toasts** — `web/src/components/queue/use-queue.ts`:
+
+Replace (1):
+```ts
+
+import { openAccountDialog } from "@/components/account/account-store"
+import { REMOVED_TOAST_ID, showRemovedToast } from "@/components/account/use-account"
+import { fill, th } from "@/i18n/th"
+import { ACCOUNT_KEY, showAccountButton, type AccountEvent } from "@/lib/account"
+import { ApiError } from "@/lib/api"
+import { connectEvents, type ConnectOptions } from "@/lib/events"
+import { cancelJob, JOBS_KEY, jobsQuery, queueQuery, reorderJobs, retryJob, revealOutput } from "@/lib/jobs"
+import type { AccountStatus, Job } from "@/lib/types"
+
+import { jobTitle } from "./job-text"
+```
+with:
+```ts
+
+import { openAccountDialog } from "@/components/account/account-store"
+import { REMOVED_TOAST_ID, showRemovedToast } from "@/components/account/use-account"
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { PLAIN_TOAST } from "@/components/error-report/model"
+import { fill, th } from "@/i18n/th"
+import { ACCOUNT_KEY, showAccountButton, type AccountEvent } from "@/lib/account"
+import { ApiError } from "@/lib/api"
+import { connectEvents, type ConnectOptions } from "@/lib/events"
+import { cancelJob, JOBS_KEY, jobsQuery, queueQuery, reorderJobs, retryJob, revealOutput } from "@/lib/jobs"
+import { reportRequest } from "@/lib/report"
+import type { AccountStatus, Job } from "@/lib/types"
+
+import { jobTitle } from "./job-text"
+```
+
+Replace (2):
+```ts
+  try {
+    await revealOutput(id, index)
+  } catch (error) {
+    toast.error(error instanceof ApiError && error.status === 404 ? th.queue.fileMissing : th.queue.revealFailed)
+  }
+}
+```
+with:
+```ts
+  try {
+    await revealOutput(id, index)
+  } catch (error) {
+    // M6 รอบ B (spec Q5): ข้อความเดิม + ปุ่มคัดลอก (ส่ง error จริงไปกับรายงาน)
+    showErrorToast(error instanceof ApiError && error.status === 404 ? th.queue.fileMissing : th.queue.revealFailed, {
+      id: `queue-reveal-${id}`,
+      request: reportRequest(error, { context: "queue-reveal", jobId: id }),
+    })
+  }
+}
+```
+
+Replace (3):
+```ts
+  const title = jobTitle(after)
+  if (kind === "finished") {
+    const first = after.outputs?.[0]
+    toast.success(fill(th.queue.finished, { title }), {
+      id: `job-${after.id}`,
+      action: first
+        ? { label: th.queue.openFolder, onClick: () => void revealWithToast(after.id, first.index) }
+```
+with:
+```ts
+  const title = jobTitle(after)
+  if (kind === "finished") {
+    const first = after.outputs?.[0]
+    // ...PLAIN_TOAST: งานที่เคยพลาดแล้วลองใหม่จนเสร็จใช้ id เดิม sonner รวมค่าทับ toast พลาดตัวเดิม (P5)
+    toast.success(fill(th.queue.finished, { title }), {
+      ...PLAIN_TOAST,
+      id: `job-${after.id}`,
+      action: first
+        ? { label: th.queue.openFolder, onClick: () => void revealWithToast(after.id, first.index) }
+```
+
+Replace (4):
+```ts
+          onClick: () => openAccountDialog({ origin: "error", onImported: () => void runJobAction(client, "retry", after.id) }),
+        }
+      : null
+    toast.error(fill(th.queue.failed, { title }), {
+      id: `job-${after.id}`,
+      description: after.error?.message,
+      duration: Infinity,
+      action: account ?? details,
+      cancel: account ? details : undefined,
+    })
+  }
+}
+```
+with:
+```ts
+          onClick: () => openAccountDialog({ origin: "error", onImported: () => void runJobAction(client, "retry", after.id) }),
+        }
+      : null
+    // M6 รอบ B: ปุ่มคัดลอกอยู่ในแถว description (action / cancel เป็นของปุ่มบัญชีกับ "ดูรายละเอียด" เหมือนเดิม)
+    showErrorToast(fill(th.queue.failed, { title }), {
+      id: `job-${after.id}`,
+      description: after.error?.message,
+      action: account ?? details,
+      cancel: account ? details : undefined,
+      request: { jobId: after.id, code: after.error?.code, detail: after.error?.detail ?? undefined, context: "queue" },
+    })
+  }
+}
+```
+
+Replace (5):
+```ts
+  try {
+    const job = await (action === "cancel" ? cancelJob(id) : retryJob(id))
+    client.setQueryData<Job[]>(JOBS_KEY, (old) => applyActionResult(old, job))
+  } catch {
+    toast.error(th.queue.actionFailed)
+    void client.invalidateQueries({ queryKey: JOBS_KEY })
+  }
+}
+```
+with:
+```ts
+  try {
+    const job = await (action === "cancel" ? cancelJob(id) : retryJob(id))
+    client.setQueryData<Job[]>(JOBS_KEY, (old) => applyActionResult(old, job))
+  } catch (error) {
+    showErrorToast(th.queue.actionFailed, {
+      id: `queue-action-${id}`,
+      request: reportRequest(error, { context: "queue-action", jobId: id }),
+    })
+    void client.invalidateQueries({ queryKey: JOBS_KEY })
+  }
+}
+```
+
+Replace (6):
+```ts
+      client.setQueryData<Job[]>(JOBS_KEY, next)
+      try {
+        await reorderJobs(ids)
+      } catch {
+        client.setQueryData<Job[]>(JOBS_KEY, (old) => (old === undefined ? old : rollbackReorder(old, snapshot)))
+        toast.error(th.queue.actionFailed)
+      }
+    },
+    [client],
+```
+with:
+```ts
+      client.setQueryData<Job[]>(JOBS_KEY, next)
+      try {
+        await reorderJobs(ids)
+      } catch (error) {
+        client.setQueryData<Job[]>(JOBS_KEY, (old) => (old === undefined ? old : rollbackReorder(old, snapshot)))
+        showErrorToast(th.queue.actionFailed, { id: "queue-reorder", request: reportRequest(error, { context: "queue-reorder" }) })
+      }
+    },
+    [client],
+```
+
+- [ ] **Step 4: The failed row** — `web/src/components/queue/job-row.tsx` (the controlled `open` and `data-details-trigger=""` the toast's "ดูรายละเอียด" relies on stay — `ErrorDetails` sets the attribute on its trigger):
+
+Replace (1):
+```tsx
+import { ChevronDown, CircleCheck, CirclePause, CircleX, Copy, Download, FolderOpen, RotateCcw } from "lucide-react"
+import { useState, type ComponentProps, type ReactNode } from "react"
+import { toast } from "sonner"
+
+import { UseAccountButton } from "@/components/account/account-button"
+import { useAccountStatus } from "@/components/account/use-account"
+import { Badge } from "@/components/ui/badge"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Progress } from "@/components/ui/progress"
+import { Spinner } from "@/components/ui/spinner"
+import { fill, th } from "@/i18n/th"
+```
+with:
+```tsx
+import { CircleCheck, CirclePause, CircleX, Download, FolderOpen, RotateCcw } from "lucide-react"
+import { useState, type ComponentProps, type ReactNode } from "react"
+
+import { UseAccountButton } from "@/components/account/account-button"
+import { useAccountStatus } from "@/components/account/use-account"
+import { ErrorDetails } from "@/components/error-report/error-details"
+import { Badge } from "@/components/ui/badge"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
+import { Spinner } from "@/components/ui/spinner"
+import { fill, th } from "@/i18n/th"
+```
+
+Replace (2):
+```tsx
+  )
+}
+
+async function copyDetails(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success(th.video.copied)
+  } catch {
+    toast.error(th.video.copyFailed)
+  }
+}
+
+/** แถวงานที่พลาดหรือหยุดกลางคัน: ข้อความผิดพลาด · "ดูรายละเอียด" (รหัส + ข้อความเทคนิค + คัดลอก) · "ลองใหม่" */
+export function FailedRow({ job, expanded }: { job: Job; expanded: boolean }) {
+  const retry = useJobAction("retry", job.id)
+  // เปิดจาก toast "ดูรายละเอียด" = กางรายละเอียด แม้แถวนี้จะแสดงอยู่แล้วก่อนหน้า
+```
+with:
+```tsx
+  )
+}
+
+/**
+ * แถวงานที่พลาดหรือหยุดกลางคัน: ข้อความผิดพลาด · "ดูรายละเอียด" (รหัส + ข้อความเทคนิค + "คัดลอกข้อมูลแจ้งปัญหา") · "ลองใหม่"
+ * M6 รอบ B: ปุ่มคัดลอกรายงานแทนปุ่ม "คัดลอกรายละเอียด" เดิม · เซิร์ฟเวอร์หางานจาก jobId ก่อน code/detail เป็นตัวสำรอง
+ */
+export function FailedRow({ job, expanded }: { job: Job; expanded: boolean }) {
+  const retry = useJobAction("retry", job.id)
+  // เปิดจาก toast "ดูรายละเอียด" = กางรายละเอียด แม้แถวนี้จะแสดงอยู่แล้วก่อนหน้า
+```
+
+Replace (3):
+```tsx
+          </div>
+        )}
+        {code && (
+          <Collapsible open={open} onOpenChange={setOpen}>
+            <CollapsibleTrigger
+              data-details-trigger=""
+              render={<Button variant="link" size="sm" className="group/details h-7 px-0 text-muted-foreground" />}
+            >
+              {th.queue.details}
+              <ChevronDown aria-hidden className="transition-transform group-data-[panel-open]/details:rotate-180" />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="flex flex-col items-start gap-2 pt-1">
+              <p className="font-mono text-xs">{fill(th.queue.errorCode, { code })}</p>
+              {detail && (
+                <pre className="max-h-40 w-full overflow-auto rounded-md bg-muted p-2 font-mono text-xs break-all whitespace-pre-wrap">
+                  {detail}
+                </pre>
+              )}
+              <Button variant="outline" size="sm" onClick={() => void copyDetails(detail ? `${code}\n${detail}` : code)}>
+                <Copy aria-hidden />
+                {th.queue.copyDetails}
+              </Button>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+      </div>
+      <Button
+```
+with:
+```tsx
+          </div>
+        )}
+        {code && (
+          <ErrorDetails
+            request={{ jobId: job.id, code, detail: detail ?? undefined, context: "queue" }}
+            open={open}
+            onOpenChange={setOpen}
+          />
+        )}
+      </div>
+      <Button
+```
+
+`web/src/i18n/th.ts` — the last user of `queue.copyDetails` is gone (`queue.details` / `queue.errorCode` stay: the toast action still uses `queue.details`):
+
+Replace (1):
+```ts
+    downloadOf: "ดาวน์โหลด {file}",
+    details: "ดูรายละเอียด",
+    errorCode: "รหัส {code}",
+    copyDetails: "คัดลอกรายละเอียด",
+    dragHandle: "ลากเพื่อเปลี่ยนลำดับ {title}",
+    dnd: {
+      picked: "ยก {title} ขึ้นแล้ว กดลูกศรขึ้นหรือลงเพื่อย้าย แล้วกด Space เพื่อวาง",
+```
+with:
+```ts
+    downloadOf: "ดาวน์โหลด {file}",
+    details: "ดูรายละเอียด",
+    errorCode: "รหัส {code}",
+    dragHandle: "ลากเพื่อเปลี่ยนลำดับ {title}",
+    dnd: {
+      picked: "ยก {title} ขึ้นแล้ว กดลูกศรขึ้นหรือลงเพื่อย้าย แล้วกด Space เพื่อวาง",
+```
+
+- [ ] **Step 5: The small action toasts (spec Q5) and shutdown**
+
+`web/src/components/queue/pause-alert.tsx`:
+
+Replace (1):
+```tsx
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Hourglass } from "lucide-react"
+import { useEffect, useState } from "react"
+import { toast } from "sonner"
+
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { th } from "@/i18n/th"
+import { QUEUE_KEY, resumeQueue } from "@/lib/jobs"
+import type { QueueState } from "@/lib/types"
+import { cn } from "cn"
+```
+with:
+```tsx
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Hourglass } from "lucide-react"
+import { useEffect, useState } from "react"
+
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { th } from "@/i18n/th"
+import { QUEUE_KEY, resumeQueue } from "@/lib/jobs"
+import { reportRequest } from "@/lib/report"
+import type { QueueState } from "@/lib/types"
+import { cn } from "cn"
+```
+
+Replace (2):
+```tsx
+    mutationFn: () => resumeQueue(),
+    onSuccess: () =>
+      client.setQueryData<QueueState>(QUEUE_KEY, (old) => (old === undefined ? old : { ...old, pausedUntil: null, reason: null })),
+    onError: () => toast.error(th.queue.actionFailed),
+  })
+
+  if (pausedRemainingMs(pausedUntil, now) <= 0) return null
+```
+with:
+```tsx
+    mutationFn: () => resumeQueue(),
+    onSuccess: () =>
+      client.setQueryData<QueueState>(QUEUE_KEY, (old) => (old === undefined ? old : { ...old, pausedUntil: null, reason: null })),
+    onError: (error) =>
+      showErrorToast(th.queue.actionFailed, { id: "queue-resume", request: reportRequest(error, { context: "queue-resume" }) }),
+  })
+
+  if (pausedRemainingMs(pausedUntil, now) <= 0) return null
+```
+
+`web/src/components/queue/shutdown-dialog.tsx` (`toast` stays for `toast.dismiss()`):
+
+Replace (1):
+```tsx
+import { useState } from "react"
+import { toast } from "sonner"
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+```
+with:
+```tsx
+import { useState } from "react"
+import { toast } from "sonner"
+
+import { showErrorToast } from "@/components/error-report/error-toast"
+import {
+  AlertDialog,
+  AlertDialogAction,
+```
+
+Replace (2):
+```tsx
+import { fill, th } from "@/i18n/th"
+import { api } from "@/lib/api"
+import { appShutdown } from "@/lib/events"
+
+import { useQueueData } from "./use-queue"
+```
+with:
+```tsx
+import { fill, th } from "@/i18n/th"
+import { api } from "@/lib/api"
+import { appShutdown } from "@/lib/events"
+import { reportRequest } from "@/lib/report"
+
+import { useQueueData } from "./use-queue"
+```
+
+Replace (3):
+```tsx
+      onShutdown?.()
+      appShutdown.set()
+    },
+    onError: (error) => toast.error(error.message),
+  })
+
+  return (
+```
+with:
+```tsx
+      onShutdown?.()
+      appShutdown.set()
+    },
+    onError: (error) =>
+      showErrorToast(error.message, { id: "shutdown-error", request: reportRequest(error, { context: "shutdown" }) }),
+  })
+
+  return (
+```
+
+`web/src/components/account/use-account.ts` (`toast` stays for `showRemovedToast`):
+
+Replace (1):
+```ts
+import { useEffect, useState } from "react"
+import { toast } from "sonner"
+
+import { th } from "@/i18n/th"
+import { ACCOUNT_KEY, accountQuery, deleteAccount, INACTIVE } from "@/lib/account"
+import type { AccountStatus } from "@/lib/types"
+
+/** toast หลังลบบัญชี (ทุกเหตุผล ทุกแท็บ): ไม่หายเอง มีปุ่ม "ปิด" · id เดียว = ลบในแท็บนี้แล้วข่าว SSE ตามมาไม่เด้งซ้ำ */
+```
+with:
+```ts
+import { useEffect, useState } from "react"
+import { toast } from "sonner"
+
+import { showErrorToast } from "@/components/error-report/error-toast"
+import { th } from "@/i18n/th"
+import { ACCOUNT_KEY, accountQuery, deleteAccount, INACTIVE } from "@/lib/account"
+import { reportRequest } from "@/lib/report"
+import type { AccountStatus } from "@/lib/types"
+
+/** toast หลังลบบัญชี (ทุกเหตุผล ทุกแท็บ): ไม่หายเอง มีปุ่ม "ปิด" · id เดียว = ลบในแท็บนี้แล้วข่าว SSE ตามมาไม่เด้งซ้ำ */
+```
+
+Replace (2):
+```ts
+      client.setQueryData<AccountStatus>(ACCOUNT_KEY, status)
+      showRemovedToast()
+    },
+    onError: () => toast.error(th.queue.actionFailed),
+  })
+  return { remove: () => mutation.mutate(), pending: mutation.isPending }
+}
+```
+with:
+```ts
+      client.setQueryData<AccountStatus>(ACCOUNT_KEY, status)
+      showRemovedToast()
+    },
+    // M6 รอบ B (spec Q5): รายงานมีแค่บรรทัดสถานะบัญชีเหมือนทุกรายงาน (C4)
+    onError: (error) =>
+      showErrorToast(th.queue.actionFailed, { id: "account-delete", request: reportRequest(error, { context: "account-delete" }) }),
+  })
+  return { remove: () => mutation.mutate(), pending: mutation.isPending }
+}
+```
+
+- [ ] **Step 6: The crash panel and its Toaster**
+
+`web/src/components/error-panel.tsx`:
+
+Replace (1):
+```tsx
+import { CircleX } from "lucide-react"
+
+import {
+  Alert,
+  AlertAction,
+```
+with:
+```tsx
+import { CircleX } from "lucide-react"
+
+import { CopyReportButton } from "@/components/error-report/copy-report-button"
+import {
+  Alert,
+  AlertAction,
+```
+
+Replace (2):
+```tsx
+import { Button } from "@/components/ui/button"
+import { th } from "@/i18n/th"
+import { isChunkLoadError } from "@/lib/lazy-import"
+
+// หน้าแทนเมื่อเปิดหน้าไม่สำเร็จ: ไฟล์โค้ดของหน้าหายหลังอัปเดตโปรแกรม (แท็บเก่า) หรือโค้ดหน้านั้นพัง
+export function ErrorPanel({ error }: { error: unknown }) {
+  return (
+    <div className="pt-8">
+      <Alert variant="destructive">
+        <CircleX aria-hidden />
+        <AlertTitle>{th.errors.pageTitle}</AlertTitle>
+        <AlertDescription>
+          {isChunkLoadError(error) ? th.errors.chunk : th.errors.crash}
+        </AlertDescription>
+        <AlertAction>
+          <Button variant="outline" size="sm" onClick={() => location.reload()}>
+            {th.common.reload}
+          </Button>
+```
+with:
+```tsx
+import { Button } from "@/components/ui/button"
+import { th } from "@/i18n/th"
+import { isChunkLoadError } from "@/lib/lazy-import"
+import { reportRequest } from "@/lib/report"
+
+// หน้าแทนเมื่อเปิดหน้าไม่สำเร็จ: ไฟล์โค้ดของหน้าหายหลังอัปเดตโปรแกรม (แท็บเก่า) หรือโค้ดหน้านั้นพัง
+// M6 รอบ B: ปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" ก่อนปุ่มโหลดหน้าใหม่ (E_UNKNOWN + ชื่อ: ข้อความ + stack) ยังใช้ได้หลังหน้าพัง
+// เพราะใช้แค่ api() กับ <meta> ของ token · ปุ่มสองปุ่มเรียงเป็นแถวใต้ข้อความ (หน้าต่าง 640 px ไม่ทับหัวข้อ)
+export function ErrorPanel({ error }: { error: unknown }) {
+  const chunk = isChunkLoadError(error)
+  return (
+    <div className="pt-8">
+      <Alert variant="destructive">
+        <CircleX aria-hidden />
+        <AlertTitle>{th.errors.pageTitle}</AlertTitle>
+        <AlertDescription>
+          {chunk ? th.errors.chunk : th.errors.crash}
+        </AlertDescription>
+        <AlertAction className="static col-start-2 mt-2 flex flex-wrap gap-2">
+          <CopyReportButton request={reportRequest(error, { context: chunk ? "chunk" : "crash" })} />
+          <Button variant="outline" size="sm" onClick={() => location.reload()}>
+            {th.common.reload}
+          </Button>
+```
+
+`web/src/components/route-error.tsx`:
+
+Replace (1):
+```tsx
+import { useRouteError } from "react-router"
+
+import { ErrorPanel } from "@/components/error-panel"
+
+// ตาข่ายชั้นสุดท้ายของ router: ข้อผิดพลาดที่หลุดจากทุกหน้า ไม่ให้เห็นหน้า error ภาษาอังกฤษของ React Router
+export function RouteError() {
+  return (
+    <main className="mx-auto max-w-[960px] px-4">
+      <ErrorPanel error={useRouteError()} />
+    </main>
+  )
+}
+```
+with:
+```tsx
+import { useRouteError } from "react-router"
+
+import { ErrorPanel } from "@/components/error-panel"
+import { Toaster } from "@/components/ui/sonner"
+
+// ตาข่ายชั้นสุดท้ายของ router: ข้อผิดพลาดที่หลุดจากทุกหน้า ไม่ให้เห็นหน้า error ภาษาอังกฤษของ React Router
+// หน้านี้แทน Layout ทั้งหน้า (Toaster อยู่ใน Layout) จึงมี Toaster ของตัวเอง ไม่งั้น toast "คัดลอกแล้ว" ไม่ขึ้น (M6 รอบ B)
+export function RouteError() {
+  return (
+    <main className="mx-auto max-w-[960px] px-4">
+      <ErrorPanel error={useRouteError()} />
+      <Toaster position="bottom-right" />
+    </main>
+  )
+}
+```
+
+(`PageErrorBoundary` renders inside `Layout`, which already has the Toaster: no change.)
+
+- [ ] **Step 7: E2E literals that pinned the old button**
+
+`web/e2e/nav.spec.ts`:
+
+Replace (1):
+```ts
+    await failed.getByRole("button", { name: "ดูรายละเอียด" }).click()
+    await expect(failed.getByText("รหัส E_YT_REFUSED")).toBeVisible()
+    await expect(failed.getByText("HTTP Error 403: Forbidden")).toBeVisible()
+    await expect(failed.getByRole("button", { name: "คัดลอกรายละเอียด" })).toBeVisible()
+    await expect(failed.getByRole("button", { name: "ลองใหม่ คลิปที่ยูทูปไม่ส่งไฟล์" })).toBeVisible()
+
+    const done = sheet.locator(`[data-job-id="${DONE}"]`)
+```
+with:
+```ts
+    await failed.getByRole("button", { name: "ดูรายละเอียด" }).click()
+    await expect(failed.getByText("รหัส E_YT_REFUSED")).toBeVisible()
+    await expect(failed.getByText("HTTP Error 403: Forbidden")).toBeVisible()
+    // M6 รอบ B: ปุ่มคัดลอกรายงานแทนปุ่มคัดลอกรายละเอียดเดิม
+    await expect(failed.getByRole("button", { name: "คัดลอกข้อมูลแจ้งปัญหา" })).toBeVisible()
+    await expect(failed.getByRole("button", { name: "คัดลอกรายละเอียด" })).toHaveCount(0)
+    await expect(failed.getByRole("button", { name: "ลองใหม่ คลิปที่ยูทูปไม่ส่งไฟล์" })).toBeVisible()
+
+    const done = sheet.locator(`[data-job-id="${DONE}"]`)
+```
+
+`web/e2e/queue-flow.spec.ts` (queue project, real fake jobs; run only at the gate with `--workers=1`):
+
+Replace (1):
+```ts
+    await expect(failed).toContainText("ยูทูปไม่ยอมส่งไฟล์ของคลิปนี้ตอนนี้ ลองใหม่ภายหลัง")
+    await failed.getByRole("button", { name: "ดูรายละเอียด" }).click()
+    await expect(failed.getByText("รหัส E_YT_REFUSED")).toBeVisible()
+
+    const retried = page.waitForResponse((r) => r.url().endsWith(`/api/jobs/${job.id}/retry`) && r.request().method() === "POST")
+    await failed.getByRole("button", { name: `ลองใหม่ ${TITLE.REFUSEDDL01}` }).click()
+```
+with:
+```ts
+    await expect(failed).toContainText("ยูทูปไม่ยอมส่งไฟล์ของคลิปนี้ตอนนี้ ลองใหม่ภายหลัง")
+    await failed.getByRole("button", { name: "ดูรายละเอียด" }).click()
+    await expect(failed.getByText("รหัส E_YT_REFUSED")).toBeVisible()
+    // M6 รอบ B: แถวที่พลาดมีปุ่มคัดลอกรายงานแทนปุ่มคัดลอกรายละเอียดเดิม
+    await expect(failed.getByRole("button", { name: "คัดลอกข้อมูลแจ้งปัญหา" })).toBeVisible()
+    await expect(failed.getByRole("button", { name: "คัดลอกรายละเอียด" })).toHaveCount(0)
+
+    const retried = page.waitForResponse((r) => r.url().endsWith(`/api/jobs/${job.id}/retry`) && r.request().method() === "POST")
+    await failed.getByRole("button", { name: `ลองใหม่ ${TITLE.REFUSEDDL01}` }).click()
+```
+
+- [ ] **Step 8: Run, expect PASS**
+
+Run: `cd "$WORKTREE/web" && npm run typecheck && npm run lint && npm test` (prototype: 1,034 passed). `git grep -n "copyDetails\|คัดลอกรายละเอียด" -- web/src` prints nothing.
+
+- [ ] **Step 9: Commit**
+```bash
+cd "$WORKTREE" && git add web/src/components web/src/i18n/th.ts web/e2e/nav.spec.ts web/e2e/queue-flow.spec.ts && git commit -F- <<'EOF'
+feat(web): report button on failed jobs, queue action toasts and the crash panel
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+
 ---
 
-> **WIP:** tasks T9-T12, the spec-coverage table and the execution handoff follow in the next commit of this plan. Do not execute before the plan is complete.
+> **WIP:** tasks T10-T12, the spec-coverage table and the execution handoff follow in the next commit of this plan. Do not execute before the plan is complete.
