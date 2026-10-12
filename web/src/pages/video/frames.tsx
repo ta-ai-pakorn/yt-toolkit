@@ -3,6 +3,7 @@ import { Captions, ChevronFirst, ChevronLast, Copy, Download, ExternalLink, Flam
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react"
 import { toast } from "sonner"
 
+import { showErrorToast } from "@/components/error-report/error-toast"
 import { AspectRatio } from "@/components/ui/aspect-ratio"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -15,6 +16,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { fill, th } from "@/i18n/th"
 import { ApiError } from "@/lib/api"
+import { reportRequest } from "@/lib/report"
 import { copyImage } from "@/lib/clipboard"
 import { downloadFile } from "@/lib/download"
 import { formatTimecode, youtubeLinkAt, youtubeWatchUrl } from "@/lib/format"
@@ -54,7 +56,11 @@ async function downloadWithToast(url: string, fallbackName: string): Promise<voi
     await downloadFile(url, fallbackName)
     toast.dismiss(id)
   } catch (error) {
-    toast.error(errorMessage(error, th.errors.downloadFailed), { id })
+    // M6 รอบ B: id เดิมของ toast "กำลังเตรียม" = แทนที่ toast นั้นด้วย error ที่มีปุ่มคัดลอก
+    showErrorToast(errorMessage(error, th.errors.downloadFailed), {
+      id,
+      request: reportRequest(error, { context: "frames-download" }),
+    })
   }
 }
 
@@ -602,7 +608,15 @@ export function FramesSection({ videoId, enabled, mostReplayed, video }: FramesS
     )
   }
   else if (storyboard.isError) {
-    body = <LoadError title={t.loadError} error={storyboard.error} onRetry={() => void storyboard.refetch()} />
+    body = (
+      <LoadError
+        title={t.loadError}
+        error={storyboard.error}
+        onRetry={() => void storyboard.refetch()}
+        context="video-frames"
+        videoId={videoId}
+      />
+    )
   } else body = <FrameSkeleton />
 
   return (

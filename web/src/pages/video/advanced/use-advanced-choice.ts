@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
-
+import { showErrorToast } from "@/components/error-report/error-toast"
 import { fill, th } from "@/i18n/th"
 import {
   chapterBlock,
@@ -14,6 +13,7 @@ import {
   type RangeCheck,
 } from "@/lib/advanced-options"
 import { NO_ADVANCED, SPONSOR_CATEGORIES, sponsorCategories, type AdvancedParams } from "@/lib/download-options"
+import { reportRequest } from "@/lib/report"
 import { patchSettings, SETTINGS_KEY, settingsQuery } from "@/lib/settings-api"
 import type { Settings, SponsorCategory, VideoInfo } from "@/lib/types"
 
@@ -117,9 +117,9 @@ export function sponsorToggleMutation(
       if (previous) client.setQueryData<Settings>(SETTINGS_KEY, { ...previous, sponsorblockDefault: next })
       return { previous }
     },
-    onError: (_error: unknown, _next: SponsorCategory[], context: { previous: Settings | undefined } | undefined) => {
+    onError: (error: unknown, _next: SponsorCategory[], context: { previous: Settings | undefined } | undefined) => {
       if (context?.previous) client.setQueryData(SETTINGS_KEY, context.previous)
-      toast.error(th.general.saveFailed)
+      showErrorToast(th.general.saveFailed, { id: "advanced-save", request: reportRequest(error, { context: "advanced-save" }) })
     },
     onSuccess: (saved: Settings) => {
       if (client.isMutating({ mutationKey: SPONSOR_MUTATION_KEY }) <= 1) client.setQueryData(SETTINGS_KEY, saved)

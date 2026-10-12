@@ -142,7 +142,12 @@ export function HistoryPage() {
       {history.isPending ? (
         <HistoryTableSkeleton />
       ) : history.isError && !history.data ? (
-        <LoadError title={th.history.loadError} error={history.error} onRetry={() => void history.refetch()} />
+        <LoadError
+          title={th.history.loadError}
+          error={history.error}
+          onRetry={() => void history.refetch()}
+          context="history"
+        />
       ) : items.length === 0 ? (
         urlQ ? (
           <p role="status" className="py-8 text-center text-muted-foreground [overflow-wrap:anywhere]">
@@ -169,6 +174,7 @@ export function HistoryPage() {
               title={th.history.loadError}
               error={history.error}
               onRetry={() => void (history.isFetchNextPageError ? history.fetchNextPage() : history.refetch())}
+              context="history"
             />
           )}
           <div className="flex flex-col items-center gap-3 pt-2">

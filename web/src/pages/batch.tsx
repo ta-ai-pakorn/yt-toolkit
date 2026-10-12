@@ -235,6 +235,7 @@ function BatchBody({ source, results }: BodyProps) {
           title={failure === settings ? th.general.loadError : t.loadError}
           error={failure.error}
           onRetry={() => void failure.refetch()}
+          context="batch"
         />
       ) : loadingPlaylist ? (
         <div aria-busy="true">

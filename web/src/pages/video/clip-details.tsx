@@ -252,7 +252,15 @@ function PinnedSection({ videoId }: { videoId: string }) {
 
   let body: ReactNode
   if (pinned.isError) {
-    body = <LoadError title={t.pinned.loadError} error={pinned.error} onRetry={() => void pinned.refetch()} />
+    body = (
+      <LoadError
+        title={t.pinned.loadError}
+        error={pinned.error}
+        onRetry={() => void pinned.refetch()}
+        context="video-pinned"
+        videoId={videoId}
+      />
+    )
   } else if (!pinned.isSuccess) body = <PinnedSkeleton />
   else if (comment) body = <PinnedText comment={comment} />
   else body = <p className="text-sm text-muted-foreground">{t.pinned.none}</p>

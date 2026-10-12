@@ -68,7 +68,13 @@ function SubsBody({ videoId, data }: { videoId: string; data: SubtitleTracks }) 
           {track && (
             <>
               <Separator />
-              <SubsPreview query={tokens} options={settings.options} onUseOriginal={backToOriginal} range={range} />
+              <SubsPreview
+                videoId={videoId}
+                query={tokens}
+                options={settings.options}
+                onUseOriginal={backToOriginal}
+                range={range}
+              />
             </>
           )}
           {advanced.values.sponsorblock && !advanced.split && (
