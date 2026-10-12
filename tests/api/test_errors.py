@@ -60,7 +60,7 @@ def test_unhandled_exception_uses_unknown_envelope_and_logs(make_client, caplog)
     assert resp.status_code == 500
     assert resp.json()["error"] == {
         "code": "E_UNKNOWN",
-        "message": "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล",
+        "message": 'มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล',
         "detail": "kaboom",
     }
     records = [r for r in caplog.records if r.exc_info]

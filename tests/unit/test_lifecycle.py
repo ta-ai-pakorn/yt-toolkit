@@ -460,8 +460,8 @@ def test_setup_file_logging_uses_rotating_handler(paths):  # item 6
         assert len(added) == 1
         handler = added[0]
         assert isinstance(handler, logging.handlers.RotatingFileHandler)
-        assert handler.maxBytes == 1_000_000
-        assert handler.backupCount == 3
+        assert handler.maxBytes == 5_000_000  # M6 รอบ B: PRD 7.1 หมุนไฟล์ที่ 5 MB เก็บ 3 ไฟล์
+        assert handler.backupCount == 2
         assert handler.encoding == "utf-8"
         assert handler.baseFilename == str((paths.logs / "app.log").resolve())
     finally:
