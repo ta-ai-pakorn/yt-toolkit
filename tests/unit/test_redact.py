@@ -485,3 +485,36 @@ def test_crash_trace_redacts_the_traceback_with_titles_and_roots(somchai_home) -
     assert text.startswith("Traceback (most recent call last):")
     assert "Other Clip" not in text and "somchai" not in text
     assert "PermissionError: [Errno 13] Permission denied: '~\\\\Downloads\\\\YT Toolkit\\\\<path>'" in text
+
+
+# ---------- รีวิวซ้ำ N1: uvicorn เขียน "Exception in ASGI application" พร้อม traceback ดิบลง app.log ----------
+
+
+def test_uvicorn_error_traceback_in_app_log_is_masked_below_the_output_folder(
+    paths, restore_root_logging, somchai_home, monkeypatch
+) -> None:
+    root = PureWindowsPath("C:/Users/somchai/Downloads/YT Toolkit")
+    monkeypatch.setattr(redact, "_output_roots", lambda: (root,))
+    probe.setup_file_log(paths)
+    clip = str(root / "Secret Clip Title [abcdefghijk]" / "x.mp4")
+    try:
+        raise PermissionError(13, "Permission denied", clip)
+    except PermissionError:
+        logging.getLogger("uvicorn.error").exception("Exception in ASGI application")
+    for handler in restore_root_logging.handlers:
+        handler.flush()
+    text = (paths.logs / "app.log").read_text(encoding="utf-8")
+    assert "Exception in ASGI application" in text and "PermissionError" in text
+    assert "Secret Clip Title" not in text and "somchai" not in text
+    assert "'~\\\\Downloads\\\\YT Toolkit\\\\<path>'" in text  # repr ของ OSError: backslash สองตัว
+
+
+def test_output_roots_provider_is_set_and_cleared() -> None:
+    try:
+        redact.set_output_roots(lambda: ["D:/out"])
+        assert tuple(redact._output_roots()) == ("D:/out",)
+        redact.set_output_roots(lambda: (_ for _ in ()).throw(RuntimeError("db closed")))
+        assert redact._output_roots() == ()
+    finally:
+        redact.set_output_roots(None)
+    assert redact._output_roots() == ()

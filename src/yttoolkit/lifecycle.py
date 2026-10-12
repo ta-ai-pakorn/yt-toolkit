@@ -49,7 +49,15 @@ from .platform import LockFileError, Platform, current
 
 # ตัวจริงอยู่ใน probe (stdlib ล้วน) ที่นี่ส่งต่อชื่อเดิมให้โค้ดและเทสที่เรียกผ่าน lifecycle
 from .probe import base_url, find_running, is_alive, setup_file_log  # noqa: F401
-from .redact import HomePathFilter, SecretFilter, add_redaction, crash_trace, redact_home
+from .redact import (
+    HomePathFilter,
+    OutputPathFilter,
+    SecretFilter,
+    add_redaction,
+    crash_trace,
+    redact_home,
+    set_output_roots,
+)
 
 log = logging.getLogger("yttoolkit")
 
@@ -145,7 +153,7 @@ def install_log_filters(paths: Paths) -> None:
     """ใส่ ConnectionResetNoiseFilter, HomePathFilter และ SecretFilter ให้ handler ของ app.log ที่ตั้งไว้แล้ว
     (เรียกซ้ำได้ ไม่ใส่ซ้ำ · probe.setup_file_log ใส่สองตัวหลังไว้ตั้งแต่สร้าง handler แล้ว)"""
     for handler in _app_log_handlers(paths):
-        for kind in (ConnectionResetNoiseFilter, HomePathFilter, SecretFilter):
+        for kind in (ConnectionResetNoiseFilter, HomePathFilter, SecretFilter, OutputPathFilter):
             if not any(isinstance(f, kind) for f in handler.filters):
                 handler.addFilter(kind())
 
@@ -296,6 +304,8 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         subtitles = SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
         default_output = paths.data_root / "output" if fake else default_output_dir(plat)
         settings = SettingsStore(db, default_output)
+        # รีวิวซ้ำ N1: traceback ดิบ (เช่น uvicorn.error) ในทุก handler ที่มี OutputPathFilter ปิด path ใต้โฟลเดอร์ผลลัพธ์
+        set_output_roots(lambda: (settings.output_dir(),))
         media: MediaTools
         if fake:
             media = FakeMediaTools(CODE_ROOT / "tests" / "fixtures" / "media")

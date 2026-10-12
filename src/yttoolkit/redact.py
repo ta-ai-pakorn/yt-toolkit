@@ -16,7 +16,7 @@ import logging
 import os
 import re
 import traceback
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from urllib.parse import quote
 
@@ -142,9 +142,41 @@ class SecretFilter(_RewriteFilter):
         return redact_secrets(text)
 
 
+# รีวิวซ้ำ N1: ตัวบอกโฟลเดอร์ผลลัพธ์ปัจจุบัน (lifecycle ตั้งหลังสร้าง SettingsStore) · None = ยังไม่รู้ ไม่ปิดอะไร
+_roots_provider: Callable[[], Iterable[str | os.PathLike[str]]] | None = None
+
+
+def set_output_roots(provider: Callable[[], Iterable[str | os.PathLike[str]]] | None) -> None:
+    """ตั้งตัวบอกโฟลเดอร์ผลลัพธ์ให้ OutputPathFilter (อ่านใหม่ทุกบรรทัด log: เปลี่ยนโฟลเดอร์ในหน้าตั้งค่าแล้วมีผลทันที)"""
+    global _roots_provider
+    _roots_provider = provider
+
+
+def _output_roots() -> tuple[str | os.PathLike[str], ...]:
+    provider = _roots_provider
+    if provider is None:
+        return ()
+    try:
+        return tuple(provider())
+    except Exception:
+        return ()  # อ่านการตั้งค่าไม่ได้ (เช่นฐานข้อมูลปิดแล้วตอนปิดโปรแกรม): ห้ามทำให้การเขียน log พัง
+
+
+class OutputPathFilter(_RewriteFilter):
+    """ทุกอย่างใต้โฟลเดอร์ผลลัพธ์เป็น <path> ในข้อความ log และ traceback (รีวิวซ้ำ N1)
+
+    ชื่อไฟล์/โฟลเดอร์ใต้โฟลเดอร์ผลลัพธ์คือชื่อคลิป · ตัวนี้ปิด traceback ที่ไม่ได้ผ่าน crash_trace เช่นบรรทัด
+    "Exception in ASGI application" ของ uvicorn.error (exc_info ดิบ) และ log.exception ที่อื่น · ใส่หลัง HomePathFilter
+    """
+
+    def rewrite(self, text: str) -> str:
+        roots = _output_roots()
+        return mask_below_roots(text, roots) if roots else text
+
+
 def add_redaction(handler: logging.Handler) -> None:
-    """ใส่ HomePathFilter และ SecretFilter ให้ handler (เรียกซ้ำได้ ไม่ใส่ซ้ำ)"""
-    for kind in (HomePathFilter, SecretFilter):
+    """ใส่ HomePathFilter, SecretFilter และ OutputPathFilter ให้ handler ตามลำดับนี้ (เรียกซ้ำได้ ไม่ใส่ซ้ำ)"""
+    for kind in (HomePathFilter, SecretFilter, OutputPathFilter):
         if not any(isinstance(f, kind) for f in handler.filters):
             handler.addFilter(kind())
 
