@@ -1,6 +1,6 @@
 # M6 round B: two-layer errors, the problem report and logging (design)
 
-Pete approved the design in conversation on 2026-10-12 (decisions file below). This written spec turns it into an implementable design and is awaiting his review. Section 9 lists the questions that still need his answer before the copy is final.
+Pete approved the design in conversation on 2026-10-12 (decisions file below). This written spec turns it into an implementable design. Pete answered the spec's five follow-up questions the same day (§9); the copy is final.
 
 Round B implements PRD §7.1 / BRD FR-SET-5:
 - every error the staff see gets a folded "ดูรายละเอียด" section (code + raw detail) and a **"คัดลอกข้อมูลแจ้งปัญหา"** button;
@@ -148,12 +148,26 @@ Notes:
 - **Existing actions stay.** The failed-job toast keeps account / "ดูรายละเอียด" in `action` / `cancel`; the enqueue toast keeps "ไปหน้าตรวจสุขภาพ"; the capture toast keeps "ใช้บัญชียูทูปชั่วคราว".
 - **Every row above becomes `duration: Infinity`** (D1). The ones that already have it (failed job, ffmpeg install, capture with account) are unchanged.
 - **Layering:** `lib/jobs.ts` will import `showErrorToast` from `components/error-report/`. This is the first `lib → components` import; it is accepted because the toast needs JSX. Keep `lib/report.ts` free of React so it stays node-testable.
-- **Out of scope here (ruling R3, see Q5):** toasts that show a fixed local string and drop the error object:
-  - `th.queue.actionFailed` at `use-queue.ts:249`, `:276`, `pause-alert.tsx:37` and `use-account.ts:34`;
-  - `revealWithToast` at `use-queue.ts:162`;
-  - `use-advanced-choice.ts:122`;
-  - copy-failure toasts;
-  - the validation toast at `range-mark-buttons.tsx:21`.
+**Small action toasts (Pete, spec Q5 = the alternative, 2026-10-12).** These toasts today show a fixed local string and drop the error object. They get the copy button too, through `showErrorToast`:
+- each keeps its current text;
+- each catches the dropped error (`catch (error)` / `onError: (error) => …`) and passes it to `reportRequest`, so the server code and detail reach the report;
+- each uses `duration: Infinity` and the stable id below.
+
+| Toast (current text) | File:line | `context` | toast `id` |
+|---|---|---|---|
+| Cancel / retry a job failed (`th.queue.actionFailed`) | `components/queue/use-queue.ts:249` (`runJobAction`, add `catch (error)`) | `queue-action` + `jobId` | `queue-action-<id>` |
+| Reorder failed (`th.queue.actionFailed`) | `components/queue/use-queue.ts:276` (`useReorder`, add `catch (error)`) | `queue-reorder` | `queue-reorder` |
+| Resume the paused queue failed (`th.queue.actionFailed`) | `components/queue/pause-alert.tsx:37` | `queue-resume` | `queue-resume` |
+| Delete the temporary account failed (`th.queue.actionFailed`) | `components/account/use-account.ts:34` | `account-delete` | `account-delete` |
+| Open the output folder failed (`th.queue.fileMissing` for 404 / `th.queue.revealFailed`) | `components/queue/use-queue.ts:162` (`revealWithToast`) | `queue-reveal` + `jobId` | `queue-reveal-<id>` |
+| Save the SponsorBlock default failed (`th.general.saveFailed`) | `pages/video/advanced/use-advanced-choice.ts:122` (use the `_error` argument) | `advanced-save` | `advanced-save` |
+
+The account-delete report contains only the status line, like every report (C4).
+
+**Still excluded:** toasts that come from no server request:
+- the copy-failure toasts (`job-row.tsx:98`, removed by §1.4; `capture-strip.tsx:64`; `clip-details.tsx:32`; `frames.tsx:67`, `:76`; `subs/export-buttons.tsx:40`);
+- the local validation toast at `pages/video/player/range-mark-buttons.tsx:21`;
+- the report's own failure toast (`CopyReportButton`), so a failed report never offers another report.
 
 ### 1.4 Queue FailedRow (`components/queue/job-row.tsx:93-151`)
 - **Replace** the "คัดลอกรายละเอียด" button (`:146-149`) and delete `copyDetails` (`:93-100`). In their place: `CopyReportButton` with `{ jobId: job.id, code, detail, context: "queue" }`. The server prefers the job store; `code`/`detail` are the fallback if the job is gone.
@@ -286,7 +300,7 @@ def build_report(inputs: ReportInputs) -> str: ...
 - **Account line:** only the two PRD phrases. Never the import time, names or values (AC-SET-06).
 - **Error section** (omitted entirely, heading included, when `error is None`):
   - **Job error:** `- รหัส: {code} · งาน: {kind} (videoId {video_id})`, exactly the template.
-  - **Non-job error:** `- รหัส: {code}`, then ` · {context}` when there is a context, then ` (videoId {id})` when there is a video id. The context is the raw ASCII tag from §1.3, with no Thai label (see Q1).
+  - **Non-job error:** `- รหัส: {code}`, then ` · หน้าจอ: {context}` when there is a context, then ` (videoId {id})` when there is a video id. The context is the raw ASCII tag from §1.3, after the Thai label `หน้าจอ: ` (Pete, spec Q1). Example: `- รหัส: E_NETWORK · หน้าจอ: video-header (videoId dQw4w9WgXcQ)`.
   - **Detail:** `- รายละเอียด: ` + detail. Collapse `\r\n` to `\n`. A multi-line detail puts its first line after the label and every further line on its own line indented by two spaces (a Markdown list continuation). Empty or `None` → `ไม่มี`.
 - **Log heading:** always `### log ล่าสุด (50 บรรทัด)`, even when fewer lines exist (the template's fixed title).
 - **Code fence:** ```` ```text ```` … ```` ``` ````. If any log line contains a run of backticks of length ≥ 3, use a fence one backtick longer than the longest run, so a line can never close the block early.
@@ -370,13 +384,13 @@ It runs as a sync endpoint (threadpool). The subprocess version checks take well
 - `api/errors.py:18`: `UNKNOWN_MESSAGE = MESSAGES["E_UNKNOWN"]` already follows it. No edit is needed, only a test.
 - `web/src/i18n/th.ts:590`: `unknown: 'มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล'`.
 - Tests that pin the old text: `tests/api/test_errors.py:63`, `tests/unit/test_yterrors.py:131`, `web/e2e/settings-general.spec.ts:233` (a mocked envelope; update it for consistency).
-- **Not changed:** `start.bat:88`, `:95` ("ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล…"). That screen shows when the app failed to open, so there is no web page and no button. See Q3.
+- **Not changed:** `start.bat:88`, `:95` ("ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล…"). That screen shows when the app failed to open, so there is no web page and no button. Pete confirmed it keeps its text (spec Q3).
 - PRD §7 is updated in this commit.
 
 ## 3. Logging
 
 ### 3.1 File log (`probe.setup_file_log`, `probe.py:65-80`)
-- Use `RotatingFileHandler(filename, maxBytes=5_000_000, backupCount=2, encoding="utf-8")`. That is **3 files**: `app.log`, `.1`, `.2`, at most 15 MB, matching PRD "หมุนไฟล์ที่ 5 MB เก็บ 3 ไฟล์" (planner ruling R4, see Q4). Today it is 1 MB × (1 + 3).
+- Use `RotatingFileHandler(filename, maxBytes=5_000_000, backupCount=2, encoding="utf-8")`. That is **3 files**: `app.log`, `.1`, `.2`, at most 15 MB, matching PRD "หมุนไฟล์ที่ 5 MB เก็บ 3 ไฟล์" (Pete, spec Q4). Today it is 1 MB × (1 + 3).
 - Add `logging.getLogger("httpx").setLevel(logging.WARNING)` in the same function, before the handler is created. It is set by name, so `probe` still does not import `httpx`, which `tests/unit/test_probe.py:30` asserts. This drops the per-request INFO lines that carry full thumbnail/image URLs.
 - The format string and the redaction filters are unchanged.
 
@@ -427,7 +441,7 @@ Add a pure ASGI middleware `ErrorLogMiddleware`. In `create_app` (`app.py:101`),
 ## 4. Errors and edge cases
 
 - **App closed when the button is pressed:** `api()` throws `E_OFFLINE`; the toast shows `th.errors.offline`. Nothing is copied.
-- **Clipboard refused** (permission denied, document not focused): the toast shows `th.errors.copyFailed`. Nothing else changes (see Q2 for a manual-copy fallback).
+- **Clipboard refused** (permission denied, document not focused): the toast shows `th.errors.copyFailed`. Nothing else changes: there is no manual-copy box (Pete, spec Q2).
 - **Slow report** (ffmpeg / deno version checks on a slow PC): the `ClipboardItem` promise path keeps the user gesture. On the `writeText` fallback, a long wait may lose focus, and that case shows `copyFailed`.
 - **Job deleted or unknown id:** the body's `code`/`detail` are used (§2.1), and a report is always produced.
 - **Interrupted job** (`E_INTERRUPTED`): the same as a failed job. `FailedRow` already covers both.
@@ -520,7 +534,7 @@ Extend `test_canaries_never_leave_memory` (`:91`):
     - mock `GET /api/videos/<id>` → 502 `E_YT_REFUSED` with a detail;
     - open `/v/<id>`, press "ดูรายละเอียด" and see `รหัส E_YT_REFUSED` and the detail;
     - press "คัดลอกข้อมูลแจ้งปัญหา" and see the toast "คัดลอกแล้ว";
-    - `navigator.clipboard.readText()` starts with `## รายงานปัญหา YT Toolkit` and contains `- รหัส: E_YT_REFUSED · video-header (videoId <id>)` and `### log ล่าสุด (50 บรรทัด)`;
+    - `navigator.clipboard.readText()` starts with `## รายงานปัญหา YT Toolkit` and contains `- รหัส: E_YT_REFUSED · หน้าจอ: video-header (videoId <id>)` and `### log ล่าสุด (50 บรรทัด)`;
     - the request body has `code`, `detail`, `context` and `videoId`.
   - **`E_UNKNOWN` box:** the details are open on arrival and the button is visible without a click.
   - **Toast:**
@@ -552,6 +566,7 @@ Extend `test_canaries_never_leave_memory` (`:91`):
 | `E_UNKNOWN` | มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล | decisions D3 |
 | Health, no JS runtime | บางคุณภาพอาจไม่แสดง เพราะเครื่องยังไม่มีตัวช่วยที่ yt-dlp ต้องใช้ | PRD §7 `E_JS_RUNTIME_MISSING` |
 | Report labels | รายงานปัญหา YT Toolkit · เวลา · แอพ · ระบบ · บัญชียูทูป · รหัส · งาน · รายละเอียด · log ล่าสุด (50 บรรทัด) | PRD §7.1 template |
+| Report label, non-job errors | หน้าจอ | Pete, spec Q1 (2026-10-12) |
 | Report account line | ไม่ได้ใช้บัญชี / ใช้บัญชีชั่วคราวอยู่ | PRD §7.1 |
 | Report placeholder | ไม่มี | decisions (Section 2) |
 
@@ -589,17 +604,17 @@ Copy rules: buttons start with a verb; no "กรุณา"; no "!".
    - Check `job_failed` lines and reports for split-chapter and batch jobs that fail at the write step (`E_OUTPUT_NOT_WRITABLE` / `E_DISK_FULL` with an `OSError` cause).
 5. **Log rotation vs the tail reader on Windows.** `doRollover` renames `app.log` while the reader might hold it open. Python's `open()` on Windows does not share delete/rename, so the rename fails and the record is lost (`handleError` prints to stderr). The design takes the handler lock while reading; check that it is the same lock, that `serve` mode's console handlers don't matter, and that a report during heavy logging (a running batch) neither blocks a worker thread for long nor deadlocks (the builder never logs while holding the lock: the `diagnostics` line comes after).
 
-## 9. Open questions for the owner
+## 9. Spec questions (all answered by Pete, 2026-10-12)
 
-Each has a draft for Pete to approve or change. The implementation uses the **default** until he answers.
+These are the spec's own questions, separate from the decision-file Q1-Q3 above. All five are answered and are folded into the sections shown.
 
-- **Q1 — Label for non-job errors in the report.** The PRD template has `· งาน: video (videoId …)` for jobs only. For other errors the spec writes the raw screen tag with no Thai label.
-  - Default: `- รหัส: E_NETWORK · video-header (videoId dQw4w9WgXcQ)`
-  - Draft with a Thai label: `- รหัส: E_NETWORK · หน้าจอ: video-header (videoId dQw4w9WgXcQ)`
-- **Q2 — Manual copy when the clipboard is blocked.** Default: only the toast "คัดลอกไม่สำเร็จ ลองอีกครั้ง". Draft: also open a small box showing the report text, so it can be selected by hand, with the line `คัดลอกเองจากกล่องนี้ แล้วส่งให้ผู้ดูแล` and a button `ปิด`.
-- **Q3 — `start.bat` failure screen.** It still says "ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล". The app is not running there, so no button can exist. Default: keep the text as is. Draft alternative: `เปิดโปรแกรมไม่สำเร็จ ส่งไฟล์ run\logs\app.log ให้ผู้ดูแล แล้วกดปุ่มใดก็ได้เพื่อปิดหน้าต่าง`
-- **Q4 — How many log files.** The PRD says "เก็บ 3 ไฟล์" and the decisions say "keep 3 files". Today `backupCount=3` keeps 4 files. Default: 3 files in total (`backupCount=2`, 15 MB at most). Alternative: keep `backupCount=3` (4 files, 20 MB).
-- **Q5 — Small action toasts.** These toasts show a fixed local string (`th.queue.actionFailed`, `th.queue.revealFailed`, `th.general.saveFailed`) and drop the server error: cancel/retry/reorder failed, pause-resume failed, account delete failed, open-folder failed, saving the advanced choice failed. Default: no copy button this round (they are not in the decisions list). Alternative (D1 "every error point"): give them the button too, keeping their current text and passing the dropped error.
+| # | Question | Answer | Where |
+|---|---|---|---|
+| Spec Q1 | Label for non-job errors in the report | The Thai label: `- รหัส: E_NETWORK · หน้าจอ: video-header (videoId dQw4w9WgXcQ)` | §2.2, §6.4, §7, PRD §7.1 |
+| Spec Q2 | Manual copy when the clipboard is blocked | No manual box. Only the toast "คัดลอกไม่สำเร็จ ลองอีกครั้ง", which already exists in `th.ts` (`video.copyFailed` at `th.ts:124`, `frames.copyFailed` at `:175`, `subs.copyFailed` at `:309`) | §1.2, §4 |
+| Spec Q3 | `start.bat` failure screen | It keeps its current text ("ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล…") | §2.7 |
+| Spec Q4 | How many log files | 3 files in total: `backupCount=2`, 15 MB at most | §3.1 |
+| Spec Q5 | Small action toasts | They get the copy button, keep their text, pass the dropped error, and use `duration: Infinity` + a stable id | §1.3 |
 
 ## Out of scope (round B)
 - `E_SETTINGS_INVALID` and settings import/export (round A).
