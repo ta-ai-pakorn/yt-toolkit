@@ -43,6 +43,7 @@
 - **P7 — `SubsPreview` gets a `videoId` prop** (spec §1.3 wants `videoId` for `video-subs-preview`, the component had none); `subs-panel.tsx` passes it (T8).
 - **P8 — UNC paths start at a boundary.** `mask_user_paths` treats `\\server\share\` as a path only at the start of text or after whitespace, a quote, `(`, `=`, `,`, `;` or `:`; otherwise the doubled-backslash repr `'~\\Downloads\\a.mp4'` would be masked as a UNC path (found by the prototype).
 - **P9 — unhandled exceptions in the middleware.** Starlette's `ServerErrorMiddleware` (outside every user middleware) sends the 500 for an unhandled exception, so `ErrorLogMiddleware` never sees that response. It catches the exception before any response started, logs `api_error ... status=500 code=E_UNKNOWN` at WARNING and re-raises; `_unhandled_error` still writes the traceback line (now with `code=E_UNKNOWN`). Spec §6.2 "a 500 → a WARNING line plus the traceback line".
+- **P11 — the logged API path is percent-encoded.** `scope["path"]` is already URL-decoded, so `/api/videos/bad%0Aid/captures` would put a line break into `app.log` (the prototype broke `tests/api/test_captures_api.py::test_post_with_a_malformed_id_never_reaches_the_service`). `api_error` logs `urllib.parse.quote(path, safe="/-_.~")`.
 - **P10 — pre-existing failure at HEAD.** `tests/unit/test_yterrors.py::test_messages_match_prd_table` fails at `ffbd03e` because the spec commit already changed PRD §7 `E_UNKNOWN`; T3 fixes it. Every other test passed at `ffbd03e` (3,276 passed, 46 network deselected; vitest 1,009 passed).
 
 ---
@@ -949,6 +950,1614 @@ EOF
 ```
 
 
+### Task 4: Web foundation — strings, `lib/report.ts`, `components/error-report/`
+
+**Files:**
+- Modify: `web/src/i18n/th.ts` (`errors` section only)
+- Create: `web/src/lib/report.ts`, `web/src/lib/report.test.ts`
+- Create: `web/src/components/error-report/model.ts`, `model.test.ts`, `copy-report-button.tsx`, `error-details.tsx`, `error-toast.tsx`, `error-toast.test.ts`
+- Modify: `web/e2e/settings-general.spec.ts` (`:233` mocked `E_UNKNOWN` envelope text)
+
+**Interfaces:**
+- Consumes: `api`, `ApiError` (`lib/api.ts`); `th`, `fill` (`i18n/th.ts`); `Button`, `Spinner`, `Collapsible*` (`components/ui`); sonner `toast`.
+- Produces: K6 exactly (strings, `MAX_DETAIL`, `STACK_LINES`, `ReportRequest`, `ReportWhere`, `CopyOutcome`, `cleanRequest`, `reportRequest`, `fetchReport`, `copyReport`, `REPORT_TOAST_ID`, `ToastButton`, `ErrorToastOptions`, `DetailsSource`, `detailsRequest`, `detailsOpenByDefault`, `errorToastSettings`, `PLAIN_TOAST`, `CopyReportButton`, `ErrorDetails`, `showErrorToast`). T8-T10 and T12 use these names only.
+
+No call site uses the new components yet (T8-T10). `th.queue.copyDetails` stays until T9 removes it together with its last user.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `web/src/lib/report.test.ts`:
+```ts
+import { describe, expect, it, vi } from "vitest"
+
+import { th } from "@/i18n/th"
+
+import { ApiError } from "./api"
+import { cleanRequest, copyReport, fetchReport, MAX_DETAIL, reportRequest, STACK_LINES } from "./report"
+
+const REPORT = "## รายงานปัญหา YT Toolkit\n- เวลา: 2026-10-12 10:00 (+07:00)\n"
+const VIDEO = "dQw4w9WgXcQ"
+
+class FakeItem {
+  readonly items: Record<string, Promise<Blob> | Blob>
+  constructor(items: Record<string, Promise<Blob> | Blob>) {
+    this.items = items
+  }
+}
+const Item = FakeItem as unknown as typeof ClipboardItem
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
+}
+
+describe("reportRequest", () => {
+  it("ApiError = รหัสและ detail จากเซิร์ฟเวอร์ พร้อมหน้าจอและคลิป", () => {
+    const error = new ApiError(502, "E_YT_REFUSED", "ยูทูปไม่ยอมส่งไฟล์", "HTTP Error 403: Forbidden", null)
+    expect(reportRequest(error, { context: "video-header", videoId: VIDEO })).toEqual({
+      code: "E_YT_REFUSED",
+      detail: "HTTP Error 403: Forbidden",
+      context: "video-header",
+      videoId: VIDEO,
+    })
+  })
+
+  it("ApiError ที่ไม่มี detail = ไม่มีช่อง detail", () => {
+    expect(reportRequest(new ApiError(0, "E_OFFLINE", "x", null, null), { context: "crash" })).toEqual({
+      code: "E_OFFLINE",
+      context: "crash",
+    })
+  })
+
+  it("Error อื่น = E_UNKNOWN + ชื่อ: ข้อความ + stack ไม่เกิน 10 บรรทัด", () => {
+    const error = new TypeError("x is undefined")
+    error.stack = Array.from({ length: 30 }, (_, i) => `    at f${i} (app.js:${i})`).join("\n")
+    const req = reportRequest(error, { context: "crash" })
+    expect(req.code).toBe("E_UNKNOWN")
+    const lines = req.detail!.split("\n")
+    expect(lines[0]).toBe("TypeError: x is undefined")
+    expect(lines).toHaveLength(1 + STACK_LINES)
+    expect(lines.at(-1)).toBe("    at f9 (app.js:9)")
+  })
+
+  it("ค่าที่ไม่ใช่ error = E_UNKNOWN ไม่มี detail", () => {
+    expect(reportRequest("boom", { context: "chunk" })).toEqual({ code: "E_UNKNOWN", context: "chunk" })
+    expect(reportRequest(undefined, { context: "chunk" })).toEqual({ code: "E_UNKNOWN", context: "chunk" })
+  })
+
+  it("detail ยาวเกิน = ตัดที่ 4,000 ตัว (เซิร์ฟเวอร์ไม่ตอบ 422 กับ error จริง)", () => {
+    const error = new ApiError(500, "E_UNKNOWN", "x", "d".repeat(9000), null)
+    expect(reportRequest(error, { context: "crash" }).detail).toHaveLength(MAX_DETAIL)
+  })
+})
+
+describe("cleanRequest: body ผ่านกฎของเซิร์ฟเวอร์เสมอ", () => {
+  it("videoId / jobId / context ที่ผิดรูปถูกทิ้ง รหัสที่ผิดรูปเป็น E_UNKNOWN", () => {
+    expect(
+      cleanRequest({ code: "boom", videoId: "abc", jobId: "../x", context: "Video Header", detail: "d" }),
+    ).toEqual({ code: "E_UNKNOWN", detail: "d" })
+  })
+
+  it("ค่าที่ถูกต้องผ่านครบ · detail ว่างไม่ส่ง", () => {
+    const ok = { jobId: "01a1-b_2", code: "E_HTTP_502", context: "queue", videoId: VIDEO }
+    expect(cleanRequest({ ...ok, detail: "" })).toEqual(ok)
+  })
+})
+
+describe("fetchReport", () => {
+  it("POST /api/diagnostics พร้อม token และ body ที่ทำความสะอาดแล้ว คืนข้อความรายงาน", async () => {
+    const fetch = vi.fn().mockResolvedValue(jsonResponse(200, { report: REPORT }))
+    await expect(fetchReport({ code: "E_NETWORK", videoId: "bad" }, { fetch, token: "tok" })).resolves.toBe(REPORT)
+    const [url, init] = fetch.mock.calls[0]
+    expect(url).toBe("/api/diagnostics")
+    expect(init.method).toBe("POST")
+    expect(new Headers(init.headers).get("X-Toolkit-Token")).toBe("tok")
+    expect(JSON.parse(init.body)).toEqual({ code: "E_NETWORK" })
+  })
+})
+
+// unhandled rejection ใด ๆ ทำให้ vitest ล้มทั้งชุดเอง จึงไม่ต้องดักเพิ่ม (ทุกกรณีข้างล่างต้องไม่มี)
+describe("copyReport", () => {
+  it("มี ClipboardItem = เขียนทันทีด้วย text/plain ที่เป็น Promise (ยังอยู่ในจังหวะที่ผู้ใช้กด)", async () => {
+    let resolve: (text: string) => void = () => {}
+    const fetchReport = vi.fn(() => new Promise<string>((r) => (resolve = r)))
+    const write = vi.fn(async (items: ClipboardItems) => {
+      const blob = await (items[0] as unknown as FakeItem).items["text/plain"]
+      expect(await blob.text()).toBe(REPORT)
+    })
+    const done = copyReport({ code: "E_X" }, { clipboard: { write }, ClipboardItem: Item, fetchReport })
+    expect(write).toHaveBeenCalledTimes(1) // ก่อนรายงานมาถึง
+    expect(fetchReport).toHaveBeenCalledWith({ code: "E_X" })
+    resolve(REPORT)
+    await expect(done).resolves.toEqual({ ok: true })
+  })
+
+  it("ไม่มี ClipboardItem = รอรายงานแล้ว writeText", async () => {
+    const writeText = vi.fn(async () => {})
+    const outcome = await copyReport({}, { clipboard: { writeText }, ClipboardItem: undefined, fetchReport: async () => REPORT })
+    expect(outcome).toEqual({ ok: true })
+    expect(writeText).toHaveBeenCalledWith(REPORT)
+  })
+
+  it("เซิร์ฟเวอร์ตอบ error = ข้อความของเซิร์ฟเวอร์", async () => {
+    const write = vi.fn(async (items: ClipboardItems) => {
+      await (items[0] as unknown as FakeItem).items["text/plain"]
+    })
+    const fetchReport = () => Promise.reject(new ApiError(422, "E_BAD_REQUEST", "ข้อมูลที่ส่งมาไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ", null, null))
+    await expect(copyReport({}, { clipboard: { write }, ClipboardItem: Item, fetchReport })).resolves.toEqual({
+      ok: false,
+      message: "ข้อมูลที่ส่งมาไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ",
+    })
+  })
+
+  it("ปิดโปรแกรมไปแล้ว (E_OFFLINE) = th.errors.offline", async () => {
+    const fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
+    const writeText = vi.fn(async () => {})
+    const outcome = await copyReport(
+      {},
+      { clipboard: { writeText }, ClipboardItem: undefined, fetchReport: (req) => fetchReport(req, { fetch, token: "t" }) },
+    )
+    expect(outcome).toEqual({ ok: false, message: th.errors.offline })
+    expect(writeText).not.toHaveBeenCalled()
+  })
+
+  it("error ที่ไม่ใช่ ApiError ตอนขอรายงาน = th.errors.unknown", async () => {
+    const outcome = await copyReport({}, { clipboard: { writeText: vi.fn() }, ClipboardItem: undefined, fetchReport: () => Promise.reject(new Error("x")) })
+    expect(outcome).toEqual({ ok: false, message: th.errors.unknown })
+  })
+
+  it("คลิปบอร์ดไม่ยอม = th.errors.copyFailed (คัดลอกไม่สำเร็จ ลองอีกครั้ง)", async () => {
+    const write = vi.fn(() => Promise.reject(new DOMException("Document is not focused", "NotAllowedError")))
+    const outcome = await copyReport({}, { clipboard: { write }, ClipboardItem: Item, fetchReport: async () => REPORT })
+    expect(outcome).toEqual({ ok: false, message: "คัดลอกไม่สำเร็จ ลองอีกครั้ง" })
+  })
+
+  it("ไม่มีคลิปบอร์ดเลย = copyFailed", async () => {
+    await expect(copyReport({}, { clipboard: undefined, ClipboardItem: undefined, fetchReport: async () => REPORT })).resolves.toEqual({
+      ok: false,
+      message: th.errors.copyFailed,
+    })
+  })
+})
+```
+
+Create `web/src/components/error-report/model.test.ts`:
+```ts
+import { describe, expect, it } from "vitest"
+
+import { ApiError } from "@/lib/api"
+
+import { detailsOpenByDefault, detailsRequest, errorToastSettings, PLAIN_TOAST } from "./model"
+
+describe("detailsRequest", () => {
+  it("จาก error ที่จับได้ + ที่ที่เกิด", () => {
+    const error = new ApiError(502, "E_YT_REFUSED", "x", "HTTP Error 403", null)
+    expect(detailsRequest({ error, context: "video-frames", videoId: "dQw4w9WgXcQ" })).toEqual({
+      code: "E_YT_REFUSED",
+      detail: "HTTP Error 403",
+      context: "video-frames",
+      videoId: "dQw4w9WgXcQ",
+    })
+  })
+
+  it("จาก body ที่ประกอบไว้ (แถวงานในคิว) ผ่าน cleanRequest", () => {
+    expect(detailsRequest({ request: { jobId: "j1", code: "E_NETWORK", detail: "d".repeat(5000), context: "queue" } })).toEqual({
+      jobId: "j1",
+      code: "E_NETWORK",
+      detail: "d".repeat(4000),
+      context: "queue",
+    })
+  })
+})
+
+describe("detailsOpenByDefault (planner ruling R1)", () => {
+  it("E_UNKNOWN กางเอง รหัสอื่นพับไว้", () => {
+    expect(detailsOpenByDefault("E_UNKNOWN")).toBe(true)
+    expect(detailsOpenByDefault("E_NETWORK")).toBe(false)
+    expect(detailsOpenByDefault(undefined)).toBe(false)
+  })
+
+  it("ผู้เรียกกำหนดเองได้", () => {
+    expect(detailsOpenByDefault("E_UNKNOWN", false)).toBe(false)
+    expect(detailsOpenByDefault("E_NETWORK", true)).toBe(true)
+  })
+})
+
+describe("errorToastSettings", () => {
+  it("ค้างจนกดปิด (D1) ส่ง id action cancel ต่อไปตรง ๆ", () => {
+    const action = { label: "a", onClick: () => {} }
+    const cancel = { label: "c", onClick: () => {} }
+    expect(errorToastSettings({ id: "job-1", action, cancel })).toEqual({ id: "job-1", duration: Infinity, action, cancel })
+    expect(errorToastSettings({})).toEqual({ id: undefined, duration: Infinity, action: undefined, cancel: undefined })
+  })
+})
+
+describe("PLAIN_TOAST (planner ruling P5)", () => {
+  it("ล้างทุกช่องที่ toast error ตั้งไว้ เมื่อ toast อื่นใช้ id เดียวกัน", () => {
+    // แบบเดียวกับที่ sonner รวม toast ใหม่ทับ toast เดิมที่ id เดียวกัน: { ...เดิม, ...ใหม่ }
+    const errorToast: Record<string, unknown> = { ...errorToastSettings({ id: "x", action: { label: "a", onClick: () => {} } }), description: "btn" }
+    const merged = { ...errorToast, ...PLAIN_TOAST }
+    expect(merged).toEqual({ id: "x", duration: undefined, action: undefined, cancel: undefined, description: undefined })
+  })
+})
+```
+
+Create `web/src/components/error-report/error-toast.test.ts`:
+```ts
+import type { ReactElement, ReactNode } from "react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+const toast = vi.hoisted(() => ({ error: vi.fn(() => "t1"), success: vi.fn() }))
+vi.mock("sonner", () => ({ toast }))
+
+import { CopyReportButton } from "./copy-report-button"
+import { showErrorToast } from "./error-toast"
+
+type Options = { id?: string; duration?: number; action?: unknown; cancel?: unknown; description: ReactElement<{ children: ReactNode[] }> }
+
+beforeEach(() => toast.error.mockClear())
+
+describe("showErrorToast", () => {
+  it("ข้อความเดิม ค้างจนกดปิด id คงที่ ปุ่มคัดลอกอยู่ในแถว description (ไม่ใช่ action)", () => {
+    const action = { label: "ไปหน้าตรวจสุขภาพ", onClick: () => {} }
+    const request = { code: "E_FFMPEG_MISSING", context: "enqueue" }
+    expect(showErrorToast("ยังไม่มีโปรแกรมแปลงไฟล์", { request, id: "enqueue-error", action })).toBe("t1")
+    const [message, options] = toast.error.mock.lastCall as unknown as [string, Options]
+    expect(message).toBe("ยังไม่มีโปรแกรมแปลงไฟล์")
+    expect(options.id).toBe("enqueue-error")
+    expect(options.duration).toBe(Infinity)
+    expect(options.action).toBe(action)
+    expect(options.cancel).toBeUndefined()
+    const [extra, button] = options.description.props.children as [ReactNode, ReactElement<{ request: unknown }>]
+    expect(extra).toBeUndefined()
+    expect(button.type).toBe(CopyReportButton)
+    expect(button.props.request).toBe(request)
+  })
+
+  it("description เดิม (ข้อความ error ของงาน) อยู่ก่อนปุ่ม", () => {
+    showErrorToast("โหลดไม่สำเร็จ · คลิป", { request: { jobId: "j1" }, id: "job-j1", description: "เน็ตหลุด ลองใหม่อีกครั้ง" })
+    const [, options] = toast.error.mock.lastCall as unknown as [string, Options]
+    expect(options.description.props.children[0]).toBe("เน็ตหลุด ลองใหม่อีกครั้ง")
+  })
+})
+```
+
+- [ ] **Step 2: Run them, expect FAIL**
+
+Run: `cd "$WORKTREE/web" && npx vitest run src/lib/report.test.ts src/components/error-report`
+Expected: `Failed to resolve import "./report"` / `"./model"` / `"./error-toast"` for the three files.
+
+- [ ] **Step 3: Strings (`web/src/i18n/th.ts`)**
+
+Replace
+```ts
+    downloadFailed: "โหลดไฟล์ไม่สำเร็จ ลองอีกครั้ง",
+    unknown: "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล",
+    offline: "เชื่อมต่อโปรแกรมไม่ได้ ถ้าปิดโปรแกรมไปแล้ว เปิดใหม่ด้วย start.bat",
+    pageTitle: "เปิดหน้านี้ไม่สำเร็จ",
+    chunk: "โปรแกรมเพิ่งอัปเดต โหลดหน้านี้ใหม่อีกครั้ง",
+    crash: "หน้านี้ทำงานผิดพลาด โหลดหน้าใหม่แล้วลองอีกครั้ง",
+  },
+```
+with
+```ts
+    downloadFailed: "โหลดไฟล์ไม่สำเร็จ ลองอีกครั้ง",
+    // M6 รอบ B (Pete Q3 = A): ทุก error มีปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" แล้ว ไม่ต้องถ่ายภาพหน้าจอ
+    unknown: 'มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล',
+    offline: "เชื่อมต่อโปรแกรมไม่ได้ ถ้าปิดโปรแกรมไปแล้ว เปิดใหม่ด้วย start.bat",
+    pageTitle: "เปิดหน้านี้ไม่สำเร็จ",
+    chunk: "โปรแกรมเพิ่งอัปเดต โหลดหน้านี้ใหม่อีกครั้ง",
+    crash: "หน้านี้ทำงานผิดพลาด โหลดหน้าใหม่แล้วลองอีกครั้ง",
+    // M6 รอบ B: error สองชั้น (PRD 7.1) ทุกคำยกมาจาก PRD / ข้อความเดิมใน th.ts (spec 7) ไม่มีคำใหม่
+    copyReport: "คัดลอกข้อมูลแจ้งปัญหา",
+    details: "ดูรายละเอียด",
+    code: "รหัส {code}",
+    copied: "คัดลอกแล้ว",
+    copyFailed: "คัดลอกไม่สำเร็จ ลองอีกครั้ง",
+  },
+```
+
+`web/e2e/settings-general.spec.ts` — replace
+```ts
+        json: { error: { code: "E_UNKNOWN", message: "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล", detail: null } },
+```
+with
+```ts
+        json: { error: { code: "E_UNKNOWN", message: 'มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล', detail: null } },
+```
+
+- [ ] **Step 4: Create `web/src/lib/report.ts`**
+```ts
+import { th } from "@/i18n/th"
+
+import { api, ApiError } from "./api"
+
+/**
+ * รายงานแจ้งปัญหา (M6 รอบ B · PRD 7.1): หน้าเว็บส่งแค่ข้อมูลของ error ไป POST /api/diagnostics
+ * เซิร์ฟเวอร์สร้างรายงานทั้งหมดและซ่อนข้อมูลส่วนตัวที่จุดเดียว · โมดูลนี้ไม่มี React (เทสใน node ได้)
+ */
+
+/** ความยาวสูงสุดของ detail ที่ส่ง (เท่ากับ MAX_DETAIL ของ api/diagnostics.py): error จริงต้องไม่โดน 422 */
+export const MAX_DETAIL = 4000
+/** จำนวนบรรทัดของ stack ที่ใส่ต่อท้าย "<name>: <message>" ของ error ที่ไม่ใช่ ApiError */
+export const STACK_LINES = 10
+
+/** body ของ POST /api/diagnostics (ทุกช่องไม่บังคับ) */
+export type ReportRequest = { jobId?: string; code?: string; detail?: string; context?: string; videoId?: string }
+
+/** ที่ที่ error เกิด: context = แท็ก ASCII ของหน้าจอ (spec 1.3) เช่น "video-header" */
+export type ReportWhere = { context: string; videoId?: string; jobId?: string }
+
+export type CopyOutcome = { ok: true } | { ok: false; message: string }
+
+// กฎเดียวกับ api/diagnostics.py PATTERNS: ค่าที่ไม่ผ่านกฎไม่ส่ง (ไม่ให้ปุ่มได้ 422 แทนรายงาน)
+const PATTERNS = {
+  jobId: /^[A-Za-z0-9_-]{1,64}$/,
+  code: /^E_[A-Z0-9_]{1,40}$/,
+  context: /^[a-z][a-z0-9-]{0,31}$/,
+  videoId: /^[A-Za-z0-9_-]{11}$/,
+} as const
+
+/**
+ * ทำ body ให้ผ่านกฎของเซิร์ฟเวอร์เสมอ: ช่องที่ผิดรูปถูกทิ้ง (code ที่ผิดรูปกลายเป็น E_UNKNOWN) · detail ตัดที่ MAX_DETAIL
+ * เช่น /v/abc (videoId พิมพ์เองผิด) ยังได้รายงาน ไม่ใช่ 422
+ */
+export function cleanRequest(req: ReportRequest): ReportRequest {
+  const out: ReportRequest = {}
+  for (const key of ["jobId", "context", "videoId"] as const) {
+    const value = req[key]
+    if (value !== undefined && PATTERNS[key].test(value)) out[key] = value
+  }
+  if (req.code !== undefined) out.code = PATTERNS.code.test(req.code) ? req.code : "E_UNKNOWN"
+  if (req.detail) out.detail = req.detail.slice(0, MAX_DETAIL)
+  return out
+}
+
+/**
+ * body ของรายงานจาก error ที่จับได้: ApiError = รหัสและ detail จากเซิร์ฟเวอร์ · Error อื่น = E_UNKNOWN + "<name>: <message>"
+ * ตามด้วย stack ไม่เกิน 10 บรรทัด · ค่าอื่น = E_UNKNOWN ไม่มี detail
+ */
+export function reportRequest(error: unknown, where: ReportWhere): ReportRequest {
+  const req: ReportRequest = { context: where.context, videoId: where.videoId, jobId: where.jobId }
+  if (error instanceof ApiError) {
+    req.code = error.code
+    req.detail = error.detail ?? undefined
+  } else if (error instanceof Error) {
+    req.code = "E_UNKNOWN"
+    const head = `${error.name}: ${error.message}`
+    const stack = error.stack ? error.stack.split("\n").slice(0, STACK_LINES).join("\n") : ""
+    req.detail = stack ? `${head}\n${stack}` : head
+  } else {
+    req.code = "E_UNKNOWN"
+  }
+  return cleanRequest(req)
+}
+
+/** ขอรายงาน (Markdown) จากเซิร์ฟเวอร์ · api() ใส่ token ให้เอง · ต่อไม่ได้ = ApiError E_OFFLINE */
+export async function fetchReport(req: ReportRequest, deps?: Parameters<typeof api>[2]): Promise<string> {
+  const { report } = await api<{ report: string }>(
+    "/diagnostics",
+    { method: "POST", body: JSON.stringify(cleanRequest(req)) },
+    deps,
+  )
+  return report
+}
+
+type CopyDeps = {
+  clipboard?: Partial<Pick<Clipboard, "write" | "writeText">>
+  ClipboardItem?: typeof ClipboardItem
+  fetchReport?: (req: ReportRequest) => Promise<string>
+}
+
+/**
+ * ขอรายงานแล้วคัดลอกลงคลิปบอร์ด · ไม่โยน error เลย
+ * เริ่มขอรายงานทันทีในจังหวะที่กด แล้วส่ง Promise<Blob> ให้ ClipboardItem (แบบเดียวกับ copyImage ใน clipboard.ts)
+ * การเขียนจึงยังอยู่ในจังหวะที่ผู้ใช้กด แม้รายงานมาถึงทีหลัง · ไม่มี ClipboardItem = รอรายงานแล้ว writeText
+ * พลาด: ขอรายงานไม่ได้ = ข้อความของเซิร์ฟเวอร์ (ปิดโปรแกรมไปแล้ว = th.errors.offline) · คลิปบอร์ดไม่ยอม = th.errors.copyFailed
+ */
+export async function copyReport(req: ReportRequest, deps: CopyDeps = {}): Promise<CopyOutcome> {
+  const clipboard = "clipboard" in deps ? deps.clipboard : globalThis.navigator?.clipboard
+  const Item = "ClipboardItem" in deps ? deps.ClipboardItem : globalThis.ClipboardItem
+  const text = (deps.fetchReport ?? fetchReport)(req)
+  // ถ้าขอรายงานไม่สำเร็จ write จะล้มเองอยู่แล้ว: กันไม่ให้ Promise ตัวนี้กลายเป็น unhandled rejection อีกทาง
+  text.catch(() => {})
+  try {
+    if (clipboard?.write && Item) {
+      await clipboard.write([new Item({ "text/plain": text.then((t) => new Blob([t], { type: "text/plain" })) })])
+    } else if (clipboard?.writeText) {
+      await clipboard.writeText(await text)
+    } else {
+      throw new Error("clipboard unsupported")
+    }
+    return { ok: true }
+  } catch {
+    const failed = await text.then(
+      () => null,
+      (error: unknown) => error ?? new Error("report failed"),
+    )
+    if (failed !== null) return { ok: false, message: failed instanceof ApiError ? failed.message : th.errors.unknown }
+    return { ok: false, message: th.errors.copyFailed }
+  }
+}
+```
+
+- [ ] **Step 5: Create `web/src/components/error-report/model.ts`**
+```ts
+import type { ReactNode } from "react"
+
+import { cleanRequest, reportRequest, type ReportRequest, type ReportWhere } from "@/lib/report"
+
+/**
+ * ตรรกะของส่วน "ดูรายละเอียด" และ toast ของ error (M6 รอบ B spec 1.1) แยกจาก JSX เพื่อเทสใน node ได้
+ * (vitest ไม่มี DOM แบบเดียวกับ components/account/dialog-model.ts)
+ */
+
+/** id ของ toast "คัดลอกแล้ว" / คัดลอกไม่สำเร็จ: กดซ้ำหลายครั้งได้ toast เดียว */
+export const REPORT_TOAST_ID = "report-copy"
+
+export type ToastButton = { label: string; onClick: () => void }
+
+/** ตัวเลือกของ showErrorToast: request = body ของรายงาน · id คงที่ต่อแหล่ง error (error ครั้งใหม่แทนที่ toast เดิม) */
+export type ErrorToastOptions = {
+  request: ReportRequest
+  id?: string | number
+  description?: ReactNode
+  action?: ToastButton
+  cancel?: ToastButton
+}
+
+/** ที่มาของส่วนพับ: error ที่จับได้ + ที่ที่เกิด หรือ body ที่ประกอบไว้แล้ว (แถวงานที่พลาดในคิว) */
+export type DetailsSource = ({ error: unknown } & ReportWhere) | { request: ReportRequest }
+
+/** body ของรายงานของส่วนพับ · รหัสและ detail ที่แสดงมาจาก body นี้ จึงตรงกับที่ส่งไปเสมอ */
+export function detailsRequest(source: DetailsSource): ReportRequest {
+  if ("request" in source) return cleanRequest(source.request)
+  return reportRequest(source.error, { context: source.context, videoId: source.videoId, jobId: source.jobId })
+}
+
+/**
+ * กางไว้ตั้งแต่แรกเมื่อรหัสเป็น E_UNKNOWN (planner ruling R1): ข้อความของรหัสนี้บอกให้กดปุ่ม
+ * ปุ่มจึงต้องเห็นโดยไม่ต้องกดอะไรก่อน · ผู้เรียกกำหนดเองได้ด้วย defaultOpen
+ */
+export function detailsOpenByDefault(code: string | undefined, defaultOpen?: boolean): boolean {
+  return defaultOpen ?? code === "E_UNKNOWN"
+}
+
+/** ตัวเลือก sonner ของ toast error (ยกเว้น description ที่ error-toast.tsx ใส่ปุ่มคัดลอก): ค้างจนกดปิด (D1) */
+export function errorToastSettings(opts: Pick<ErrorToastOptions, "id" | "action" | "cancel">) {
+  return { id: opts.id, duration: Infinity, action: opts.action, cancel: opts.cancel }
+}
+
+/**
+ * กระจายใส่ toast ที่ใช้ id เดียวกับ toast error (เช่น "โหลดเสร็จแล้ว" ของงานที่เคยพลาด "บันทึกแล้ว" กำลังโหลด ffmpeg)
+ * sonner รวมค่าใหม่ทับ toast เดิมที่มี id เดียวกัน ช่องที่ไม่ส่งจะค้างจาก toast error (ปุ่มคัดลอก + ไม่หายเอง)
+ */
+export const PLAIN_TOAST = { description: undefined, duration: undefined, action: undefined, cancel: undefined }
+```
+
+- [ ] **Step 6: Create `web/src/components/error-report/copy-report-button.tsx`**
+```tsx
+import { Copy } from "lucide-react"
+import { useRef, useState } from "react"
+import { toast } from "sonner"
+
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { th } from "@/i18n/th"
+import { copyReport, type ReportRequest } from "@/lib/report"
+
+import { REPORT_TOAST_ID } from "./model"
+
+type Props = {
+  request: ReportRequest
+  variant?: "outline" | "default"
+  size?: "sm" | "default"
+  className?: string
+}
+
+/**
+ * ปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" (PRD 7.1): ขอรายงานจากเซิร์ฟเวอร์แล้วคัดลอก → toast "คัดลอกแล้ว"
+ * ระหว่างรอ = ปิดปุ่ม + วงหมุน (กดสองครั้งส่งคำขอเดียว) · ใช้แค่ useState/useRef กับ api() ไม่มี React Query
+ * ไม่มี store ไม่มี router จึงยังใช้ได้ใน ErrorPanel หลังหน้าพัง · ความล้มเหลวของปุ่มนี้ไม่มีปุ่มรายงานซ้อน
+ */
+export function CopyReportButton({ request, variant = "outline", size = "sm", className }: Props) {
+  const [pending, setPending] = useState(false)
+  const busy = useRef(false)
+
+  function onClick() {
+    if (busy.current) return
+    busy.current = true
+    setPending(true)
+    // เรียกทันทีในจังหวะที่กด (ไม่มี await ก่อนหน้า): ClipboardItem ยังนับเป็นการกระทำของผู้ใช้
+    void copyReport(request).then((outcome) => {
+      busy.current = false
+      setPending(false)
+      if (outcome.ok) toast.success(th.errors.copied, { id: REPORT_TOAST_ID })
+      else toast.error(outcome.message, { id: REPORT_TOAST_ID })
+    })
+  }
+
+  return (
+    <Button type="button" variant={variant} size={size} className={className} disabled={pending} onClick={onClick}>
+      {pending ? <Spinner /> : <Copy aria-hidden />}
+      {th.errors.copyReport}
+    </Button>
+  )
+}
+```
+
+- [ ] **Step 7: Create `web/src/components/error-report/error-details.tsx`**
+```tsx
+import { ChevronDown } from "lucide-react"
+import { useState } from "react"
+
+import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { fill, th } from "@/i18n/th"
+import { cn } from "cn"
+
+import { CopyReportButton } from "./copy-report-button"
+import { detailsOpenByDefault, detailsRequest, type DetailsSource } from "./model"
+
+type Props = DetailsSource & {
+  /** กางตั้งแต่แรกไหม (ไม่ส่ง = กางเมื่อรหัสเป็น E_UNKNOWN) */
+  defaultOpen?: boolean
+  /** คุมจากข้างนอก (แถวงานในคิว: ปุ่ม "ดูรายละเอียด" ใน toast สั่งกาง) */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /** ใน Alert ที่มีไอคอน ส่ง "col-start-2" ให้ตรงกับข้อความ */
+  className?: string
+}
+
+/**
+ * ส่วนพับ "ดูรายละเอียด" ของ error ทุกจุด (PRD 7.1 ชั้นหน้าเว็บ · spec 1.1): รหัส · ข้อความเทคนิคดิบ · "คัดลอกข้อมูลแจ้งปัญหา"
+ * หน้าตาเดียวกับแถวงานที่พลาดในคิวเดิม · <pre> ตัดคำได้ทุกตัว หน้าต่าง 640 px ไม่เลื่อนซ้ายขวา
+ */
+export function ErrorDetails(props: Props) {
+  const { defaultOpen, open, onOpenChange, className } = props
+  const request = detailsRequest(props)
+  const code = request.code ?? "E_UNKNOWN"
+  const [ownOpen, setOwnOpen] = useState(() => detailsOpenByDefault(code, defaultOpen))
+  return (
+    <Collapsible
+      data-testid="error-details"
+      className={cn("min-w-0", className)}
+      open={open ?? ownOpen}
+      onOpenChange={(next) => {
+        setOwnOpen(next)
+        onOpenChange?.(next)
+      }}
+    >
+      <CollapsibleTrigger
+        data-details-trigger=""
+        render={<Button variant="link" size="sm" className="group/details h-7 px-0 text-muted-foreground" />}
+      >
+        {th.errors.details}
+        <ChevronDown aria-hidden className="transition-transform group-data-[panel-open]/details:rotate-180" />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="flex flex-col items-start gap-2 pt-1 text-foreground">
+        <p className="font-mono text-xs">{fill(th.errors.code, { code })}</p>
+        {request.detail && (
+          <pre className="max-h-40 w-full overflow-auto rounded-md bg-muted p-2 font-mono text-xs break-all whitespace-pre-wrap">
+            {request.detail}
+          </pre>
+        )}
+        <CopyReportButton request={request} />
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+```
+
+- [ ] **Step 8: Create `web/src/components/error-report/error-toast.tsx`**
+```tsx
+import { toast } from "sonner"
+
+import { CopyReportButton } from "./copy-report-button"
+import { errorToastSettings, type ErrorToastOptions } from "./model"
+
+/**
+ * toast ของ error ทุกตัว (D1): ค้างจนกดปิด · ปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" อยู่ในแถว description ไม่ใช่ช่อง action ของ sonner
+ * (sonner ปิด toast เมื่อกด action แต่ toast ต้องอยู่ต่อให้กด "ดูรายละเอียด" / ปุ่มบัญชีได้ และ action/cancel มีเจ้าของแล้ว)
+ * ส่ง id คงที่ของแหล่ง error เสมอ: error ครั้งใหม่จากที่เดิมแทนที่ toast เดิม ไม่ซ้อนเป็นกอง
+ */
+export function showErrorToast(message: string, opts: ErrorToastOptions): string | number {
+  return toast.error(message, {
+    ...errorToastSettings(opts),
+    description: (
+      <div className="mt-1 flex flex-col items-start gap-2">
+        {opts.description}
+        <CopyReportButton request={opts.request} />
+      </div>
+    ),
+  })
+}
+```
+
+- [ ] **Step 9: Run, expect PASS**
+
+Run: `cd "$WORKTREE/web" && npx vitest run src/lib/report.test.ts src/components/error-report` (23 passed), then `npm run typecheck && npm run lint && npm test` (prototype: 63 files / 1,032 tests passed, ESLint clean — `error-toast.tsx` exports only a function, which `react-refresh/only-export-components` accepts).
+
+- [ ] **Step 10: Commit**
+```bash
+cd "$WORKTREE" && git add web/src/i18n/th.ts web/src/lib/report.ts web/src/lib/report.test.ts web/src/components/error-report web/e2e/settings-general.spec.ts && git commit -F- <<'EOF'
+feat(web): problem-report request, copy button, details section and error toast
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+
+### Task 5: Docs — PRD §6.2 / §11, acceptance rows AC-SET-03..06, follow-up files
+
+**Files:**
+- Modify: `PRD.md` (the §6.2 `/diagnostics` row and the §11 FR-SET-5 row only; §7 / §7.1 were already updated in the spec commit)
+- Modify: `docs/acceptance.md` (new "M6 รอบ B" section at the end)
+- Modify: `docs/m1-followups.md` (`:58`), `docs/m4-followups.md` (`:40`)
+
+**Interfaces:**
+- Consumes: the final names of K5 (endpoint, body rules) and the Thai strings of spec §7 (quoted, never new).
+- Produces: docs matching the code. `tests/integration/test_account_privacy.py`'s docstring is T11's (it owns that file).
+
+Every `old` text occurs exactly once in its file (use the Edit tool, LF kept). Docs are Pete-style Thai prose; quoted UI strings are the spec §7 strings.
+
+- [ ] **Step 1: PRD.md §6.2 — replace the stale GET row (planner ruling P2)**
+
+Replace
+```markdown
+| GET | `/diagnostics` | `?jobId=` (ไม่บังคับ) | `{text}` รายงานแจ้งปัญหาแบบ Markdown ตามข้อ 7.1 |
+```
+with
+```markdown
+| POST | `/diagnostics` | `{jobId?, code?, detail?, context?, videoId?}` (detail ≤ 4,000) | `{report}` Markdown ตามแม่แบบใน §7.1 · token เหมือนคำขออื่นที่ไม่ใช่ GET · ช่องผิดรูป = 422 `E_BAD_REQUEST` |
+```
+
+- [ ] **Step 2: PRD.md §11 — FR-SET-5 traceability**
+
+Replace
+```markdown
+| FR-SET-5 | W6, W7 | `/diagnostics` | AC-SET-03..06 |
+```
+with
+```markdown
+| FR-SET-5 | W2, W3, W4, W5, W6, W7 (ส่วน "ดูรายละเอียด" และปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" ทุกจุดที่มี error) | `POST /diagnostics` · `run/logs/app.log` (บรรทัด `job_failed` และ `api_error`) | AC-SET-03..06 |
+```
+
+- [ ] **Step 3: docs/acceptance.md — manual Windows checks**
+
+Append at the end of the file (after the `M5C-NARROW` row):
+```markdown
+
+## M6 รอบ B (ทำบน Windows 10/11 · error สองชั้น รายงานแจ้งปัญหา และ log)
+| AC | ขั้นตอน | ผ่าน |
+|---|---|---|
+| AC-SET-03 | ส่งงานโหลดคลิปที่ยูทูปไม่ส่งไฟล์ หรือถอดสายเน็ตระหว่างโหลดจนงานพลาด แล้วเปิด `run\logs\app.log` ด้วย Notepad: มีบรรทัด `job_failed id=<รหัสงาน> kind=video code=<รหัส error> detail=...` พร้อมเวลาข้างหน้า ตามด้วย traceback · ไม่มีชื่อผู้ใช้ Windows ไม่มีชื่อคลิป (เห็น `<title>` แทน) และ path นอกโฟลเดอร์ผู้ใช้เป็น `<path>` | ☐ |
+| AC-SET-04 | กดปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" ที่แถวงานที่พลาดในคิว แล้ววางใน Notepad: มีครบทุกหัวข้อตามตัวอย่างใน PRD ข้อ 7.1 (เวลา แอพ ระบบ yt-dlp ffmpeg JS runtime บัญชียูทูป error log ล่าสุด) · บรรทัดรหัสเป็น `- รหัส: <รหัส> · งาน: video (videoId <id>)` · ค้นชื่อผู้ใช้ Windows ของเครื่อง (`Ctrl+F`) ไม่เจอ path ในโฟลเดอร์ผู้ใช้ขึ้นต้นด้วย `~\` · ไม่มีชื่อคลิป | ☐ |
+| AC-SET-05 | หน้าคลิป (W2) ที่เปิดไม่ได้ (เช่นคลิปส่วนตัว): กด "ดูรายละเอียด" เห็น "รหัส …" ข้อความเทคนิค และปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" · กดแล้วมี toast "คัดลอกแล้ว" · วางใน LINE (หรือ Teams) และ Notepad: ข้อความครบ อ่านเป็นรายการได้ บล็อก log ไม่ขาดกลาง · บรรทัดรหัสเป็น `- รหัส: <รหัส> · หน้าจอ: video-header (videoId <id>)` · toast ของ error (เช่นงานที่พลาด) มีปุ่มนี้ในตัว และค้างจนกดปิด | ☐ |
+| AC-SET-05b | ตั้งค่า > ตรวจสุขภาพระบบ: ปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" อยู่ถัดจาก "ตรวจอีกครั้ง" · วางแล้วไม่มีหัวข้อ `### error` · ไม่มีตัวช่วยของ yt-dlp: แถวนั้นขึ้น "บางคุณภาพอาจไม่แสดง เพราะเครื่องยังไม่มีตัวช่วยที่ yt-dlp ต้องใช้" | ☐ |
+| AC-SET-05c | error ที่รหัสเป็น `E_UNKNOWN`: ข้อความ "มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล" และส่วน "ดูรายละเอียด" กางไว้แล้ว เห็นปุ่มทันที · ปิดโปรแกรมด้วย stop.bat แล้วกดปุ่มในแท็บที่ค้างอยู่: toast "เชื่อมต่อโปรแกรมไม่ได้ ถ้าปิดโปรแกรมไปแล้ว เปิดใหม่ด้วย start.bat" ไม่มีอะไรถูกคัดลอก | ☐ |
+| AC-SET-06 | (M6) ทำตาม M5C-IMPORT ให้ถือบัญชีชั่วคราวอยู่ แล้วกด "คัดลอกข้อมูลแจ้งปัญหา" ทั้งที่แถวงานที่พลาดและที่หน้าตรวจสุขภาพ: บรรทัดบัญชีเป็น "บัญชียูทูป: ใช้บัญชีชั่วคราวอยู่" เท่านั้น · ค้น `SAPISID`, `LOGIN_INFO` และค่าคุกกี้สักตัวจากไฟล์ในข้อความที่วาง: ไม่เจอ (ชื่อคุกกี้เป็น `<hidden>`) · ไม่มี token ของแอพ (ค่าใน `<meta name="yt-token">` ของหน้าเว็บ) | ☐ |
+| M6B-ROTATE | ดูโฟลเดอร์ `run\logs\` หลังใช้งานนาน: มีไม่เกิน 3 ไฟล์ (`app.log`, `app.log.1`, `app.log.2`) ไฟล์ละไม่เกินราว 5 MB · ใน `app.log` ไม่มีบรรทัด `HTTP Request:` ของ httpx | ☐ |
+| M6B-NARROW | หน้าต่างกว้าง 640 px (หรือซูม 200%): กล่อง error ที่กาง "ดูรายละเอียด" แล้ว (ข้อความเทคนิคยาว) toast ที่มีปุ่มคัดลอก และหน้าตรวจสุขภาพ ไม่มีแถบเลื่อนแนวนอน · toast ที่ค้างหลายอันไม่บังแถบคิว | ☐ |
+```
+
+- [ ] **Step 4: docs/m1-followups.md — close the M6 diagnostics item**
+
+Replace
+```markdown
+- **FR-SET-5 และ AC-SET-03 ถึง AC-SET-05 (รายงานวินิจฉัย และปุ่ม "คัดลอกข้อมูลแจ้งปัญหา"):** ตามแผนอยู่ใน M6 ครับ
+```
+with
+```markdown
+- **FR-SET-5 และ AC-SET-03 ถึง AC-SET-05 (รายงานวินิจฉัย และปุ่ม "คัดลอกข้อมูลแจ้งปัญหา"):** ทำแล้วใน M6 รอบ B ครับ (`POST /api/diagnostics`, บรรทัด `job_failed` / `api_error` ใน `app.log` ตรวจมือตาม `docs/acceptance.md` ส่วน "M6 รอบ B")
+```
+
+- [ ] **Step 5: docs/m4-followups.md — the canary now covers the report**
+
+Replace
+```markdown
+- **รายงานแจ้งปัญหา (`/api/diagnostics`) ยังไม่มีในแอพ:** เทส canary ของ M5 รอบ C (`tests/integration/test_account_privacy.py`) ตรวจ log, `app.log`, ข่าว SSE, คำตอบของ API, `/health`, `GET /cookies` และไฟล์บนดิสก์ · ตอนทำรายงานใน M6 ต้องเพิ่มรายงานเข้าเทสเดียวกัน (AC-SET-06)
+```
+with
+```markdown
+- **รายงานแจ้งปัญหา (`/api/diagnostics`) (ปิดแล้วใน M6 รอบ B):** เทส canary `tests/integration/test_account_privacy.py` เรียก `POST /api/diagnostics` ทั้งสามแบบ (งานที่พลาด error จากหน้าเว็บ หน้าตรวจสุขภาพ) ตอนถือบัญชีอยู่ แล้วตรวจว่าไม่มีค่า canary ไม่มีชื่อคุกกี้ และส่วนหัวพูดถึงบัญชีแค่บรรทัดสถานะ (AC-SET-06)
+```
+
+- [ ] **Step 6: Verify**
+
+Run: `cd "$WORKTREE" && git grep -n "GET | \`/diagnostics\`\|ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล" -- PRD.md docs/acceptance.md` — prints only the PRD §7 `E_UNKNOWN` note ("ข้อความเดิม …ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล") and nothing for the old GET row. Then `cd "$WORKTREE" && uv run pytest tests/unit/test_yterrors.py -q -W error -p no:cacheprovider` (PRD §7 rows untouched; the one pre-existing failure P10 is expected until T3 merges).
+
+- [ ] **Step 7: Commit**
+```bash
+cd "$WORKTREE" && git add PRD.md docs/acceptance.md docs/m1-followups.md docs/m4-followups.md && git commit -F- <<'EOF'
+docs: M6 round B API row, FR-SET-5 traceability, acceptance checks AC-SET-03..06
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+
 ---
 
-> **WIP:** tasks T4-T12, the spec-coverage table and the execution handoff follow in the next commit of this plan. Do not execute before the plan is complete.
+## Wave 2
+
+### Task 6: Report builder (`core/diagnostics.py`)
+
+**Files:**
+- Create: `src/yttoolkit/core/diagnostics.py`
+- Create: `tests/unit/test_diagnostics.py`
+
+**Interfaces:**
+- Consumes: `redact.redact_report(text, *, token, titles)` (T1); `core.tools.ToolStatus`; the `app.log` handler that `probe.setup_file_log` installs (`RotatingFileHandler` with `baseFilename == os.path.abspath(log_dir / "app.log")`).
+- Produces: K3 — `ErrorSection`, `ReportInputs`, `build_report`, constants `NONE`, `LOG_FILES`, `TAIL_LINES`, `TAIL_BYTES`, `DETAIL_MAX`, `LOG_LINE_MAX`, `REPORT_MAX`; private `_tail_lines(log_dir, want=50, *, read=_read_tail)` and `_read_tail(path)` (tests inject `read`).
+
+The builder is pure apart from reading the log files: no FastAPI, no `yt_dlp`, no `extractor`, no network, no `collect_health` (C3; the last test pins it).
+
+- [ ] **Step 1: Write the failing tests** — create `tests/unit/test_diagnostics.py`:
+```python
+"""รายงานแจ้งปัญหา (M6 รอบ B · core/diagnostics.py · PRD ข้อ 7.1): แม่แบบ ค่าที่ไม่มี log ล่าสุด และเพดานความยาว"""
+
+from __future__ import annotations
+
+import logging
+import logging.handlers
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path, PureWindowsPath
+
+import pytest
+
+from yttoolkit import redact
+from yttoolkit.core import diagnostics
+from yttoolkit.core.diagnostics import (
+    DETAIL_MAX,
+    LOG_LINE_MAX,
+    REPORT_MAX,
+    ErrorSection,
+    ReportInputs,
+    build_report,
+)
+from yttoolkit.core.tools import ToolStatus
+
+BANGKOK = timezone(timedelta(hours=7))
+NOW = datetime(2026, 10, 5, 14, 32, 9, tzinfo=BANGKOK)
+TOKEN = "tok-5d4c3b2a1f0e"
+
+
+def inputs(log_dir: Path, **over) -> ReportInputs:
+    base = ReportInputs(
+        now=NOW,
+        version="0.1.0",
+        commit="abc1234",
+        os_version="Windows 11 (10.0.26200)",
+        ytdlp=ToolStatus("ok", name="yt-dlp", version="2026.09.20"),
+        ffmpeg=ToolStatus("ok", name="ffmpeg", version="8.1", path="C:/tools/ffmpeg.exe"),
+        js_runtime=ToolStatus("ok", name="deno", version="2.9.7", path="C:/tools/deno.exe"),
+        account_active=False,
+        error=ErrorSection(code="E_BOT_CHECK", detail="ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm", kind="video",
+                           video_id="dQw4w9WgXcQ"),  # fmt: skip
+        log_dir=log_dir,
+        token=TOKEN,
+        titles=(),
+    )
+    return replace(base, **over)
+
+
+def write_log(log_dir: Path, name: str, lines: list[str]) -> None:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / name).write_text("".join(f"{line}\n" for line in lines), encoding="utf-8", newline="\n")
+
+
+def log_block(report: str) -> list[str]:
+    body = report.split("### log ล่าสุด (50 บรรทัด)\n", 1)[1]
+    lines = body.rstrip("\n").split("\n")
+    return lines[1:-1]  # ไม่เอาบรรทัดเปิดและปิดรั้ว
+
+
+# ---------- แม่แบบ ----------
+
+
+def test_job_report_matches_the_prd_template_exactly(tmp_path: Path) -> None:
+    write_log(tmp_path, "app.log", ["2026-10-05 14:31:58,120 INFO yttoolkit: งาน j1 (video) จบด้วย E_BOT_CHECK"])
+    assert build_report(inputs(tmp_path)) == (
+        "## รายงานปัญหา YT Toolkit\n"
+        "- เวลา: 2026-10-05 14:32 (+07:00)\n"
+        "- แอพ: 0.1.0 (commit abc1234) · ระบบ: Windows 11 (10.0.26200)\n"
+        "- yt-dlp: 2026.09.20 · ffmpeg: 8.1 · JS runtime: deno 2.9.7\n"
+        "- บัญชียูทูป: ไม่ได้ใช้บัญชี\n"
+        "### error\n"
+        "- รหัส: E_BOT_CHECK · งาน: video (videoId dQw4w9WgXcQ)\n"
+        "- รายละเอียด: ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm\n"
+        "### log ล่าสุด (50 บรรทัด)\n"
+        "```text\n"
+        "2026-10-05 14:31:58,120 INFO yttoolkit: งาน j1 (video) จบด้วย E_BOT_CHECK\n"
+        "```\n"
+    )
+
+
+def test_time_uses_the_local_offset_with_a_colon(tmp_path: Path) -> None:
+    utc = build_report(inputs(tmp_path, now=datetime(2026, 1, 2, 3, 4, tzinfo=UTC)))
+    assert "- เวลา: 2026-01-02 03:04 (+00:00)\n" in utc
+    minus = build_report(inputs(tmp_path, now=datetime(2026, 1, 2, 3, 4, tzinfo=timezone(timedelta(hours=-3, minutes=-30)))))
+    assert "(-03:30)" in minus
+
+
+def test_a_naive_time_is_a_programming_error(tmp_path: Path) -> None:
+    with pytest.raises(AssertionError):
+        build_report(inputs(tmp_path, now=datetime(2026, 10, 5, 14, 32)))
+
+
+def test_missing_values_say_none(tmp_path: Path) -> None:
+    report = build_report(inputs(
+        tmp_path,
+        commit=None,
+        ytdlp=ToolStatus("ok", name="yt-dlp", version=None),
+        ffmpeg=ToolStatus("error", name="ffmpeg", message="ยังไม่มีโปรแกรมแปลงไฟล์ (ffmpeg)"),
+        js_runtime=ToolStatus("warn", name=None, message="x"),
+    ))  # fmt: skip
+    assert "- แอพ: 0.1.0 (commit ไม่มี) · ระบบ: Windows 11 (10.0.26200)\n" in report
+    assert "- yt-dlp: ไม่มี · ffmpeg: ไม่มี · JS runtime: ไม่มี\n" in report
+
+
+@pytest.mark.parametrize("status", ["warn", "error"])
+def test_ffmpeg_version_only_when_ready(tmp_path: Path, status: str) -> None:
+    report = build_report(inputs(tmp_path, ffmpeg=ToolStatus(status, name="ffmpeg", version="8.1")))
+    assert "· ffmpeg: ไม่มี ·" in report
+
+
+def test_node_fallback_shows_node_and_its_version(tmp_path: Path) -> None:
+    report = build_report(inputs(tmp_path, js_runtime=ToolStatus("warn", name="node", version="22.11.0")))
+    assert "JS runtime: node 22.11.0\n" in report
+
+
+def test_tool_paths_never_appear(tmp_path: Path) -> None:
+    report = build_report(inputs(tmp_path))
+    assert "C:/tools" not in report and "ffmpeg.exe" not in report
+
+
+@pytest.mark.parametrize(("active", "line"), [(False, "ไม่ได้ใช้บัญชี"), (True, "ใช้บัญชีชั่วคราวอยู่")])
+def test_account_line_has_only_the_two_prd_phrases(tmp_path: Path, active: bool, line: str) -> None:
+    report = build_report(inputs(tmp_path, account_active=active))
+    assert f"- บัญชียูทูป: {line}\n" in report
+    assert [x for x in report.splitlines() if "บัญชี" in x] == [f"- บัญชียูทูป: {line}"]  # ไม่มีเวลา ชื่อ หรือค่าคุกกี้
+
+
+# ---------- หัวข้อ error ----------
+
+
+def test_non_job_error_line_with_context_and_video_id(tmp_path: Path) -> None:
+    error = ErrorSection(code="E_NETWORK", detail=None, context="video-header", video_id="dQw4w9WgXcQ")
+    report = build_report(inputs(tmp_path, error=error))
+    assert "- รหัส: E_NETWORK · หน้าจอ: video-header (videoId dQw4w9WgXcQ)\n- รายละเอียด: ไม่มี\n" in report
+
+
+def test_non_job_error_line_without_context_or_video_id(tmp_path: Path) -> None:
+    report = build_report(inputs(tmp_path, error=ErrorSection(code=None, detail="")))
+    assert "### error\n- รหัส: ไม่มี\n- รายละเอียด: ไม่มี\n" in report
+
+
+def test_non_job_error_with_context_only(tmp_path: Path) -> None:
+    report = build_report(inputs(tmp_path, error=ErrorSection(code="E_UNKNOWN", detail="x", context="crash")))
+    assert "- รหัส: E_UNKNOWN · หน้าจอ: crash\n" in report
+
+
+def test_no_error_section_for_the_health_report(tmp_path: Path) -> None:
+    report = build_report(inputs(tmp_path, error=None))
+    assert "### error" not in report and "- รหัส:" not in report
+    assert "- บัญชียูทูป: ไม่ได้ใช้บัญชี\n### log ล่าสุด (50 บรรทัด)\n" in report
+
+
+def test_multi_line_detail_is_a_list_continuation_and_crlf_collapses(tmp_path: Path) -> None:
+    error = ErrorSection(code="E_UNKNOWN", detail="TypeError: x\r\n    at a (app.js:1)\n    at b (app.js:2)", context="crash")
+    report = build_report(inputs(tmp_path, error=error))
+    assert "- รายละเอียด: TypeError: x\n      at a (app.js:1)\n      at b (app.js:2)\n### log" in report
+    assert "\r" not in report
+
+
+# ---------- log ล่าสุด ----------
+
+
+def test_tail_spans_rotation_in_order(tmp_path: Path) -> None:
+    write_log(tmp_path, "app.log.1", [f"old {i}" for i in range(40)])
+    write_log(tmp_path, "app.log", [f"new {i}" for i in range(20)])
+    lines = log_block(build_report(inputs(tmp_path)))
+    assert lines == [f"old {i}" for i in range(10, 40)] + [f"new {i}" for i in range(20)]
+
+
+def test_tail_reads_at_most_three_files_and_ignores_an_old_fourth(tmp_path: Path) -> None:
+    write_log(tmp_path, "app.log.3", ["ancient"])
+    write_log(tmp_path, "app.log.2", ["two"])
+    write_log(tmp_path, "app.log.1", ["one"])
+    write_log(tmp_path, "app.log", ["zero"])
+    assert log_block(build_report(inputs(tmp_path))) == ["two", "one", "zero"]
+
+
+def test_no_log_files_say_none_inside_the_fence(tmp_path: Path) -> None:
+    report = build_report(inputs(tmp_path / "missing"))
+    assert report.endswith("### log ล่าสุด (50 บรรทัด)\n```text\nไม่มี\n```\n")
+
+
+def test_invalid_utf8_bytes_become_replacement_characters(tmp_path: Path) -> None:
+    tmp_path.mkdir(exist_ok=True)
+    (tmp_path / "app.log").write_bytes(b"ok \xff\xfe bytes\n")
+    assert log_block(build_report(inputs(tmp_path))) == ["ok \ufffd\ufffd bytes"]
+
+
+def test_a_big_app_log_drops_the_partial_first_line_and_never_pulls_from_older_files(tmp_path: Path) -> None:
+    write_log(tmp_path, "app.log.1", ["older file"])
+    filler = "x" * 2000
+    write_log(tmp_path, "app.log", [f"{i:03d} {filler}" for i in range(40)] + [f"tail {i}" for i in range(3)])
+    lines = log_block(build_report(inputs(tmp_path, error=None)))
+    assert "older file" not in lines
+    assert lines[-3:] == ["tail 0", "tail 1", "tail 2"]
+    assert all(line.startswith(("tail", "0")) for line in lines)  # ไม่มีเศษบรรทัดที่ถูกตัดหัว
+
+
+def test_a_small_app_log_with_few_lines_pulls_the_rest_from_older_files(tmp_path: Path) -> None:
+    write_log(tmp_path, "app.log.1", [f"a {i}" for i in range(60)])
+    write_log(tmp_path, "app.log", ["b 0"])
+    lines = log_block(build_report(inputs(tmp_path, error=None)))
+    assert len(lines) == 50 and lines[0] == "a 11" and lines[-1] == "b 0"
+
+
+def test_an_unreadable_file_is_skipped(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    def read(path: Path):
+        if path.name == "app.log":
+            raise PermissionError("locked")
+        return (["from one"], True) if path.name == "app.log.1" else None
+
+    with caplog.at_level(logging.DEBUG, logger="yttoolkit"):
+        assert diagnostics._tail_lines(tmp_path, read=read) == ["from one"]
+    assert any("app.log" in r.getMessage() for r in caplog.records)
+
+
+def test_backticks_in_a_log_line_get_a_longer_fence(tmp_path: Path) -> None:
+    write_log(tmp_path, "app.log", ["a ``` b", "c ````` d"])
+    report = build_report(inputs(tmp_path, error=None))
+    assert "\n``````text\na ``` b\nc ````` d\n``````\n" in report
+
+
+def test_tail_holds_the_app_log_handler_lock(tmp_path: Path) -> None:
+    write_log(tmp_path, "app.log", ["x"])
+    handler = logging.handlers.RotatingFileHandler(tmp_path / "app.log", encoding="utf-8")
+    root = logging.getLogger()
+    root.addHandler(handler)
+    held: list[bool] = []
+
+    def read(path: Path):
+        held.append(handler.lock._is_owned())  # type: ignore[attr-defined]  # RLock ของ Handler.createLock
+        return diagnostics._read_tail(path)
+
+    try:
+        assert diagnostics._tail_lines(tmp_path, read=read) == ["x"]
+    finally:
+        root.removeHandler(handler)
+        handler.close()
+    assert held and all(held)
+    assert not handler.lock._is_owned()  # type: ignore[attr-defined]
+
+
+# ---------- เพดานความยาว (หลังซ่อนข้อมูล) ----------
+
+
+def test_a_long_log_line_is_cut_with_an_ellipsis(tmp_path: Path) -> None:
+    write_log(tmp_path, "app.log", ["y" * 1000])
+    (line,) = log_block(build_report(inputs(tmp_path, error=None)))
+    assert len(line) == LOG_LINE_MAX and line.endswith("…")
+
+
+def test_a_long_detail_is_cut_to_the_detail_cap(tmp_path: Path) -> None:
+    error = ErrorSection(code="E_UNKNOWN", detail="d" * 5000, context="crash")
+    report = build_report(inputs(tmp_path, error=error))
+    detail = report.split("- รายละเอียด: ", 1)[1].split("\n", 1)[0]
+    assert len(detail) == DETAIL_MAX and detail.endswith("…")
+
+
+def test_report_stays_under_the_cap_by_dropping_the_oldest_log_lines(tmp_path: Path) -> None:
+    write_log(tmp_path, "app.log", [f"{i:02d} " + "z" * 290 for i in range(50)])
+    error = ErrorSection(code="E_UNKNOWN", detail="d" * 1990, context="crash")
+    report = build_report(inputs(tmp_path, error=error))
+    assert len(report) <= REPORT_MAX
+    lines = log_block(report)
+    assert 0 < len(lines) < 50
+    assert lines[-1].startswith("49 ")  # บรรทัดใหม่สุดยังอยู่ ที่ทิ้งคือบรรทัดเก่า
+    assert "### log ล่าสุด (50 บรรทัด)" in report
+
+
+def test_caps_apply_after_redaction_so_a_cut_never_leaks_half_a_username(tmp_path: Path, monkeypatch) -> None:
+    from yttoolkit.api import errors
+
+    monkeypatch.setattr(errors.Path, "home", lambda: PureWindowsPath("C:/Users/somchaijaidee"))
+    monkeypatch.setattr(redact, "_home_aliases", lambda home: ())
+    # path ยาวคร่อมจุดตัด 300: ถ้าตัดก่อนซ่อน "somchai" จะหลุดครึ่งเดียวและไม่ถูกแทน
+    write_log(tmp_path, "app.log", ["p" * 290 + " C:\\Users\\somchaijaidee\\Downloads\\a.mp4"])
+    error = ErrorSection(code="E_UNKNOWN", detail="q" * 1995 + " C:\\Users\\somchaijaidee\\x", context="crash")
+    report = build_report(inputs(tmp_path, error=error))
+    assert "somchai" not in report
+    assert " ~\\Downlo" in report and " ~\\x" in report  # ซ่อนก่อนแล้วค่อยตัด: รอยตัดอยู่หลัง ~
+
+
+def test_token_titles_cookie_names_and_other_drives_are_hidden(tmp_path: Path) -> None:
+    title = "สูตรขนมไทยโบราณ ตอนพิเศษ"
+    write_log(tmp_path, "app.log", [f"token={TOKEN} SAPISID=abc {title} D:\\out\\a.mp4"])
+    error = ErrorSection(code="E_DISK_FULL", detail=f"'D:\\\\out\\\\{title}.mp4'", kind="video", video_id="dQw4w9WgXcQ")
+    report = build_report(inputs(tmp_path, error=error, titles=(title,)))
+    for leaked in (TOKEN, "SAPISID", title, "D:\\out"):
+        assert leaked not in report
+    assert "videoId dQw4w9WgXcQ" in report and "E_DISK_FULL" in report
+
+
+def test_the_builder_never_touches_the_network_or_yt_dlp() -> None:
+    import ast
+
+    source = Path(diagnostics.__file__).read_text(encoding="utf-8")
+    imported = {
+        alias.name for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Import) for alias in node.names
+    } | {node.module or "" for node in ast.walk(ast.parse(source)) if isinstance(node, ast.ImportFrom)}
+    assert not {"yt_dlp", "extractor", "fastapi", "httpx"} & {name.split(".")[0] for name in imported}
+    assert "collect_health" not in source
+```
+
+- [ ] **Step 2: Run them, expect FAIL**
+
+Run: `cd "$WORKTREE" && uv run pytest tests/unit/test_diagnostics.py -q -W error -p no:cacheprovider`
+Expected: collection error `ModuleNotFoundError: No module named 'yttoolkit.core.diagnostics'`.
+
+- [ ] **Step 3: Implement** — create `src/yttoolkit/core/diagnostics.py`:
+```python
+"""รายงานแจ้งปัญหา (M6 รอบ B · PRD ข้อ 7.1 · FR-SET-5): ข้อความ Markdown ที่พนักงานคัดลอกไปส่งผู้ดูแล
+
+เซิร์ฟเวอร์สร้างทั้งรายงานที่นี่ที่เดียว: สถานะเครื่อง + error + log ล่าสุด 50 บรรทัด
+ทุกส่วนผ่าน redact.redact_report ที่จุดเดียว (build_report ขั้นที่ 2) แล้วค่อยตัดความยาว จึงไม่มีรอยตัดกลาง path
+ไม่ต่อเน็ต ไม่ import FastAPI, yt_dlp หรือ extractor (ผู้เรียกส่งสถานะเครื่องมือเข้ามา) อ่านแค่ไฟล์ log
+"""
+
+from __future__ import annotations
+
+import logging
+import logging.handlers
+import os
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
+from ..redact import redact_report
+from .tools import ToolStatus
+
+log = logging.getLogger("yttoolkit")
+
+NONE = "ไม่มี"
+TITLE = "## รายงานปัญหา YT Toolkit"
+LOG_HEADING = "### log ล่าสุด (50 บรรทัด)"  # หัวข้อคงที่ตามแม่แบบ แม้ log มีไม่ถึง 50 บรรทัด
+ACCOUNT_OFF = "ไม่ได้ใช้บัญชี"
+ACCOUNT_ON = "ใช้บัญชีชั่วคราวอยู่"
+LOG_FILES = ("app.log", "app.log.1", "app.log.2")  # ใหม่ไปเก่า (หมุนไฟล์เก็บ 3 ไฟล์ probe.LOG_BACKUPS)
+TAIL_LINES = 50
+TAIL_BYTES = 64 * 1024  # อ่านท้ายไฟล์ละไม่เกินเท่านี้ ไฟล์ใหญ่ 5 MB ก็ไม่ต้องอ่านทั้งไฟล์
+DETAIL_MAX = 2000
+LOG_LINE_MAX = 300
+REPORT_MAX = 8000  # พอดีกับช่องแชตทั่วไป (LINE / Teams / AI) ดู spec Review Focus 1
+ELLIPSIS = "…"
+_BACKTICKS = re.compile(r"`{3,}")
+
+
+@dataclass(frozen=True)
+class ErrorSection:
+    code: str | None  # None = "ไม่มี"
+    detail: str | None
+    kind: str | None = None  # ชนิดงาน ("video", "audio", ...) มี = error ของงานในคิว
+    video_id: str | None = None
+    context: str | None = None  # หน้าจอที่เกิด error (error ที่ไม่ใช่งานในคิวเท่านั้น)
+
+
+@dataclass(frozen=True)
+class ReportInputs:
+    now: datetime  # เวลาท้องถิ่นที่มี timezone (api ส่ง datetime.now().astimezone() เทสส่งเอง)
+    version: str
+    commit: str | None
+    os_version: str
+    ytdlp: ToolStatus
+    ffmpeg: ToolStatus
+    js_runtime: ToolStatus
+    account_active: bool
+    error: ErrorSection | None
+    log_dir: Path
+    token: str  # ใช้ซ่อนเท่านั้น ไม่มีวันอยู่ในรายงาน
+    titles: tuple[str, ...]  # ชื่อคลิปที่ต้องปิด (ชื่องาน + ชื่อในตาราง videos)
+
+
+def build_report(inputs: ReportInputs) -> str:
+    """รายงานตามแม่แบบ PRD ข้อ 7.1 ทุกบรรทัดจบด้วย LF
+
+    ลำดับที่อนุญาตลำดับเดียว: 1) รวบรวมส่วนดิบ 2) redact_report ทุกส่วน 3) ตัดความยาว 4) ต่อด้วย \\n
+    """
+    offset = inputs.now.utcoffset()
+    assert offset is not None, "now ต้องมี timezone (datetime.now().astimezone())"
+    # 1) ส่วนดิบ
+    header = _header_lines(inputs)
+    code_line = _code_line(inputs.error) if inputs.error is not None else None
+    detail = (inputs.error.detail or "").replace("\r\n", "\n") if inputs.error is not None else ""
+    logs = _tail_lines(inputs.log_dir)
+    # 2) ซ่อนข้อมูลส่วนตัว (จุดเดียวของรายงาน · C5)
+
+    def redact(text: str) -> str:
+        return redact_report(text, token=inputs.token, titles=inputs.titles)
+
+    header = [redact(line) for line in header]
+    code_line = redact(code_line) if code_line is not None else None
+    detail = redact(detail)
+    logs = [redact(line) for line in logs]
+    # 3) ตัดความยาว (หลังซ่อนแล้ว รอยตัดจึงไม่ทำให้ชื่อผู้ใช้หลุดครึ่งหนึ่ง)
+    detail = _cut(detail, DETAIL_MAX)
+    logs = [_cut(line, LOG_LINE_MAX) for line in logs]
+    # 4) ต่อ แล้วทิ้ง log บรรทัดเก่าสุดทีละบรรทัดจนไม่เกิน REPORT_MAX
+    text = _assemble(header, code_line, detail, logs)
+    while len(text) > REPORT_MAX and logs:
+        logs.pop(0)
+        text = _assemble(header, code_line, detail, logs)
+    if len(text) > REPORT_MAX and code_line is not None:
+        detail = _cut(detail, max(1, len(detail) - (len(text) - REPORT_MAX)))
+        text = _assemble(header, code_line, detail, logs)
+    return text
+
+
+def _header_lines(inputs: ReportInputs) -> list[str]:
+    z = inputs.now.strftime("%z")  # +0700
+    when = f"{inputs.now.strftime('%Y-%m-%d %H:%M')} ({z[:3]}:{z[3:5]})"
+    ffmpeg = inputs.ffmpeg.version if inputs.ffmpeg.status == "ok" and inputs.ffmpeg.version else NONE
+    runtime = inputs.js_runtime
+    js = " ".join(part for part in (runtime.name, runtime.version) if part) if runtime.name else NONE
+    return [
+        TITLE,
+        f"- เวลา: {when}",
+        f"- แอพ: {inputs.version} (commit {inputs.commit or NONE}) · ระบบ: {inputs.os_version}",
+        f"- yt-dlp: {inputs.ytdlp.version or NONE} · ffmpeg: {ffmpeg} · JS runtime: {js}",
+        f"- บัญชียูทูป: {ACCOUNT_ON if inputs.account_active else ACCOUNT_OFF}",
+    ]
+
+
+def _code_line(error: ErrorSection) -> str:
+    code = error.code or NONE
+    if error.kind is not None:  # งานในคิว: บรรทัดตามแม่แบบตรงตัว
+        return f"- รหัส: {code} · งาน: {error.kind} (videoId {error.video_id or NONE})"
+    line = f"- รหัส: {code}"
+    if error.context:
+        line += f" · หน้าจอ: {error.context}"  # ป้ายไทยตาม Pete spec Q1 ตามด้วยแท็ก ASCII ของหน้าจอ
+    if error.video_id:
+        line += f" (videoId {error.video_id})"
+    return line
+
+
+def _detail_lines(detail: str) -> list[str]:
+    if not detail.strip():
+        return [f"- รายละเอียด: {NONE}"]
+    first, *rest = detail.split("\n")
+    return [f"- รายละเอียด: {first}", *(f"  {line}" for line in rest)]  # บรรทัดต่อของรายการ Markdown
+
+
+def _fence(lines: list[str]) -> str:
+    longest = max((len(run) for line in lines for run in _BACKTICKS.findall(line)), default=0)
+    return "`" * max(3, longest + 1)
+
+
+def _assemble(header: list[str], code_line: str | None, detail: str, logs: list[str]) -> str:
+    out = list(header)
+    if code_line is not None:
+        out += ["### error", code_line, *_detail_lines(detail)]
+    fence = _fence(logs)
+    out += [LOG_HEADING, f"{fence}text", *(logs or [NONE]), fence]
+    return "\n".join(out) + "\n"
+
+
+def _cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + ELLIPSIS
+
+
+# ---------- log ล่าสุด ----------
+
+
+def _file_handler(log_dir: Path) -> logging.Handler | None:
+    """handler ของ app.log ตัวที่ probe.setup_file_log สร้าง (lock เดียวกับที่ emit → doRollover ใช้) ไม่มี = None"""
+    target = os.path.abspath(log_dir / "app.log")
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.handlers.RotatingFileHandler) and handler.baseFilename == target:
+            return handler
+    return None
+
+
+def _read_tail(path: Path) -> tuple[list[str], bool] | None:
+    """บรรทัดท้ายไฟล์ (ไม่เกิน TAIL_BYTES) และว่าได้อ่านทั้งไฟล์ไหม · ไม่มีไฟล์ = None · อ่านไม่ได้ = OSError"""
+    try:
+        f = open(path, "rb")  # noqa: SIM115 (ปิดใน finally ด้านล่าง)
+    except FileNotFoundError:
+        return None
+    try:
+        size = f.seek(0, os.SEEK_END)
+        start = max(0, size - TAIL_BYTES)
+        f.seek(start)
+        data = f.read()
+    finally:
+        f.close()
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if start > 0 and lines:
+        lines = lines[1:]  # บรรทัดแรกหลังจุดที่ seek ถูกตัดกลางบรรทัด
+    return lines, start == 0
+
+
+TailReader = Callable[[Path], "tuple[list[str], bool] | None"]
+
+
+def _tail_lines(log_dir: Path, want: int = TAIL_LINES, *, read: TailReader = _read_tail) -> list[str]:
+    """log ล่าสุดไม่เกิน want บรรทัด เก่าไปใหม่ · อ่านไฟล์เก่ากว่าต่อเมื่อไฟล์ใหม่กว่าอ่านได้ทั้งไฟล์แล้วยังไม่พอ (ไม่มีช่องโหว่)
+
+    ถือ lock ของ handler ของ app.log ระหว่างอ่าน: บน Windows ถ้าหมุนไฟล์ตอนเรากำลังเปิดไฟล์อยู่ การเปลี่ยนชื่อจะล้มและ
+    บรรทัดนั้นหาย · ไม่ log อะไรระหว่างถือ lock (บันทึกไฟล์ที่อ่านไม่ได้ไว้ log ทีหลัง)
+    """
+    handler = _file_handler(log_dir)
+    unreadable: list[str] = []
+    result: list[str] = []
+    if handler is not None:
+        handler.acquire()
+    try:
+        for name in LOG_FILES:
+            try:
+                got = read(log_dir / name)
+            except OSError:
+                unreadable.append(name)
+                continue
+            if got is None:
+                continue
+            lines, whole = got
+            need = want - len(result)
+            result = (lines[-need:] if need > 0 else []) + result
+            if len(result) >= want or not whole:
+                break
+    finally:
+        if handler is not None:
+            handler.release()
+    for name in unreadable:
+        log.debug("อ่าน %s ไม่ได้ ข้ามไปในรายงานแจ้งปัญหา", name)
+    return result
+```
+
+Design notes (spec §2.2):
+- Assembly order is fixed: raw parts → `redact_report` on every part → caps → join. The caps run after redaction so a cut never splits a home path (Review Focus 4).
+- The tail moves to an older file only when the newer one was read whole (≤ 64 KiB) and still gave fewer than 50 lines, so the tail never has a gap; `app.log.3` from older versions is ignored.
+- The `app.log` handler lock (`handler.acquire()` / `release()`, the same RLock `emit` → `doRollover` takes) is held while reading: on Windows a rename while our handle is open would fail and lose that record. Nothing is logged while the lock is held (unreadable files are logged at DEBUG afterwards).
+- A log line with a run of ≥ 3 backticks gets a fence one backtick longer than the longest run.
+
+- [ ] **Step 4: Run, expect PASS**
+
+Run the Step 2 command (30 passed), then the full suite.
+
+- [ ] **Step 5: Commit**
+```bash
+cd "$WORKTREE" && git add src/yttoolkit/core/diagnostics.py tests/unit/test_diagnostics.py && git commit -F- <<'EOF'
+feat(core): problem-report builder (PRD 7.1 template, log tail, one redaction point, caps)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+### Task 7: One `job_failed` log line per failed job (`core/queue.py`, AC-SET-03)
+
+**Files:**
+- Modify: `src/yttoolkit/core/queue.py`
+- Modify: `tests/unit/test_queue.py`
+
+**Interfaces:**
+- Consumes: `redact.redact_log_detail(text, titles)` (T1); `Job.id/kind/title`.
+- Produces: K4 — `JOB_FAILED_DETAIL_MAX`, `job_failed_message(job, code, detail, exc)`, `log_job_failed(job, code, detail, exc)`, `QueueRunner._fail(..., exc=None)`. The old `log.exception` calls at `:316` (spawn) and `:375` (unexpected) are gone; the summary line `งาน … จบด้วย …` (`:351`) stays.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `tests/unit/test_queue.py` replace
+```python
+import random
+import threading
+import time
+from datetime import UTC, datetime, timedelta
+```
+with
+```python
+import logging
+import random
+import threading
+import time
+from datetime import UTC, datetime, timedelta
+```
+and append at the end of the file:
+```python
+# ---------- M6 รอบ B: บรรทัด job_failed ใน app.log (AC-SET-03 · spec 3.2) ----------
+
+
+def failed_records(caplog) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.getMessage().startswith("job_failed ")]
+
+
+def run_one_job(runner_factory, caplog, outcome, *, title: str = "", kind: str = "video"):
+    r, spawn, h = runner_factory(concurrency=1, fail={"vid00000001": outcome})
+    (job,) = r.enqueue([NewJob("vid00000001", kind, {}, title)])
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        r.tick()
+        spawn.run_all()
+    return r, job
+
+
+def test_yt_error_failure_logs_one_detailed_warning_with_a_traceback(runner_factory, caplog):
+    r, job = run_one_job(runner_factory, caplog, "E_YT_REFUSED")
+    (record,) = failed_records(caplog)
+    assert record.levelno == logging.WARNING
+    first, trace = record.getMessage().split("\n", 1)
+    assert first == f"job_failed id={job.id} kind=video code=E_YT_REFUSED detail=fake E_YT_REFUSED"
+    assert trace.startswith("Traceback (most recent call last):") and "YtError" in trace
+    assert record.exc_info is None  # traceback อยู่ในข้อความ จึงผ่านตัวปิดชื่อคลิปด้วย
+    assert r.store.get(job.id).error_code == "E_YT_REFUSED"
+
+
+def test_unexpected_exception_logs_once_at_error_with_e_unknown(runner_factory, caplog):
+    run_one_job(runner_factory, caplog, RuntimeError("boom"))
+    (record,) = failed_records(caplog)
+    assert record.levelno == logging.ERROR
+    assert "code=E_UNKNOWN detail=RuntimeError: boom" in record.getMessage()
+    assert "RuntimeError: boom" in record.getMessage().split("\n", 1)[1]
+    assert [r for r in caplog.records if r.exc_info] == []  # log.exception เดิมของงานที่พังถูกเอาออก (ไม่ซ้ำสองที่)
+
+
+def test_cancelled_without_a_reason_logs_a_warning_without_traceback(runner_factory, caplog):
+    run_one_job(runner_factory, caplog, JobCancelled())
+    (record,) = failed_records(caplog)
+    assert record.levelno == logging.WARNING
+    assert "\n" not in record.getMessage()
+    assert "code=E_UNKNOWN detail=JobCancelled" in record.getMessage()
+
+
+def test_spawn_failure_logs_a_job_failed_line(runner_factory, caplog):
+    def broken_spawn(fn):
+        raise RuntimeError("can't start new thread")
+
+    r, spawn, h = runner_factory(spawn=broken_spawn)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        assert r.tick() == []
+    (record,) = failed_records(caplog)
+    assert record.levelno == logging.ERROR
+    assert record.getMessage().startswith(
+        f"job_failed id={job.id} kind=frames_zip code=E_UNKNOWN detail=RuntimeError: can't start new thread\nTraceback"
+    )
+    assert [r for r in caplog.records if r.exc_info] == []
+
+
+def test_second_bot_check_logs_a_job_failed_line_and_the_first_does_not(runner_factory, caplog):
+    r, spawn, h = runner_factory(concurrency=1, fail={"vid00000001": ["E_BOT_CHECK", "E_BOT_CHECK"]})
+    (job,) = r.enqueue(jobs_of("video", 1))
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        r.tick()
+        spawn.run_all()
+        assert failed_records(caplog) == []  # ครั้งแรกกลับหัวคิว ไม่ใช่ความล้มเหลว
+        r.resume()
+        r.clock.t += 10
+        r.tick()
+        spawn.run_all()
+    (record,) = failed_records(caplog)
+    assert record.levelno == logging.WARNING
+    assert f"job_failed id={job.id} kind=video code=E_BOT_CHECK detail=fake E_BOT_CHECK\nTraceback" in record.getMessage()
+
+
+def test_job_failed_hides_the_title_home_and_other_drive_paths(runner_factory, caplog, tmp_path):
+    title = "สูตรลับขนมไทยของยาย ตอนที่ 3"
+    detail = f"[Errno 13] Permission denied: '{tmp_path}\\out\\{title}.mp4' · copy to 'D:\\backup\\{title}.mp4'"
+    run_one_job(runner_factory, caplog, YtError("E_OUTPUT_NOT_WRITABLE", detail), title=title)
+    text = caplog.text
+    assert title not in text and str(tmp_path) not in text and "D:\\backup" not in text
+    assert "<title>" in text and "<path>" in text and "~" in text
+
+
+def test_job_failed_detail_is_one_line_and_capped(runner_factory, caplog):
+    run_one_job(runner_factory, caplog, YtError("E_YT_REFUSED", "line one\r\nline two\n" + "x" * 5000))
+    first = failed_records(caplog)[0].getMessage().split("\n", 1)[0]
+    detail = first.split(" detail=", 1)[1]
+    assert detail.startswith("line one\\r\\nline two\\n")
+    assert len(detail) <= queue_module.JOB_FAILED_DETAIL_MAX + 6  # \r \n ที่ escape แล้วยาวขึ้นตัวละ 1
+    assert detail.endswith("…")
+
+
+def test_job_failed_line_reaches_app_log(runner_factory, caplog, paths):
+    from yttoolkit import probe
+
+    root = logging.getLogger()
+    before, level = list(root.handlers), root.level
+    try:
+        probe.setup_file_log(paths)
+        r, job = run_one_job(runner_factory, caplog, "E_YT_REFUSED")
+        for handler in root.handlers:
+            handler.flush()
+        text = (paths.logs / "app.log").read_text(encoding="utf-8")
+    finally:
+        for handler in list(root.handlers):
+            if handler not in before:
+                root.removeHandler(handler)
+                handler.close()
+        root.setLevel(level)
+    assert f"WARNING yttoolkit: job_failed id={job.id} kind=video code=E_YT_REFUSED" in text
+```
+
+- [ ] **Step 2: Run them, expect FAIL**
+
+Run: `cd "$WORKTREE" && uv run pytest tests/unit/test_queue.py -q -W error -p no:cacheprovider -k "job_failed or logs_"`
+Expected: the new tests fail on `(record,) = failed_records(caplog)` (`ValueError: not enough values to unpack (expected 1, got 0)`) and `test_job_failed_detail_is_one_line_and_capped` with `IndexError`; `AttributeError: ... 'JOB_FAILED_DETAIL_MAX'`.
+
+- [ ] **Step 3: Implement in `src/yttoolkit/core/queue.py`**
+
+Replace (1) the imports and the logger line:
+```python
+import logging
+import math
+import random
+import shutil
+import threading
+import time
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, Protocol
+
+from .cancel import JobCancelled
+from .download import YOUTUBE_KINDS
+from .events import EventBus
+from .jobs import Handler, InvalidTransition, Job, JobResult, JobStore, NewJob, is_stage
+from .yterrors import MESSAGES, YtError
+
+log = logging.getLogger("yttoolkit")
+```
+with:
+```python
+import logging
+import math
+import random
+import shutil
+import threading
+import time
+import traceback
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, Protocol
+
+from ..redact import redact_log_detail
+from .cancel import JobCancelled
+from .download import YOUTUBE_KINDS
+from .events import EventBus
+from .jobs import Handler, InvalidTransition, Job, JobResult, JobStore, NewJob, is_stage
+from .yterrors import MESSAGES, YtError
+
+log = logging.getLogger("yttoolkit")
+
+# M6 รอบ B (spec 3.2): ความยาวสูงสุดของ detail ในบรรทัด job_failed (หลังซ่อนข้อมูลแล้ว)
+JOB_FAILED_DETAIL_MAX = 2000
+
+
+def job_failed_message(job: Job, code: str, detail: str | None, exc: BaseException | None) -> str:
+    """บรรทัด job_failed ของ app.log: ฟิลด์ ASCII key=value (ไม่ต้องมีข้อความไทยใหม่) ตามด้วย traceback (ถ้ามี)
+
+    detail และ traceback ผ่าน redact_log_detail ที่นี่ที่เดียว (C5) พร้อมชื่องาน: ข้อความของ OSError ที่มีชื่อไฟล์
+    ของคลิปก็ถูกปิดด้วย · traceback อยู่ในข้อความเอง ไม่ใช้ exc_info จึงผ่านตัวปิดชื่อคลิปด้วย
+    """
+    titles = (job.title,)
+    text = redact_log_detail(detail or "-", titles)
+    if len(text) > JOB_FAILED_DETAIL_MAX:
+        text = text[: JOB_FAILED_DETAIL_MAX - 1] + "…"
+    text = text.replace("\r", "\\r").replace("\n", "\\n")
+    line = f"job_failed id={job.id} kind={job.kind} code={code} detail={text}"
+    if exc is None:
+        return line
+    trace = redact_log_detail("".join(traceback.format_exception(exc)), titles)
+    return f"{line}\n{trace.rstrip()}"
+
+
+def log_job_failed(job: Job, code: str, detail: str | None, exc: BaseException | None) -> None:
+    """WARNING สำหรับ YtError หรือไม่มี exception · ERROR สำหรับ exception ที่ไม่ได้คาดไว้ (E_UNKNOWN)"""
+    level = logging.WARNING if exc is None or isinstance(exc, YtError) else logging.ERROR
+    log.log(level, "%s", job_failed_message(job, code, detail, exc))
+```
+(`core` may import `yttoolkit.redact`: it is neither `api` nor `platform`, and it is stdlib only; `test_core_does_not_import_api_or_platform_at_runtime` stays green.)
+
+Replace (2) the spawn-failure block in `_start`:
+```python
+            # เปิดเธรดไม่ได้ (เช่นเครื่องทรัพยากรหมด): งานต้องไม่ค้าง running โดยไม่มีใครทำ
+            log.exception("เริ่มงาน %s ไม่ได้", job.id)
+            ctx.close()
+            self._forget(job.id, ctx)
+            shutil.rmtree(workdir, ignore_errors=True)
+            ctx.done.set()
+            try:
+                failed = self.store.transition(job.id, "failed", error_code="E_UNKNOWN",
+                                               error_message=MESSAGES["E_UNKNOWN"],
+                                               error_detail=f"{type(exc).__name__}: {exc}")
+```
+with:
+```python
+            # เปิดเธรดไม่ได้ (เช่นเครื่องทรัพยากรหมด): งานต้องไม่ค้าง running โดยไม่มีใครทำ
+            detail = f"{type(exc).__name__}: {exc}"
+            log_job_failed(job, "E_UNKNOWN", detail, exc)
+            ctx.close()
+            self._forget(job.id, ctx)
+            shutil.rmtree(workdir, ignore_errors=True)
+            ctx.done.set()
+            try:
+                failed = self.store.transition(job.id, "failed", error_code="E_UNKNOWN",
+                                               error_message=MESSAGES["E_UNKNOWN"], error_detail=detail)
+```
+
+Replace (3) in `_run_job`:
+```python
+            if exc.code == "E_QUEUE_PAUSED" and self.pause_state() is not None:
+                return self._paused(job, ctx)
+            return self._fail(job, ctx, exc.code, exc.message, exc.detail)
+        except Exception as exc:
+            if ctx.reason is not None:
+                return self._stopped(job, ctx)
+            log.exception("งาน %s (%s) พังแบบไม่คาดคิด", job.id, job.kind)
+            return self._fail(job, ctx, "E_UNKNOWN", MESSAGES["E_UNKNOWN"], f"{type(exc).__name__}: {exc}")
+```
+with:
+```python
+            if exc.code == "E_QUEUE_PAUSED" and self.pause_state() is not None:
+                return self._paused(job, ctx)
+            return self._fail(job, ctx, exc.code, exc.message, exc.detail, exc)
+        except Exception as exc:
+            if ctx.reason is not None:
+                return self._stopped(job, ctx)
+            # พังแบบไม่คาดคิด: traceback ลง log ครั้งเดียวในบรรทัด job_failed พร้อมรหัส (M6 รอบ B)
+            return self._fail(job, ctx, "E_UNKNOWN", MESSAGES["E_UNKNOWN"], f"{type(exc).__name__}: {exc}", exc)
+```
+(The `JobCancelled` without a reason at `:362` keeps calling `_fail` with no exception → WARNING without traceback.)
+
+Replace (4) the `_fail` signature:
+```python
+    def _fail(self, job: Job, ctx: _JobContext, code: str, message: str, detail: str | None) -> str:
+        self._clear_workdir(ctx)
+```
+with:
+```python
+    def _fail(
+        self, job: Job, ctx: _JobContext, code: str, message: str, detail: str | None, exc: BaseException | None = None
+    ) -> str:
+        """ทุกความล้มเหลวของงานผ่านที่นี่ (ยกเว้นเปิดเธรดไม่ได้ใน _start): บรรทัด job_failed หนึ่งบรรทัดต่อครั้ง (AC-SET-03)"""
+        log_job_failed(job, code, detail, exc)
+        self._clear_workdir(ctx)
+```
+
+Replace (5) the end of `_bot_check`:
+```python
+        if ctx.reason is not None:
+            return self._stopped(job, ctx)
+        return self._fail(job, ctx, "E_BOT_CHECK", exc.message, exc.detail)
+```
+with:
+```python
+        if ctx.reason is not None:
+            return self._stopped(job, ctx)
+        return self._fail(job, ctx, "E_BOT_CHECK", exc.message, exc.detail, exc)
+```
+
+- [ ] **Step 4: Run, expect PASS**
+
+Run: `cd "$WORKTREE" && uv run pytest tests/unit/test_queue.py -q -W error -p no:cacheprovider` (65 passed), then the full suite (the privacy tests `test_handlers.py::test_logs_have_no_absolute_paths` / `test_logs_have_no_clip_title` and `test_account_privacy.py` must stay green — C6).
+
+- [ ] **Step 5: Commit**
+```bash
+cd "$WORKTREE" && git add src/yttoolkit/core/queue.py tests/unit/test_queue.py && git commit -F- <<'EOF'
+feat(queue): one redacted job_failed line with code, detail and traceback per failure
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+
+---
+
+> **WIP:** tasks T8-T12, the spec-coverage table and the execution handoff follow in the next commit of this plan. Do not execute before the plan is complete.
