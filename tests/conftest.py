@@ -81,3 +81,4 @@ def no_pypi_lookup(monkeypatch):
 
     monkeypatch.setattr(tools, "_fetch_latest_ytdlp", offline)
     monkeypatch.setattr(tools, "_latest_ytdlp_cache", None)
+    monkeypatch.setattr(tools, "_network_cache", None)

@@ -264,6 +264,48 @@ def test_network_status():
     assert tools.network_status(http_error).status == "ok"
 
 
+def test_network_status_remembers_ok_for_a_minute_but_not_errors(monkeypatch):
+    # หน้าตรวจสุขภาพเปิดบ่อย: ต่อยูทูปได้แล้วจำไว้ 60 วินาที ต่อไม่ได้ไม่จำ (เน็ตกลับมาเห็นทันที)
+    calls = []
+    now = [100.0]
+    monkeypatch.setattr(tools, "_network_cache", None)
+    monkeypatch.setattr(tools, "_head_status", lambda url: calls.append(url) or 200)
+
+    def clock():
+        return now[0]
+
+    assert tools.network_status(clock=clock).status == "ok"
+    assert tools.network_status(clock=clock).status == "ok"
+    assert len(calls) == 1
+    now[0] += tools.NETWORK_CACHE_SECONDS + 1
+    assert tools.network_status(clock=clock).status == "ok"
+    assert len(calls) == 2
+
+    def boom(url):
+        raise urllib.error.URLError("offline")
+
+    monkeypatch.setattr(tools, "_network_cache", None)
+    monkeypatch.setattr(tools, "_head_status", boom)
+    assert tools.network_status(clock=clock).status == "error"
+    monkeypatch.setattr(tools, "_head_status", lambda url: 200)
+    assert tools.network_status(clock=clock).status == "ok"
+
+
+def test_collect_health_offline_never_touches_the_network(paths, fake_platform, monkeypatch):
+    # โหมดข้อมูลปลอม: ไม่ต่อยูทูปและไม่ต่อ PyPI
+    monkeypatch.setenv("YT_TOOLKIT_FFMPEG_PATH_LOOKUP", "0")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("offline health must not use the network")
+
+    monkeypatch.setattr(tools, "_head_status", forbidden)
+    monkeypatch.setattr(tools, "_fetch_latest_ytdlp", forbidden)
+    monkeypatch.setattr(tools, "_network_cache", None)
+    health = tools.collect_health(paths, fake_platform, paths.data_root / "out", offline=True)
+    assert health["network"]["status"] == "ok"
+    assert health["tools"]["ytdlp"]["name"] == "yt-dlp"
+
+
 def test_collect_health_shape(paths, fake_platform, monkeypatch):
     monkeypatch.setenv("YT_TOOLKIT_FFMPEG_PATH_LOOKUP", "0")
     health = tools.collect_health(
