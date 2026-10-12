@@ -12,12 +12,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { showErrorToast } from "@/components/error-report/error-toast"
 import { AspectRatio } from "@/components/ui/aspect-ratio"
 import { Button } from "@/components/ui/button"
 import { fill, th } from "@/i18n/th"
 import { copyImage } from "@/lib/clipboard"
 import { downloadFile } from "@/lib/download"
 import { youtubeWatchUrl } from "@/lib/format"
+import { reportRequest } from "@/lib/report"
 import type { Capture } from "@/lib/types"
 import { cn } from "cn"
 
@@ -71,7 +73,10 @@ async function downloadCapture(capture: Capture): Promise<void> {
     await downloadFile(captureDownloadUrl(capture.url), captureFileName(capture.tMs))
     toast.dismiss(id)
   } catch (error) {
-    toast.error(errorMessage(error, th.errors.downloadFailed), { id })
+    showErrorToast(errorMessage(error, th.errors.downloadFailed), {
+      id,
+      request: reportRequest(error, { context: "capture-download" }),
+    })
   }
 }
 
@@ -190,7 +195,10 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
       } catch (error) {
         // ภาพหายไปแล้ว (ถูกลบจากที่อื่น) = ถือว่าลบสำเร็จ · พลาดแบบอื่น = แจ้งแล้วโหลดรายการใหม่ให้ตรงกับของจริง
         if (!hasCode(error, "E_NOT_FOUND")) {
-          toast.error(errorMessage(error, th.errors.unknown))
+          showErrorToast(errorMessage(error, th.errors.unknown), {
+            id: "capture-delete",
+            request: reportRequest(error, { context: "capture-delete", videoId }),
+          })
           void client.invalidateQueries({ queryKey: capturesKey(videoId) })
           return
         }
@@ -212,7 +220,10 @@ export function CaptureStrip({ videoId, layout, className }: { videoId: string; 
     try {
       await revealCaptures(videoId)
     } catch (error) {
-      toast.error(errorMessage(error, th.errors.unknown))
+      showErrorToast(errorMessage(error, th.errors.unknown), {
+        id: "capture-reveal",
+        request: reportRequest(error, { context: "capture-reveal", videoId }),
+      })
     }
   }
 

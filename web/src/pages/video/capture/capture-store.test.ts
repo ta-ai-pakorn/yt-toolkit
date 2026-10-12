@@ -17,6 +17,9 @@ const api = vi.hoisted(() => ({ postCapture: vi.fn() }))
 vi.mock("./capture-api", async (importOriginal) => ({ ...(await importOriginal<object>()), postCapture: api.postCapture }))
 
 const BBB = "aqz-KE-bpKQ"
+type ErrorOptions = { id?: string; duration?: number; action?: { label: string; onClick: () => void } }
+/** ข้อความและตัวเลือกของ toast error ล่าสุด (M6 รอบ B: ทุกตัวผ่าน showErrorToast) */
+const lastError = () => toast.error.mock.lastCall as unknown as [string, ErrorOptions]
 const item = (tMs: number): Capture => ({ id: `c_${tMs}`, tMs, width: 1920, height: 1080, url: `/api/cache/${BBB}/captures/c_${tMs}.jpg?v=1` })
 
 beforeEach(() => {
@@ -129,7 +132,11 @@ describe("runCapture", () => {
     const invalidate = vi.spyOn(client, "invalidateQueries")
     api.postCapture.mockRejectedValueOnce(new ApiError(422, "E_CAPTURE_UNSUPPORTED", "ถ่ายไม่ได้", null, null))
     await runCapture(client, BBB, 0)
-    expect(toast.error).toHaveBeenCalledWith("ถ่ายไม่ได้")
+    const [message, options] = lastError()
+    expect(message).toBe("ถ่ายไม่ได้")
+    expect(options.id).toBe("capture-error") // M6 รอบ B: id คงที่ ค้างจนกดปิด ไม่มีปุ่มบัญชี
+    expect(options.duration).toBe(Infinity)
+    expect(options.action).toBeUndefined()
     expect(client.getQueryData(capturesKey(BBB))).toBeUndefined()
     expect(invalidate).not.toHaveBeenCalled()
     api.postCapture.mockRejectedValueOnce(new ApiError(429, "E_BOT_CHECK", "ยูทูปขอให้ยืนยัน", null, null))
@@ -158,11 +165,14 @@ describe("runCapture", () => {
     accountDialog.close()
   })
 
-  it("M5 รอบ C: ยูทูปขอตรวจสอบ (E_BOT_CHECK) = ไม่มีปุ่มบัญชี ข้อความเดิม ไม่ค้างถาวร", async () => {
+  it("M5 รอบ C: ยูทูปขอตรวจสอบ (E_BOT_CHECK) = ไม่มีปุ่มบัญชี ข้อความเดิม (M6 รอบ B: ค้างจนกดปิดเหมือน error อื่น)", async () => {
     const client = new QueryClient()
     api.postCapture.mockRejectedValueOnce(new ApiError(429, "E_BOT_CHECK", "ยูทูปขอให้ยืนยัน", null, null))
     await runCapture(client, BBB, 0)
-    expect(toast.error).toHaveBeenLastCalledWith("ยูทูปขอให้ยืนยัน")
+    const [message, options] = lastError()
+    expect(message).toBe("ยูทูปขอให้ยืนยัน")
+    expect(options.action).toBeUndefined()
+    expect(options.duration).toBe(Infinity)
   })
 
   it("M5 รอบ C: ถือบัญชีอยู่แล้ว = ไม่มีปุ่ม (ข้อความ ลองด้วยบัญชีแล้ว… มาจาก backend)", async () => {
@@ -170,6 +180,8 @@ describe("runCapture", () => {
     client.setQueryData(ACCOUNT_KEY, { active: true, used: true })
     api.postCapture.mockRejectedValueOnce(new ApiError(404, "E_VIDEO_PRIVATE", "ลองด้วยบัญชีแล้วยังเปิดไม่ได้", null, null))
     await runCapture(client, BBB, 0)
-    expect(toast.error).toHaveBeenLastCalledWith("ลองด้วยบัญชีแล้วยังเปิดไม่ได้")
+    const [message, options] = lastError()
+    expect(message).toBe("ลองด้วยบัญชีแล้วยังเปิดไม่ได้")
+    expect(options.action).toBeUndefined()
   })
 })
