@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import platform
 import signal
 import subprocess
 from pathlib import Path
@@ -67,3 +68,9 @@ class MacPlatform:
 
     def path_aliases(self, path: Path) -> list[str]:
         return []
+
+    def os_version(self) -> str:
+        """ชื่อและเลขรุ่นสำหรับรายงานแจ้งปัญหา เช่น macOS 15.6 (M6 รอบ B: ให้ protocol ครบ · macOS จริงมาใน M7)"""
+        # platform ตัวนี้คือโมดูลของ stdlib (import แบบ absolute) ไม่ใช่แพ็กเกจ yttoolkit.platform
+        release = platform.mac_ver()[0]
+        return f"macOS {release}" if release else "macOS"
