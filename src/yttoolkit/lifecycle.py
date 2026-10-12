@@ -158,6 +158,15 @@ def install_log_filters(paths: Paths) -> None:
                 handler.addFilter(kind())
 
 
+def wire_output_roots(settings: SettingsStore) -> None:
+    """รีวิวซ้ำ N1: OutputPathFilter ปิด path ใต้โฟลเดอร์ผลลัพธ์ในทุกบรรทัด log (รวม traceback ดิบของ uvicorn.error)
+
+    ตั้งค่าครั้งเดียวตอนนี้ แล้วอัปเดตเมื่อ PATCH outputDir สำเร็จ · ตัวกรองอ่านแค่ค่าที่ตั้งไว้ ไม่เคยอ่านการตั้งค่า/ฐานข้อมูลเอง
+    """
+    set_output_roots((settings.output_dir(),))
+    settings.on_output_dir = lambda folder: set_output_roots((folder,))
+
+
 def setup_file_logging(paths: Paths) -> None:
     setup_file_log(paths)  # เรียกซ้ำได้ (__main__ ตั้งไว้ก่อน import lifecycle แล้ว) ไม่เกิด handler ซ้ำ
     install_log_filters(paths)
@@ -304,8 +313,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         subtitles = SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
         default_output = paths.data_root / "output" if fake else default_output_dir(plat)
         settings = SettingsStore(db, default_output)
-        # รีวิวซ้ำ N1: traceback ดิบ (เช่น uvicorn.error) ในทุก handler ที่มี OutputPathFilter ปิด path ใต้โฟลเดอร์ผลลัพธ์
-        set_output_roots(lambda: (settings.output_dir(),))
+        wire_output_roots(settings)
         media: MediaTools
         if fake:
             media = FakeMediaTools(CODE_ROOT / "tests" / "fixtures" / "media")

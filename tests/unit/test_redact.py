@@ -490,11 +490,19 @@ def test_crash_trace_redacts_the_traceback_with_titles_and_roots(somchai_home) -
 # ---------- รีวิวซ้ำ N1: uvicorn เขียน "Exception in ASGI application" พร้อม traceback ดิบลง app.log ----------
 
 
+@pytest.fixture
+def output_roots():
+    """ค่าโฟลเดอร์ผลลัพธ์ของ OutputPathFilter เป็นค่าระดับโมดูล: คืนค่าเดิมหลังเทส"""
+    before = redact.output_roots()
+    yield
+    redact.set_output_roots(before)
+
+
 def test_uvicorn_error_traceback_in_app_log_is_masked_below_the_output_folder(
-    paths, restore_root_logging, somchai_home, monkeypatch
+    paths, restore_root_logging, somchai_home, output_roots
 ) -> None:
     root = PureWindowsPath("C:/Users/somchai/Downloads/YT Toolkit")
-    monkeypatch.setattr(redact, "_output_roots", lambda: (root,))
+    redact.set_output_roots([root])
     probe.setup_file_log(paths)
     clip = str(root / "Secret Clip Title [abcdefghijk]" / "x.mp4")
     try:
@@ -509,12 +517,74 @@ def test_uvicorn_error_traceback_in_app_log_is_masked_below_the_output_folder(
     assert "'~\\\\Downloads\\\\YT Toolkit\\\\<path>'" in text  # repr ของ OSError: backslash สองตัว
 
 
-def test_output_roots_provider_is_set_and_cleared() -> None:
+def test_set_output_roots_swaps_an_immutable_tuple(output_roots) -> None:
+    redact.set_output_roots([Path("D:/out")])
+    assert redact.output_roots() == (str(Path("D:/out")),)
+    redact.set_output_roots(())
+    assert redact.output_roots() == ()
+
+
+def _filtered_logger(name: str):
+    import io
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    add_redaction(handler)
+    logger = logging.getLogger(name)
+    logger.addHandler(handler)
+    logger.propagate = False
+    return logger, handler, stream
+
+
+def test_a_changed_output_folder_masks_later_log_lines(tmp_path, output_roots) -> None:
+    from yttoolkit.core.db import Database
+    from yttoolkit.core.settings import SettingsStore
+
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    first, second = tmp_path / "first out", tmp_path / "second out"
+    store = SettingsStore(db, first)
+    lifecycle.wire_output_roots(store)
+    logger, handler, stream = _filtered_logger("yttoolkit.test.roots")
     try:
-        redact.set_output_roots(lambda: ["D:/out"])
-        assert tuple(redact._output_roots()) == ("D:/out",)
-        redact.set_output_roots(lambda: (_ for _ in ()).throw(RuntimeError("db closed")))
-        assert redact._output_roots() == ()
+        logger.warning("open %s", first / "Clip One" / "a.mp4")
+        store.patch({"outputDir": str(second)})
+        logger.warning("open %s", second / "Clip Two" / "b.mp4")
     finally:
-        redact.set_output_roots(None)
-    assert redact._output_roots() == ()
+        logger.removeHandler(handler)
+        logger.propagate = True
+        db.close()
+    text = stream.getvalue()
+    assert "Clip One" not in text and "Clip Two" not in text
+    assert text.count("<path>") == 2
+
+
+def test_output_path_filter_never_reads_settings(tmp_path, output_roots) -> None:
+    # ตัวกรอง log ห้ามแตะล็อกของแอพหรือฐานข้อมูล (ล็อกกลับลำดับกับเธรดที่ log ระหว่างถือ db._lock)
+    class Settings:
+        def __init__(self) -> None:
+            self.on_output_dir = None
+
+        def output_dir(self) -> Path:
+            return tmp_path / "out"
+
+    settings = Settings()
+    lifecycle.wire_output_roots(settings)
+
+    def no_io(*args, **kwargs):
+        raise AssertionError("the log filter read the settings")
+
+    settings.output_dir = no_io  # type: ignore[method-assign]
+    clip_name = "Secret Clip"  # ไม่อยู่บรรทัดเดียวกับ raise: บรรทัดโค้ดใน traceback ไม่มีชื่อนี้
+    logger, handler, stream = _filtered_logger("yttoolkit.test.noio")
+    try:
+        try:
+            raise PermissionError(13, "Permission denied", str(tmp_path / "out" / clip_name / "x.mp4"))
+        except PermissionError:
+            logger.exception("boom")
+    finally:
+        logger.removeHandler(handler)
+        logger.propagate = True
+    text = stream.getvalue()
+    assert "Secret Clip" not in text and "<path>" in text
+    assert "the log filter read the settings" not in text

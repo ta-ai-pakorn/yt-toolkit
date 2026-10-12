@@ -16,7 +16,7 @@ import logging
 import os
 import re
 import traceback
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from pathlib import Path
 from urllib.parse import quote
 
@@ -142,24 +142,19 @@ class SecretFilter(_RewriteFilter):
         return redact_secrets(text)
 
 
-# รีวิวซ้ำ N1: ตัวบอกโฟลเดอร์ผลลัพธ์ปัจจุบัน (lifecycle ตั้งหลังสร้าง SettingsStore) · None = ยังไม่รู้ ไม่ปิดอะไร
-_roots_provider: Callable[[], Iterable[str | os.PathLike[str]]] | None = None
+# รีวิวซ้ำ N1: โฟลเดอร์ผลลัพธ์ปัจจุบันของ OutputPathFilter เป็น tuple ที่สลับทั้งก้อน (การกำหนดค่าตัวแปรเดียวเป็น atomic)
+# ตัวกรอง log ห้ามอ่านการตั้งค่าเอง: ล็อกของ SettingsStore/ฐานข้อมูลกลับลำดับกับเธรดที่ log ระหว่างถือ db._lock = ค้าง
+# lifecycle.wire_output_roots ตั้งค่าตอนเปิดโปรแกรม และหลัง PATCH outputDir สำเร็จ (นอกล็อก) · () = ยังไม่รู้ ไม่ปิดอะไร
+_output_roots_value: tuple[str, ...] = ()
 
 
-def set_output_roots(provider: Callable[[], Iterable[str | os.PathLike[str]]] | None) -> None:
-    """ตั้งตัวบอกโฟลเดอร์ผลลัพธ์ให้ OutputPathFilter (อ่านใหม่ทุกบรรทัด log: เปลี่ยนโฟลเดอร์ในหน้าตั้งค่าแล้วมีผลทันที)"""
-    global _roots_provider
-    _roots_provider = provider
+def set_output_roots(roots: Iterable[str | os.PathLike[str]]) -> None:
+    global _output_roots_value
+    _output_roots_value = tuple(os.fspath(root) for root in roots)
 
 
-def _output_roots() -> tuple[str | os.PathLike[str], ...]:
-    provider = _roots_provider
-    if provider is None:
-        return ()
-    try:
-        return tuple(provider())
-    except Exception:
-        return ()  # อ่านการตั้งค่าไม่ได้ (เช่นฐานข้อมูลปิดแล้วตอนปิดโปรแกรม): ห้ามทำให้การเขียน log พัง
+def output_roots() -> tuple[str, ...]:
+    return _output_roots_value
 
 
 class OutputPathFilter(_RewriteFilter):
@@ -170,7 +165,7 @@ class OutputPathFilter(_RewriteFilter):
     """
 
     def rewrite(self, text: str) -> str:
-        roots = _output_roots()
+        roots = _output_roots_value  # อ่านค่าเดียว ไม่มี I/O ไม่มีล็อก
         return mask_below_roots(text, roots) if roots else text
 
 
