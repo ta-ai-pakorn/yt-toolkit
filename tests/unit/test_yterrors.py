@@ -128,7 +128,7 @@ def test_messages_are_verbatim_prd_copy() -> None:
         MESSAGES["E_TRANSLATION_BLOCKED"]
         == "ยูทูปยังไม่ให้โหลดซับแปลอัตโนมัติในตอนนี้ เลือกซับภาษาต้นฉบับแทน"
     )
-    assert MESSAGES["E_UNKNOWN"] == "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล"
+    assert MESSAGES["E_UNKNOWN"] == 'มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล'  # M6 รอบ B D3
 
 
 def test_m4_messages_are_verbatim_c11_copy() -> None:

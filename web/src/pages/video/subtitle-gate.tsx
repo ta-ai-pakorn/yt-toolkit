@@ -56,7 +56,15 @@ type Props = {
 export function SubtitleGate({ videoId, enabled, children }: Props) {
   const subtitles = useQuery(subtitlesQuery(videoId, enabled))
   if (subtitles.isError) {
-    return <LoadError title={t.loadError} error={subtitles.error} onRetry={() => void subtitles.refetch()} />
+    return (
+      <LoadError
+        title={t.loadError}
+        error={subtitles.error}
+        onRetry={() => void subtitles.refetch()}
+        context="video-subtitles"
+        videoId={videoId}
+      />
+    )
   }
   if (!subtitles.isSuccess) return <SubsSkeleton />
   if (subtitles.data.tracks.length === 0) return <NoSubtitles />

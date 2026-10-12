@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import threading
 import time
 from collections.abc import Callable, Collection, Sequence
@@ -547,3 +548,11 @@ class JobStore:
     def pending_count(self) -> int:
         rows = self._db.execute("SELECT count(*) AS n FROM jobs WHERE status IN ('queued', 'running')")
         return int(rows[0]["n"])
+
+    def chapters_json(self, video_id: str) -> str | None:
+        """chapters_json ของคลิปจากตาราง videos (ใช้ปิดชื่อ chapter ในบรรทัด job_failed) อ่านไม่ได้ = None ไม่ยกต่อ"""
+        try:
+            rows = self._db.execute("SELECT chapters_json FROM videos WHERE video_id = ?", (video_id,))
+        except sqlite3.Error:
+            return None
+        return rows[0]["chapters_json"] if rows else None

@@ -1,1 +1,0 @@
-import{Ir as e,an as t,m as n,vt as r,yt as i}from"./skeleton-452wYkPt.js";var a=e();function o({onImported:e,origin:o=`error`,variant:s=`outline`,size:c=`sm`,className:l}){return(0,a.jsxs)(i,{variant:s,size:c,className:l,onClick:()=>n({origin:o,onImported:e}),children:[(0,a.jsx)(t,{"aria-hidden":!0}),r.account.use]})}export{o as t};

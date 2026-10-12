@@ -175,7 +175,15 @@ function TrackTranscript({ videoId, track, at, segments, onPick, onUseOriginal }
   else if (hasCode(tokens.error, "E_TRANSLATION_BLOCKED")) body = <TranslationBlocked onUseOriginal={onUseOriginal} />
   else if (isWarming(tokens.error)) body = <SessionWarming key={tokens.errorUpdatedAt} query={tokens} onUseOriginal={onUseOriginal} />
   else if (tokens.isError) {
-    body = <LoadError title={th.subs.loadError} error={tokens.error} onRetry={() => void tokens.refetch()} />
+    body = (
+      <LoadError
+        title={th.subs.loadError}
+        error={tokens.error}
+        onRetry={() => void tokens.refetch()}
+        context="video-transcript"
+        videoId={videoId}
+      />
+    )
   } else if (!tokens.isSuccess) body = <LinesSkeleton />
   else if (cues.length === 0) body = <NoLines />
   else body = <TranscriptLines cues={cues} at={at} segments={segments} onPick={onPick} />

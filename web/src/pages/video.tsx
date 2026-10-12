@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEffect } from "react"
 import { useLocation, useParams } from "react-router"
-import { toast } from "sonner"
-
+import { showErrorToast } from "@/components/error-report/error-toast"
 import { fill, th } from "@/i18n/th"
+import { reportRequest } from "@/lib/report"
 
 import { homeStore, useHomeState } from "./home/state"
 import { readFromList, useAnalyze, useGlobalPaste } from "./home/use-analyze"
@@ -54,8 +54,12 @@ export function VideoPage() {
 
   // รีเฟรชเบื้องหลังล้มเหลวทั้งที่มีข้อมูลเดิมอยู่: ไม่ล้มทั้งหน้า แจ้งด้วย toast
   useEffect(() => {
-    if (video.isError && hasData) toast.error(errorMessage(video.error, th.errors.unknown))
-  }, [video.isError, video.error, hasData])
+    if (!video.isError || !hasData) return
+    showErrorToast(errorMessage(video.error, th.errors.unknown), {
+      id: "video-refresh",
+      request: reportRequest(video.error, { context: "video-refresh", videoId }),
+    })
+  }, [video.isError, video.error, hasData, videoId])
 
   return (
     <div className="flex flex-col gap-6 pt-2">

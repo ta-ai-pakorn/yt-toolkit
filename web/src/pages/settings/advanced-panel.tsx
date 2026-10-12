@@ -3,6 +3,7 @@ import { CircleX, UserRound } from "lucide-react"
 
 import { UseAccountButton } from "@/components/account/account-button"
 import { useDeleteAccount, useNow } from "@/components/account/use-account"
+import { ErrorDetails } from "@/components/error-report/error-details"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -37,6 +38,7 @@ export function AdvancedPanel() {
         <CircleX aria-hidden />
         <AlertTitle>{th.general.loadError}</AlertTitle>
         <AlertDescription>{account.error instanceof ApiError ? account.error.message : th.errors.unknown}</AlertDescription>
+        <ErrorDetails key={account.errorUpdatedAt} error={account.error} context="settings-advanced" className="col-start-2" />
         <AlertAction>
           <Button variant="outline" size="sm" onClick={() => void account.refetch()}>
             {th.common.retry}

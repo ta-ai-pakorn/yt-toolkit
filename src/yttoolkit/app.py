@@ -9,7 +9,8 @@ from fastapi import FastAPI
 
 from .api.account import build_account_router
 from .api.captures import build_captures_router
-from .api.errors import install_error_handlers
+from .api.diagnostics import build_diagnostics_router
+from .api.errors import ErrorLogMiddleware, install_error_handlers
 from .api.events import build_events_router
 from .api.jobs import build_jobs_router
 from .api.routes import build_router
@@ -83,6 +84,8 @@ def create_app(ctx: AppContext) -> FastAPI:
     app.state.ctx = ctx
     install_error_handlers(app)
     app.include_router(build_router(ctx), prefix="/api")
+    # M6 รอบ B: รายงานแจ้งปัญหาเปิดเสมอ (ใช้ได้แม้บริการอื่นยังไม่พร้อม เช่นหน้าตรวจสุขภาพตอนเริ่ม)
+    app.include_router(build_diagnostics_router(ctx), prefix="/api")
     if ctx.videos is not None:
         app.include_router(build_videos_router(ctx), prefix="/api")
     if ctx.captures is not None:
@@ -99,4 +102,6 @@ def create_app(ctx: AppContext) -> FastAPI:
         app.include_router(build_events_router(ctx), prefix="/api")
     mount_web(app, ctx.paths.web_dist, ctx.token)
     app.add_middleware(LocalOnlyMiddleware, port=ctx.port, token=ctx.token, extra_origins=ctx.extra_origins)
+    # เพิ่มทีหลัง = อยู่นอกสุด: เห็น 403/421 ของ LocalOnlyMiddleware ด้วย (M6 รอบ B spec 3.3)
+    app.add_middleware(ErrorLogMiddleware)
     return app

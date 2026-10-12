@@ -11,18 +11,21 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import random
 import shutil
 import threading
 import time
+import traceback
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
+from ..redact import crash_trace, redact_log_detail
 from .cancel import JobCancelled
 from .download import YOUTUBE_KINDS
 from .events import EventBus
@@ -30,6 +33,64 @@ from .jobs import Handler, InvalidTransition, Job, JobResult, JobStore, NewJob, 
 from .yterrors import MESSAGES, YtError
 
 log = logging.getLogger("yttoolkit")
+
+# M6 รอบ B (spec 3.2): ความยาวสูงสุดของ detail ในบรรทัด job_failed (หลังซ่อนข้อมูลแล้ว)
+JOB_FAILED_DETAIL_MAX = 2000
+
+
+def job_titles(job: Any, chapters_json: str | None) -> tuple[str, ...]:
+    """ชื่อที่ต้องปิดในข้อความเกี่ยวกับงานหนึ่งงาน (รีวิวท้ายรอบ I1): ชื่องาน ชื่อโฟลเดอร์ playlist/ชุดงาน (params.folder)
+    และชื่อ chapter ทุกตอนของคลิป (คอลัมน์ chapters_json ของตาราง videos) · ค่าที่อ่านไม่ได้ข้ามไป ไม่ยกต่อ
+
+    ใช้ทั้งบรรทัด job_failed ของ app.log และรายงานแจ้งปัญหา (api/diagnostics) จะได้ปิดชื่อชุดเดียวกัน
+    """
+    params = job.params if isinstance(getattr(job, "params", None), Mapping) else {}
+    folder = params.get("folder")
+    names = [job.title, folder if isinstance(folder, str) else ""]
+    try:
+        chapters = json.loads(chapters_json) if chapters_json else []
+    except (ValueError, TypeError, RecursionError):
+        chapters = []
+    if isinstance(chapters, list):
+        names += [c["title"] for c in chapters if isinstance(c, Mapping) and isinstance(c.get("title"), str)]
+    return tuple(name for name in names if name)
+
+
+def job_failed_message(
+    job: Job, code: str, detail: str | None, exc: BaseException | None, titles: Sequence[str] | None = None
+) -> str:
+    """บรรทัด job_failed ของ app.log: ฟิลด์ ASCII key=value (ไม่ต้องมีข้อความไทยใหม่) ตามด้วย traceback (ถ้ามี)
+
+    detail และ traceback ผ่าน redact_log_detail ที่นี่ที่เดียว (C5) พร้อมชื่องาน: ข้อความของ OSError ที่มีชื่อไฟล์
+    ของคลิปก็ถูกปิดด้วย · traceback อยู่ในข้อความเอง ไม่ใช้ exc_info จึงผ่านตัวปิดชื่อคลิปด้วย
+    """
+    titles = tuple(titles) if titles is not None else job_titles(job, None)
+    text = redact_log_detail(detail or "-", titles)
+    if len(text) > JOB_FAILED_DETAIL_MAX:
+        text = text[: JOB_FAILED_DETAIL_MAX - 1] + "…"
+    text = text.replace("\r", "\\r").replace("\n", "\\n")
+    line = f"job_failed id={job.id} kind={job.kind} code={code} detail={text}"
+    if exc is None:
+        return line
+    trace = redact_log_detail("".join(traceback.format_exception(exc)), titles)
+    return f"{line}\n{trace.rstrip()}"
+
+
+def log_job_failed(
+    job: Job, code: str, detail: str | None, exc: BaseException | None, chapters_json: str | None = None
+) -> None:
+    """WARNING สำหรับ YtError หรือไม่มี exception · ERROR สำหรับ exception ที่ไม่ได้คาดไว้ (E_UNKNOWN)
+
+    chapters_json = คอลัมน์ของตาราง videos ของคลิปนี้ (JobStore.chapters_json) ชื่อ chapter จะถูกปิดด้วย
+    """
+    level = logging.WARNING if exc is None or isinstance(exc, YtError) else logging.ERROR
+    try:
+        message = job_failed_message(job, code, detail, exc, job_titles(job, chapters_json))
+    except Exception:
+        # ตัวปิดข้อมูล/จัดรูปแบบพัง: ห้ามขวางการเปลี่ยนสถานะงานเป็น failed · เหลือแค่ id กับรหัส (ไม่มี detail/traceback)
+        log.warning("job_failed job=%s code=%s", job.id, code)
+        return
+    log.log(level, "%s", message)
 
 # ความถี่สูงสุดที่เขียนความคืบหน้าลงฐานข้อมูล (หน้าเว็บได้ค่าสดทาง SSE อยู่แล้ว ฐานข้อมูลไว้ใช้ตอนโหลดหน้าใหม่)
 PROGRESS_DB_INTERVAL_S = 1.0
@@ -313,7 +374,8 @@ class QueueRunner:
             self._spawn(lambda: self._work(job, ctx))
         except Exception as exc:
             # เปิดเธรดไม่ได้ (เช่นเครื่องทรัพยากรหมด): งานต้องไม่ค้าง running โดยไม่มีใครทำ
-            log.exception("เริ่มงาน %s ไม่ได้", job.id)
+            detail = f"{type(exc).__name__}: {exc}"
+            log_job_failed(job, "E_UNKNOWN", detail, exc, self.store.chapters_json(job.video_id))
             ctx.close()
             self._forget(job.id, ctx)
             shutil.rmtree(workdir, ignore_errors=True)
@@ -321,7 +383,7 @@ class QueueRunner:
             try:
                 failed = self.store.transition(job.id, "failed", error_code="E_UNKNOWN",
                                                error_message=MESSAGES["E_UNKNOWN"],
-                                               error_detail=f"{type(exc).__name__}: {exc}")
+                                               error_detail=detail)
             except (KeyError, InvalidTransition):
                 return _SPAWN_FAILED
             self._publish_job(failed)
@@ -334,8 +396,8 @@ class QueueRunner:
         outcome = "?"
         try:
             outcome = self._run_job(job, ctx)
-        except Exception:
-            log.exception("สรุปผลงาน %s ไม่สำเร็จ", job.id)
+        except Exception as exc:
+            self._log_crash(job, ctx, exc)
         finally:
             ctx.close()
             with self._lock:
@@ -349,6 +411,15 @@ class QueueRunner:
             ctx.done.set()
             self._wake.set()
             log.info("งาน %s (%s) จบด้วย %s", job.id, job.kind, outcome)
+
+    def _log_crash(self, job: Job, ctx: _JobContext, exc: BaseException) -> None:
+        """สรุปผลงานพัง: traceback ในข้อความผ่าน crash_trace (ชื่อของงานนี้ + ทุกอย่างใต้โฟลเดอร์ผลลัพธ์เป็น <path>)"""
+        try:
+            titles = job_titles(job, self.store.chapters_json(job.video_id))
+            trace = crash_trace(exc, titles=titles, roots=(ctx.output_root,))
+        except Exception:
+            trace = type(exc).__name__
+        log.error("สรุปผลงาน %s ไม่สำเร็จ\n%s", job.id, trace)
 
     def _run_job(self, job: Job, ctx: _JobContext) -> str:
         """เรียก handler แล้วเปลี่ยนสถานะตามผล คืนข้อความสั้นสำหรับ log (สถานะหรือรหัส error)"""
@@ -368,12 +439,12 @@ class QueueRunner:
                 return self._bot_check(job, ctx, exc)
             if exc.code == "E_QUEUE_PAUSED" and self.pause_state() is not None:
                 return self._paused(job, ctx)
-            return self._fail(job, ctx, exc.code, exc.message, exc.detail)
+            return self._fail(job, ctx, exc.code, exc.message, exc.detail, exc)
         except Exception as exc:
             if ctx.reason is not None:
                 return self._stopped(job, ctx)
-            log.exception("งาน %s (%s) พังแบบไม่คาดคิด", job.id, job.kind)
-            return self._fail(job, ctx, "E_UNKNOWN", MESSAGES["E_UNKNOWN"], f"{type(exc).__name__}: {exc}")
+            # พังแบบไม่คาดคิด: traceback ลง log ครั้งเดียวในบรรทัด job_failed พร้อมรหัส (M6 รอบ B)
+            return self._fail(job, ctx, "E_UNKNOWN", MESSAGES["E_UNKNOWN"], f"{type(exc).__name__}: {exc}", exc)
         return self._finish(job, ctx, result)
 
     def _call_with_retries(self, handler: Handler, job: Job, ctx: _JobContext) -> JobResult:
@@ -403,7 +474,11 @@ class QueueRunner:
         self._end(job, ctx, "cancelled")
         return "cancelled"
 
-    def _fail(self, job: Job, ctx: _JobContext, code: str, message: str, detail: str | None) -> str:
+    def _fail(
+        self, job: Job, ctx: _JobContext, code: str, message: str, detail: str | None, exc: BaseException | None = None
+    ) -> str:
+        """ทุกความล้มเหลวของงานผ่านที่นี่ (ยกเว้นเปิดเธรดไม่ได้ใน _start): บรรทัด job_failed หนึ่งบรรทัดต่อครั้ง (AC-SET-03)"""
+        log_job_failed(job, code, detail, exc, self.store.chapters_json(job.video_id))
         self._clear_workdir(ctx)
         self._end(job, ctx, "failed", error_code=code, error_message=message, error_detail=detail or None)
         return code
@@ -427,7 +502,7 @@ class QueueRunner:
                     return "E_BOT_CHECK (กลับหัวคิว)"
         if ctx.reason is not None:
             return self._stopped(job, ctx)
-        return self._fail(job, ctx, "E_BOT_CHECK", exc.message, exc.detail)
+        return self._fail(job, ctx, "E_BOT_CHECK", exc.message, exc.detail, exc)
 
     def _paused(self, job: Job, ctx: _JobContext) -> str:
         """E_QUEUE_PAUSED ระหว่างงานรันอยู่ (คำขออื่นเบรกคิวกลางทาง แล้ว with_account_retry ไม่ยอมลองด้วยบัญชี)

@@ -21,6 +21,9 @@ from .platform import Platform, current
 from .redact import add_redaction
 
 PING_TIMEOUT = 2
+# PRD ข้อ 7.1 "หมุนไฟล์ที่ 5 MB เก็บ 3 ไฟล์" (Pete spec Q4): app.log + app.log.1 + app.log.2 รวมไม่เกิน 15 MB
+LOG_MAX_BYTES = 5_000_000
+LOG_BACKUPS = 2
 
 # ไม่ผ่าน proxy ที่ตั้งไว้ในเครื่อง เพราะ 127.0.0.1 ต้องต่อตรงเสมอ
 _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -68,12 +71,16 @@ def setup_file_log(paths: Paths) -> None:
     filename = paths.logs / "app.log"
     root = logging.getLogger()
     root.setLevel(logging.INFO)
+    # M6 รอบ B: httpx เขียน INFO ทุกคำขอพร้อม URL เต็มของภาพ/ปก ให้เหลือแค่ WARNING (ตั้งตามชื่อ ไม่ต้อง import httpx)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     target = os.path.abspath(filename)
     for existing in root.handlers:
         if isinstance(existing, logging.handlers.RotatingFileHandler) and existing.baseFilename == target:
             add_redaction(existing)
             return
-    handler = logging.handlers.RotatingFileHandler(filename, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    handler = logging.handlers.RotatingFileHandler(
+        filename, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"
+    )
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     # M5 รอบ C: ซ่อนโฟลเดอร์ผู้ใช้และค่าคุกกี้ตั้งแต่สร้าง handler (ก่อนโหลด lifecycle) ไม่มีบรรทัดไหนหลุดก่อนตั้ง log
     add_redaction(handler)

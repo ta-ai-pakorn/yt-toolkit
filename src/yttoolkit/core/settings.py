@@ -12,7 +12,7 @@ import os
 import re
 import threading
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -174,6 +174,8 @@ class SettingsStore:
     def __init__(self, db: Database, default_output_dir: Path) -> None:
         self._db = db
         self._lock = threading.RLock()
+        # เรียกหลัง patch ที่เปลี่ยน outputDir สำเร็จ นอกล็อก (lifecycle.wire_output_roots ต่อสายให้ OutputPathFilter)
+        self.on_output_dir: Callable[[Path], None] | None = None
         self._defaults: dict[str, Any] = {
             "outputDir": str(default_output_dir),
             "videoDefault": "compat-1080",
@@ -234,7 +236,11 @@ class SettingsStore:
                         "ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
                         (key, json.dumps(value, ensure_ascii=False, allow_nan=False)),
                     )
-        return self.get()
+        saved = self.get()
+        hook = self.on_output_dir
+        if "outputDir" in clean and hook is not None:
+            hook(Path(saved["outputDir"]))
+        return saved
 
     def output_dir(self) -> Path:
         return Path(self.get()["outputDir"])

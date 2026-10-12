@@ -128,6 +128,8 @@ function PreviewBody({ data, options, range }: { data: SubTokens; options: SubOp
 }
 
 type Props = {
+  /** คลิปของซับนี้ (M6 รอบ B: videoId ของรายงานแจ้งปัญหา) */
+  videoId: string
   /** ผลของ tokensQuery สำหรับแทร็กที่ใช้อยู่ */
   query: UseQueryResult<SubTokens>
   options: SubOptions
@@ -142,12 +144,20 @@ type Props = {
  * ยูทูปไม่ให้โหลดซับแปล = คำแนะนำ + ปุ่มใช้ซับภาษาต้นฉบับ · ซับแปลรอเซสชัน = กล่องนับถอยหลัง (โหลดให้เองเมื่อครบ)
  * ผิดพลาดอื่น = Alert + ลองใหม่ (ถ้าลองแล้วช่วย)
  */
-export function SubsPreview({ query, options, onUseOriginal, range }: Props) {
+export function SubsPreview({ videoId, query, options, onUseOriginal, range }: Props) {
   if (query.isError) {
     if (hasCode(query.error, "E_NO_SUBTITLES")) return <NoTokens />
     if (hasCode(query.error, "E_TRANSLATION_BLOCKED")) return <TranslationBlocked onUseOriginal={onUseOriginal} />
     if (isWarming(query.error)) return <SessionWarming key={query.errorUpdatedAt} query={query} onUseOriginal={onUseOriginal} />
-    return <LoadError title={t.loadError} error={query.error} onRetry={() => void query.refetch()} />
+    return (
+      <LoadError
+        title={t.loadError}
+        error={query.error}
+        onRetry={() => void query.refetch()}
+        context="video-subs-preview"
+        videoId={videoId}
+      />
+    )
   }
   if (!query.isSuccess) return <PreviewSkeleton />
   return <PreviewBody data={query.data} options={options} range={range} />

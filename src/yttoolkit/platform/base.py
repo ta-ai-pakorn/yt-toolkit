@@ -48,3 +48,7 @@ class Platform(Protocol):
     def path_aliases(self, path: Path) -> list[str]:
         """ชื่ออื่นที่ชี้ไปที่เดียวกับ path (Windows: ชื่อสั้นแบบ 8.3) ใช้ตัดชื่อผู้ใช้ออกจากข้อความ error"""
         ...
+
+    def os_version(self) -> str:
+        """ชื่อและเลขรุ่นของระบบปฏิบัติการสำหรับรายงานแจ้งปัญหา"""
+        ...

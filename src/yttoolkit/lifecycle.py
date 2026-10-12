@@ -49,7 +49,15 @@ from .platform import LockFileError, Platform, current
 
 # ตัวจริงอยู่ใน probe (stdlib ล้วน) ที่นี่ส่งต่อชื่อเดิมให้โค้ดและเทสที่เรียกผ่าน lifecycle
 from .probe import base_url, find_running, is_alive, setup_file_log  # noqa: F401
-from .redact import HomePathFilter, SecretFilter, add_redaction, redact_home
+from .redact import (
+    HomePathFilter,
+    OutputPathFilter,
+    SecretFilter,
+    add_redaction,
+    crash_trace,
+    redact_home,
+    set_output_roots,
+)
 
 log = logging.getLogger("yttoolkit")
 
@@ -145,9 +153,18 @@ def install_log_filters(paths: Paths) -> None:
     """ใส่ ConnectionResetNoiseFilter, HomePathFilter และ SecretFilter ให้ handler ของ app.log ที่ตั้งไว้แล้ว
     (เรียกซ้ำได้ ไม่ใส่ซ้ำ · probe.setup_file_log ใส่สองตัวหลังไว้ตั้งแต่สร้าง handler แล้ว)"""
     for handler in _app_log_handlers(paths):
-        for kind in (ConnectionResetNoiseFilter, HomePathFilter, SecretFilter):
+        for kind in (ConnectionResetNoiseFilter, HomePathFilter, SecretFilter, OutputPathFilter):
             if not any(isinstance(f, kind) for f in handler.filters):
                 handler.addFilter(kind())
+
+
+def wire_output_roots(settings: SettingsStore) -> None:
+    """รีวิวซ้ำ N1: OutputPathFilter ปิด path ใต้โฟลเดอร์ผลลัพธ์ในทุกบรรทัด log (รวม traceback ดิบของ uvicorn.error)
+
+    ตั้งค่าครั้งเดียวตอนนี้ แล้วอัปเดตเมื่อ PATCH outputDir สำเร็จ · ตัวกรองอ่านแค่ค่าที่ตั้งไว้ ไม่เคยอ่านการตั้งค่า/ฐานข้อมูลเอง
+    """
+    set_output_roots((settings.output_dir(),))
+    settings.on_output_dir = lambda folder: set_output_roots((folder,))
 
 
 def setup_file_logging(paths: Paths) -> None:
@@ -296,6 +313,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         subtitles = SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
         default_output = paths.data_root / "output" if fake else default_output_dir(plat)
         settings = SettingsStore(db, default_output)
+        wire_output_roots(settings)
         media: MediaTools
         if fake:
             media = FakeMediaTools(CODE_ROOT / "tests" / "fixtures" / "media")
@@ -381,12 +399,19 @@ def recover_jobs(services: Services) -> None:
     except Exception:
         log.exception("กู้งานที่ค้างจากรอบก่อนไม่สำเร็จ")
         return
+    output_root: Path | None = None
     try:
-        removed = sweep_interrupted_outputs(store, services.settings.output_dir(), stranded)
+        output_root = services.settings.output_dir()
+        removed = sweep_interrupted_outputs(store, output_root, stranded)
         if removed:
             log.info("ล้างไฟล์ที่ค้างจากงานที่หยุดกลางคันแล้ว %s ไฟล์", removed)
-    except Exception:
-        log.exception("ล้างไฟล์ที่ค้างจากงานที่หยุดกลางคันไม่สำเร็จ (ข้ามไปก่อน)")
+    except Exception as exc:
+        # OSError ของไฟล์ค้างมี path ใต้โฟลเดอร์ผลลัพธ์ (ชื่อคลิป): traceback ผ่าน crash_trace ไม่ใช้ log.exception
+        try:
+            trace = crash_trace(exc, roots=(output_root,) if output_root is not None else ())
+        except Exception:
+            trace = type(exc).__name__
+        log.error("ล้างไฟล์ที่ค้างจากงานที่หยุดกลางคันไม่สำเร็จ (ข้ามไปก่อน)\n%s", trace)
 
 
 def _clip_folders(root: Path, video_id: str, title: str, group: str | None = None) -> list[tuple[Path, str]]:

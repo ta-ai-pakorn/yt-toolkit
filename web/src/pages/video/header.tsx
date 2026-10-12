@@ -2,6 +2,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { ExternalLink, ImageIcon, NotebookPen } from "lucide-react"
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
+import { useParams } from "react-router"
 
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -321,6 +322,8 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
   }, [videoId])
   // เปิดคลิปที่เปิดไม่ได้ (เช่นกด "ถัดไป" แล้วคลิปนั้นถูกลบ) ไม่มีชื่อคลิป: โฟกัสกล่อง error แทน ไม่ปล่อยไว้ที่ body
   const errorRef = useRef<HTMLDivElement>(null)
+  // เปิดคลิปไม่ได้ = ยังไม่มีข้อมูลคลิป: videoId ของรายงานมาจาก URL (/v/:videoId)
+  const { videoId: pageId } = useParams()
   const failed = !data && video.isError
   useEffect(() => {
     if (failed && focusLost()) errorRef.current?.focus({ preventScroll: true })
@@ -335,6 +338,8 @@ export function VideoHeader({ video }: { video: UseQueryResult<VideoInfo, Error>
           error={video.error}
           onRetry={() => void video.refetch()}
           account={{ onImported: () => void video.refetch() }}
+          context="video-header"
+          videoId={pageId}
         />
       )
     }

@@ -1,12 +1,11 @@
-import { ChevronDown, CircleCheck, CirclePause, CircleX, Copy, Download, FolderOpen, RotateCcw } from "lucide-react"
+import { CircleCheck, CirclePause, CircleX, Download, FolderOpen, RotateCcw } from "lucide-react"
 import { useState, type ComponentProps, type ReactNode } from "react"
-import { toast } from "sonner"
 
 import { UseAccountButton } from "@/components/account/account-button"
 import { useAccountStatus } from "@/components/account/use-account"
+import { ErrorDetails } from "@/components/error-report/error-details"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
 import { fill, th } from "@/i18n/th"
@@ -90,20 +89,15 @@ export function QueuedRow({ job, handle, className, ...props }: { job: Job; hand
   )
 }
 
-async function copyDetails(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.success(th.video.copied)
-  } catch {
-    toast.error(th.video.copyFailed)
-  }
-}
-
-/** แถวงานที่พลาดหรือหยุดกลางคัน: ข้อความผิดพลาด · "ดูรายละเอียด" (รหัส + ข้อความเทคนิค + คัดลอก) · "ลองใหม่" */
+/**
+ * แถวงานที่พลาดหรือหยุดกลางคัน: ข้อความผิดพลาด · "ดูรายละเอียด" (รหัส + ข้อความเทคนิค + "คัดลอกข้อมูลแจ้งปัญหา") · "ลองใหม่"
+ * M6 รอบ B: ปุ่มคัดลอกรายงานแทนปุ่ม "คัดลอกรายละเอียด" เดิม · เซิร์ฟเวอร์หางานจาก jobId ก่อน code/detail เป็นตัวสำรอง
+ */
 export function FailedRow({ job, expanded }: { job: Job; expanded: boolean }) {
   const retry = useJobAction("retry", job.id)
   // เปิดจาก toast "ดูรายละเอียด" = กางรายละเอียด แม้แถวนี้จะแสดงอยู่แล้วก่อนหน้า
-  const [open, setOpen] = useState(expanded)
+  // E_UNKNOWN กางตั้งแต่แรก (R1): ข้อความของรหัสนี้บอกให้กดปุ่มคัดลอก ปุ่มจึงต้องเห็นเลย
+  const [open, setOpen] = useState(expanded || job.error?.code === "E_UNKNOWN")
   const [lastExpanded, setLastExpanded] = useState(expanded)
   if (expanded !== lastExpanded) {
     setLastExpanded(expanded)
@@ -128,27 +122,12 @@ export function FailedRow({ job, expanded }: { job: Job; expanded: boolean }) {
           </div>
         )}
         {code && (
-          <Collapsible open={open} onOpenChange={setOpen}>
-            <CollapsibleTrigger
-              data-details-trigger=""
-              render={<Button variant="link" size="sm" className="group/details h-7 px-0 text-muted-foreground" />}
-            >
-              {th.queue.details}
-              <ChevronDown aria-hidden className="transition-transform group-data-[panel-open]/details:rotate-180" />
-            </CollapsibleTrigger>
-            <CollapsibleContent className="flex flex-col items-start gap-2 pt-1">
-              <p className="font-mono text-xs">{fill(th.queue.errorCode, { code })}</p>
-              {detail && (
-                <pre className="max-h-40 w-full overflow-auto rounded-md bg-muted p-2 font-mono text-xs break-all whitespace-pre-wrap">
-                  {detail}
-                </pre>
-              )}
-              <Button variant="outline" size="sm" onClick={() => void copyDetails(detail ? `${code}\n${detail}` : code)}>
-                <Copy aria-hidden />
-                {th.queue.copyDetails}
-              </Button>
-            </CollapsibleContent>
-          </Collapsible>
+          <ErrorDetails
+            key={`${code}:${detail ?? ""}`}
+            request={{ jobId: job.id, code, detail: detail ?? undefined, context: "queue" }}
+            open={open}
+            onOpenChange={setOpen}
+          />
         )}
       </div>
       <Button

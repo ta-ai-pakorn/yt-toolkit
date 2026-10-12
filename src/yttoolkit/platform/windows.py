@@ -5,6 +5,7 @@ import functools
 import msvcrt
 import os
 import subprocess
+import sys
 import uuid
 from ctypes import wintypes
 from pathlib import Path
@@ -159,3 +160,21 @@ class WindowsPlatform:
             return []
         short = buffer.value
         return [short] if short.casefold() != full.casefold() else []
+
+    def os_version(self) -> str:
+        """ชื่อและเลขรุ่นของระบบปฏิบัติการสำหรับรายงานแจ้งปัญหา เช่น Windows 11 (10.0.26200) (M6 รอบ B)
+
+        Windows 11 ยังรายงาน major 10 จึงดูเลข build ≥ 22000 · ไม่ใช้ platform.release() เพราะ Python รุ่นเก่าบอก 10
+        บน Windows 11 · อ่านไม่ได้ = คืนแค่ Windows
+        """
+        try:
+            v = sys.getwindowsversion()
+            if v.major == 10 and v.build >= 22000:
+                name = "Windows 11"
+            elif v.major == 10:
+                name = "Windows 10"
+            else:
+                name = f"Windows {v.major}"
+            return f"{name} ({v.major}.{v.minor}.{v.build})"
+        except Exception:
+            return "Windows"

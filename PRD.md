@@ -610,7 +610,7 @@ queued ──► running ──► done
 | POST | `/jobs/{id}/outputs/{n}/reveal` | — | `{ok:true}` เปิด Explorer/Finder พร้อมเลือกไฟล์นั้น (AC-OUT-04) · 404 แบบเดียวกับข้างบน |
 | GET | `/cache/{videoId}/{path}` | `?download=1` (ไม่บังคับ) | ไฟล์ภาพใน cache (ภาพเฟรม, ปก) เฉพาะที่อยู่ใต้ `data/cache/<videoId>/` · path ที่มี `..`, `\`, `:` หรือขึ้นต้นด้วย `/` หรือตัวพิมพ์เล็ก/ใหญ่ไม่ตรงชื่อจริง → 404 (AC-SEC-04) · ภาพเฟรมมี `Cache-Control: public, max-age=86400, immutable` · `?download=1` → attachment ชื่อ `frame_HH-MM-SS.jpg` |
 | GET | `/history` | `?q=&limit=&offset=&scope=all\|opened` (`limit` ค่าเริ่มต้น 20 สูงสุด 100 · `scope` ค่าเริ่มต้น `all`) | `{items:[{videoId, title, thumbnailUrl, durationS, outputs:[kind], lastAt}], total}` · **`scope=all` (W5):** คลิปที่เปิดดูใน W2 หรือมีงาน `done` ที่มีไฟล์ · `lastAt` = เวลาล่าสุดของการเปิดหรืองานที่เสร็จ · **`scope=opened` (W1 "ล่าสุด"):** เฉพาะคลิปที่เปิดใน W2 (งานในคิวและ `peek=1` ไม่นับว่าเปิด) · `outputs` = ชนิดงาน `done` ที่มีไฟล์ ไม่ซ้ำ เรียง video, audio, subtitle, contact_sheet, frames_zip · `q` ค้นจากชื่อคลิป · `scope` อื่น → 422 |
-| GET | `/diagnostics` | `?jobId=` (ไม่บังคับ) | `{text}` รายงานแจ้งปัญหาแบบ Markdown ตามข้อ 7.1 |
+| POST | `/diagnostics` | `{jobId?, code?, detail?, context?, videoId?}` (detail ≤ 4,000) | `{report}` Markdown ตามแม่แบบใน §7.1 · token เหมือนคำขออื่นที่ไม่ใช่ GET · ช่องผิดรูป = 422 `E_BAD_REQUEST` |
 | GET | `/settings` | — | `Settings` |
 | PATCH | `/settings` | บางส่วนของ `Settings` | `Settings` · ทั้งหมดหรือไม่เลย: key ที่ไม่รู้จัก ชนิดผิด ค่าเกินช่วง หรือแตะ `statsResetAt` (หรือส่ง `cookies` ที่เลิกใช้แล้วใน M5 รอบ C) → 422 `E_BAD_REQUEST` · `outputDir` ต้องเป็น path เต็ม ระบบสร้างโฟลเดอร์และลองเขียนไฟล์ทดสอบ เขียนไม่ได้ → 422 `E_OUTPUT_NOT_WRITABLE` ไม่เก็บค่าใดเลย |
 | POST | `/settings/open-output` | — | `{ok:true}` สร้างโฟลเดอร์ผลลัพธ์ (ถ้ายังไม่มี) แล้วเปิด Explorer/Finder · เขียนโฟลเดอร์ไม่ได้ → 422 `E_OUTPUT_NOT_WRITABLE` (โหมดข้อมูลปลอมไม่เปิดจริง แค่บันทึก log) |
@@ -815,7 +815,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | `E_TOOL_INSTALL_FAILED` | โหลดโปรแกรมที่ต้องใช้ไม่สำเร็จ ตรวจเน็ตแล้วกด "โหลด ffmpeg ใหม่" อีกครั้ง | คงสถานะเดิม |
 | `E_FORBIDDEN` | คำขอนี้ไม่ได้รับอนุญาต ลองรีเฟรชหน้าเว็บ | ตอบ 403 (NFR-SEC-3) |
 | `E_OFFLINE` | เชื่อมต่อโปรแกรมไม่ได้ ถ้าปิดโปรแกรมไปแล้ว เปิดใหม่ด้วย start.bat | ฝั่งหน้าเว็บ: เชื่อมต่อ backend ไม่ได้ |
-| `E_UNKNOWN` | มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล | งานล้มเหลว · M6 เปลี่ยนเป็นปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" |
+| `E_UNKNOWN` | มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล | งานล้มเหลว · (M6 รอบ B, Pete Q3 = A) ข้อความเดิม "…ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล" เปลี่ยนเป็นข้อความนี้ทุกที่ (`yterrors.py`, `th.errors.unknown`) · กล่อง error ที่เป็นรหัสนี้กางส่วน "ดูรายละเอียด" ไว้ให้เห็นปุ่มทันที · หน้าจอ "เปิดโปรแกรมไม่สำเร็จ" ของ `start.bat` คงข้อความถ่ายภาพหน้าจอ เพราะตอนนั้นแอพยังไม่เปิด |
 | `E_NOT_FOUND` | ไม่พบสิ่งที่ขอ | ตอบ 404 (path ที่ไม่มีใน API) |
 | `E_BAD_REQUEST` | ข้อมูลที่ส่งมาไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ | ตอบ 422 (ข้อมูลไม่ผ่านการตรวจ) · HTTP error อื่นใช้ข้อความเดียวกันกับรหัส `E_HTTP_<status>` |
 
@@ -832,7 +832,10 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | **หน้าเว็บ** | พนักงาน | `message` ภาษาไทยจากตารางข้างบน + ส่วน "รายละเอียด" ที่พับไว้ (รหัส error + `detail` ข้อความเทคนิคดิบ) |
 | **log** | ผู้ดูแล / AI | `run/logs/app.log` ทุก error มีเวลา, รหัส error, job id และ traceback · หมุนไฟล์ที่ 5 MB เก็บ 3 ไฟล์ |
 
-**ปุ่ม "คัดลอกข้อมูลแจ้งปัญหา"** อยู่ในส่วน "รายละเอียด" ของ error ทุกจุด และในหน้าตรวจสุขภาพระบบ เรียก `GET /api/diagnostics` แล้วคัดลอกข้อความนี้ลงคลิปบอร์ด:
+**ปุ่ม "คัดลอกข้อมูลแจ้งปัญหา"** อยู่ในส่วน "รายละเอียด" ของ error ทุกจุด และในหน้าตรวจสุขภาพระบบ เรียก `POST /api/diagnostics` แล้วคัดลอกข้อความนี้ลงคลิปบอร์ด:
+
+- (M6 รอบ B) toast ของ error มีปุ่มนี้ในตัว toast เอง และค้างจนกดปิด · กล่อง "เปิดหน้านี้ไม่สำเร็จ" (หน้าพัง) มีปุ่มนี้ข้างปุ่มโหลดหน้าใหม่ · แถวงานที่พลาดในคิวใช้ปุ่มนี้แทนปุ่ม "คัดลอกรายละเอียด" เดิม
+- (M6 รอบ B) เปลี่ยนจาก `GET /api/diagnostics?jobId=` เป็น `POST` เพราะ error ที่ไม่ใช่งานในคิวต้องส่งรหัสกับ `detail` จากหน้าเว็บไปด้วย (ไม่ใส่ข้อความเทคนิคลงใน URL) และให้คำขอผ่าน token แบบเดียวกับคำขออื่นที่ไม่ใช่ GET · body = `{jobId?, code?, detail?, context?, videoId?}` ทุกช่องไม่บังคับ (`detail` ไม่เกิน 4,000 ตัวอักษร ช่องผิดรูปหรือเกินขนาด = 422 `E_BAD_REQUEST`) · มี `jobId` ของงานที่มีอยู่ = หัวข้อ error มาจากงานนั้น ไม่มี = มาจาก `code`/`detail` ที่ส่งมา ไม่ส่งทั้งสองแบบ (หน้าตรวจสุขภาพ) = ไม่มีหัวข้อ error · error ที่ไม่ใช่งานในคิวใช้บรรทัด `- รหัส: E_NETWORK · หน้าจอ: video-header (videoId dQw4w9WgXcQ)` แทนบรรทัด `งาน:` (Pete 2026-10-12) · ตอบ `{report}` · `detail` ที่หน้าเว็บส่งมาผ่านตัวซ่อนข้อมูลชุดเดียวกับทั้งรายงาน (ดู `docs/superpowers/specs/2026-10-12-m6b-error-report-design.md`)
 
 ```markdown
 ## รายงานปัญหา YT Toolkit
@@ -856,7 +859,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | AC | เงื่อนไข → ผลที่ต้องได้ | เทส |
 |---|---|---|
 | AC-SET-03 | error ที่เกิดจากงานใด ๆ → มีบรรทัดใน `app.log` ที่มีรหัส error และ job id | A |
-| AC-SET-04 | `/api/diagnostics?jobId=` → มีครบทุกหัวข้อตามตัวอย่าง ไม่มีชื่อผู้ใช้ใน path และไม่มี token | A |
+| AC-SET-04 | `POST /api/diagnostics` ที่มี `jobId` (M6 รอบ B: เดิม `GET /api/diagnostics?jobId=`) → มีครบทุกหัวข้อตามตัวอย่าง ไม่มีชื่อผู้ใช้ใน path และไม่มี token | A |
 | AC-SET-05 | กด "คัดลอกข้อมูลแจ้งปัญหา" → คลิปบอร์ดได้ข้อความรายงาน และมี toast "คัดลอกแล้ว" | E |
 | AC-SET-06 | นำเข้า `cookies.txt` ที่ค่าคุกกี้ (และชื่อคุกกี้หนึ่งตัว) เป็นค่าปลอมที่จำง่าย (canary) แล้วเปิดคลิปด้วยบัญชี ทำงานที่ใช้บัญชีทั้งที่สำเร็จและพลาด เรียก `/health` และ `GET /cookies` → ค่า canary ไม่อยู่ใน `run/logs/*` (รวม `app.log`), ข่าว SSE, `detail` ของ error และคำตอบของ API ใด ๆ และไม่มีไฟล์ใดในโฟลเดอร์ข้อมูลหรือ temp ที่มี canary · (M6) `/api/diagnostics` ต้องผ่านเงื่อนไขเดียวกัน และรายงานมีแค่บรรทัดสถานะบัญชี | A |
 
@@ -939,7 +942,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | FR-OUT-1..5 | W2, W4, W5 | `/outputs`, `/reveal`, `/history` | AC-OUT-01..05 |
 | FR-OUT-6..8 | W2, W6 | `/jobs` (ทุก kind), `/settings` | AC-OUT-06..11 |
 | FR-SET-1..4 | W6 | `/settings`, `/health`, `/update` | AC-SET-01..02 |
-| FR-SET-5 | W6, W7 | `/diagnostics` | AC-SET-03..06 |
+| FR-SET-5 | W2, W3, W4, W5, W6, W7 (ส่วน "ดูรายละเอียด" และปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" ทุกจุดที่มี error) | `POST /diagnostics` · `run/logs/app.log` (บรรทัด `job_failed` และ `api_error`) | AC-SET-03..06 |
 | FR-SET-6..7 | W6, W7 | `/storage*`, `/settings/export`, `/settings/import` | AC-SET-07..10 |
 | FR-CK-1..8 | W2, W4, W6, W7 | `/cookies*`, `/health`, SSE `account` | AC-CK-01..09, AC-SET-06 |
 | FR-STAT-1..4 | W6, W7 | `/stats`, `/stats/reset` | AC-STAT-01..04 |

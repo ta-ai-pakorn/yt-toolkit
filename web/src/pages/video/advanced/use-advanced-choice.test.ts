@@ -1,8 +1,12 @@
 import { MutationObserver, QueryClient } from "@tanstack/react-query"
+import type { ReactElement } from "react"
+import { toast } from "sonner"
 import { describe, expect, it, vi } from "vitest"
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
+import { th } from "@/i18n/th"
+import { ApiError } from "@/lib/api"
 import { SETTINGS_KEY } from "@/lib/settings-api"
 import { PRESETS } from "@/lib/sub-options"
 import type { Settings, SponsorCategory } from "@/lib/types"
@@ -27,6 +31,12 @@ function settings(sponsorblockDefault: SponsorCategory[]): Settings {
     statsResetAt: null,
     lastUsed: {},
   }
+}
+
+type ToastOptions = {
+  id?: string
+  duration?: number
+  description: ReactElement<{ children: ReactElement<{ request: unknown }>[] }>
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -74,5 +84,22 @@ describe("ติ๊กหมวด SponsorBlock หลายช่องเร�
 
   it("ยังไม่มีการตั้งค่าในแคช = คิดจากหมวดเริ่มต้น", () => {
     expect(nextSponsorCategories(new QueryClient(), "intro", true)).toEqual(["sponsor", "selfpromo", "interaction", "intro"])
+  })
+})
+
+describe("บันทึกหมวด SponsorBlock ไม่สำเร็จ", () => {
+  it("toast id advanced-save ค้างจนกดปิด ปุ่มคัดลอกส่งรหัสกับรายละเอียดของ error · แคชกลับเป็นค่าเดิม", async () => {
+    const client = new QueryClient()
+    client.setQueryData(SETTINGS_KEY, settings(["sponsor"]))
+    const failure = new ApiError(500, "E_SETTINGS_WRITE", "บันทึกไม่ได้", "disk is read-only", null)
+    const observer = new MutationObserver(client, sponsorToggleMutation(client, () => Promise.reject(failure)))
+    await observer.mutate(nextSponsorCategories(client, "intro", true)).catch(() => {})
+    const [message, options] = vi.mocked(toast.error).mock.lastCall as unknown as [string, ToastOptions]
+    expect(message).toBe(th.general.saveFailed)
+    expect(options.id).toBe("advanced-save")
+    expect(options.duration).toBe(Infinity)
+    const button = options.description.props.children[1]
+    expect(button.props.request).toEqual({ context: "advanced-save", code: "E_SETTINGS_WRITE", detail: "disk is read-only" })
+    expect(client.getQueryData<Settings>(SETTINGS_KEY)?.sponsorblockDefault).toEqual(["sponsor"])
   })
 })

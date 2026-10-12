@@ -3,6 +3,7 @@ import { Check, ChevronDown, ChevronUp, CircleX, ListChecks, ListVideo, Trash2 }
 import { useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { Link } from "react-router"
 
+import { ErrorDetails } from "@/components/error-report/error-details"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -306,6 +307,7 @@ function PlaylistRow({ listId, playlistId, mixVideoId }: { listId: string; playl
           <AlertDescription>
             {t.playlistError} · {playlist.error.message}
           </AlertDescription>
+          <ErrorDetails key={playlist.errorUpdatedAt} error={playlist.error} context="home-playlist" className="col-start-2" />
           <AlertAction>
             <Button
               variant="outline"

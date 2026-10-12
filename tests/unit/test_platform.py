@@ -1,6 +1,7 @@
 import ctypes
 import importlib
 import os
+import re
 import subprocess
 import sys
 import types
@@ -298,3 +299,76 @@ def test_windows_short_path_name_is_typed_and_loaded_once():
     assert windows._short_path_name() is fn
     assert fn.argtypes == (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
     assert fn.restype is wintypes.DWORD
+
+
+# ---- M6 รอบ B: ชื่อและเลขรุ่นของระบบปฏิบัติการ (บรรทัด "ระบบ:" ของรายงานแจ้งปัญหา) ------------------------------
+
+
+def _winver(major: int, minor: int, build: int):
+    return lambda: types.SimpleNamespace(major=major, minor=minor, build=build)
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [
+        ((10, 0, 26200), "Windows 11 (10.0.26200)"),
+        ((10, 0, 22000), "Windows 11 (10.0.22000)"),
+        ((10, 0, 19045), "Windows 10 (10.0.19045)"),
+        ((6, 3, 9600), "Windows 6 (6.3.9600)"),
+    ],
+)
+def test_windows_os_version_names_11_by_build(windows_module, monkeypatch, version, expected):
+    monkeypatch.setattr(windows_module.sys, "getwindowsversion", _winver(*version), raising=False)
+    assert windows_module.WindowsPlatform().os_version() == expected
+
+
+def test_windows_os_version_falls_back_when_unreadable(windows_module, monkeypatch):
+    def broken():
+        raise OSError("no version")
+
+    monkeypatch.setattr(windows_module.sys, "getwindowsversion", broken, raising=False)
+    assert windows_module.WindowsPlatform().os_version() == "Windows"
+
+
+@pytest.mark.parametrize(("release", "expected"), [("15.6", "macOS 15.6"), ("", "macOS")])
+def test_macos_os_version(macos_module, monkeypatch, release, expected):
+    monkeypatch.setattr(macos_module.platform, "mac_ver", lambda: (release, ("", "", ""), ""))
+    assert macos_module.MacPlatform().os_version() == expected
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="อ่านเลขรุ่นของ Windows จริง")
+def test_windows_os_version_live():
+    text = current().os_version()
+    assert text.startswith("Windows ")
+    assert text.endswith(")") and "(10." in text
+
+
+# ---- กฎของโปรเจกต์: เช็กระบบปฏิบัติการได้ที่ yttoolkit.platform ที่เดียว (M6 รอบ B C2) ------------------------------
+
+SRC = Path(__file__).resolve().parents[2] / "src" / "yttoolkit"
+_OS_CHECK = re.compile(
+    r"\bsys\.platform\b|\bos\.name\b|getwindowsversion"
+    r"|\bplatform\.(?:system|release|version|mac_ver|win32_ver|uname|platform|win32_edition)\("
+    r"|\bfrom\s+(?:sys|os)\s+import\s+[^#\n]*\b(?:platform|name)\b"  # from sys import platform · from os import name
+)
+
+
+def test_only_the_platform_package_checks_the_os():
+    offenders = [
+        f"{path.relative_to(SRC).as_posix()}:{n}"
+        for path in sorted(SRC.rglob("*.py"))
+        if path.relative_to(SRC).parts[0] != "platform"
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if _OS_CHECK.search(line)
+    ]
+    assert offenders == []
+
+
+def test_os_check_detector():
+    for line in ("if sys.platform == 'win32':", "os.name == 'nt'", "platform.system()", "sys.getwindowsversion()",
+                 "from sys import platform", "from os import name", "from os import path, name as os_name",
+                 "platform.uname()", "platform.platform()", "platform.win32_edition()"):  # fmt: skip
+        assert _OS_CHECK.search(line), line
+    for line in ("platform.os_version()", "ctx.plat.name", "from ..platform import Platform",
+                 "from .platform import current", "from os import environ", "from sys import argv  # platform"):  # fmt: skip
+        assert not _OS_CHECK.search(line), line

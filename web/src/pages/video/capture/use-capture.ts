@@ -3,10 +3,12 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import { openAccountDialog } from "@/components/account/account-store"
+import { showErrorToast } from "@/components/error-report/error-toast"
 import { fill, th } from "@/i18n/th"
 import { ACCOUNT_KEY, showAccountButton } from "@/lib/account"
 import { ApiError } from "@/lib/api"
 import { QUEUE_KEY, queueQuery } from "@/lib/jobs"
+import { reportRequest } from "@/lib/report"
 import type { AccountStatus, Capture, VideoInfo } from "@/lib/types"
 
 import { errorMessage, hasCode } from "../errors"
@@ -45,15 +47,15 @@ export async function runCapture(client: QueryClient, videoId: string, ms: numbe
     const active = client.getQueryData<AccountStatus>(ACCOUNT_KEY)?.active === true
     const account = showAccountButton(error instanceof ApiError ? error.code : null, active)
     const message = errorMessage(error, th.errors.unknown)
-    if (account) {
-      const retry = () => void runCapture(client, videoId, ms)
-      toast.error(message, {
-        duration: Infinity, // มีปุ่มให้กด: ไม่หายเองก่อนผู้ใช้เห็น (เหมือน toast งานที่พลาด)
-        action: { label: th.account.use, onClick: () => openAccountDialog({ origin: "error", onImported: retry }) },
-      })
-    } else {
-      toast.error(message)
-    }
+    const retry = () => void runCapture(client, videoId, ms)
+    // M6 รอบ B: toast เดียว (id คงที่) ค้างจนกดปิด มีปุ่มคัดลอก · มีปุ่มบัญชีเมื่อจำกัดอายุ/ส่วนตัวและยังไม่ได้ใช้บัญชี
+    showErrorToast(message, {
+      id: "capture-error",
+      request: reportRequest(error, { context: "capture", videoId }),
+      action: account
+        ? { label: th.account.use, onClick: () => openAccountDialog({ origin: "error", onImported: retry }) }
+        : undefined,
+    })
     if (hasCode(error, "E_BOT_CHECK") || hasCode(error, "E_QUEUE_PAUSED")) {
       void client.invalidateQueries({ queryKey: QUEUE_KEY })
     }
