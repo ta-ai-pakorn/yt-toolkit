@@ -5,6 +5,8 @@
   เป็นตาข่ายกันพลาดชั้นสุดท้าย โค้ดของแอพไม่ log ค่าพวกนี้อยู่แล้ว
 - HomePathFilter / SecretFilter: ตัวกรองของ logging.Handler ที่ใช้สองตัวข้างบน (ข้อความ + traceback)
   probe.setup_file_log ใส่ให้ app.log ตั้งแต่สร้าง handler (ก่อนโหลด lifecycle) จึงครอบความล้มเหลวตอนเปิดโปรแกรมด้วย
+- (M6 รอบ B) mask_user_paths / mask_media_urls / scrub_titles: ปิด path นอกโฟลเดอร์ผู้ใช้ ลิงก์ไฟล์ของยูทูป และชื่อคลิป
+  redact_log_detail = ชุดของบรรทัด job_failed ใน app.log · redact_report = ชุดของรายงานแจ้งปัญหา (เพิ่ม token และชื่อคุกกี้)
 """
 
 from __future__ import annotations
@@ -12,7 +14,9 @@ from __future__ import annotations
 import functools
 import logging
 import re
+from collections.abc import Iterable
 from pathlib import Path
+from urllib.parse import quote
 
 MASK = "<hidden>"
 # คุกกี้เข้าสู่ระบบของ Google/ยูทูปที่รู้จัก (เก็บแค่ชื่อ ค่าถูกแทนด้วย MASK)
@@ -79,11 +83,13 @@ def redact_home(text: str) -> str:
     if not home.strip("/\\"):
         return text
     # แบบปกติ, แบบ / และแบบ backslash สองตัว (มาจาก repr เช่น str(OSError) บน Windows) ทั้งชื่อเต็มและชื่อสั้น
-    variants = {
+    forms = {
         form
         for name in (home, *_home_aliases(home))
         for form in (name, name.replace("\\", "/"), name.replace("\\", "\\\\"))
     }
+    # M6 รอบ B: แบบ percent-encoded ด้วย (file:///C:/Users/... และ path ใน URL ที่ yt-dlp ยกมา) ตัวพิมพ์ของ %xx ไม่สำคัญ
+    variants = forms | {quote(f, safe="") for f in forms} | {quote(f.replace("\\", "/"), safe="/") for f in forms}
     # รวมเป็น regex เดียว เรียงยาวก่อน จึงไม่มีแบบไหนไปจับแค่บางส่วนของอีกแบบ
     alternatives = "|".join(re.escape(v) for v in sorted(variants, key=len, reverse=True))
     # ไม่แตะโฟลเดอร์ข้างเคียงที่ชื่อขึ้นต้นเหมือนกัน เช่น C:\Users\Som กับ C:\Users\Somchai
@@ -138,3 +144,77 @@ def add_redaction(handler: logging.Handler) -> None:
     for kind in (HomePathFilter, SecretFilter):
         if not any(isinstance(f, kind) for f in handler.filters):
             handler.addFilter(kind())
+
+
+# ---------- M6 รอบ B: บรรทัด job_failed ใน app.log และรายงานแจ้งปัญหา ----------
+
+PATH_MASK = "<path>"
+TITLE_MASK = "<title>"
+URL_MASK = "<url>"
+TITLE_MIN = 4  # ชื่อคลิปที่สั้นกว่านี้ไม่ปิด (จะไปโดนคำธรรมดา)
+TITLE_PREFIX = 16  # ชื่อไฟล์ที่ถูกตัดสั้น: ขึ้นต้นด้วย 16 ตัวแรกของชื่อไฟล์ของคลิป = ถือว่าเป็นชื่อคลิป
+# ไดรฟ์ (C:\ หรือ C:/) หรือ UNC (\\server\share\) · ตัวอักษรที่ติดคำก่อนหน้าไม่ใช่ไดรฟ์ (https:// ไม่ใช่ไดรฟ์ s:)
+# UNC เริ่มได้แค่ต้นข้อความหรือหลังช่องว่าง/อัญประกาศ/วงเล็บ/=,;: ไม่งั้น ~\\Downloads\\ (repr ที่ backslash สองตัว) จะถูกมองเป็น UNC
+_ROOT = r"""(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|(?<![^\s'"(=,;:])\\\\[^\\/\s'"<>|]+[\\/])"""
+_QUOTED_PATH = re.compile(r"""(['"])(""" + _ROOT + r""")[^\r\n]*?\1""")
+_BARE_PATH = re.compile(_ROOT + r"""[^\s'"<>|,;)]*""")
+_FRAME_LINE = re.compile(r'^\s*File ".*", line \d+')
+_MEDIA_URL = re.compile(r"""(?i)https?://(?:[a-z0-9-]+\.)*googlevideo\.com(?::\d+)?(?:[/?#][^\s'"<>]*)?""")
+_COOKIE_NAME = re.compile(rf"(?<![A-Za-z0-9_-])(?:{_NAMES})(?![A-Za-z0-9_-])")
+
+
+def _mask_paths_in_line(line: str) -> str:
+    if _FRAME_LINE.match(line):
+        return line  # บรรทัด File "...", line N ของ traceback ชี้โค้ดของแอพ (C4): คง path ไว้ (โฟลเดอร์ผู้ใช้เป็น ~ แล้ว)
+    line = _QUOTED_PATH.sub(lambda m: f"{m.group(1)}{PATH_MASK}{m.group(1)}", line)
+    return _BARE_PATH.sub(PATH_MASK, line)
+
+
+def mask_user_paths(text: str) -> str:
+    """แทน path เต็มที่ไม่อยู่ใต้โฟลเดอร์ผู้ใช้ (ไดรฟ์อื่น โฟลเดอร์แชร์) ด้วย <path> · path ที่เป็น ~ แล้วคงไว้
+
+    path ที่ขึ้นต้นหลังอัญประกาศยาวถึงอัญประกาศปิดตัวเดียวกัน (repr ของ OSError ที่ชื่อมีช่องว่าง)
+    ไม่อย่างนั้นยาวถึงช่องว่าง หรือ ' " < > | , ; ) ตัวแรก
+    """
+    return "".join(_mask_paths_in_line(line) for line in text.splitlines(keepends=True))
+
+
+def mask_media_urls(text: str) -> str:
+    """ลิงก์ไฟล์สื่อของยูทูป (*.googlevideo.com) มีเลข IP ของผู้ใช้และลายเซ็น: แทนด้วย <url>"""
+    return _MEDIA_URL.sub(URL_MASK, text)
+
+
+def scrub_titles(text: str, titles: Iterable[str]) -> str:
+    """แทนชื่อคลิปด้วย <title>: ชื่อตรงตัว ชื่อแบบที่ใช้เป็นชื่อไฟล์ (safe_component) และชื่อไฟล์ที่ถูกตัดสั้น"""
+    from .core.files import safe_component  # stdlib ล้วน import ตอนใช้ probe จะได้ไม่โหลด core
+
+    for title in titles:
+        if len(title) < TITLE_MIN:
+            continue
+        text = text.replace(title, TITLE_MASK)
+        safe = safe_component(title, "")
+        if len(safe) >= TITLE_MIN and safe != title:
+            text = text.replace(safe, TITLE_MASK)
+        if len(safe) >= TITLE_PREFIX:
+            text = re.sub(re.escape(safe[:TITLE_PREFIX]) + r"""[^\\/'"\r\n]*""", TITLE_MASK, text)
+    return text
+
+
+def redact_log_detail(text: str, titles: Iterable[str] = ()) -> str:
+    """ชุดซ่อนข้อมูลของบรรทัด job_failed ใน app.log (เรียกที่เดียว: core/queue.py)
+
+    โฟลเดอร์ผู้ใช้ → ค่าคุกกี้ → path อื่น → ลิงก์ไฟล์ของยูทูป → ชื่อคลิป
+    """
+    text = mask_media_urls(mask_user_paths(redact_secrets(redact_home(text))))
+    return scrub_titles(text, tuple(titles))
+
+
+def redact_report(text: str, *, token: str, titles: Iterable[str] = ()) -> str:
+    """ชุดซ่อนข้อมูลของรายงานแจ้งปัญหา (เรียกที่เดียว: core/diagnostics.build_report)
+
+    = redact_log_detail + token ของแอพเป็น <hidden> + ชื่อคุกกี้เข้าสู่ระบบทั้งคำเป็น <hidden> (รายงานไม่มีชื่อคุกกี้เลย FR-CK-5)
+    """
+    text = redact_log_detail(text, titles)
+    if token:
+        text = text.replace(token, MASK)
+    return _COOKIE_NAME.sub(MASK, text)

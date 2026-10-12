@@ -7,7 +7,7 @@ import logging
 import logging.handlers
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -243,6 +243,126 @@ def test_redact_module_does_not_load_the_web_stack() -> None:
     code = (
         "import sys, yttoolkit.redact\n"
         "print(','.join(sorted({'httpx', 'fastapi', 'uvicorn', 'starlette'} & set(sys.modules))))\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=True)
+    assert out.stdout.strip() == ""
+
+
+# ---------- M6 รอบ B: path นอกโฟลเดอร์ผู้ใช้ ลิงก์ไฟล์ของยูทูป ชื่อคลิป token และชื่อคุกกี้ ----------
+
+HOME = PureWindowsPath("C:/Users/somchai")
+TITLE = "คลิปสอนทำขนม: วิธีทำบัวลอย | ตอนที่ 1"
+
+
+@pytest.fixture
+def somchai_home(monkeypatch):
+    """โฟลเดอร์ผู้ใช้ปลอมแบบ Windows (แบบเดียวกับ tests/api/test_errors.py) ไม่มีชื่อสั้นแบบ 8.3"""
+    monkeypatch.setattr(errors.Path, "home", lambda: HOME)
+    monkeypatch.setattr(redact, "_home_aliases", lambda home: ())
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "open file:///C:/Users/somchai/Downloads/a.mp4 failed",
+        "url=file:///c:/users/SOMCHAI/x",
+        "path=C%3A%5CUsers%5Csomchai%5CDownloads",
+        "path=C%3a%5cusers%5cSomchai%5cDownloads",
+        "path=C%3A/Users/somchai/Downloads",
+    ],
+)
+def test_percent_encoded_and_file_url_home_forms_are_tilde(somchai_home, text: str) -> None:
+    out = redact.redact_home(text)
+    assert "somchai" not in out.lower()
+    assert "~" in out
+
+
+def test_percent_encoded_home_keeps_the_sibling_guard(somchai_home) -> None:
+    assert redact.redact_home("C%3A%5CUsers%5Csomchaiyo") == "C%3A%5CUsers%5Csomchaiyo"
+
+
+def test_mask_user_paths_quoted_oserror_repr_with_spaces() -> None:
+    text = r"[Errno 28] No space left on device: 'D:\\งาน ตัดต่อ\\คลิป ยาว.mp4' (เขียนไม่ได้)"
+    assert redact.mask_user_paths(text) == "[Errno 28] No space left on device: '<path>' (เขียนไม่ได้)"
+
+
+def test_mask_user_paths_double_quoted_unc_and_bare_paths() -> None:
+    assert redact.mask_user_paths(r'open "\\nas\share\my clips\a.mp4"') == 'open "<path>"'
+    assert redact.mask_user_paths(r"dest \\nas\share\a.mp4, retry") == "dest <path>, retry"
+    assert redact.mask_user_paths("saved to E:/out/a.mp4") == "saved to <path>"
+    assert redact.mask_user_paths(r"x (D:\out\a.mp4)") == "x (<path>)"
+
+
+def test_mask_user_paths_keeps_tilde_urls_and_traceback_frames() -> None:
+    kept = (
+        r"~\Downloads\a.mp4 and ~/Videos",
+        r"'~\\Downloads\\a b.mp4' (repr ของ OSError: backslash สองตัว ไม่ใช่ UNC)",
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        r'  File "C:\yt-dl\src\yttoolkit\core\queue.py", line 360, in _run_job',
+        "ratio 16:9 at 1:30",
+    )
+    for text in kept:
+        assert redact.mask_user_paths(text) == text
+    frames = 'Traceback:\n  File "D:\\app\\x.py", line 5, in f\nOSError: D:\\out\\a.mp4\n'
+    assert redact.mask_user_paths(frames) == 'Traceback:\n  File "D:\\app\\x.py", line 5, in f\nOSError: <path>\n'
+
+
+def test_mask_media_urls_masks_only_googlevideo() -> None:
+    text = (
+        "GET https://rr3---sn-abc.googlevideo.com/videoplayback?ip=203.0.113.9&sig=AB 403 · "
+        "https://i.ytimg.com/vi/dQw4w9WgXcQ/hq.jpg ok"
+    )
+    assert redact.mask_media_urls(text) == "GET <url> 403 · https://i.ytimg.com/vi/dQw4w9WgXcQ/hq.jpg ok"
+
+
+def test_scrub_titles_exact_safe_name_and_truncated_file_name() -> None:
+    from yttoolkit.core.files import safe_component
+
+    safe = safe_component(TITLE, "")
+    assert safe != TITLE  # ":" และ "|" ใช้ในชื่อไฟล์ไม่ได้
+    text = f"title={TITLE}\nfile ~\\Downloads\\{safe} [x].mp4\ncut '~\\Downloads\\{safe[:20]}.mp4'"
+    out = redact.scrub_titles(text, (TITLE,))
+    assert "บัวลอย" not in out and "สอนทำขนม" not in out
+    assert out.count("<title>") == 3
+    assert "~\\Downloads\\<title>" in out
+
+
+def test_scrub_titles_skips_short_titles_and_empty_input() -> None:
+    assert redact.scrub_titles("the job failed", ("job",)) == "the job failed"
+    assert redact.scrub_titles("anything", ()) == "anything"
+
+
+def test_redact_log_detail_runs_every_step_in_order(somchai_home) -> None:
+    detail = (
+        f"C:\\Users\\somchai\\Downloads\\{TITLE}.mp4 · D:\\out\\a.mp4 · SAPISID={CANARY} · "
+        "https://r1---sn-x.googlevideo.com/videoplayback?ip=198.51.100.7"
+    )
+    out = redact.redact_log_detail(detail, (TITLE,))
+    assert out.startswith("~\\Downloads\\<title>")
+    assert "somchai" not in out and CANARY not in out and "D:\\" not in out and "198.51.100.7" not in out
+    assert TITLE not in out and "<path>" in out and "<url>" in out
+
+
+def test_redact_report_hides_the_token_and_every_sign_in_cookie_name() -> None:
+    token = "tok-9f8e7d6c5b4a"
+    names = " ".join(f"{name}=v{i}" for i, name in enumerate(redact.SIGN_IN_COOKIE_NAMES))
+    out = redact.redact_report(f"token {token} cookies {names}", token=token, titles=())
+    assert token not in out
+    for name in redact.SIGN_IN_COOKIE_NAMES:
+        assert name not in out
+    assert out.startswith("token <hidden> cookies <hidden>=<hidden>")
+
+
+def test_redact_report_keeps_ids_codes_and_ordinary_words() -> None:
+    text = r"E_YT_REFUSED job=a1b2 videoId dQw4w9WgXcQ SIDEBAR XSAPISID ~\Downloads"
+    assert redact.redact_report(text, token="", titles=()) == text
+
+
+def test_redact_report_does_not_load_the_web_stack_or_yt_dlp() -> None:
+    code = (
+        "import sys, yttoolkit.redact as r\n"
+        "r.redact_report('C:/x a', token='t', titles=('คลิปทดสอบยาวพอ',))\n"
+        "print(','.join(sorted({'httpx', 'fastapi', 'uvicorn', 'starlette', 'yt_dlp'} & set(sys.modules))))\n"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=True)
     assert out.stdout.strip() == ""
