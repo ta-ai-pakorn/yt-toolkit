@@ -157,6 +157,15 @@ def test_multi_line_detail_is_a_list_continuation_and_crlf_collapses(tmp_path: P
     assert "\r" not in report
 
 
+@pytest.mark.parametrize("brk", ["\r", "\x85", " ", " ", "\r\n"])
+def test_every_line_break_kind_becomes_lf(tmp_path: Path, brk: str) -> None:
+    error = ErrorSection(code="E_UNKNOWN", detail=f"first{brk}second", context=f"crash{brk}x")
+    report = build_report(inputs(tmp_path, error=error))
+    assert "- รายละเอียด: first\n  second\n### log" in report
+    assert "- รหัส: E_UNKNOWN · หน้าจอ: crash\nx\n" in report
+    assert not any(c in report for c in "\r\x85  ")
+
+
 # ---------- log ล่าสุด ----------
 
 
@@ -282,10 +291,10 @@ def test_caps_apply_after_redaction_so_a_cut_never_leaks_half_a_username(tmp_pat
 
 def test_token_titles_cookie_names_and_other_drives_are_hidden(tmp_path: Path) -> None:
     title = "สูตรขนมไทยโบราณ ตอนพิเศษ"
-    write_log(tmp_path, "app.log", [f"token={TOKEN} SAPISID=abc {title} D:\\out\\a.mp4"])
+    write_log(tmp_path, "app.log", [f"token={TOKEN} SAPISID=sEcReTcOoKiE9 {title} D:\\out\\a.mp4"])
     error = ErrorSection(code="E_DISK_FULL", detail=f"'D:\\\\out\\\\{title}.mp4'", kind="video", video_id="dQw4w9WgXcQ")
     report = build_report(inputs(tmp_path, error=error, titles=(title,)))
-    for leaked in (TOKEN, "SAPISID", title, "D:\\out"):
+    for leaked in (TOKEN, "SAPISID", "sEcReTcOoKiE9", title, "D:\\out"):  # ทั้งชื่อและค่าของคุกกี้
         assert leaked not in report
     assert "videoId dQw4w9WgXcQ" in report and "E_DISK_FULL" in report
 

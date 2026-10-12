@@ -34,6 +34,7 @@ LOG_LINE_MAX = 300
 REPORT_MAX = 8000  # พอดีกับช่องแชตทั่วไป (LINE / Teams / AI) ดู spec Review Focus 1
 ELLIPSIS = "…"
 _BACKTICKS = re.compile(r"`{3,}")
+_LINE_BREAK = re.compile(r"\r\n|[\r\x85  ]")
 
 
 @dataclass(frozen=True)
@@ -69,9 +70,9 @@ def build_report(inputs: ReportInputs) -> str:
     offset = inputs.now.utcoffset()
     assert offset is not None, "now ต้องมี timezone (datetime.now().astimezone())"
     # 1) ส่วนดิบ
-    header = _header_lines(inputs)
-    code_line = _code_line(inputs.error) if inputs.error is not None else None
-    detail = (inputs.error.detail or "").replace("\r\n", "\n") if inputs.error is not None else ""
+    header = [_lf(line) for line in _header_lines(inputs)]
+    code_line = _lf(_code_line(inputs.error)) if inputs.error is not None else None
+    detail = _lf(inputs.error.detail or "") if inputs.error is not None else ""
     logs = _tail_lines(inputs.log_dir)
     # 2) ซ่อนข้อมูลส่วนตัว (จุดเดียวของรายงาน · C5)
 
@@ -90,7 +91,7 @@ def build_report(inputs: ReportInputs) -> str:
     while len(text) > REPORT_MAX and logs:
         logs.pop(0)
         text = _assemble(header, code_line, detail, logs)
-    if len(text) > REPORT_MAX and code_line is not None:
+    if len(text) > REPORT_MAX and code_line is not None:  # กันไว้เผื่อเพดานเปลี่ยนในอนาคต (เพดานปัจจุบันไปไม่ถึงตรงนี้)
         detail = _cut(detail, max(1, len(detail) - (len(text) - REPORT_MAX)))
         text = _assemble(header, code_line, detail, logs)
     return text
@@ -142,6 +143,11 @@ def _assemble(header: list[str], code_line: str | None, detail: str, logs: list[
     fence = _fence(logs)
     out += [LOG_HEADING, f"{fence}text", *(logs or [NONE]), fence]
     return "\n".join(out) + "\n"
+
+
+def _lf(text: str) -> str:
+    """ตัวขึ้นบรรทัดทุกแบบ (CRLF, CR, NEL, U+2028, U+2029) กลายเป็น LF ตัวเดียว"""
+    return _LINE_BREAK.sub("\n", text)
 
 
 def _cut(text: str, limit: int) -> str:
