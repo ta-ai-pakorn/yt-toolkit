@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException
 
 from ..core.yterrors import MESSAGES
-from ..redact import _home_aliases, redact_home  # noqa: F401  ย้ายไป redact.py (M5 รอบ C) ชื่อเดิมยังใช้ได้
+from ..redact import _home_aliases, crash_trace, redact_home  # noqa: F401  ย้ายไป redact.py (M5 รอบ C) ชื่อเดิมยังใช้ได้
 
 log = logging.getLogger("yttoolkit")
 
@@ -54,8 +54,24 @@ async def _validation_error(request: Request, exc: RequestValidationError) -> JS
     return error_response(422, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, detail)
 
 
+def _output_roots(request: Request) -> tuple[Path, ...]:
+    """โฟลเดอร์ผลลัพธ์ของแอพ (ทุกอย่างข้างใต้เป็นชื่อคลิป) · หาไม่ได้ = ไม่มี (ห้ามทำให้การตอบ 500 พังซ้ำ)"""
+    ctx = getattr(request.app.state, "ctx", None)
+    try:
+        settings = getattr(ctx, "settings", None)
+        root = settings.output_dir() if settings is not None else getattr(ctx, "output_dir", None)
+    except Exception:
+        return ()
+    return (root,) if isinstance(root, Path) else ()
+
+
 async def _unhandled_error(request: Request, exc: Exception) -> JSONResponse:
-    log.error("เกิดข้อผิดพลาดที่ไม่ได้คาดไว้ที่ %s %s code=E_UNKNOWN", request.method, request.url.path, exc_info=exc)
+    # traceback อยู่ในข้อความ (ไม่ใช้ exc_info) ผ่าน crash_trace: path ใต้โฟลเดอร์ผลลัพธ์ (ชื่อคลิปใดก็ได้) เป็น <path>
+    try:
+        trace = crash_trace(exc, roots=_output_roots(request))
+    except Exception:
+        trace = type(exc).__name__
+    log.error("เกิดข้อผิดพลาดที่ไม่ได้คาดไว้ที่ %s %s code=E_UNKNOWN\n%s", request.method, request.url.path, trace)
     return error_response(500, "E_UNKNOWN", UNKNOWN_MESSAGE, str(exc))
 
 

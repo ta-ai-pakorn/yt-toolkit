@@ -1196,3 +1196,67 @@ def test_job_failed_for_an_untitled_job_is_written_and_not_over_masked(runner_fa
     first = record.getMessage().split("\n", 1)[0]
     assert first.endswith("code=E_YT_REFUSED detail=refused by the server")
     assert "<title>" not in record.getMessage()
+
+
+# ---------- รีวิวท้ายรอบ I1: ชื่อ chapter และชื่อโฟลเดอร์ playlist/ชุดงานต้องไม่หลุดลงบรรทัด job_failed ----------
+
+CHAPTER = "Chapter About Somchai"
+FOLDER = "Secret Playlist Name"
+
+
+def _chapters_row(r, video_id: str, chapters: list[dict]) -> None:
+    import json
+
+    r.store._db.execute(
+        "INSERT INTO videos (video_id, title, chapters_json, probe_json, probed_at, opened_at)"
+        " VALUES (?, ?, ?, '{}', 'x', 'x')",
+        (video_id, "row title", json.dumps(chapters, ensure_ascii=False)),
+    )
+
+
+def test_job_failed_hides_chapter_titles_and_the_playlist_folder(runner_factory, caplog):
+    detail = (
+        f"no free name for 03 {CHAPTER}.mp4 · [Errno 13] Permission denied:"
+        f" '~\\Downloads\\{FOLDER}\\Main Clip Title [vid00000001]\\split\\03 {CHAPTER}.mp4'"
+    )
+    r, spawn, h = runner_factory(concurrency=1, fail={"vid00000001": YtError("E_OUTPUT_NOT_WRITABLE", detail)})
+    _chapters_row(r, "vid00000001", [{"start_s": 0, "end_s": 5, "title": CHAPTER}, {"start_s": 5, "end_s": 9}])
+    (job,) = r.enqueue([NewJob("vid00000001", "video", {"folder": FOLDER}, "Main Clip Title")])
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        r.tick()
+        spawn.run_all()
+    (record,) = failed_records(caplog)
+    assert CHAPTER not in record.getMessage() and FOLDER not in record.getMessage()
+    assert "no free name for 03 <title>.mp4" in record.getMessage()
+
+
+@pytest.mark.parametrize("chapters_json", [None, "", "not json", "{}", "[1, null]", '[{"title": 5}]'])
+def test_job_titles_ignores_a_broken_chapters_column(chapters_json):
+    job = NewJob("vid00000001", "video", {"folder": 7}, "Main Clip Title")
+    fake = type("J", (), {"title": job.title, "params": job.params})()
+    assert queue_module.job_titles(fake, chapters_json) == ("Main Clip Title",)
+
+
+def test_job_titles_lists_title_folder_and_every_chapter():
+    fake = type("J", (), {"title": "T1", "params": {"folder": FOLDER}})()
+    chapters = '[{"title": "A chapter"}, {"title": ""}, {"start_s": 1}, {"title": "B chapter"}]'
+    assert queue_module.job_titles(fake, chapters) == ("T1", FOLDER, "A chapter", "B chapter")
+
+
+def test_a_crash_after_the_job_hides_paths_below_the_output_folder(runner_factory, caplog, monkeypatch):
+    # รีวิวท้ายรอบ M3: traceback ของทาง crash ไม่ใช้ log.exception และปิดทุกอย่างใต้โฟลเดอร์ผลลัพธ์
+    r, spawn, h = runner_factory(concurrency=1)
+    clip = r.settings_view.output / "Another Clip Title [x]" / "a.mp4"
+
+    def broken(job, ctx):
+        raise PermissionError(13, "Permission denied", str(clip))
+
+    monkeypatch.setattr(r, "_run_job", broken)
+    r.enqueue(jobs_of("video", 1))
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        r.tick()
+        spawn.run_all()
+    (record,) = [x for x in caplog.records if "Traceback (most recent call last)" in x.getMessage()]
+    assert "PermissionError" in record.getMessage() and "<path>" in record.getMessage()
+    assert "Another Clip Title" not in caplog.text
+    assert record.exc_info is None

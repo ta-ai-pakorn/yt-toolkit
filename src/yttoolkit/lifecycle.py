@@ -49,7 +49,7 @@ from .platform import LockFileError, Platform, current
 
 # ตัวจริงอยู่ใน probe (stdlib ล้วน) ที่นี่ส่งต่อชื่อเดิมให้โค้ดและเทสที่เรียกผ่าน lifecycle
 from .probe import base_url, find_running, is_alive, setup_file_log  # noqa: F401
-from .redact import HomePathFilter, SecretFilter, add_redaction, redact_home
+from .redact import HomePathFilter, SecretFilter, add_redaction, crash_trace, redact_home
 
 log = logging.getLogger("yttoolkit")
 
@@ -381,12 +381,19 @@ def recover_jobs(services: Services) -> None:
     except Exception:
         log.exception("กู้งานที่ค้างจากรอบก่อนไม่สำเร็จ")
         return
+    output_root: Path | None = None
     try:
-        removed = sweep_interrupted_outputs(store, services.settings.output_dir(), stranded)
+        output_root = services.settings.output_dir()
+        removed = sweep_interrupted_outputs(store, output_root, stranded)
         if removed:
             log.info("ล้างไฟล์ที่ค้างจากงานที่หยุดกลางคันแล้ว %s ไฟล์", removed)
-    except Exception:
-        log.exception("ล้างไฟล์ที่ค้างจากงานที่หยุดกลางคันไม่สำเร็จ (ข้ามไปก่อน)")
+    except Exception as exc:
+        # OSError ของไฟล์ค้างมี path ใต้โฟลเดอร์ผลลัพธ์ (ชื่อคลิป): traceback ผ่าน crash_trace ไม่ใช้ log.exception
+        try:
+            trace = crash_trace(exc, roots=(output_root,) if output_root is not None else ())
+        except Exception:
+            trace = type(exc).__name__
+        log.error("ล้างไฟล์ที่ค้างจากงานที่หยุดกลางคันไม่สำเร็จ (ข้ามไปก่อน)\n%s", trace)
 
 
 def _clip_folders(root: Path, video_id: str, title: str, group: str | None = None) -> list[tuple[Path, str]]:

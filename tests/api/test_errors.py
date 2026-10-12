@@ -63,8 +63,10 @@ def test_unhandled_exception_uses_unknown_envelope_and_logs(make_client, caplog)
         "message": 'มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล',
         "detail": "kaboom",
     }
-    records = [r for r in caplog.records if r.exc_info]
-    assert records and isinstance(records[0].exc_info[1], RuntimeError)
+    # รีวิวท้ายรอบ M3: traceback อยู่ในข้อความ (ผ่าน crash_trace) ไม่ใช่ exc_info
+    records = [r for r in caplog.records if "Traceback (most recent call last)" in r.getMessage()]
+    assert records and "RuntimeError: kaboom" in records[0].getMessage()
+    assert not any(r.exc_info for r in caplog.records)
 
 
 def test_error_body_redacts_real_home():

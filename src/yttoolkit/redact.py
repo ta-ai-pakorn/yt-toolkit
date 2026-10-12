@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
 import re
+import traceback
 from collections.abc import Iterable
 from pathlib import Path
 from urllib.parse import quote
@@ -252,3 +254,48 @@ def redact_report(text: str, *, token: str, titles: Iterable[str] = ()) -> str:
     if token:
         text = text.replace(token, MASK)
     return _COOKIE_NAME.sub(MASK, text)
+
+
+# ---------- รีวิวท้ายรอบ M3: traceback ของทาง crash (ไม่รู้ว่าเป็นของคลิปไหน) ----------
+
+_SEP = r"(?:\\\\|[\\/])"  # \ (repr) หรือ \ หรือ /
+
+
+def mask_below_roots(text: str, roots: Iterable[str | os.PathLike[str]]) -> str:
+    """ทุกอย่างที่อยู่ใต้โฟลเดอร์ใน roots (โฟลเดอร์ผลลัพธ์) เป็น <path> คงตัวโฟลเดอร์ไว้ (เรียกหลัง redact_home)
+
+    ชื่อโฟลเดอร์/ไฟล์ใต้โฟลเดอร์ผลลัพธ์คือชื่อคลิป ชื่อ chapter หรือชื่อ playlist เสมอ · path ในอัญประกาศปิดถึงอัญประกาศปิด
+    path ไม่มีอัญประกาศปิดถึงท้ายบรรทัด (ชื่อมีช่องว่างได้) · บรรทัด File "...", line N ของ traceback ไม่แตะ (path ของโค้ด)
+    """
+    forms: set[str] = set()
+    for root in roots:
+        base = redact_home(os.fspath(root)).rstrip("\\/")
+        if base:
+            slash = base.replace("\\", "/")
+            forms |= {base, slash, slash.replace("/", "\\"), slash.replace("/", "\\\\")}
+    if not forms:
+        return text
+    alternatives = "|".join(re.escape(f) for f in sorted(forms, key=len, reverse=True))
+    head = rf"(?<![\w.\-])((?:{alternatives}){_SEP})(?![\\/]*{re.escape(PATH_MASK)})"
+    quoted = re.compile(r"""(['"])""" + head + r"""[^\r\n]*?(?=\1)""", re.IGNORECASE)
+    bare = re.compile(head + r"[^\r\n]*", re.IGNORECASE)
+
+    def line_mask(line: str) -> str:
+        if _FRAME_LINE.match(line):
+            return line
+        line = quoted.sub(lambda m: f"{m.group(1)}{m.group(2)}{PATH_MASK}", line)
+        return bare.sub(lambda m: f"{m.group(1)}{PATH_MASK}", line)
+
+    return "".join(line_mask(line) for line in text.splitlines(keepends=True))
+
+
+def crash_trace(
+    exc: BaseException, *, titles: Iterable[str] = (), roots: Iterable[str | os.PathLike[str]] = ()
+) -> str:
+    """traceback ของ exception ที่ไม่ได้คาดไว้ สำหรับใส่ในข้อความ log (แทน exc_info / log.exception)
+
+    = redact_log_detail (ชื่อที่รู้ โฟลเดอร์ผู้ใช้ ค่าคุกกี้ path อื่น ลิงก์สื่อ) + ทุกอย่างใต้ roots เป็น <path>
+    ทาง crash ไม่รู้ชื่อของคลิปอื่น จึงปิดตามตำแหน่ง (ใต้โฟลเดอร์ผลลัพธ์) แทนการปิดตามชื่อ
+    """
+    text = "".join(traceback.format_exception(exc)).rstrip()
+    return mask_below_roots(redact_log_detail(text, tuple(titles)), roots)

@@ -448,3 +448,40 @@ def test_log_detail_hides_a_spaced_title_in_a_yt_dlp_destination_line() -> None:
     assert out.endswith(" code=E_X")
     out = redact.redact_report("Destination: D:\\out\\clip one.mp4", token="", titles=("clip one",))
     assert "one" not in out and "clip" not in out
+
+
+# ---------- รีวิวท้ายรอบ M3: traceback ของ crash ปิดทุกอย่างใต้โฟลเดอร์ผลลัพธ์ ----------
+
+
+@pytest.fixture
+def somchai_home(monkeypatch):
+    monkeypatch.setattr(errors.Path, "home", lambda: PureWindowsPath("C:/Users/somchai"))
+    monkeypatch.setattr(redact, "_home_aliases", lambda home: ())
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("open ~\\Downloads\\YT Toolkit\\Secret Clip [id]\\03 Ch.mp4 failed",
+         "open ~\\Downloads\\YT Toolkit\\<path>"),
+        ("denied: '~\\\\Downloads\\\\YT Toolkit\\\\Secret Clip\\\\x.mp4' (errno 13)",
+         "denied: '~\\\\Downloads\\\\YT Toolkit\\\\<path>' (errno 13)"),
+        ("at ~/Downloads/YT Toolkit/Secret Clip/x.mp4", "at ~/Downloads/YT Toolkit/<path>"),
+        ("at ~\\downloads\\yt toolkit\\Secret.mp4", "at ~\\downloads\\yt toolkit\\<path>"),
+        ("sibling ~\\Downloads\\YT Toolkit 2\\Secret.mp4", "sibling ~\\Downloads\\YT Toolkit 2\\Secret.mp4"),
+        ('  File "~\\Downloads\\YT Toolkit\\x.py", line 3, in f', '  File "~\\Downloads\\YT Toolkit\\x.py", line 3, in f'),
+    ],
+)  # fmt: skip
+def test_mask_below_roots_hides_everything_under_the_output_folder(somchai_home, text, expected) -> None:
+    root = PureWindowsPath("C:/Users/somchai/Downloads/YT Toolkit")
+    assert redact.mask_below_roots(redact.redact_home(text), [root]) == expected
+
+
+def test_crash_trace_redacts_the_traceback_with_titles_and_roots(somchai_home) -> None:
+    try:
+        raise PermissionError(13, "Permission denied", "C:\\Users\\somchai\\Downloads\\YT Toolkit\\Other Clip\\a.mp4")
+    except PermissionError as exc:
+        text = redact.crash_trace(exc, titles=("Known Title",), roots=["C:\\Users\\somchai\\Downloads\\YT Toolkit"])
+    assert text.startswith("Traceback (most recent call last):")
+    assert "Other Clip" not in text and "somchai" not in text
+    assert "PermissionError: [Errno 13] Permission denied: '~\\\\Downloads\\\\YT Toolkit\\\\<path>'" in text
