@@ -160,7 +160,13 @@ _ROOT = r"""(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|(?<![^\s'"(=,;:\[<{|])\\\\[^\\/\s'
 _QUOTED_PATH = re.compile(r"""(['"])(""" + _ROOT + r""")[^\r\n]*?\1""")
 _PATH_TOKEN = r"""[^\s'"<>|,;)]"""
 _BARE_PATH = re.compile(_ROOT + _PATH_TOKEN + "*")
-_PATH_TAIL = re.compile(" " + _PATH_TOKEN + "+")
+# ส่วนต่อของ path ที่มีช่องว่าง: หยุดที่ key=value, ://, ราก path ใหม่ (ไดรฟ์ \\ ~) และวงเล็บ/อัญประกาศ
+_PATH_TAIL = re.compile(
+    r"""(?! *[A-Za-z_][\w.-]*=)(?! *\S*://)(?! *[A-Za-z]:[\\/])(?! *(?:\\\\|~))(?! *\S*[\[\]{}(])"""
+    + " "
+    + _PATH_TOKEN
+    + "+"
+)
 _FRAME_LINE = re.compile(r'^\s*File ".*", line \d+')
 # รวมแบบ JSON-escaped (https:\/\/host\/path) · ")" ท้ายลิงก์ไม่ถูกกิน
 _MEDIA_URL = re.compile(
@@ -174,14 +180,16 @@ def _mask_paths_in_line(line: str) -> str:
     if _FRAME_LINE.match(line):
         return line  # บรรทัด File "...", line N ของ traceback ชี้โค้ดของแอพ (C4): คง path ไว้ (โฟลเดอร์ผู้ใช้เป็น ~ แล้ว)
     line = _QUOTED_PATH.sub(lambda m: f"{m.group(1)}{PATH_MASK}{m.group(1)}", line)
-    last_sep = max(line.rfind("\\"), line.rfind("/"))
     out: list[str] = []
     pos = 0
     while m := _BARE_PATH.search(line, pos):
         end = m.end()
         # ชื่อโฟลเดอร์ที่มีช่องว่าง: ต่อข้ามช่องว่างเดี่ยวตราบที่ยังมีตัวคั่น path ตามมาในบรรทัด (คำธรรมดาท้าย path ไม่ถูกกิน)
-        while end < last_sep and (t := _PATH_TAIL.match(line, end)):
-            end = t.end()
+        scan = end
+        while t := _PATH_TAIL.match(line, scan):
+            scan = t.end()
+            if "\\" in t.group() or "/" in t.group():
+                end = scan  # ตัดท้ายที่คำสุดท้ายที่มีตัวคั่น คำธรรมดาหลังจากนั้นไม่ถูกกิน
         out += [line[pos : m.start()], PATH_MASK]
         pos = end
     return "".join(out) + line[pos:]
@@ -228,10 +236,11 @@ def scrub_titles(text: str, titles: Iterable[str]) -> str:
 def redact_log_detail(text: str, titles: Iterable[str] = ()) -> str:
     """ชุดซ่อนข้อมูลของบรรทัด job_failed ใน app.log (เรียกที่เดียว: core/queue.py)
 
-    โฟลเดอร์ผู้ใช้ → ค่าคุกกี้ → path อื่น → ลิงก์ไฟล์ของยูทูป → ชื่อคลิป
+    โฟลเดอร์ผู้ใช้ → ค่าคุกกี้ → ชื่อคลิป → path อื่น → ลิงก์ไฟล์ของยูทูป
     """
-    text = mask_media_urls(mask_user_paths(redact_secrets(redact_home(text))))
-    return scrub_titles(text, tuple(titles))
+    # ชื่อคลิปก่อน path: ชื่อไฟล์ที่มีช่องว่าง (Destination: D:\out\ชื่อ คลิป.mp4) จะถูกปิดครบก่อน path จะตัดที่ช่องว่าง
+    text = scrub_titles(redact_secrets(redact_home(text)), tuple(titles))
+    return mask_media_urls(mask_user_paths(text))
 
 
 def redact_report(text: str, *, token: str, titles: Iterable[str] = ()) -> str:

@@ -421,3 +421,30 @@ def test_scrub_titles_prefix_rule_keeps_following_fields() -> None:
     safe = safe_component(TITLE, "")
     out = redact.scrub_titles(rf"file ~\Downloads\{safe[:20]} [x].mp4 code=E_X job=a1b2", (TITLE,))
     assert out == r"file ~\Downloads\<title> code=E_X job=a1b2"
+
+
+# ---------- fix round 2 ----------
+
+
+def test_spaced_path_tail_stops_at_key_value_url_and_prose() -> None:
+    text = r"D:\a\b.mp4 failed code=E_X job=j1 url=https://youtu.be/abc"
+    assert redact.mask_user_paths(text) == "<path> failed code=E_X job=j1 url=https://youtu.be/abc"
+
+
+def test_two_spaced_paths_on_one_line_keep_the_prose_between() -> None:
+    text = r"copy D:\My Clips\a.mp4 then E:\Other Dir\b.mp4, retry"
+    assert redact.mask_user_paths(text) == "copy <path> then <path>, retry"
+
+
+@pytest.mark.parametrize("stop", ["~\\Downloads\\x", "[x]\\y", "'q'\\y", "\\\\nas\\s\\y"])
+def test_spaced_path_tail_stops_at_roots_quotes_and_brackets(stop: str) -> None:
+    assert redact.mask_user_paths(r"D:\My Clips\a.mp4 " + stop).startswith("<path> ")
+
+
+def test_log_detail_hides_a_spaced_title_in_a_yt_dlp_destination_line() -> None:
+    title = "คลิป สอนทำ ขนมบัวลอย"
+    out = redact.redact_log_detail(f"Destination: D:\\out\\{title}.mp4 code=E_X", (title,))
+    assert "คลิป" not in out and "ขนม" not in out and "D:" not in out
+    assert out.endswith(" code=E_X")
+    out = redact.redact_report("Destination: D:\\out\\clip one.mp4", token="", titles=("clip one",))
+    assert "one" not in out and "clip" not in out
