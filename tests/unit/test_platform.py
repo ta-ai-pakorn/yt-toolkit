@@ -346,7 +346,11 @@ def test_windows_os_version_live():
 # ---- กฎของโปรเจกต์: เช็กระบบปฏิบัติการได้ที่ yttoolkit.platform ที่เดียว (M6 รอบ B C2) ------------------------------
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "yttoolkit"
-_OS_CHECK = re.compile(r"\bsys\.platform\b|\bos\.name\b|\bplatform\.(?:system|release|version|mac_ver|win32_ver)\(|getwindowsversion")
+_OS_CHECK = re.compile(
+    r"\bsys\.platform\b|\bos\.name\b|getwindowsversion"
+    r"|\bplatform\.(?:system|release|version|mac_ver|win32_ver|uname|platform|win32_edition)\("
+    r"|\bfrom\s+(?:sys|os)\s+import\s+[^#\n]*\b(?:platform|name)\b"  # from sys import platform · from os import name
+)
 
 
 def test_only_the_platform_package_checks_the_os():
@@ -361,7 +365,10 @@ def test_only_the_platform_package_checks_the_os():
 
 
 def test_os_check_detector():
-    for line in ("if sys.platform == 'win32':", "os.name == 'nt'", "platform.system()", "sys.getwindowsversion()"):
+    for line in ("if sys.platform == 'win32':", "os.name == 'nt'", "platform.system()", "sys.getwindowsversion()",
+                 "from sys import platform", "from os import name", "from os import path, name as os_name",
+                 "platform.uname()", "platform.platform()", "platform.win32_edition()"):  # fmt: skip
         assert _OS_CHECK.search(line), line
-    for line in ("platform.os_version()", "ctx.plat.name", "from ..platform import Platform"):
+    for line in ("platform.os_version()", "ctx.plat.name", "from ..platform import Platform",
+                 "from .platform import current", "from os import environ", "from sys import argv  # platform"):  # fmt: skip
         assert not _OS_CHECK.search(line), line
