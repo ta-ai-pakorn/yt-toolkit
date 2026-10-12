@@ -230,7 +230,7 @@ test("โหลดค่าตั้งไม่สำเร็จ → แจ้
     if (route.request().method() === "GET" && fail) {
       return route.fulfill({
         status: 500,
-        json: { error: { code: "E_UNKNOWN", message: "มีบางอย่างผิดพลาด ถ่ายภาพหน้าจอนี้ส่งให้ผู้ดูแล", detail: null } },
+        json: { error: { code: "E_UNKNOWN", message: 'มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล', detail: null } },
       })
     }
     return route.continue()
