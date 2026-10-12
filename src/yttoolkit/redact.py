@@ -90,6 +90,7 @@ def redact_home(text: str) -> str:
     }
     # M6 รอบ B: แบบ percent-encoded ด้วย (file:///C:/Users/... และ path ใน URL ที่ yt-dlp ยกมา) ตัวพิมพ์ของ %xx ไม่สำคัญ
     variants = forms | {quote(f, safe="") for f in forms} | {quote(f.replace("\\", "/"), safe="/") for f in forms}
+    variants |= {quote(f.replace("\\", "/"), safe="/:") for f in forms}  # Path.as_uri(): file:///C:/Users/Som%20Chai
     # รวมเป็น regex เดียว เรียงยาวก่อน จึงไม่มีแบบไหนไปจับแค่บางส่วนของอีกแบบ
     alternatives = "|".join(re.escape(v) for v in sorted(variants, key=len, reverse=True))
     # ไม่แตะโฟลเดอร์ข้างเคียงที่ชื่อขึ้นต้นเหมือนกัน เช่น C:\Users\Som กับ C:\Users\Somchai
@@ -155,11 +156,17 @@ TITLE_MIN = 4  # ชื่อคลิปที่สั้นกว่านี
 TITLE_PREFIX = 16  # ชื่อไฟล์ที่ถูกตัดสั้น: ขึ้นต้นด้วย 16 ตัวแรกของชื่อไฟล์ของคลิป = ถือว่าเป็นชื่อคลิป
 # ไดรฟ์ (C:\ หรือ C:/) หรือ UNC (\\server\share\) · ตัวอักษรที่ติดคำก่อนหน้าไม่ใช่ไดรฟ์ (https:// ไม่ใช่ไดรฟ์ s:)
 # UNC เริ่มได้แค่ต้นข้อความหรือหลังช่องว่าง/อัญประกาศ/วงเล็บ/=,;: ไม่งั้น ~\\Downloads\\ (repr ที่ backslash สองตัว) จะถูกมองเป็น UNC
-_ROOT = r"""(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|(?<![^\s'"(=,;:])\\\\[^\\/\s'"<>|]+[\\/])"""
+_ROOT = r"""(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|(?<![^\s'"(=,;:\[<{|])\\\\[^\\/\s'"<>|]+[\\/])"""
 _QUOTED_PATH = re.compile(r"""(['"])(""" + _ROOT + r""")[^\r\n]*?\1""")
-_BARE_PATH = re.compile(_ROOT + r"""[^\s'"<>|,;)]*""")
+_PATH_TOKEN = r"""[^\s'"<>|,;)]"""
+_BARE_PATH = re.compile(_ROOT + _PATH_TOKEN + "*")
+_PATH_TAIL = re.compile(" " + _PATH_TOKEN + "+")
 _FRAME_LINE = re.compile(r'^\s*File ".*", line \d+')
-_MEDIA_URL = re.compile(r"""(?i)https?://(?:[a-z0-9-]+\.)*googlevideo\.com(?::\d+)?(?:[/?#][^\s'"<>]*)?""")
+# รวมแบบ JSON-escaped (https:\/\/host\/path) · ")" ท้ายลิงก์ไม่ถูกกิน
+_MEDIA_URL = re.compile(
+    r"""(?i)https?:(?:\\?/){2}(?:[a-z0-9-]+\.)*googlevideo\.com(?::\d+)?(?:(?:[/?#]|\\/)[^\s'"<>)]*)?"""
+)
+_MASKS = re.compile("(" + "|".join(re.escape(m) for m in (PATH_MASK, TITLE_MASK, URL_MASK, MASK)) + ")")
 _COOKIE_NAME = re.compile(rf"(?<![A-Za-z0-9_-])(?:{_NAMES})(?![A-Za-z0-9_-])")
 
 
@@ -167,7 +174,17 @@ def _mask_paths_in_line(line: str) -> str:
     if _FRAME_LINE.match(line):
         return line  # บรรทัด File "...", line N ของ traceback ชี้โค้ดของแอพ (C4): คง path ไว้ (โฟลเดอร์ผู้ใช้เป็น ~ แล้ว)
     line = _QUOTED_PATH.sub(lambda m: f"{m.group(1)}{PATH_MASK}{m.group(1)}", line)
-    return _BARE_PATH.sub(PATH_MASK, line)
+    last_sep = max(line.rfind("\\"), line.rfind("/"))
+    out: list[str] = []
+    pos = 0
+    while m := _BARE_PATH.search(line, pos):
+        end = m.end()
+        # ชื่อโฟลเดอร์ที่มีช่องว่าง: ต่อข้ามช่องว่างเดี่ยวตราบที่ยังมีตัวคั่น path ตามมาในบรรทัด (คำธรรมดาท้าย path ไม่ถูกกิน)
+        while end < last_sep and (t := _PATH_TAIL.match(line, end)):
+            end = t.end()
+        out += [line[pos : m.start()], PATH_MASK]
+        pos = end
+    return "".join(out) + line[pos:]
 
 
 def mask_user_paths(text: str) -> str:
@@ -188,16 +205,24 @@ def scrub_titles(text: str, titles: Iterable[str]) -> str:
     """แทนชื่อคลิปด้วย <title>: ชื่อตรงตัว ชื่อแบบที่ใช้เป็นชื่อไฟล์ (safe_component) และชื่อไฟล์ที่ถูกตัดสั้น"""
     from .core.files import safe_component  # stdlib ล้วน import ตอนใช้ probe จะได้ไม่โหลด core
 
-    for title in titles:
-        if len(title) < TITLE_MIN:
-            continue
-        text = text.replace(title, TITLE_MASK)
-        safe = safe_component(title, "")
-        if len(safe) >= TITLE_MIN and safe != title:
-            text = text.replace(safe, TITLE_MASK)
-        if len(safe) >= TITLE_PREFIX:
-            text = re.sub(re.escape(safe[:TITLE_PREFIX]) + r"""[^\\/'"\r\n]*""", TITLE_MASK, text)
-    return text
+    titles = tuple(titles)
+
+    def scrub(chunk: str) -> str:
+        for title in titles:
+            if len(title) < TITLE_MIN:
+                continue
+            chunk = chunk.replace(title, TITLE_MASK)
+            safe = safe_component(title, "")
+            if len(safe) >= TITLE_MIN and safe != title:
+                chunk = chunk.replace(safe, TITLE_MASK)
+            if len(safe) >= TITLE_PREFIX:
+                # หางชื่อไฟล์ที่ถูกตัด: หยุดก่อนช่อง key=value ถัดไป (code= job=) จะได้ไม่กินข้อมูลวินิจฉัย
+                tail = r"""(?:(?![ \t]+[A-Za-z_]+=)[^\\/'"\r\n])*"""
+                chunk = re.sub(re.escape(safe[:TITLE_PREFIX]) + tail, TITLE_MASK, chunk)
+        return chunk
+
+    # ไม่แตะตัวปิดข้อมูลที่ใส่ไว้แล้ว (ชื่อคลิป "path" ต้องไม่ทำให้ <path> เป็น <<title>>)
+    return "".join(part if i % 2 else scrub(part) for i, part in enumerate(_MASKS.split(text)))
 
 
 def redact_log_detail(text: str, titles: Iterable[str] = ()) -> str:

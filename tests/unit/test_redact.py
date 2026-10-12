@@ -366,3 +366,58 @@ def test_redact_report_does_not_load_the_web_stack_or_yt_dlp() -> None:
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=True)
     assert out.stdout.strip() == ""
+
+
+# ---------- M6 รอบ B fix round 1 ----------
+
+
+@pytest.mark.parametrize("name", ["Som Chai", "สมชาย ใจดี"])
+def test_file_uri_home_with_space_or_thai_name_is_tilde(monkeypatch, name: str) -> None:
+    home = PureWindowsPath(f"C:/Users/{name}")
+    monkeypatch.setattr(errors.Path, "home", lambda: home)
+    monkeypatch.setattr(redact, "_home_aliases", lambda h: ())
+    from urllib.parse import quote
+
+    uri = f"file:///C:/Users/{quote(name)}/Downloads/a.mp4"
+    out = redact.redact_home(f"open {uri} failed")
+    assert name.split()[0] not in out and quote(name) not in out
+    assert "~" in out
+
+
+def test_percent_encoded_8_3_alias_is_tilde(monkeypatch) -> None:
+    monkeypatch.setattr(errors.Path, "home", lambda: HOME)
+    monkeypatch.setattr(redact, "_home_aliases", lambda h: (r"C:\Users\SOMCHA~1",))
+    out = redact.redact_home("p=C%3A%5CUsers%5CSOMCHA~1%5Cx")
+    assert "SOMCHA" not in out and out.startswith("p=~")
+
+
+def test_mask_user_paths_unquoted_path_with_spaces_does_not_leak_its_tail() -> None:
+    assert redact.mask_user_paths(r"Destination: D:\งาน ตัดต่อ\x.mp4") == "Destination: <path>"
+    assert redact.mask_user_paths(r"D:\My Videos\Old Clips\a.mp4, retry") == "<path>, retry"
+    assert redact.mask_user_paths(r"D:\a\b.mp4 แล้วไฟล์หาย") == "<path> แล้วไฟล์หาย"
+
+
+@pytest.mark.parametrize("prefix", ["[", "<", "{", "|"])
+def test_mask_user_paths_unc_after_bracket_like_chars(prefix: str) -> None:
+    assert "nas" not in redact.mask_user_paths(prefix + r"\\nas\share\a")
+
+
+def test_mask_media_urls_json_escaped_uppercase_and_closing_paren() -> None:
+    assert redact.mask_media_urls(r'{"u": "https:\/\/rr1.googlevideo.com\/videoplayback?ip=1.2.3.4"}') == '{"u": "<url>"}'
+    assert redact.mask_media_urls("HTTPS://RR1.GOOGLEVIDEO.COM/videoplayback?ip=1.2.3.4 x") == "<url> x"
+    assert redact.mask_media_urls("(https://rr1.googlevideo.com/v?ip=1.2.3.4)") == "(<url>)"
+
+
+@pytest.mark.parametrize("title", ["path", "title", "hidden", "media"])
+def test_scrub_titles_never_corrupts_masks(title: str) -> None:
+    out = redact.scrub_titles(f"<path> <title> <url> <hidden> {title}", (title,))
+    assert out.startswith("<path> <title> <url> <hidden> ")
+    assert out.endswith("<title>")
+
+
+def test_scrub_titles_prefix_rule_keeps_following_fields() -> None:
+    from yttoolkit.core.files import safe_component
+
+    safe = safe_component(TITLE, "")
+    out = redact.scrub_titles(rf"file ~\Downloads\{safe[:20]} [x].mp4 code=E_X job=a1b2", (TITLE,))
+    assert out == r"file ~\Downloads\<title> code=E_X job=a1b2"
