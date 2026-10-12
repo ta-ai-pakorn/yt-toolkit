@@ -44,6 +44,9 @@
 - **P8 — UNC paths start at a boundary.** `mask_user_paths` treats `\\server\share\` as a path only at the start of text or after whitespace, a quote, `(`, `=`, `,`, `;` or `:`; otherwise the doubled-backslash repr `'~\\Downloads\\a.mp4'` would be masked as a UNC path (found by the prototype).
 - **P9 — unhandled exceptions in the middleware.** Starlette's `ServerErrorMiddleware` (outside every user middleware) sends the 500 for an unhandled exception, so `ErrorLogMiddleware` never sees that response. It catches the exception before any response started, logs `api_error ... status=500 code=E_UNKNOWN` at WARNING and re-raises; `_unhandled_error` still writes the traceback line (now with `code=E_UNKNOWN`). Spec §6.2 "a 500 → a WARNING line plus the traceback line".
 - **P11 — the logged API path is percent-encoded.** `scope["path"]` is already URL-decoded, so `/api/videos/bad%0Aid/captures` would put a line break into `app.log` (the prototype broke `tests/api/test_captures_api.py::test_post_with_a_malformed_id_never_reaches_the_service`). `api_error` logs `urllib.parse.quote(path, safe="/-_.~")`.
+- **P12 — ErrorPanel button row.** `ErrorPanel` keeps the `AlertAction` slot but renders it as a static row under the message (`static col-start-2 mt-2 flex flex-wrap gap-2`), copy button first: two buttons in the default absolute top-right slot cover the title at 640 px (C9).
+- **P13 — axe scope on the health page.** A whole-page axe run of `/settings/health` in fake mode already fails at HEAD (`aria-required-children` on the item group that holds the "โหลด ffmpeg ใหม่" button, `color-contrast` 4.11 of the destructive "ใช้ไม่ได้" badge — not touched by this round). T12 scopes its health-page axe checks to the new action row (`[data-testid="health-actions"]`, added by T10) and to the toaster (`[data-sonner-toaster]`); the W2 error-box check stays whole-page. The pre-existing health-page findings are listed for a follow-up, not fixed here.
+- **P14 — the clipboard holds CRLF on Windows.** Chromium on Windows stores `text/plain` with CRLF line ends, so `navigator.clipboard.readText()` returns `\r\n`. T12 normalizes to LF before comparing; the report itself (server output) stays LF.
 - **P10 — pre-existing failure at HEAD.** `tests/unit/test_yterrors.py::test_messages_match_prd_table` fails at `ffbd03e` because the spec commit already changed PRD §7 `E_UNKNOWN`; T3 fixes it. Every other test passed at `ffbd03e` (3,276 passed, 46 network deselected; vitest 1,009 passed).
 
 ---
@@ -114,7 +117,8 @@ Integration branch: `m6b-error-report` (already checked out in the main checkout
 
 ---
 
-## Verified facts (read on 2026-10-12 at `ffbd03e`; a scratch prototype of T1-T3, T6, T7, T11 and T4 was run against this tree)
+## Verified facts (read on 2026-10-12 at `ffbd03e`; every task below was built as a scratch prototype on this tree)
+- **Prototype results (all tasks applied):** `pytest -q -W error` 3,372 passed (46 network deselected); web `tsc -b` clean, `eslint .` clean, vitest 1,034 passed; after `npm run build`: Playwright chromium `error-report.spec.ts` 9/9 and `nav`, `video`, `home`, `settings-general`, `health`, `account`, `capture` 201/201; queue project (`--workers=1`) `queue-flow` + `queue-account` 9/9. Every "Replace … with …" block below was generated from the prototype diff and checked to occur exactly once in the file at `ffbd03e`.
 - **Redaction.** `src/yttoolkit/redact.py` (stdlib only): `MASK = "<hidden>"`, `SIGN_IN_COOKIE_NAMES` (15 names), `_NAMES` alternation, `redact_secrets`, `_home_aliases` (functools.cache, lazy `from .platform import current`), `redact_home` (`variants` set at `:82-86`), `HomePathFilter`, `SecretFilter`, `add_redaction`. `api/errors.py` re-exports `redact_home`/`_home_aliases` and keeps `from pathlib import Path` because tests patch `errors.Path.home`. `tests/unit/test_redact.py:242` checks the module does not load the web stack.
 - **Platform.** `platform/base.py:25` `Platform` protocol ends with `path_aliases`; `windows.py` imports `ctypes, functools, msvcrt, os, subprocess, uuid` (no `sys`); `macos.py` imports `fcntl, os, signal, subprocess`; `platform/__init__.py` is the only `sys.platform` user in `src/`. `tests/conftest.py:12` `FakePlatform` dataclass. `tests/unit/test_platform.py` has `windows_module` / `macos_module` fixtures that load isolated copies (fake `msvcrt`/`fcntl` off-platform).
 - **Copy.** `core/yterrors.py:50` `E_UNKNOWN`; `core/tools.py:124` "ไม่พบตัวช่วยของ yt-dlp (deno)"; `tests/unit/test_tools_status.py:118`, `tests/unit/test_yterrors.py:131`, `tests/api/test_errors.py:63`, `web/e2e/settings-general.spec.ts:233` pin the old texts; `web/src/i18n/th.ts:590` `errors.unknown`.
@@ -3492,7 +3496,7 @@ EOF
 - Consumes (T4): `ErrorDetails` (`request` + `open` / `onOpenChange`), `CopyReportButton`, `showErrorToast`, `PLAIN_TOAST`, `reportRequest`.
 - Produces: K7 ids `job-<id>` (failed-job request `{ jobId, code, detail, context: "queue" }`), `queue-action-<id>`, `queue-reorder`, `queue-resume`, `queue-reveal-<id>`, `account-delete`, `shutdown-error`; contexts `chunk` / `crash` in `ErrorPanel`; `RouteError` renders its own `<Toaster position="bottom-right" />`.
 
-Planner ruling P12 (layout, C9): `ErrorPanel` keeps the `AlertAction` slot but makes it a static row under the message (`static col-start-2 mt-2 flex flex-wrap gap-2`). Two buttons in the default absolute top-right slot would cover the title at 640 px.
+Planner ruling P12 (layout, C9): `ErrorPanel` keeps the `AlertAction` slot but makes it a static row under the message (`static col-start-2 mt-2 flex flex-wrap gap-2`). Two buttons in the default absolute top-right slot would cover the title at 640 px. (The existing `home.spec.ts` chunk test, which clicks "โหลดหน้าใหม่", passed on the prototype.)
 
 - [ ] **Step 1: Write the failing tests** — `web/src/components/queue/use-queue-events.test.ts`:
 
@@ -4239,7 +4243,7 @@ EOF
 
 **Interfaces:**
 - Consumes (T4): `ErrorDetails`, `CopyReportButton`, `showErrorToast`, `PLAIN_TOAST`, `reportRequest`.
-- Produces: `lib/jobs.ENQUEUE_TOAST_ID = "enqueue-error"`; K7 contexts `home`, `home-playlist`, `settings-advanced`, `settings-general`, `health-load`, `health`; toast ids `analyze-error`, `settings-general` (existing `TOAST_ID`), `settings-open`, `ffmpeg`, `shutdown-error`, `enqueue-error`. The health page's copy button sits right after "ตรวจอีกครั้ง" and before "ปิดโปรแกรม" (spec §1.6), `variant="outline"`, default size; its request is `{ context: "health" }` (no error section, D4).
+- Produces: `lib/jobs.ENQUEUE_TOAST_ID = "enqueue-error"`; K7 contexts `home`, `home-playlist`, `settings-advanced`, `settings-general`, `health-load`, `health`; toast ids `analyze-error`, `settings-general` (existing `TOAST_ID`), `settings-open`, `ffmpeg`, `shutdown-error`, `enqueue-error`. The health page's copy button sits right after "ตรวจอีกครั้ง" and before "ปิดโปรแกรม" (spec §1.6), `variant="outline"`, default size; its request is `{ context: "health" }` (no error section, D4). The action row gets `data-testid="health-actions"` so T12's axe check can scope to it (planner ruling P13).
 
 Spec §1.3 notes honoured here: the output-folder field message (`dirError`) gets no details section (field feedback); the "ไปหน้าตรวจสุขภาพ" action of the enqueue toast stays; `health-panel.tsx:83` (backend 200 with `status: "error"`, no `ApiError`) sends `{ code: "E_TOOL_INSTALL_FAILED", detail: status.message, context: "ffmpeg-install" }`; `lib/jobs.ts` importing from `components/error-report/` is the accepted first `lib → components` import.
 
@@ -4838,6 +4842,11 @@ with:
 
 Replace (6):
 ```tsx
+        })}
+        {health.data.account && <AccountRow account={health.data.account} />}
+      </ItemGroup>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button variant="outline" onClick={() => void health.refetch()} disabled={health.isFetching}>
           <RefreshCw aria-hidden />
           {th.health.recheck}
         </Button>
@@ -4847,6 +4856,11 @@ Replace (6):
 ```
 with:
 ```tsx
+        })}
+        {health.data.account && <AccountRow account={health.data.account} />}
+      </ItemGroup>
+      <div data-testid="health-actions" className="flex flex-wrap justify-end gap-2">
+        <Button variant="outline" onClick={() => void health.refetch()} disabled={health.isFetching}>
           <RefreshCw aria-hidden />
           {th.health.recheck}
         </Button>
@@ -4873,4 +4887,985 @@ EOF
 
 ---
 
-> **WIP:** tasks T11-T12, the spec-coverage table and the execution handoff follow in the next commit of this plan. Do not execute before the plan is complete.
+## Wave 3
+
+### Task 11: `POST /api/diagnostics`, `ErrorLogMiddleware`, the privacy canary (AC-SET-04, AC-SET-06)
+
+**Files:**
+- Create: `src/yttoolkit/api/diagnostics.py`
+- Modify: `src/yttoolkit/api/errors.py` (`ErrorLogMiddleware`, `code=E_UNKNOWN` on the unhandled-error line)
+- Modify: `src/yttoolkit/app.py` (router always included; middleware added last = outermost)
+- Create: `tests/api/test_diagnostics_api.py` (planner ruling P1)
+- Modify: `tests/integration/test_account_privacy.py` (docstring + the three report calls)
+
+**Interfaces:**
+- Consumes: `core.diagnostics.ErrorSection`, `ReportInputs`, `build_report` (T6); `ctx.plat.os_version()` and `FakePlatform.os_version()` (T2); `core.tools.ytdlp_status(lookup_latest=False)`, `ffmpeg_status(paths, plat)`, `find_js_runtime(plat)`, `ToolStatus`; `ctx.queue.store.get(job_id)`; `ctx.db.execute(...)`; `ctx.accounts.status()["active"]`; `errors.error_response`, `BAD_REQUEST_MESSAGE`.
+- Produces: K5 — `build_diagnostics_router(ctx)`, `parse_body(raw: bytes) -> dict[str, str] | str`, `collect_inputs(ctx, body) -> ReportInputs`, `MAX_DETAIL = 4000`, `PATTERNS`; `errors.ErrorLogMiddleware`, `errors._error_code(body: bytes) -> str`, `errors._log_api_error(scope, status, code)`.
+
+Rules from the spec this task must keep: the body is validated by hand (a rejected value is never echoed, neither in the 422 nor in the log); an unknown `jobId` falls back to the body and never 404s; the log tail is read **before** the `diagnostics` line is written; `detail` is never logged; the endpoint is a `POST` behind `LocalOnlyMiddleware` (token + Origin); the tools are called through the `tools` module (tests patch them). P9 (unhandled 500) and P11 (percent-encoded path) are implemented here.
+
+- [ ] **Step 1: Write the failing API tests** — create `tests/api/test_diagnostics_api.py`:
+```python
+"""POST /api/diagnostics (M6 รอบ B spec 2.1 · AC-SET-04) และบรรทัด api_error ของ ErrorLogMiddleware (spec 3.3)"""
+
+from __future__ import annotations
+
+import logging
+import random
+import re
+from pathlib import Path, PureWindowsPath
+
+import pytest
+from fastapi.testclient import TestClient
+
+from yttoolkit import redact
+from yttoolkit.api import errors
+from yttoolkit.api.diagnostics import MAX_DETAIL
+from yttoolkit.core import tools
+from yttoolkit.core.db import Database
+from yttoolkit.core.events import EventBus
+from yttoolkit.core.jobs import JobStore, NewJob
+from yttoolkit.core.queue import QueueRunner
+from yttoolkit.core.settings import SettingsStore
+from yttoolkit.core.tools import ToolStatus
+
+TOKEN = "test-token"
+BASE = "http://127.0.0.1:8787"
+AUTH = {"X-Toolkit-Token": TOKEN, "Origin": BASE}
+BBB = "aqz-KE-bpKQ"
+TITLE = "บิ๊กบัคบันนี่ ฉบับทดสอบ"
+HOME = PureWindowsPath("C:/Users/somchai")
+PRD_LABELS = (
+    "## รายงานปัญหา YT Toolkit\n",
+    "- เวลา: ",
+    "- แอพ: 0.1.0 (commit abc1234) · ระบบ: Windows 11 (10.0.26200)\n",
+    "- yt-dlp: 2026.09.20 · ffmpeg: ไม่มี · JS runtime: deno 2.9.7\n",
+    "- บัญชียูทูป: ไม่ได้ใช้บัญชี\n",
+    "### error\n",
+    "- รหัส: ",
+    "- รายละเอียด: ",
+    "### log ล่าสุด (50 บรรทัด)\n```text\n",
+)
+
+
+@pytest.fixture(autouse=True)
+def fixed_tools(monkeypatch):
+    """ไม่เรียก ffmpeg / deno / yt-dlp จริง (รายงานใช้ผลของสามตัวนี้ตรง ๆ)"""
+    monkeypatch.setattr(tools, "ytdlp_status", lambda **kwargs: ToolStatus("ok", name="yt-dlp", version="2026.09.20"))
+    monkeypatch.setattr(tools, "ffmpeg_status", lambda paths, plat: ToolStatus("error", name="ffmpeg", message="x"))
+    monkeypatch.setattr(tools, "find_js_runtime", lambda plat: ToolStatus("ok", name="deno", version="2.9.7"))
+
+
+@pytest.fixture
+def somchai(monkeypatch):
+    monkeypatch.setattr(errors.Path, "home", lambda: HOME)
+    monkeypatch.setattr(redact, "_home_aliases", lambda home: ())
+
+
+class Env:
+    def __init__(self, make_client, tmp_path: Path) -> None:
+        self.db = Database(tmp_path / "app.db")
+        self.db.migrate()
+        self.store = JobStore(self.db)
+        self.bus = EventBus()
+        settings = SettingsStore(self.db, tmp_path / "out")
+        self.runner = QueueRunner(self.store, self.bus, {}, settings=settings, work_root=tmp_path / "work",
+                                  rng=random.Random(1), spawn=lambda fn: None, redact=lambda text: text)  # fmt: skip
+        self.client: TestClient = make_client(queue=self.runner, events=self.bus, settings=settings, db=self.db)
+
+    def failed_job(self, code: str, detail: str, title: str = TITLE):
+        (job,) = self.store.add([NewJob(BBB, "video", {}, title)])
+        self.store.transition(job.id, "running")
+        return self.store.transition(job.id, "failed", error_code=code, error_message="m", error_detail=detail)
+
+    def report(self, body: dict) -> str:
+        resp = self.client.post("/api/diagnostics", json=body, headers=AUTH)
+        assert resp.status_code == 200, resp.text
+        return resp.json()["report"]
+
+
+@pytest.fixture
+def env(make_client, tmp_path):
+    e = Env(make_client, tmp_path)
+    yield e
+    e.runner.shutdown(timeout=0.1)
+    e.bus.close()
+    e.db.close()
+
+
+def _in_order(text: str, parts: tuple[str, ...]) -> bool:
+    at = 0
+    for part in parts:
+        found = text.find(part, at)
+        if found < 0:
+            return False
+        at = found + len(part)
+    return True
+
+
+# ---------- AC-SET-04: รายงานของงานที่พลาด ----------
+
+
+def test_job_report_has_every_prd_heading_and_no_personal_data(env, somchai, paths) -> None:
+    paths.logs.mkdir(parents=True, exist_ok=True)
+    (paths.logs / "app.log").write_text(f"INFO yttoolkit: token={TOKEN} เปิด C:\\Users\\somchai\\x\n", encoding="utf-8")
+    detail = f"[Errno 28] No space left: 'C:\\\\Users\\\\somchai\\\\Downloads\\\\{TITLE}.mp4' · copy 'D:\\\\out\\\\{TITLE}.mp4'"
+    job = env.failed_job("E_DISK_FULL", detail)
+    report = env.report({"jobId": job.id, "code": "E_NETWORK", "detail": "ignored"})
+    assert _in_order(report, PRD_LABELS), report
+    assert re.search(r"^- เวลา: \d{4}-\d{2}-\d{2} \d{2}:\d{2} \([+-]\d{2}:\d{2}\)$", report, re.M)
+    assert f"- รหัส: E_DISK_FULL · งาน: video (videoId {BBB})\n" in report  # จากงาน ไม่ใช่จาก body
+    assert "ignored" not in report and "E_NETWORK" not in report
+    assert "~\\\\Downloads" in report
+    for leaked in ("somchai", TITLE, "D:\\", TOKEN):
+        assert leaked not in report, leaked
+
+
+def test_the_videos_row_title_is_hidden_too(env, paths) -> None:
+    env.db.execute(
+        "INSERT INTO videos (video_id, title, probe_json, probed_at, opened_at) VALUES (?, ?, '{}', 'x', 'x')",
+        (BBB, "ชื่อในประวัติที่ยาวพอ"),
+    )
+    report = env.report({"code": "E_NETWORK", "detail": "เปิด ชื่อในประวัติที่ยาวพอ ไม่ได้", "videoId": BBB})
+    assert "ชื่อในประวัติที่ยาวพอ" not in report and "<title>" in report
+
+
+# ---------- รูปแบบอื่นของ body ----------
+
+
+def test_non_job_report_uses_the_body_with_the_screen_label(env) -> None:
+    report = env.report({"code": "E_YT_REFUSED", "detail": "HTTP Error 403", "context": "video-header", "videoId": BBB})
+    assert f"- รหัส: E_YT_REFUSED · หน้าจอ: video-header (videoId {BBB})\n- รายละเอียด: HTTP Error 403\n" in report
+
+
+def test_empty_body_is_the_health_report_without_an_error_section(env) -> None:
+    for body in ({}, {"context": "health"}):
+        report = env.report(body)
+        assert "### error" not in report
+        assert "### log ล่าสุด (50 บรรทัด)" in report
+
+
+def test_unknown_job_id_falls_back_to_the_body_and_never_404s(env) -> None:
+    report = env.report({"jobId": "nope-123", "code": "E_UNKNOWN", "detail": "gone", "context": "queue"})
+    assert "- รหัส: E_UNKNOWN · หน้าจอ: queue\n- รายละเอียด: gone\n" in report
+    assert "- รหัส: ไม่มี" in env.report({"jobId": "nope-123"})
+
+
+def test_works_without_a_queue_or_database(make_client) -> None:
+    resp = make_client().post("/api/diagnostics", json={"code": "E_OFFLINE", "context": "crash"}, headers=AUTH)
+    assert resp.status_code == 200
+    assert "- รหัส: E_OFFLINE · หน้าจอ: crash\n" in resp.json()["report"]
+
+
+def test_account_line_reads_only_the_status(env) -> None:
+    class Accounts:
+        def status(self) -> dict:
+            return {"active": True, "importedAt": "2026-10-12T01:00:00+00:00", "expiresAt": "x", "used": True}
+
+    env.client.app.state.ctx.accounts = Accounts()
+    report = env.report({})
+    assert "- บัญชียูทูป: ใช้บัญชีชั่วคราวอยู่\n" in report
+    assert "2026-10-12T01" not in report
+
+
+def test_response_is_not_cached_and_logs_one_line_without_the_detail(env, caplog) -> None:
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        resp = env.client.post("/api/diagnostics", json={"code": "E_NETWORK", "detail": "secret-detail-77",
+                                                         "context": "video-frames"}, headers=AUTH)  # fmt: skip
+    assert resp.headers["cache-control"] == "no-store"
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("diagnostics ")]
+    assert lines == ["diagnostics code=E_NETWORK context=video-frames job=-"]
+    assert "secret-detail-77" not in caplog.text
+
+
+def test_the_report_never_contains_its_own_log_line(env, paths) -> None:
+    from yttoolkit import probe
+
+    root = logging.getLogger()
+    before, level = list(root.handlers), root.level
+    try:
+        probe.setup_file_log(paths)
+        first = env.report({"context": "health"})
+        second = env.report({"context": "health"})
+    finally:
+        for handler in list(root.handlers):
+            if handler not in before:
+                root.removeHandler(handler)
+                handler.close()
+        root.setLevel(level)
+    assert "diagnostics code=" not in first
+    assert "diagnostics code=- context=health job=-" in second  # บรรทัดของครั้งก่อนอยู่ใน log แล้ว
+
+
+# ---------- 422: ตรวจ body เอง ไม่ยกค่าที่ส่งมา ----------
+
+BAD = "evil-value-9z"
+
+
+@pytest.mark.parametrize(
+    ("body", "detail"),
+    [
+        ({"jobId": "a", BAD: "x"}, "body has an unknown field"),
+        ({"code": f"E_{BAD}"}, "code must match ^E_[A-Z0-9_]{1,40}$"),
+        ({"jobId": f"{BAD}/../x"}, "jobId must match ^[A-Za-z0-9_-]{1,64}$"),
+        ({"videoId": BAD}, "videoId must match ^[A-Za-z0-9_-]{11}$"),
+        ({"context": f"Video {BAD}"}, "context must match ^[a-z][a-z0-9-]{0,31}$"),
+        ({"detail": BAD + "x" * MAX_DETAIL}, "detail longer than 4000 characters"),
+        ({"code": 5}, "code must be a string"),
+        ({"jobId": "abc\n"}, "jobId must match ^[A-Za-z0-9_-]{1,64}$"),
+    ],
+)
+def test_bad_fields_are_422_and_never_echo_the_value(env, caplog, body, detail) -> None:
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        resp = env.client.post("/api/diagnostics", json=body, headers=AUTH)
+    assert resp.status_code == 422
+    error = resp.json()["error"]
+    assert (error["code"], error["detail"]) == ("E_BAD_REQUEST", detail)
+    assert BAD not in resp.text and BAD not in caplog.text
+    assert "api_error method=POST path=/api/diagnostics status=422 code=E_BAD_REQUEST" in caplog.text
+
+
+@pytest.mark.parametrize("raw", [b"[1, 2]", b'"text"', b"{not json", b""])
+def test_a_body_that_is_not_a_json_object_is_422(env, raw) -> None:
+    resp = env.client.post("/api/diagnostics", content=raw, headers={**AUTH, "Content-Type": "application/json"})
+    assert resp.status_code == 422
+    assert resp.json()["error"]["detail"] == "body must be a JSON object"
+
+
+def test_detail_at_exactly_the_limit_is_accepted(env) -> None:
+    assert "### error" in env.report({"code": "E_UNKNOWN", "detail": "d" * MAX_DETAIL})
+
+
+# ---------- token: รายงานมี log จึงต้องผ่าน token เสมอ ----------
+
+
+def test_no_token_or_a_foreign_origin_is_403(env, caplog) -> None:
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        no_token = env.client.post("/api/diagnostics", json={}, headers={"Origin": BASE})
+        foreign = env.client.post("/api/diagnostics", json={}, headers={"X-Toolkit-Token": TOKEN,
+                                                                        "Origin": "http://evil.example"})  # fmt: skip
+    assert no_token.status_code == foreign.status_code == 403
+    assert no_token.json()["error"]["code"] == "E_FORBIDDEN"
+    assert "report" not in no_token.text
+    assert "api_error method=POST path=/api/diagnostics status=403 code=E_FORBIDDEN" in caplog.text
+
+
+def test_there_is_no_get_that_returns_the_report(env) -> None:
+    resp = env.client.get("/api/diagnostics?jobId=x")
+    assert resp.status_code in (404, 405)
+    assert "report" not in resp.text and "รายงานปัญหา" not in resp.text
+
+
+# ---------- ErrorLogMiddleware (spec 3.3) ----------
+
+
+def _api_lines(caplog) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.getMessage().startswith("api_error ")]
+
+
+def test_a_409_is_an_info_line_with_method_path_and_code(env, caplog) -> None:
+    (job,) = env.store.add([NewJob(BBB, "video", {})])
+    with caplog.at_level(logging.DEBUG, logger="yttoolkit"):
+        resp = env.client.post(f"/api/jobs/{job.id}/retry?secret=q1", headers=AUTH)
+    assert resp.status_code == 409
+    (record,) = _api_lines(caplog)
+    assert record.levelno == logging.INFO
+    assert record.getMessage() == f"api_error method=POST path=/api/jobs/{job.id}/retry status=409 code=E_JOB_STATE"
+    assert "secret" not in caplog.text  # ไม่มี query string
+
+
+def test_a_404_is_debug_only(env, caplog) -> None:
+    with caplog.at_level(logging.DEBUG, logger="yttoolkit"):
+        assert env.client.get("/api/nope").status_code == 404
+    (record,) = _api_lines(caplog)
+    assert record.levelno == logging.DEBUG  # root เป็น INFO ในแอพจริง: บรรทัดนี้ไม่ถูกเขียนลง app.log
+    assert record.getMessage() == "api_error method=GET path=/api/nope status=404 code=E_NOT_FOUND"
+
+
+def test_a_path_with_a_line_break_cannot_forge_a_log_line(env, caplog) -> None:
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        env.client.post("/api/videos/bad%0Aid/captures", json={"tMs": 0}, headers=AUTH)
+    assert "bad\nid" not in caplog.text
+    assert all("\n" not in r.getMessage() for r in _api_lines(caplog))
+
+
+def test_success_and_non_api_paths_are_not_logged(env, caplog) -> None:
+    with caplog.at_level(logging.DEBUG, logger="yttoolkit"):
+        assert env.client.get("/api/ping").status_code == 200
+        env.client.get("/no-such-page")
+    assert _api_lines(caplog) == []
+
+
+def test_an_unhandled_500_logs_a_warning_line_and_the_traceback_line(make_client, caplog) -> None:
+    app = make_client().app
+
+    @app.get("/api/test-boom")
+    def boom():
+        raise RuntimeError("kaboom")
+
+    app.router.routes.insert(0, app.router.routes.pop())
+    client = TestClient(app, base_url=BASE, raise_server_exceptions=False)
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        assert client.get("/api/test-boom").status_code == 500
+    (line,) = _api_lines(caplog)
+    assert line.levelno == logging.WARNING
+    assert line.getMessage() == "api_error method=GET path=/api/test-boom status=500 code=E_UNKNOWN"
+    traced = [r for r in caplog.records if r.exc_info]
+    assert len(traced) == 1 and "code=E_UNKNOWN" in traced[0].getMessage()
+
+
+def test_a_502_from_a_route_is_a_warning(make_client, caplog) -> None:
+    app = make_client().app
+
+    @app.get("/api/test-refused")
+    def refused():
+        return errors.error_response(502, "E_YT_REFUSED", "m", "detail-should-not-be-logged")
+
+    app.router.routes.insert(0, app.router.routes.pop())
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        assert TestClient(app, base_url=BASE).get("/api/test-refused").status_code == 502
+    (line,) = _api_lines(caplog)
+    assert line.levelno == logging.WARNING and line.getMessage().endswith("status=502 code=E_YT_REFUSED")
+    assert "detail-should-not-be-logged" not in caplog.text
+```
+
+- [ ] **Step 2: Run them, expect FAIL**
+
+Run: `cd "$WORKTREE" && uv run pytest tests/api/test_diagnostics_api.py -q -W error -p no:cacheprovider`
+Expected: collection error `ModuleNotFoundError: No module named 'yttoolkit.api.diagnostics'`.
+
+- [ ] **Step 3: Create `src/yttoolkit/api/diagnostics.py`**
+```python
+"""API รายงานแจ้งปัญหา (M6 รอบ B spec 2.1 · PRD ข้อ 7.1): POST /diagnostics
+
+POST ไม่ใช่ GET: error ที่ไม่ใช่งานในคิวส่ง code + detail มาจากหน้าเว็บ (ข้อความเทคนิคต้องไม่อยู่ใน URL)
+และรายงานมี log ล่าสุด จึงต้องผ่าน token + Origin ของ LocalOnlyMiddleware เหมือนคำขออื่นที่ไม่ใช่ GET
+ตรวจ body เอง (ไม่ใช้ pydantic ที่ยกค่าที่ส่งมาใส่ข้อความ error) · ไม่เคยตอบ 404: ปุ่มต้องได้รายงานเสมอ
+ไม่ import yt_dlp หรือ extractor (เวอร์ชัน yt-dlp มาจาก tools.ytdlp_status ที่ import extractor เองตอนเรียก)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import sqlite3
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
+
+from ..core import tools
+from ..core.diagnostics import ErrorSection, ReportInputs, build_report
+from .errors import BAD_REQUEST_MESSAGE, error_response
+
+if TYPE_CHECKING:
+    from ..app import AppContext
+
+log = logging.getLogger("yttoolkit")
+
+MAX_DETAIL = 4000  # เท่ากับ MAX_DETAIL ของ web/src/lib/report.ts
+# ช่องที่รับ: รูปแบบที่ต้องตรงทั้งค่า (fullmatch) · ข้อความ error บอกแค่ชื่อช่องกับกฎ ไม่ยกค่าที่ส่งมา
+PATTERNS: dict[str, str] = {
+    "jobId": r"[A-Za-z0-9_-]{1,64}",
+    "code": r"E_[A-Z0-9_]{1,40}",
+    "context": r"[a-z][a-z0-9-]{0,31}",
+    "videoId": r"[A-Za-z0-9_-]{11}",
+}
+FIELDS = frozenset({*PATTERNS, "detail"})
+_COMPILED = {key: re.compile(rule) for key, rule in PATTERNS.items()}
+
+
+def parse_body(raw: bytes) -> dict[str, str] | str:
+    """body ที่ผ่านกฎ (ทุกช่องไม่บังคับ {} ก็ได้) หรือข้อความอังกฤษคงที่ที่บอกว่าผิดกฎข้อไหน"""
+    try:
+        body = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return "body must be a JSON object"
+    if not isinstance(body, dict):
+        return "body must be a JSON object"
+    if set(body) - FIELDS:
+        return "body has an unknown field"
+    for key, value in body.items():
+        if not isinstance(value, str):
+            return f"{key} must be a string"
+        if key == "detail":
+            if len(value) > MAX_DETAIL:
+                return f"detail longer than {MAX_DETAIL} characters"
+        elif not _COMPILED[key].fullmatch(value):
+            return f"{key} must match ^{PATTERNS[key]}$"
+    return body
+
+
+def _video_title(ctx: AppContext, video_id: str | None) -> str:
+    if not video_id or ctx.db is None:
+        return ""
+    try:
+        rows = ctx.db.execute("SELECT title FROM videos WHERE video_id = ?", (video_id,))
+    except sqlite3.Error:
+        return ""
+    return str(rows[0]["title"] or "") if rows else ""
+
+
+def collect_inputs(ctx: AppContext, body: dict[str, str]) -> ReportInputs:
+    """ข้อมูลของรายงาน: งานในคิวก่อน (jobId ที่มีอยู่) ไม่มีงานใช้ code/detail ที่ส่งมา ไม่ส่งอะไรเลย = ไม่มีหัวข้อ error"""
+    job_id = body.get("jobId")
+    job = ctx.queue.store.get(job_id) if job_id and ctx.queue is not None else None
+    if job is not None:
+        error: ErrorSection | None = ErrorSection(
+            code=job.error_code, detail=job.error_detail, kind=job.kind, video_id=job.video_id
+        )
+        video_id: str | None = job.video_id
+    elif body.keys() & {"code", "detail", "jobId"}:
+        video_id = body.get("videoId")
+        error = ErrorSection(code=body.get("code"), detail=body.get("detail"), video_id=video_id,
+                             context=body.get("context"))  # fmt: skip
+    else:
+        error, video_id = None, body.get("videoId")
+    titles = tuple(t for t in (job.title if job is not None else "", _video_title(ctx, video_id)) if t)
+    return ReportInputs(
+        now=datetime.now().astimezone(),
+        version=ctx.version,
+        commit=ctx.commit,
+        os_version=ctx.plat.os_version(),
+        ytdlp=tools.ytdlp_status(lookup_latest=False),  # ไม่ถาม PyPI รายงานไม่ต่อเน็ต
+        ffmpeg=tools.ffmpeg_status(ctx.paths, ctx.plat),
+        js_runtime=tools.find_js_runtime(ctx.plat),
+        account_active=bool(ctx.accounts.status()["active"]) if ctx.accounts is not None else False,
+        error=error,
+        log_dir=ctx.paths.logs,
+        token=ctx.token,
+        titles=titles,
+    )
+
+
+def build_diagnostics_router(ctx: AppContext) -> APIRouter:
+    router = APIRouter()
+
+    @router.post("/diagnostics", response_model=None)
+    async def diagnostics(request: Request) -> JSONResponse:
+        body = parse_body(await request.body())
+        if isinstance(body, str):
+            return error_response(422, "E_BAD_REQUEST", BAD_REQUEST_MESSAGE, body)
+        inputs = await run_in_threadpool(collect_inputs, ctx, body)
+        report = await run_in_threadpool(build_report, inputs)
+        # หลังอ่าน log แล้วเท่านั้น (บรรทัดนี้ไม่อยู่ในรายงานของตัวเอง) · ค่าทุกช่องผ่านกฎแล้ว · ไม่เคย log detail
+        code = inputs.error.code if inputs.error is not None and inputs.error.code else "-"
+        log.info("diagnostics code=%s context=%s job=%s", code, body.get("context", "-"), body.get("jobId", "-"))
+        return JSONResponse({"report": report}, headers={"Cache-Control": "no-store"})
+
+    return router
+```
+
+- [ ] **Step 4: The error-log middleware** — `src/yttoolkit/api/errors.py`:
+
+Replace (1):
+```python
+from __future__ import annotations
+
+import logging
+from pathlib import Path  # noqa: F401  เทสเดิมแก้ errors.Path.home (คลาสเดียวกับที่ redact.py ใช้)
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+```
+with:
+```python
+from __future__ import annotations
+
+import json
+import logging
+import re
+from pathlib import Path
+from urllib.parse import quote  # noqa: F401  เทสเดิมแก้ errors.Path.home (คลาสเดียวกับที่ redact.py ใช้)
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+```
+
+Replace (2):
+```python
+
+
+async def _unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+    log.error("เกิดข้อผิดพลาดที่ไม่ได้คาดไว้ที่ %s %s", request.method, request.url.path, exc_info=exc)
+    return error_response(500, "E_UNKNOWN", UNKNOWN_MESSAGE, str(exc))
+
+
+def install_error_handlers(app: FastAPI) -> None:
+    """ให้ทุก error ตอบเป็นรูปแบบเดียวกัน {"error": {...}} แทน {"detail": ...} ของ FastAPI"""
+    app.add_exception_handler(HTTPException, _http_error)
+```
+with:
+```python
+
+
+async def _unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+    log.error("เกิดข้อผิดพลาดที่ไม่ได้คาดไว้ที่ %s %s code=E_UNKNOWN", request.method, request.url.path, exc_info=exc)
+    return error_response(500, "E_UNKNOWN", UNKNOWN_MESSAGE, str(exc))
+
+
+ERROR_BODY_PEEK = 64 * 1024  # อ่านรหัสจาก body ก้อนแรกที่ไม่เกินเท่านี้
+_CODE = re.compile(r"E_[A-Z0-9_]{1,40}")
+
+
+def _error_code(body: bytes) -> str:
+    if len(body) > ERROR_BODY_PEEK:
+        return "?"
+    try:
+        code = json.loads(body)["error"]["code"]
+    except (ValueError, UnicodeDecodeError, KeyError, TypeError):
+        return "?"
+    return code if isinstance(code, str) and _CODE.fullmatch(code) else "?"
+
+
+def _log_api_error(scope: dict, status: int, code: str) -> None:
+    # 404 = คำตอบ "ยังไม่มี" ปกติ (เช่น GET /videos/{id}/sharp) เป็น DEBUG ซึ่งไม่ถูกเขียน (root เป็น INFO)
+    level = logging.DEBUG if status == 404 else logging.WARNING if status >= 500 else logging.INFO
+    # ไม่มี query string ไม่มี body ไม่มี detail: path ของ API มีแค่ id (videoId, jobId)
+    # percent-encode อักขระอื่นทั้งหมด: path ที่มีขึ้นบรรทัด (/api/videos/bad%0Aid) ปลอมบรรทัด log ใหม่ไม่ได้
+    path = quote(scope.get("path", ""), safe="/-_.~")
+    log.log(level, "api_error method=%s path=%s status=%d code=%s", scope.get("method", "?"), path, status, code)
+
+
+class ErrorLogMiddleware:
+    """ASGI middleware ของ M6 รอบ B (spec 3.3): คำตอบ error ของ /api ทุกคำตอบลง app.log พร้อมรหัส
+
+    วางนอกสุด (หลัง LocalOnlyMiddleware) จึงเห็น 403/421 ของ middleware นั้นด้วย · ส่งต่อทุกข้อความทันทีไม่แก้ไม่กักไว้
+    exception ที่หลุดออกมาก่อนเริ่มตอบ = 500 E_UNKNOWN (ServerErrorMiddleware ด้านนอกเป็นตัวตอบ และ _unhandled_error
+    เขียน traceback แยกอีกบรรทัด)
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if path != "/api" and not path.startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+        state = {"status": 0, "json": False, "done": False}
+
+        async def watch(message) -> None:
+            if message["type"] == "http.response.start":
+                state["status"] = message["status"]
+                headers = dict(message.get("headers") or [])
+                state["json"] = headers.get(b"content-type", b"").split(b";")[0].strip().lower() == b"application/json"
+                state["done"] = message["status"] < 400
+            elif message["type"] == "http.response.body" and not state["done"]:
+                state["done"] = True
+                code = _error_code(message.get("body", b"")) if state["json"] else "?"
+                _log_api_error(scope, state["status"], code)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, watch)
+        except Exception:
+            if state["status"] == 0:
+                _log_api_error(scope, 500, "E_UNKNOWN")
+            raise
+
+
+def install_error_handlers(app: FastAPI) -> None:
+    """ให้ทุก error ตอบเป็นรูปแบบเดียวกัน {"error": {...}} แทน {"detail": ...} ของ FastAPI"""
+    app.add_exception_handler(HTTPException, _http_error)
+```
+
+- [ ] **Step 5: Wire both into `create_app`** — `src/yttoolkit/app.py`:
+
+Replace (1):
+```python
+
+from .api.account import build_account_router
+from .api.captures import build_captures_router
+from .api.errors import install_error_handlers
+from .api.events import build_events_router
+from .api.jobs import build_jobs_router
+from .api.routes import build_router
+```
+with:
+```python
+
+from .api.account import build_account_router
+from .api.captures import build_captures_router
+from .api.diagnostics import build_diagnostics_router
+from .api.errors import ErrorLogMiddleware, install_error_handlers
+from .api.events import build_events_router
+from .api.jobs import build_jobs_router
+from .api.routes import build_router
+```
+
+Replace (2):
+```python
+    app.state.ctx = ctx
+    install_error_handlers(app)
+    app.include_router(build_router(ctx), prefix="/api")
+    if ctx.videos is not None:
+        app.include_router(build_videos_router(ctx), prefix="/api")
+    if ctx.captures is not None:
+```
+with:
+```python
+    app.state.ctx = ctx
+    install_error_handlers(app)
+    app.include_router(build_router(ctx), prefix="/api")
+    # M6 รอบ B: รายงานแจ้งปัญหาเปิดเสมอ (ใช้ได้แม้บริการอื่นยังไม่พร้อม เช่นหน้าตรวจสุขภาพตอนเริ่ม)
+    app.include_router(build_diagnostics_router(ctx), prefix="/api")
+    if ctx.videos is not None:
+        app.include_router(build_videos_router(ctx), prefix="/api")
+    if ctx.captures is not None:
+```
+
+Replace (3):
+```python
+        app.include_router(build_events_router(ctx), prefix="/api")
+    mount_web(app, ctx.paths.web_dist, ctx.token)
+    app.add_middleware(LocalOnlyMiddleware, port=ctx.port, token=ctx.token, extra_origins=ctx.extra_origins)
+    return app
+```
+with:
+```python
+        app.include_router(build_events_router(ctx), prefix="/api")
+    mount_web(app, ctx.paths.web_dist, ctx.token)
+    app.add_middleware(LocalOnlyMiddleware, port=ctx.port, token=ctx.token, extra_origins=ctx.extra_origins)
+    # เพิ่มทีหลัง = อยู่นอกสุด: เห็น 403/421 ของ LocalOnlyMiddleware ด้วย (M6 รอบ B spec 3.3)
+    app.add_middleware(ErrorLogMiddleware)
+    return app
+```
+
+- [ ] **Step 6: Run the API tests, expect PASS**
+
+Run: `cd "$WORKTREE" && uv run pytest tests/api -q -W error -p no:cacheprovider` (prototype: the new file 44 passed; the existing API tests unchanged — `test_videos_api.py` `records[0]` still finds the route's own log record first, `test_captures_api.py` `test_post_with_a_malformed_id_never_reaches_the_service` passes because the path is percent-encoded).
+
+- [ ] **Step 7: Extend the privacy canary (AC-SET-06)** — `tests/integration/test_account_privacy.py`:
+
+Replace (1):
+```python
+งานที่ใช้บัญชีแล้วพลาด /health และ GET /cookies · แล้วตรวจว่า canary ไม่อยู่ใน log (ทั้งที่จับได้และ app.log)
+ข้อความที่พิมพ์ออกหน้าจอ (stdout/stderr: yt-dlp write_string ไม่ผ่าน logging) ข่าว SSE คำตอบของ API ทุกคำตอบ
+และไม่มีไฟล์ใดในโฟลเดอร์ข้อมูลหรือโฟลเดอร์ temp ที่มี canary
+รายงานแจ้งปัญหา (/api/diagnostics) ยังไม่มีในแอพ (M6) จึงยังไม่ได้ตรวจ ดู docs/m4-followups.md
+"""
+
+from __future__ import annotations
+```
+with:
+```python
+งานที่ใช้บัญชีแล้วพลาด /health และ GET /cookies · แล้วตรวจว่า canary ไม่อยู่ใน log (ทั้งที่จับได้และ app.log)
+ข้อความที่พิมพ์ออกหน้าจอ (stdout/stderr: yt-dlp write_string ไม่ผ่าน logging) ข่าว SSE คำตอบของ API ทุกคำตอบ
+และไม่มีไฟล์ใดในโฟลเดอร์ข้อมูลหรือโฟลเดอร์ temp ที่มี canary
+(M6 รอบ B · AC-SET-06) รายงานแจ้งปัญหา POST /api/diagnostics ทั้งสามแบบ (งานที่พลาด error จากหน้าเว็บ หน้าตรวจสุขภาพ)
+ผ่านเงื่อนไขเดียวกัน ไม่มีชื่อคุกกี้เลย และพูดถึงบัญชีแค่บรรทัดสถานะ
+"""
+
+from __future__ import annotations
+```
+
+Replace (2):
+```python
+    call("GET", "/api/jobs")
+    call("GET", "/api/health")
+    assert call("GET", "/api/cookies")["active"] is True
+    assert call("DELETE", "/api/cookies", headers=AUTH)["active"] is False
+
+    for text in bodies:
+```
+with:
+```python
+    call("GET", "/api/jobs")
+    call("GET", "/api/health")
+    assert call("GET", "/api/cookies")["active"] is True
+    # M6 รอบ B (AC-SET-06): รายงานแจ้งปัญหาตอนถือบัญชีอยู่ ทั้งงานที่พลาด error จากหน้าเว็บ และหน้าตรวจสุขภาพ
+    reports = [
+        call("POST", "/api/diagnostics", headers=AUTH, json={"jobId": failed.id})["report"],
+        call("POST", "/api/diagnostics", headers=AUTH, json={
+            "code": "E_VIDEO_PRIVATE", "detail": failed.error_detail or "-", "context": "video-header",
+            "videoId": "PRIVATEVID1",
+        })["report"],
+        call("POST", "/api/diagnostics", headers=AUTH, json={})["report"],
+    ]  # fmt: skip
+    for report in reports:
+        _assert_clean(report, "รายงานแจ้งปัญหา")
+        for name in ("SAPISID", "__Secure-3PSID", "LOGIN_INFO", CANARIES[3]):
+            assert name not in report, f"ชื่อคุกกี้ {name} อยู่ในรายงาน"
+        # ส่วนหัวและหัวข้อ error พูดถึงบัญชีแค่บรรทัดสถานะ (log ล่าสุดเป็นบรรทัดของแอพเอง ผ่านกฎ canary เดียวกันแล้วด้านบน)
+        head = report.split("### log ล่าสุด", 1)[0]
+        assert [line for line in head.splitlines() if "บัญชี" in line] == ["- บัญชียูทูป: ใช้บัญชีชั่วคราวอยู่"]
+    assert "- รหัส: E_VIDEO_PRIVATE · งาน: video (videoId PRIVATEVID1)" in reports[0]
+    assert call("DELETE", "/api/cookies", headers=AUTH)["active"] is False
+
+    for text in bodies:
+```
+
+(The report calls happen while the account is still held, before `DELETE /api/cookies`; the existing `app.log` / caplog / stdout / file-walk checks run after them, so the new `diagnostics` and `api_error` log lines are covered too. "Only the status line" is checked on the part before `### log ล่าสุด` — planner ruling P3.)
+
+- [ ] **Step 8: Run, expect PASS**
+
+Run: `cd "$WORKTREE" && uv run pytest tests/integration/test_account_privacy.py -q -W error -p no:cacheprovider` (1 passed), then the full suite (prototype of all backend tasks: 3,372 passed, 46 network deselected).
+
+- [ ] **Step 9: Commit**
+```bash
+cd "$WORKTREE" && git add src/yttoolkit/api/diagnostics.py src/yttoolkit/api/errors.py src/yttoolkit/app.py tests/api/test_diagnostics_api.py tests/integration/test_account_privacy.py && git commit -F- <<'EOF'
+feat(api): POST /diagnostics problem report, api_error log lines, report in the privacy canary
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+
+### Task 12: Chromium e2e for the report button (`web/e2e/error-report.spec.ts`, AC-SET-05)
+
+**Files:**
+- Create: `web/e2e/error-report.spec.ts`
+
+**Interfaces:**
+- Consumes: the UI of T4/T8/T9/T10 (labels "ดูรายละเอียด", "คัดลอกข้อมูลแจ้งปัญหา", "รหัส {code}", toast "คัดลอกแล้ว"; the health row `[data-testid="health-actions"]`); the real fake-mode `POST /api/diagnostics` of T11; `analyzeSettled` (`e2e/axe-settled.ts`).
+- Produces: nothing for other tasks.
+
+Rules: project `chromium` only (the file name does not start with `queue-`); no real job is created — `POST /api/jobs`, `GET /api/videos/<id>`, `POST /api/shutdown` and the chunk file are answered by `page.route`; only `/api/diagnostics` reaches the backend. Every test grants `clipboard-read` / `clipboard-write`. The lane writes, typechecks and lints the spec; the controller runs it at the final gate (it needs the built `web/dist` and T11).
+
+- [ ] **Step 1: Write the spec** — create `web/e2e/error-report.spec.ts`:
+```ts
+/// <reference lib="dom" />
+import { analyzeSettled } from "./axe-settled"
+import { expect, test, type Page } from "@playwright/test"
+
+// M6 รอบ B (AC-SET-05): ส่วน "ดูรายละเอียด" และปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" (spec 6.4)
+// โปรเจกต์ chromium ห้ามสร้างงานจริง: error ที่ทดสอบมาจาก page.route ทั้งหมด (POST /api/jobs ก็ mock)
+// มีแค่ POST /api/diagnostics ที่ไปถึง backend จริงในโหมดข้อมูลปลอม (รายงานจริง)
+
+const BBB = "aqz-KE-bpKQ"
+const COPY = "คัดลอกข้อมูลแจ้งปัญหา"
+const COPIED = "คัดลอกแล้ว"
+const REFUSED = "ยูทูปไม่ยอมส่งไฟล์ของคลิปนี้ตอนนี้ ลองใหม่ภายหลัง"
+const UNKNOWN = 'มีบางอย่างผิดพลาด กด "คัดลอกข้อมูลแจ้งปัญหา" แล้วส่งให้ผู้ดูแล'
+const DETAIL = "ERROR: [youtube] aqz-KE-bpKQ: HTTP Error 403: Forbidden"
+
+const toast = (page: Page, text: string) => page.locator("[data-sonner-toast]").filter({ hasText: text })
+const errorCard = (page: Page) => page.getByRole("alert").filter({ hasText: "เปิดข้อมูลคลิปไม่สำเร็จ" })
+// Chromium บน Windows เก็บ text/plain ในคลิปบอร์ดเป็น CRLF (Notepad / LINE อ่านได้ปกติ) เทสเทียบแบบ LF
+const clipboardText = async (page: Page) =>
+  (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, "\n")
+
+test.beforeEach(async ({ context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"])
+})
+
+/** ข้อมูลคลิปตอบ error (GET /api/videos/<id> เท่านั้น) */
+async function failVideo(page: Page, status: number, code: string, message: string, detail: string | null) {
+  await page.route(`**/api/videos/${BBB}`, (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ status, json: { error: { code, message, detail } } })
+      : route.fallback(),
+  )
+}
+
+/** body ของ POST /api/diagnostics ทุกครั้งที่หน้าเว็บส่ง */
+function diagnosticsBodies(page: Page): unknown[] {
+  const bodies: unknown[] = []
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/diagnostics" && request.method() === "POST") {
+      bodies.push(request.postDataJSON())
+    }
+  })
+  return bodies
+}
+
+/** axe ระดับ serious/critical · include = ตรวจเฉพาะส่วนนั้น (หน้าตรวจสุขภาพ: แถวปุ่มที่รอบนี้เพิ่มปุ่ม ดู Step ของ T12) */
+async function seriousViolations(page: Page, include?: string) {
+  const results = await analyzeSettled(page, include ? (builder) => builder.include(include) : undefined)
+  return results.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => v.id)
+}
+
+test("หน้าคลิปเปิดไม่ได้: ดูรายละเอียด → รหัส + ข้อความเทคนิค → คัดลอกข้อมูลแจ้งปัญหา ได้รายงานจริงและ toast คัดลอกแล้ว", async ({
+  page,
+}) => {
+  const bodies = diagnosticsBodies(page)
+  await failVideo(page, 502, "E_YT_REFUSED", REFUSED, DETAIL)
+  await page.goto(`/v/${BBB}`)
+  const card = errorCard(page)
+  await expect(card).toContainText(REFUSED)
+  await expect(card.getByText("รหัส E_YT_REFUSED")).toHaveCount(0) // พับไว้ (รหัสนี้ไม่ใช่ E_UNKNOWN)
+  await card.getByRole("button", { name: "ดูรายละเอียด" }).click()
+  await expect(card.getByText("รหัส E_YT_REFUSED")).toBeVisible()
+  await expect(card.getByText(DETAIL)).toBeVisible()
+  await card.getByRole("button", { name: COPY }).click()
+  await expect(toast(page, COPIED)).toBeVisible()
+  const text = await clipboardText(page)
+  expect(text.startsWith("## รายงานปัญหา YT Toolkit\n")).toBe(true)
+  expect(text).toContain(`- รหัส: E_YT_REFUSED · หน้าจอ: video-header (videoId ${BBB})\n`)
+  expect(text).toContain(`- รายละเอียด: ${DETAIL}\n`)
+  expect(text).toContain("### log ล่าสุด (50 บรรทัด)\n")
+  expect(bodies).toEqual([{ code: "E_YT_REFUSED", detail: DETAIL, context: "video-header", videoId: BBB }])
+})
+
+test("E_UNKNOWN: ส่วนรายละเอียดกางไว้แล้ว เห็นปุ่มคัดลอกโดยไม่ต้องกด", async ({ page }) => {
+  await failVideo(page, 500, "E_UNKNOWN", UNKNOWN, "RuntimeError: boom")
+  await page.goto(`/v/${BBB}`)
+  const card = errorCard(page)
+  await expect(card).toContainText(UNKNOWN)
+  await expect(card.getByText("รหัส E_UNKNOWN")).toBeVisible()
+  await expect(card.getByRole("button", { name: COPY })).toBeVisible()
+})
+
+test("toast ของ error: ค้างเกิน 6 วินาที มีปุ่มคัดลอกในตัว กดแล้วคัดลอกได้และ toast ยังอยู่", async ({ page }) => {
+  await page.route("**/api/jobs", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ status: 500, json: { error: { code: "E_UNKNOWN", message: UNKNOWN, detail: "boom" } } })
+      : route.fallback(),
+  )
+  await page.goto(`/v/${BBB}`)
+  await page.getByRole("button", { name: "โหลดภาพรวมเฟรม" }).click()
+  const failed = toast(page, UNKNOWN)
+  await expect(failed).toBeVisible()
+  await page.waitForTimeout(6_000) // เกิน 4 วินาทีของ sonner
+  await expect(failed).toBeVisible()
+  await failed.getByRole("button", { name: COPY }).click()
+  await expect(toast(page, COPIED)).toBeVisible()
+  await expect(failed).toBeVisible()
+  expect(await clipboardText(page)).toContain("- รหัส: E_UNKNOWN · หน้าจอ: enqueue\n")
+})
+
+test("หน้าตรวจสุขภาพ: ปุ่มอยู่ถัดจาก ตรวจอีกครั้ง รายงานไม่มีหัวข้อ error", async ({ page }) => {
+  const bodies = diagnosticsBodies(page)
+  await page.goto("/settings/health")
+  await expect(page.getByTestId("tool-ffmpeg")).toBeVisible({ timeout: 15_000 })
+  const recheck = page.getByRole("button", { name: "ตรวจอีกครั้ง" })
+  await expect(recheck.locator("xpath=following-sibling::button[1]")).toHaveText(COPY)
+  await page.getByRole("button", { name: COPY }).click()
+  await expect(toast(page, COPIED)).toBeVisible()
+  const text = await clipboardText(page)
+  expect(text).toContain("- บัญชียูทูป: ไม่ได้ใช้บัญชี\n")
+  expect(text).not.toContain("### error")
+  expect(bodies).toEqual([{ context: "health" }])
+})
+
+test("หน้าพัง (โหลดไฟล์โค้ดไม่ได้): ปุ่มคัดลอกใช้ได้และ toast คัดลอกแล้วขึ้น", async ({ page }) => {
+  await page.route("**/assets/video-*.js", (route) => route.abort())
+  await page.goto(`/v/${BBB}`)
+  await expect(page.getByText("โปรแกรมเพิ่งอัปเดต โหลดหน้านี้ใหม่อีกครั้ง")).toBeVisible()
+  await page.getByRole("button", { name: COPY }).click()
+  await expect(toast(page, COPIED)).toBeVisible()
+  expect(await clipboardText(page)).toContain("- รหัส: E_UNKNOWN · หน้าจอ: chunk\n")
+})
+
+test("คลิปบอร์ดไม่ยอม = คัดลอกไม่สำเร็จ ลองอีกครั้ง · ต่อโปรแกรมไม่ได้ = ข้อความเชื่อมต่อโปรแกรมไม่ได้", async ({ page }) => {
+  await page.addInitScript(() => {
+    const blocked = () => Promise.reject(new DOMException("blocked", "NotAllowedError"))
+    Clipboard.prototype.write = blocked
+    Clipboard.prototype.writeText = blocked
+  })
+  await page.goto("/settings/health")
+  await expect(page.getByTestId("tool-ffmpeg")).toBeVisible({ timeout: 15_000 })
+  await page.getByRole("button", { name: COPY }).click()
+  await expect(toast(page, "คัดลอกไม่สำเร็จ ลองอีกครั้ง")).toBeVisible()
+  await page.route("**/api/diagnostics", (route) => route.abort())
+  await page.getByRole("button", { name: COPY }).click()
+  await expect(toast(page, "เชื่อมต่อโปรแกรมไม่ได้ ถ้าปิดโปรแกรมไปแล้ว เปิดใหม่ด้วย start.bat")).toBeVisible()
+})
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`axe ${scheme}: ส่วนรายละเอียดที่กางในกล่อง error · หน้าตรวจสุขภาพ · toast ที่มีปุ่มคัดลอก`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await failVideo(page, 502, "E_YT_REFUSED", REFUSED, DETAIL)
+    await page.goto(`/v/${BBB}`)
+    await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
+    await errorCard(page).getByRole("button", { name: "ดูรายละเอียด" }).click()
+    await expect(errorCard(page).getByText(DETAIL)).toBeVisible()
+    expect(await seriousViolations(page)).toEqual([])
+
+    await page.goto("/settings/health")
+    await expect(page.getByRole("button", { name: COPY })).toBeVisible({ timeout: 15_000 })
+    // ทั้งหน้ามีปัญหาเดิมที่ไม่เกี่ยวกับรอบนี้ (แถว ffmpeg ที่ใช้ไม่ได้ในโหมดข้อมูลปลอม) จึงตรวจแถวปุ่มที่เพิ่มปุ่ม
+    expect(await seriousViolations(page, '[data-testid="health-actions"]')).toEqual([])
+
+    await page.route("**/api/shutdown", (route) =>
+      route.fulfill({ status: 500, json: { error: { code: "E_UNKNOWN", message: UNKNOWN, detail: null } } }),
+    )
+    await page.getByRole("button", { name: "ปิดโปรแกรม" }).click()
+    await expect(toast(page, UNKNOWN).getByRole("button", { name: COPY })).toBeVisible()
+    expect(await seriousViolations(page, "[data-sonner-toaster]")).toEqual([])
+  })
+}
+
+test("หน้าต่างกว้าง 640 px: ข้อความเทคนิคยาวไม่มีช่องว่างไม่ทำให้เลื่อนซ้ายขวา", async ({ page }) => {
+  await page.setViewportSize({ width: 640, height: 800 })
+  await failVideo(page, 502, "E_YT_REFUSED", REFUSED, "x".repeat(300))
+  await page.goto(`/v/${BBB}`)
+  await errorCard(page).getByRole("button", { name: "ดูรายละเอียด" }).click()
+  await expect(errorCard(page).getByText("รหัส E_YT_REFUSED")).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(640)
+})
+```
+
+Notes for the implementer:
+- The clipboard text is compared after `\r\n` → `\n` (P14).
+- The two health-page axe checks are scoped (P13); the clip-page check is whole-page.
+- The toast test waits 6 s on purpose (sonner's default lifetime is 4 s).
+
+- [ ] **Step 2: Typecheck and lint**
+
+Run: `cd "$WORKTREE/web" && npm run typecheck && npx eslint e2e/error-report.spec.ts` (clean).
+
+- [ ] **Step 3: Commit**
+```bash
+cd "$WORKTREE" && git add web/e2e/error-report.spec.ts && git commit -F- <<'EOF'
+test(e2e): problem-report button on the clip page, toasts, health page, crash panel, 640 px, axe
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+- [ ] **Step 4 (controller, final gate):** `cd web && npm run build && npx playwright test --project=chromium e2e/error-report.spec.ts` — 9 passed on the prototype. A failure goes back to the owning lane (K7 contexts / labels: T8 clip page, T9 crash panel, T10 health and enqueue, T4 components, T11 report text).
+
+
+---
+
+## Spec coverage (self-review)
+
+| Spec item | Task(s) |
+|---|---|
+| D1 copy button at every error point; toasts stay until dismissed | T4 `ErrorDetails` / `showErrorToast` (`duration: Infinity`); T8, T9, T10 call sites; T12 e2e (box, toast > 6 s) |
+| D2 `E_JS_RUNTIME_MISSING` = health warning text only | T3 `JS_RUNTIME_MISSING_MESSAGE`; report shows the JS runtime (T6) |
+| D3 new `E_UNKNOWN` text everywhere (not `start.bat`) | T3 (`yterrors`, tests), T4 (`th.errors.unknown`, `settings-general.spec.ts`) |
+| D4 server builds the whole report; job by id; non-job code+detail+context; health sends no error | T6 builder, T11 `collect_inputs`, T10 health `{ context: "health" }` |
+| D5 UI points (LoadError, FailedRow, failed-job toast, other toasts, ErrorPanel after a crash, health page) | T8 / T9 / T10; RouteError Toaster T9 |
+| D6 PRD §7.1 template exactly; "คัดลอกแล้ว"; existing failure strings; OS from Platform | T6 golden test, T4 `copyReport`, T2 `os_version` |
+| D7 rotate 5 MB × 3; every failed job logs time/code/id/detail/traceback; non-job API errors log their code; quiet httpx | T3 probe, T7 `job_failed`, T11 `ErrorLogMiddleware` |
+| §1.1 `lib/report.ts`, `CopyReportButton`, `ErrorDetails` (E_UNKNOWN open, R1), `showErrorToast` (button in description) | T4 |
+| §1.3 inline boxes (9 LoadError sites + 5 R2 boxes), toasts table, small action toasts (Q5), exclusions | T8 (W2 + history + batch), T9 (queue, account, shutdown dialog), T10 (home, settings, health, enqueue); exclusions listed in T8 Step 5 |
+| §1.4 FailedRow: button replaced, `copyDetails` and `th.queue.copyDetails` removed, `data-details-trigger` + controlled open kept | T9 (+ `nav.spec.ts`, `queue-flow.spec.ts`) |
+| §1.5 ErrorPanel button + Toaster after a route error | T9 (P12) |
+| §1.6 health button right after "ตรวจอีกครั้ง" | T10, T12 |
+| §1.7 640 px, keyboard, live region, axe light/dark | T4 markup (`break-all`, `flex-wrap`), T12 (640 px, axe ×2 themes; P13 scope) |
+| §2.1 `POST /api/diagnostics`, hand validation, 422 without echo, never 404, no-store, `diagnostics` log line after the tail | T11 |
+| §2.2 builder: inputs, exact output, field rules, tail across rotation with lock, caps after redaction, assembly order | T6 |
+| §2.3 `redact_home` percent forms, `mask_user_paths`, `scrub_titles`, `mask_media_urls`, `redact_log_detail`, `redact_report` | T1 (P8) |
+| §2.4 `Platform.os_version` (Windows build ≥ 22000 = 11; macOS stub; FakePlatform) | T2 |
+| §2.5 where the API gets each input | T11 `collect_inputs` |
+| §2.6 health JS warning text | T3 |
+| §2.7 `E_UNKNOWN` text + pinned tests | T3, T4 |
+| §3.1 rotation 5 MB / backupCount 2, httpx WARNING by name | T3 (+ `test_lifecycle.py` pin) |
+| §3.2 one `job_failed` line in `_fail` (+ spawn failure), levels, traceback in the message, old `log.exception` removed | T7 |
+| §3.3 `ErrorLogMiddleware` outermost, levels, no query/body/detail; `_unhandled_error` `code=E_UNKNOWN` | T11 (P9, P11) |
+| §3.4 privacy of the new lines | T7 tests (title, tmp path, D: path), T11 tests (no detail, no query, no echo), canary |
+| §4 edge cases (offline, clipboard refused, slow report via ClipboardItem promise, unknown job, missing log file, rotation, long detail) | T4 `copyReport` tests, T11 unknown job, T6 missing files + lock, T12 failure paths |
+| §5 docs (PRD §6.2 row, §11, acceptance AC-SET-03..06, m1/m4 follow-ups, canary docstring) | T5 (P2), T11 (docstring) |
+| §6.1-§6.4 tests | T1, T2, T3, T6, T7 (unit) · T11 (API + canary) · T4, T9, T10, T8 (vitest) · T12 (chromium) · T9 `queue-flow.spec.ts` assertion (queue project) |
+| §7 Thai copy (all sourced) | T4 `th.errors.*` (+ spec §7 table); T3 backend texts; T6 report labels; no new Thai |
+| §8 review focus 1 (paste into chat) and 2 (home forms) | manual rows AC-SET-04/05 in T5; T1 percent / file URL / doubled-backslash tests; 3 (toast pile-up) — stable ids everywhere + P5; 4 (titles in paths) — T1 `scrub_titles` + T7 test; 5 (rotation race) — T6 lock test |
+| Out of scope | not implemented (see header) |
+
+Self-review checks run on this plan:
+- **Placeholders:** none — new files are given whole; changed files are exact "Replace … with …" blocks generated from the prototype diff (each old block occurs once at `ffbd03e`).
+- **Type/name consistency:** `redact_log_detail` / `redact_report` (T1 → T6, T7), `os_version` / `os_version_text` (T2 → T11), `ErrorSection` / `ReportInputs` / `build_report` (T6 → T11), `job_failed_message` / `log_job_failed` / `JOB_FAILED_DETAIL_MAX` (T7), `build_diagnostics_router` / `parse_body` / `collect_inputs` / `ErrorLogMiddleware` (T11), `ReportRequest` / `reportRequest` / `cleanRequest` / `fetchReport` / `copyReport` / `MAX_DETAIL` (T4 → T8-T10), `ErrorDetails` / `CopyReportButton` / `showErrorToast` / `PLAIN_TOAST` / `REPORT_TOAST_ID` / `detailsOpenByDefault` (T4 → T8-T10, T12), `ENQUEUE_TOAST_ID` (T10), test ids `error-details`, `health-actions`: one spelling each.
+- **Lane isolation:** no file appears in two lanes of the same wave (Lane rules table); `th.ts` is T4 in wave 1 and T9 (one deletion) in wave 2; `test_errors.py` only T3.
+- **Review Focus:** five input classes, each pinned by named tests in the owning task.
+
+---
+
+## Execution handoff
+
+Plan saved to `docs/superpowers/plans/2026-10-12-m6b-error-report.md`. Execution method (already chosen): **superpowers:subagent-driven-development with parallel lanes** — the controller creates one worktree per lane under `.claude/worktrees/m6b-t<N>` on `m6b/t<N>-<slug>` and dispatches one fresh subagent per task with its absolute `WORKTREE` (wave 1 = T1-T5, wave 2 = T6-T10, wave 3 = T11-T12, lanes of a wave in parallel), merges in the stated order, runs the wave gate procedure between waves (gate 2 adds the existing-e2e check), the two-stage review per task, then the final gate (build, `npm run e2e` with the queue project serial, `web/dist` commit, live preview for Pete, Windows checks from `docs/acceptance.md` "M6 รอบ B"). Pete reviews the plan before execution starts.
