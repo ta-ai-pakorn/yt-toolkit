@@ -58,7 +58,13 @@ def job_failed_message(job: Job, code: str, detail: str | None, exc: BaseExcepti
 def log_job_failed(job: Job, code: str, detail: str | None, exc: BaseException | None) -> None:
     """WARNING สำหรับ YtError หรือไม่มี exception · ERROR สำหรับ exception ที่ไม่ได้คาดไว้ (E_UNKNOWN)"""
     level = logging.WARNING if exc is None or isinstance(exc, YtError) else logging.ERROR
-    log.log(level, "%s", job_failed_message(job, code, detail, exc))
+    try:
+        message = job_failed_message(job, code, detail, exc)
+    except Exception:
+        # ตัวปิดข้อมูล/จัดรูปแบบพัง: ห้ามขวางการเปลี่ยนสถานะงานเป็น failed · เหลือแค่ id กับรหัส (ไม่มี detail/traceback)
+        log.warning("job_failed job=%s code=%s", job.id, code)
+        return
+    log.log(level, "%s", message)
 
 # ความถี่สูงสุดที่เขียนความคืบหน้าลงฐานข้อมูล (หน้าเว็บได้ค่าสดทาง SSE อยู่แล้ว ฐานข้อมูลไว้ใช้ตอนโหลดหน้าใหม่)
 PROGRESS_DB_INTERVAL_S = 1.0

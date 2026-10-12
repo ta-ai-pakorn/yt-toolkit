@@ -1130,7 +1130,8 @@ def test_job_failed_hides_the_title_home_and_other_drive_paths(runner_factory, c
     run_one_job(runner_factory, caplog, YtError("E_OUTPUT_NOT_WRITABLE", detail), title=title)
     text = caplog.text
     assert title not in text and "somchai" not in text and "D:\\backup" not in text
-    assert "<title>" in text and "<path>" in text and "~" in text
+    assert "<title>" in text and "<path>" in text
+    assert "~\\out\\<title>" in text
 
 
 def test_job_failed_detail_is_one_line_and_capped(runner_factory, caplog):
@@ -1160,3 +1161,38 @@ def test_job_failed_line_reaches_app_log(runner_factory, caplog, paths):
                 handler.close()
         root.setLevel(level)
     assert f"WARNING yttoolkit: job_failed id={job.id} kind=video code=E_YT_REFUSED" in text
+
+
+def test_job_failed_logging_error_never_blocks_the_failed_transition(runner_factory, caplog, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("redaction exploded")
+
+    monkeypatch.setattr(queue_module, "redact_log_detail", boom)
+    r, job = run_one_job(runner_factory, caplog, "E_YT_REFUSED")
+    assert r.store.get(job.id).status == "failed"
+    assert r.store.get(job.id).error_code == "E_YT_REFUSED"
+    assert f"job_failed job={job.id} code=E_YT_REFUSED" in caplog.text
+    assert "redaction exploded" not in caplog.text
+
+
+def test_spawn_failure_still_fails_the_job_when_logging_raises(runner_factory, caplog, monkeypatch):
+    def broken_spawn(fn):
+        raise RuntimeError("can't start new thread")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("redaction exploded")
+
+    monkeypatch.setattr(queue_module, "redact_log_detail", boom)
+    r, spawn, h = runner_factory(spawn=broken_spawn)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        r.tick()
+    assert r.store.get(job.id).status == "failed"
+
+
+def test_job_failed_for_an_untitled_job_is_written_and_not_over_masked(runner_factory, caplog):
+    run_one_job(runner_factory, caplog, YtError("E_YT_REFUSED", "refused by the server"), title="")
+    (record,) = failed_records(caplog)
+    first = record.getMessage().split("\n", 1)[0]
+    assert first.endswith("code=E_YT_REFUSED detail=refused by the server")
+    assert "<title>" not in record.getMessage()
