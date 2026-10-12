@@ -103,3 +103,18 @@ def test_health_marks_fake_mode_only_when_on(make_client):  # final review: โ�
     assert "mode" not in normal
     marked = make_client(health=lambda: fake, fake=True).get("/api/health").json()
     assert marked["mode"] == "fake"
+
+
+def test_health_is_offline_in_fake_mode(make_client, monkeypatch):  # e2e ห้ามต่อยูทูป/PyPI จริงจากหน้าตรวจสุขภาพ
+    from yttoolkit.core import tools
+
+    seen = []
+
+    def collect(paths, plat, output_dir, **kwargs):
+        seen.append(kwargs.get("offline", False))
+        return {"tools": {}, "disk": {}, "output": {}, "network": {}}
+
+    monkeypatch.setattr(tools, "collect_health", collect)
+    make_client(fake=True).get("/api/health")
+    make_client().get("/api/health")
+    assert seen == [True, False]

@@ -35,8 +35,10 @@ FFMPEG_INSTALLING_MESSAGE = "กำลังโหลด ffmpeg อาจใช�
 MIN_FREE_BYTES = 2 * 1024**3
 PYPI_YTDLP_URL = "https://pypi.org/pypi/yt-dlp/json"
 LATEST_YTDLP_CACHE_SECONDS = 3600
+NETWORK_CACHE_SECONDS = 60
 
 _latest_ytdlp_cache: tuple[float, str] | None = None  # (เวลาที่เช็ก, เวอร์ชัน)
+_network_cache: tuple[float, "ToolStatus"] | None = None  # (เวลาที่เช็ก, ผลที่ต่อได้) ไม่จำผลที่ต่อไม่ได้
 
 
 @dataclass(frozen=True)
@@ -153,7 +155,11 @@ def _version_key(version: str) -> tuple[int, ...] | None:
 
 
 def ytdlp_status(
-    version: str | None = None, today: date | None = None, fetch_latest: Callable[[], str] | None = None
+    version: str | None = None,
+    today: date | None = None,
+    fetch_latest: Callable[[], str] | None = None,
+    *,
+    lookup_latest: bool = True,
 ) -> ToolStatus:
     if version is None:
         from .extractor import ytdlp_version
@@ -165,7 +171,7 @@ def ytdlp_status(
     except ValueError:
         return ToolStatus("ok", name="yt-dlp", version=version)
     age = (today - released).days
-    latest = latest_ytdlp_version(fetch_latest)
+    latest = latest_ytdlp_version(fetch_latest) if lookup_latest else None
     installed_key, latest_key = _version_key(version), _version_key(latest) if latest else None
     if installed_key is not None and latest_key is not None:
         # อายุมากแต่เป็นตัวล่าสุดแล้ว ไม่ต้องเตือน เพราะผู้ใช้ทำอะไรเพิ่มไม่ได้
@@ -230,14 +236,30 @@ def _head_status(url: str) -> int:
         return response.status
 
 
-def network_status(opener: Callable[[str], int] | None = None) -> ToolStatus:
+def _check_network(opener: Callable[[str], int]) -> ToolStatus:
     try:
-        code = (opener or _head_status)("https://www.youtube.com/")
+        code = opener("https://www.youtube.com/")
     except urllib.error.HTTPError:
         return ToolStatus("ok", name="network")  # ได้คำตอบกลับมา แปลว่าต่อถึง
     except OSError:
         return ToolStatus("error", name="network", message="ต่อยูทูปไม่ได้ ตรวจเน็ตอีกครั้ง")
     return ToolStatus("ok" if code < 500 else "warn", name="network")
+
+
+def network_status(
+    opener: Callable[[str], int] | None = None, *, clock: Callable[[], float] = time.monotonic
+) -> ToolStatus:
+    """ต่อยูทูปได้ไหม ส่ง opener มา = เช็กตรงไม่ใช้ cache · ไม่ส่ง = จำผลที่ต่อได้ไว้ 60 วินาที
+    (หน้าตรวจสุขภาพเปิดบ่อย) ผลที่ต่อไม่ได้หรือเตือนไม่จำ เน็ตกลับมาเมื่อไรก็เห็นทันที"""
+    if opener is not None:
+        return _check_network(opener)
+    global _network_cache
+    now = clock()
+    if _network_cache is not None and now - _network_cache[0] < NETWORK_CACHE_SECONDS:
+        return _network_cache[1]
+    result = _check_network(_head_status)
+    _network_cache = (now, result) if result.status == "ok" else None
+    return result
 
 
 def collect_health(
@@ -246,11 +268,15 @@ def collect_health(
     output_dir: Path,
     *,
     network: Callable[[], ToolStatus] | None = None,
+    offline: bool = False,
 ) -> dict:
+    """offline=True (โหมดข้อมูลปลอม) = ไม่ต่อยูทูปและไม่เช็กเวอร์ชันล่าสุดบน PyPI"""
+    if offline:
+        network = network or (lambda: ToolStatus("ok", name="network"))
     return {
         "tools": {
             "ffmpeg": asdict(ffmpeg_status(paths, plat)),
-            "ytdlp": asdict(ytdlp_status()),
+            "ytdlp": asdict(ytdlp_status(lookup_latest=not offline)),
             "jsRuntime": asdict(find_js_runtime(plat)),
             "impersonation": asdict(impersonation_status()),
         },
