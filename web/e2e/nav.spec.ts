@@ -219,7 +219,9 @@ test.describe("แถบคิวงาน (ข้อมูลปลอม)", ()
     await failed.getByRole("button", { name: "ดูรายละเอียด" }).click()
     await expect(failed.getByText("รหัส E_YT_REFUSED")).toBeVisible()
     await expect(failed.getByText("HTTP Error 403: Forbidden")).toBeVisible()
-    await expect(failed.getByRole("button", { name: "คัดลอกรายละเอียด" })).toBeVisible()
+    // M6 รอบ B: ปุ่มคัดลอกรายงานแทนปุ่มคัดลอกรายละเอียดเดิม
+    await expect(failed.getByRole("button", { name: "คัดลอกข้อมูลแจ้งปัญหา" })).toBeVisible()
+    await expect(failed.getByRole("button", { name: "คัดลอกรายละเอียด" })).toHaveCount(0)
     await expect(failed.getByRole("button", { name: "ลองใหม่ คลิปที่ยูทูปไม่ส่งไฟล์" })).toBeVisible()
 
     const done = sheet.locator(`[data-job-id="${DONE}"]`)
@@ -234,6 +236,24 @@ test.describe("แถบคิวงาน (ข้อมูลปลอม)", ()
     await expect(bar.locator("button[aria-expanded]")).toHaveAttribute("aria-expanded", "true")
     await sheet.getByRole("button", { name: "ปิดคิวงาน" }).click()
     await expect(sheet).toBeHidden()
+  })
+
+  test("แถวงานที่พลาดด้วย E_UNKNOWN กางรายละเอียดไว้ตั้งแต่แรก เห็นปุ่มคัดลอกรายงานโดยไม่ต้องกด (M6 รอบ B R1)", async ({ page }) => {
+    await mockQueue(page, [
+      job({
+        id: FAILED,
+        status: "failed",
+        title: "คลิปที่พังแบบไม่รู้สาเหตุ",
+        error: { code: "E_UNKNOWN", message: "เกิดข้อผิดพลาดที่ไม่คาดคิด", detail: "Traceback: boom" },
+        finishedAt: "2026-10-01T10:00:05+00:00",
+      }),
+    ])
+    await page.goto("/")
+    const sheet = await openQueueSheet(page)
+    const failed = sheet.locator(`[data-job-id="${FAILED}"]`)
+    await expect(failed.getByText("รหัส E_UNKNOWN")).toBeVisible()
+    await expect(failed.getByText("Traceback: boom")).toBeVisible()
+    await expect(failed.getByRole("button", { name: "คัดลอกข้อมูลแจ้งปัญหา" })).toBeVisible()
   })
 
   test("เปิดโฟลเดอร์ไม่เจอไฟล์ (404) = toast ไม่พบไฟล์", async ({ page }) => {

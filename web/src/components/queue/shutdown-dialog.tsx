@@ -3,6 +3,7 @@ import { Power } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import { showErrorToast } from "@/components/error-report/error-toast"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +19,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { fill, th } from "@/i18n/th"
 import { api } from "@/lib/api"
 import { appShutdown } from "@/lib/events"
+import { reportRequest } from "@/lib/report"
 
 import { useQueueData } from "./use-queue"
 
@@ -52,7 +54,8 @@ export function ShutdownDialog({ open, onClose, pendingJobs, onShutdown }: Props
       onShutdown?.()
       appShutdown.set()
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) =>
+      showErrorToast(error.message, { id: "shutdown-error", request: reportRequest(error, { context: "shutdown" }) }),
   })
 
   return (
