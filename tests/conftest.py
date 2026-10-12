@@ -24,6 +24,7 @@ class FakePlatform:
     locked: set[Path] = field(default_factory=set)
     unopenable: set[Path] = field(default_factory=set)  # ไฟล์ lock ที่เปิดไม่ได้ (เช่นมีโฟลเดอร์ชื่อเดียวกัน)
     aliases: list[str] = field(default_factory=list)  # ชื่ออื่นของ path (Windows: ชื่อสั้นแบบ 8.3)
+    os_version_text: str = "Windows 11 (10.0.26200)"  # M6 รอบ B: บรรทัด "ระบบ:" ของรายงานแจ้งปัญหา
 
     def exe_name(self, name: str) -> str:
         return f"{name}.exe" if self.name == "windows" else name
@@ -57,6 +58,9 @@ class FakePlatform:
 
     def path_aliases(self, path: Path) -> list[str]:
         return list(self.aliases)
+
+    def os_version(self) -> str:
+        return self.os_version_text
 
 
 @pytest.fixture
