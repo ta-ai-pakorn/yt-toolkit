@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 from pathlib import Path  # noqa: F401  เทสเดิมแก้ errors.Path.home (คลาสเดียวกับที่ redact.py ใช้)
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -52,8 +55,69 @@ async def _validation_error(request: Request, exc: RequestValidationError) -> JS
 
 
 async def _unhandled_error(request: Request, exc: Exception) -> JSONResponse:
-    log.error("เกิดข้อผิดพลาดที่ไม่ได้คาดไว้ที่ %s %s", request.method, request.url.path, exc_info=exc)
+    log.error("เกิดข้อผิดพลาดที่ไม่ได้คาดไว้ที่ %s %s code=E_UNKNOWN", request.method, request.url.path, exc_info=exc)
     return error_response(500, "E_UNKNOWN", UNKNOWN_MESSAGE, str(exc))
+
+
+ERROR_BODY_PEEK = 64 * 1024  # อ่านรหัสจาก body ก้อนแรกที่ไม่เกินเท่านี้
+_CODE = re.compile(r"E_[A-Z0-9_]{1,40}")
+
+
+def _error_code(body: bytes) -> str:
+    if len(body) > ERROR_BODY_PEEK:
+        return "?"
+    try:
+        code = json.loads(body)["error"]["code"]
+    except (ValueError, UnicodeDecodeError, KeyError, TypeError):
+        return "?"
+    return code if isinstance(code, str) and _CODE.fullmatch(code) else "?"
+
+
+def _log_api_error(scope: dict, status: int, code: str) -> None:
+    # 404 = คำตอบ "ยังไม่มี" ปกติ (เช่น GET /videos/{id}/sharp) เป็น DEBUG ซึ่งไม่ถูกเขียน (root เป็น INFO)
+    level = logging.DEBUG if status == 404 else logging.WARNING if status >= 500 else logging.INFO
+    # ไม่มี query string ไม่มี body ไม่มี detail: path ของ API มีแค่ id (videoId, jobId)
+    # percent-encode อักขระอื่นทั้งหมด: path ที่มีขึ้นบรรทัด (/api/videos/bad%0Aid) ปลอมบรรทัด log ใหม่ไม่ได้
+    path = quote(scope.get("path", ""), safe="/-_.~")
+    log.log(level, "api_error method=%s path=%s status=%d code=%s", scope.get("method", "?"), path, status, code)
+
+
+class ErrorLogMiddleware:
+    """ASGI middleware ของ M6 รอบ B (spec 3.3): คำตอบ error ของ /api ทุกคำตอบลง app.log พร้อมรหัส
+
+    วางนอกสุด (หลัง LocalOnlyMiddleware) จึงเห็น 403/421 ของ middleware นั้นด้วย · ส่งต่อทุกข้อความทันทีไม่แก้ไม่กักไว้
+    exception ที่หลุดออกมาก่อนเริ่มตอบ = 500 E_UNKNOWN (ServerErrorMiddleware ด้านนอกเป็นตัวตอบ และ _unhandled_error
+    เขียน traceback แยกอีกบรรทัด)
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if path != "/api" and not path.startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+        state = {"status": 0, "json": False, "done": False}
+
+        async def watch(message) -> None:
+            if message["type"] == "http.response.start":
+                state["status"] = message["status"]
+                headers = dict(message.get("headers") or [])
+                state["json"] = headers.get(b"content-type", b"").split(b";")[0].strip().lower() == b"application/json"
+                state["done"] = message["status"] < 400
+            elif message["type"] == "http.response.body" and not state["done"]:
+                state["done"] = True
+                code = _error_code(message.get("body", b"")) if state["json"] else "?"
+                _log_api_error(scope, state["status"], code)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, watch)
+        except Exception:
+            if state["status"] == 0:
+                _log_api_error(scope, 500, "E_UNKNOWN")
+            raise
 
 
 def install_error_handlers(app: FastAPI) -> None:
