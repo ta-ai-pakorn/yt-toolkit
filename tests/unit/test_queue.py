@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 import random
 import threading
 import time
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
+from yttoolkit import redact
+from yttoolkit.api import errors
 from yttoolkit.core import queue as queue_module
 from yttoolkit.core.cancel import JobCancelled
 from yttoolkit.core.db import Database
@@ -1037,3 +1040,123 @@ def test_queue_paused_without_an_active_pause_fails_as_before(runner_factory):
     assert (failed.status, failed.error_code, failed.bot_checks) == ("failed", "E_QUEUE_PAUSED", 0)
     assert r.pause_state() is None
     assert [e for e in r.bus_events() if e.name == "queue.paused"] == []
+
+
+# ---------- M6 รอบ B: บรรทัด job_failed ใน app.log (AC-SET-03 · spec 3.2) ----------
+
+
+def failed_records(caplog) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.getMessage().startswith("job_failed ")]
+
+
+def run_one_job(runner_factory, caplog, outcome, *, title: str = "", kind: str = "video"):
+    r, spawn, h = runner_factory(concurrency=1, fail={"vid00000001": outcome})
+    (job,) = r.enqueue([NewJob("vid00000001", kind, {}, title)])
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        r.tick()
+        spawn.run_all()
+    return r, job
+
+
+def test_yt_error_failure_logs_one_detailed_warning_with_a_traceback(runner_factory, caplog):
+    r, job = run_one_job(runner_factory, caplog, "E_YT_REFUSED")
+    (record,) = failed_records(caplog)
+    assert record.levelno == logging.WARNING
+    first, trace = record.getMessage().split("\n", 1)
+    assert first == f"job_failed id={job.id} kind=video code=E_YT_REFUSED detail=fake E_YT_REFUSED"
+    assert trace.startswith("Traceback (most recent call last):") and "YtError" in trace
+    assert record.exc_info is None  # traceback อยู่ในข้อความ จึงผ่านตัวปิดชื่อคลิปด้วย
+    assert r.store.get(job.id).error_code == "E_YT_REFUSED"
+
+
+def test_unexpected_exception_logs_once_at_error_with_e_unknown(runner_factory, caplog):
+    run_one_job(runner_factory, caplog, RuntimeError("boom"))
+    (record,) = failed_records(caplog)
+    assert record.levelno == logging.ERROR
+    assert "code=E_UNKNOWN detail=RuntimeError: boom" in record.getMessage()
+    assert "RuntimeError: boom" in record.getMessage().split("\n", 1)[1]
+    assert [r for r in caplog.records if r.exc_info] == []  # log.exception เดิมของงานที่พังถูกเอาออก (ไม่ซ้ำสองที่)
+
+
+def test_cancelled_without_a_reason_logs_a_warning_without_traceback(runner_factory, caplog):
+    run_one_job(runner_factory, caplog, JobCancelled())
+    (record,) = failed_records(caplog)
+    assert record.levelno == logging.WARNING
+    assert "\n" not in record.getMessage()
+    assert "code=E_UNKNOWN detail=JobCancelled" in record.getMessage()
+
+
+def test_spawn_failure_logs_a_job_failed_line(runner_factory, caplog):
+    def broken_spawn(fn):
+        raise RuntimeError("can't start new thread")
+
+    r, spawn, h = runner_factory(spawn=broken_spawn)
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        assert r.tick() == []
+    (record,) = failed_records(caplog)
+    assert record.levelno == logging.ERROR
+    assert record.getMessage().startswith(
+        f"job_failed id={job.id} kind=frames_zip code=E_UNKNOWN detail=RuntimeError: can't start new thread\nTraceback"
+    )
+    assert [r for r in caplog.records if r.exc_info] == []
+
+
+def test_second_bot_check_logs_a_job_failed_line_and_the_first_does_not(runner_factory, caplog):
+    r, spawn, h = runner_factory(concurrency=1, fail={"vid00000001": ["E_BOT_CHECK", "E_BOT_CHECK"]})
+    (job,) = r.enqueue(jobs_of("video", 1))
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        r.tick()
+        spawn.run_all()
+        assert failed_records(caplog) == []  # ครั้งแรกกลับหัวคิว ไม่ใช่ความล้มเหลว
+        r.resume()
+        r.clock.t += 10
+        r.tick()
+        spawn.run_all()
+    (record,) = failed_records(caplog)
+    assert record.levelno == logging.WARNING
+    assert f"job_failed id={job.id} kind=video code=E_BOT_CHECK detail=fake E_BOT_CHECK\nTraceback" in record.getMessage()
+
+
+def test_job_failed_hides_the_title_home_and_other_drive_paths(runner_factory, caplog, monkeypatch):
+    # โฟลเดอร์ผู้ใช้ปลอมแบบ Windows: ไม่พึ่งว่า tmp_path อยู่ใต้ home (CI บน macOS ไม่เป็นแบบนั้น)
+    monkeypatch.setattr(errors.Path, "home", lambda: PureWindowsPath("C:/Users/somchai"))
+    monkeypatch.setattr(redact, "_home_aliases", lambda home: ())
+    title = "สูตรลับขนมไทยของยาย ตอนที่ 3"
+    detail = (
+        f"[Errno 13] Permission denied: 'C:\\Users\\somchai\\out\\{title}.mp4'"
+        f" · copy to 'D:\\backup\\{title}.mp4'"
+    )
+    run_one_job(runner_factory, caplog, YtError("E_OUTPUT_NOT_WRITABLE", detail), title=title)
+    text = caplog.text
+    assert title not in text and "somchai" not in text and "D:\\backup" not in text
+    assert "<title>" in text and "<path>" in text and "~" in text
+
+
+def test_job_failed_detail_is_one_line_and_capped(runner_factory, caplog):
+    run_one_job(runner_factory, caplog, YtError("E_YT_REFUSED", "line one\r\nline two\n" + "x" * 5000))
+    first = failed_records(caplog)[0].getMessage().split("\n", 1)[0]
+    detail = first.split(" detail=", 1)[1]
+    assert detail.startswith("line one\\r\\nline two\\n")
+    assert len(detail) <= queue_module.JOB_FAILED_DETAIL_MAX + 6  # \r \n ที่ escape แล้วยาวขึ้นตัวละ 1
+    assert detail.endswith("…")
+
+
+def test_job_failed_line_reaches_app_log(runner_factory, caplog, paths):
+    from yttoolkit import probe
+
+    root = logging.getLogger()
+    before, level = list(root.handlers), root.level
+    try:
+        probe.setup_file_log(paths)
+        r, job = run_one_job(runner_factory, caplog, "E_YT_REFUSED")
+        for handler in root.handlers:
+            handler.flush()
+        text = (paths.logs / "app.log").read_text(encoding="utf-8")
+    finally:
+        for handler in list(root.handlers):
+            if handler not in before:
+                root.removeHandler(handler)
+                handler.close()
+        root.setLevel(level)
+    assert f"WARNING yttoolkit: job_failed id={job.id} kind=video code=E_YT_REFUSED" in text
