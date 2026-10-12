@@ -610,7 +610,7 @@ queued ──► running ──► done
 | POST | `/jobs/{id}/outputs/{n}/reveal` | — | `{ok:true}` เปิด Explorer/Finder พร้อมเลือกไฟล์นั้น (AC-OUT-04) · 404 แบบเดียวกับข้างบน |
 | GET | `/cache/{videoId}/{path}` | `?download=1` (ไม่บังคับ) | ไฟล์ภาพใน cache (ภาพเฟรม, ปก) เฉพาะที่อยู่ใต้ `data/cache/<videoId>/` · path ที่มี `..`, `\`, `:` หรือขึ้นต้นด้วย `/` หรือตัวพิมพ์เล็ก/ใหญ่ไม่ตรงชื่อจริง → 404 (AC-SEC-04) · ภาพเฟรมมี `Cache-Control: public, max-age=86400, immutable` · `?download=1` → attachment ชื่อ `frame_HH-MM-SS.jpg` |
 | GET | `/history` | `?q=&limit=&offset=&scope=all\|opened` (`limit` ค่าเริ่มต้น 20 สูงสุด 100 · `scope` ค่าเริ่มต้น `all`) | `{items:[{videoId, title, thumbnailUrl, durationS, outputs:[kind], lastAt}], total}` · **`scope=all` (W5):** คลิปที่เปิดดูใน W2 หรือมีงาน `done` ที่มีไฟล์ · `lastAt` = เวลาล่าสุดของการเปิดหรืองานที่เสร็จ · **`scope=opened` (W1 "ล่าสุด"):** เฉพาะคลิปที่เปิดใน W2 (งานในคิวและ `peek=1` ไม่นับว่าเปิด) · `outputs` = ชนิดงาน `done` ที่มีไฟล์ ไม่ซ้ำ เรียง video, audio, subtitle, contact_sheet, frames_zip · `q` ค้นจากชื่อคลิป · `scope` อื่น → 422 |
-| GET | `/diagnostics` | `?jobId=` (ไม่บังคับ) | `{text}` รายงานแจ้งปัญหาแบบ Markdown ตามข้อ 7.1 |
+| POST | `/diagnostics` | `{jobId?, code?, detail?, context?, videoId?}` (detail ≤ 4,000) | `{report}` Markdown ตามแม่แบบใน §7.1 · token เหมือนคำขออื่นที่ไม่ใช่ GET · ช่องผิดรูป = 422 `E_BAD_REQUEST` |
 | GET | `/settings` | — | `Settings` |
 | PATCH | `/settings` | บางส่วนของ `Settings` | `Settings` · ทั้งหมดหรือไม่เลย: key ที่ไม่รู้จัก ชนิดผิด ค่าเกินช่วง หรือแตะ `statsResetAt` (หรือส่ง `cookies` ที่เลิกใช้แล้วใน M5 รอบ C) → 422 `E_BAD_REQUEST` · `outputDir` ต้องเป็น path เต็ม ระบบสร้างโฟลเดอร์และลองเขียนไฟล์ทดสอบ เขียนไม่ได้ → 422 `E_OUTPUT_NOT_WRITABLE` ไม่เก็บค่าใดเลย |
 | POST | `/settings/open-output` | — | `{ok:true}` สร้างโฟลเดอร์ผลลัพธ์ (ถ้ายังไม่มี) แล้วเปิด Explorer/Finder · เขียนโฟลเดอร์ไม่ได้ → 422 `E_OUTPUT_NOT_WRITABLE` (โหมดข้อมูลปลอมไม่เปิดจริง แค่บันทึก log) |
@@ -942,7 +942,7 @@ type SubOptions = { maxChars: number; lines: 1 | 2; minMs: number; maxMs: number
 | FR-OUT-1..5 | W2, W4, W5 | `/outputs`, `/reveal`, `/history` | AC-OUT-01..05 |
 | FR-OUT-6..8 | W2, W6 | `/jobs` (ทุก kind), `/settings` | AC-OUT-06..11 |
 | FR-SET-1..4 | W6 | `/settings`, `/health`, `/update` | AC-SET-01..02 |
-| FR-SET-5 | W6, W7 | `/diagnostics` | AC-SET-03..06 |
+| FR-SET-5 | W2, W3, W4, W5, W6, W7 (ส่วน "ดูรายละเอียด" และปุ่ม "คัดลอกข้อมูลแจ้งปัญหา" ทุกจุดที่มี error) | `POST /diagnostics` · `run/logs/app.log` (บรรทัด `job_failed` และ `api_error`) | AC-SET-03..06 |
 | FR-SET-6..7 | W6, W7 | `/storage*`, `/settings/export`, `/settings/import` | AC-SET-07..10 |
 | FR-CK-1..8 | W2, W4, W6, W7 | `/cookies*`, `/health`, SSE `account` | AC-CK-01..09, AC-SET-06 |
 | FR-STAT-1..4 | W6, W7 | `/stats`, `/stats/reset` | AC-STAT-01..04 |
