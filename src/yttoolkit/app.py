@@ -17,6 +17,7 @@ from .api.routes import build_router
 from .api.security import LocalOnlyMiddleware
 from .api.settings import build_settings_router
 from .api.static import mount_web
+from .api.storage import build_storage_router
 from .api.subtitles import build_subtitles_router
 from .api.videos import build_videos_router
 from .config import APP_NAME, Paths
@@ -88,6 +89,9 @@ def create_app(ctx: AppContext) -> FastAPI:
     app.include_router(build_diagnostics_router(ctx), prefix="/api")
     if ctx.videos is not None:
         app.include_router(build_videos_router(ctx), prefix="/api")
+    if ctx.cache_root is not None:
+        # M6 รอบ A: ขนาดและการล้างข้อมูลชั่วคราว (ใช้คิวและการถ่ายภาพถ้ามี เพื่อข้ามของที่กำลังใช้)
+        app.include_router(build_storage_router(ctx), prefix="/api")
     if ctx.captures is not None:
         app.include_router(build_captures_router(ctx), prefix="/api")
     if ctx.accounts is not None:

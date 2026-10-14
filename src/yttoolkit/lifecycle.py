@@ -43,6 +43,7 @@ from .core.media import FakeMediaTools, FfmpegTools, MediaTools
 from .core.queue import QueueRunner
 from .core.settings import SettingsStore
 from .core.sharp_store import sweep_sharp_leftovers
+from .core.storage import sweep_clear_leftovers
 from .core.subtitles import SubtitleService
 from .core.videos import VideoService
 from .platform import LockFileError, Platform, current
@@ -308,6 +309,7 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         db.migrate()
         purge_cache_once(db, paths.cache)
         sweep_sharp_cache_once(paths.cache)
+        sweep_clear_once(paths.cache)
         configure_thai(paths)
         videos = VideoService(db, extractor)
         subtitles = SubtitleService(videos, extractor.fetch_subtitle, paths.cache, session=session)
@@ -677,6 +679,17 @@ def sweep_sharp_cache_once(cache_root: Path) -> None:
             log.info("จัดการภาพคมที่ค้างใน cache แล้ว %s โฟลเดอร์", count)
     except Exception:
         log.exception("ล้างภาพคมที่ค้างใน cache ไม่สำเร็จ (ข้ามไปก่อน)")
+
+
+def sweep_clear_once(cache_root: Path) -> None:
+    """ตอนเปิดโปรแกรม (ยังไม่มีงานรัน): ลบ data/cache/.clear-* ที่ค้างจากการล้างข้อมูลชั่วคราวที่ถูกตัดกลางทาง
+    (M6 รอบ A) พลาดแค่บันทึก log"""
+    try:
+        count = sweep_clear_leftovers(cache_root)
+        if count:
+            log.info("storage_sweep removed=%s", count)
+    except Exception:
+        log.exception("storage_sweep failed")
 
 
 def start_periodic_purge(

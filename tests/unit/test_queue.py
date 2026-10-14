@@ -1404,3 +1404,37 @@ def test_job_failed_keeps_a_plain_word_that_matches_a_short_channel(runner_facto
     # คำธรรมดาที่ไม่ได้อยู่หลัง " - " ไม่ถูกปิด (ไม่ทำให้ข้อความวินิจฉัยเสีย)
     message = _failed_line_for(runner_factory, caplog, "TED", "the TED server refused the request")
     assert "the TED server refused the request" in message
+
+
+# ---------- M6 รอบ A: hold_active (ปุ่มล้างข้อมูลชั่วคราว spec 3.2) ----------
+
+
+def test_hold_active_lists_running_jobs_and_their_clips(runner_factory):
+    r, spawn, h = runner_factory(concurrency=2)
+    first, second, third = r.enqueue([NewJob("vid00000001", "frames_zip", {"source": "fast"}),
+                                      NewJob("vid00000002", "frames_zip", {"source": "fast"}),
+                                      NewJob("vid00000003", "frames_zip", {"source": "fast"})])  # fmt: skip
+    with r.hold_active() as idle:
+        assert idle.job_ids == frozenset() and idle.video_ids == frozenset()
+    r.tick()
+    with r.hold_active() as active:
+        assert active.job_ids == {first.id, second.id}
+        assert active.video_ids == {"vid00000001", "vid00000002"}
+    spawn.run_all()
+    with r.hold_active() as after:
+        assert after.job_ids == frozenset()
+    assert r.store.get(third.id).status == "queued"
+
+
+def test_no_job_starts_while_the_active_set_is_held(runner_factory):
+    r, spawn, h = runner_factory(concurrency=2)
+    r.enqueue(jobs_of("frames_zip", 1, {"source": "fast"}))
+    started: list[list[str]] = []
+    with r.hold_active():
+        ticker = threading.Thread(target=lambda: started.append(r.tick()))
+        ticker.start()
+        ticker.join(0.2)
+        assert ticker.is_alive()  # tick รอล็อกของคิว
+        assert r.store.running() == []
+    ticker.join(5)
+    assert len(started[0]) == 1

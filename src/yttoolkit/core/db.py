@@ -239,14 +239,27 @@ def purge_stale_cache(db: Database, cache_root: Path, now: datetime, days: int =
     return removed
 
 
+def cache_folder(root: Path, name: str) -> Path | None:
+    """โฟลเดอร์ cache ของคลิป `<root>/<name>` (resolve แล้ว) เมื่อ name เป็นรหัสคลิปที่ถูกรูป และยังอยู่ใต้ root
+    (ไม่ใช่ root เอง) · ไม่ผ่าน = None ผู้เรียกต้องไม่แตะดิสก์ · root ต้อง resolve มาแล้ว
+    ที่เดียวที่ตัดสินว่าชื่อไหนเป็นโฟลเดอร์ cache ที่แอพสร้าง (ล้าง cache เก่า และปุ่มล้างข้อมูลชั่วคราว M6 รอบ A)
+    งานในอนาคต (เว็บอื่น C12): เปลี่ยนการตรวจ VIDEO_ID ตรงนี้เป็นตัวตรวจ cache key ที่เดียว"""
+    if not VIDEO_ID.fullmatch(name):
+        return None
+    folder = (root / name).resolve()
+    if folder == root or not folder.is_relative_to(root):
+        return None
+    return folder
+
+
 def _remove_cache_folder(root: Path, video_id: str) -> bool:
     """คืน True เมื่อไม่มีโฟลเดอร์เหลือค้าง (ลบแล้ว ไม่มี หรือ id ผิดรูปจึงไม่แตะดิสก์)"""
     if not VIDEO_ID.fullmatch(video_id):
         log.warning("ข้ามการลบโฟลเดอร์ cache: video_id รูปแบบไม่ถูกต้อง %r", video_id)
         return True
-    folder = (root / video_id).resolve()
-    if folder == root or not folder.is_relative_to(root):
-        log.warning("ข้ามการลบโฟลเดอร์ cache: %s อยู่นอก %s", folder, root)
+    folder = cache_folder(root, video_id)
+    if folder is None:
+        log.warning("ข้ามการลบโฟลเดอร์ cache: %s อยู่นอก %s", root / video_id, root)
         return True
     if not folder.exists():
         return True
