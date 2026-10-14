@@ -1,4 +1,4 @@
-import { CircleX } from "lucide-react"
+import { CircleX, Clipboard } from "lucide-react"
 import { useRef, useState } from "react"
 
 import { ErrorDetails } from "@/components/error-report/error-details"
@@ -8,9 +8,10 @@ import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui
 import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { fill, th } from "@/i18n/th"
-import { looksLikeYoutube } from "@/lib/paste"
+import { isSupportedLink } from "@/lib/paste"
 import { pasteShortcut } from "@/lib/platform"
 
+import { readClipboard } from "./home/paste-button"
 import { RecentSection } from "./home/recent"
 import { ResultList } from "./home/result-list"
 import { homeStore, useHomeState } from "./home/state"
@@ -32,6 +33,8 @@ export function HomePage() {
   const pointerDown = useRef(false)
   // ข้อความประกาศให้โปรแกรมอ่านหน้าจอหลังกด "ล้างรายการ"
   const [announce, setAnnounce] = useState("")
+  // M6 รอบ A (AC-IN-09): เบราว์เซอร์ไม่ให้อ่านคลิปบอร์ดตอนกด "วาง" = คำแนะนำใต้ช่อง (ไม่ใช่ error)
+  const [pasteDenied, setPasteDenied] = useState(false)
 
   function analyze(value: string) {
     if (pending) return
@@ -44,6 +47,31 @@ export function HomePage() {
   }
 
   useGlobalPaste(analyze, pending)
+
+  /** ปุ่ม "วาง" (D1): อ่านคลิปบอร์ดเมื่อกดเท่านั้น ลิงก์ = แทนข้อความในช่องแล้ววิเคราะห์ · ข้อความอื่น = เติมลงช่อง */
+  async function pasteFromClipboard() {
+    if (pending) return
+    const outcome = await readClipboard()
+    if (outcome.kind === "denied") {
+      setPasteDenied(true)
+      inputRef.current?.focus()
+      return
+    }
+    setPasteDenied(false)
+    if (outcome.kind === "empty") {
+      inputRef.current?.focus()
+      return
+    }
+    // ข้อความในช่องถูกแทนทั้งหมด: การแตะช่องครั้งแรกไม่ต้องเลือกข้อความเดิมแล้ว
+    selectOnFirstFocus.current = false
+    restoredSelected.current = false
+    if (outcome.kind === "analyze") {
+      analyze(outcome.text)
+      return
+    }
+    homeStore.set({ text: outcome.text })
+    inputRef.current?.focus()
+  }
 
   function clearList() {
     homeStore.clear()
@@ -83,8 +111,10 @@ export function HomePage() {
             placeholder={th.home.placeholder}
             className="max-h-[calc(8lh+1rem)] min-h-24 overflow-y-auto"
             value={text}
+            aria-describedby={pasteDenied ? "paste-hint" : undefined}
             onChange={(event) => {
               restoredSelected.current = false
+              setPasteDenied(false)
               homeStore.set({ text: event.target.value })
             }}
             onMouseDown={() => {
@@ -116,7 +146,7 @@ export function HomePage() {
                 restoredSelected.current && box.selectionStart === 0 && box.selectionEnd === box.value.length
               restoredSelected.current = false
               const pasted = event.clipboardData.getData("text")
-              if (!replacesAll || !looksLikeYoutube(pasted)) return
+              if (!replacesAll || !isSupportedLink(pasted)) return
               event.preventDefault()
               analyze(pasted)
             }}
@@ -127,8 +157,18 @@ export function HomePage() {
               }
             }}
           />
-          <InputGroupAddon align="block-end" className="justify-end">
+          <InputGroupAddon align="block-end" className="justify-end gap-2">
             {/* aria-disabled แทน disabled เพื่อให้โฟกัสยังอยู่ที่ปุ่ม (analyze() กันการกดซ้ำอยู่แล้ว) */}
+            <Button
+              type="button"
+              variant="secondary"
+              aria-disabled={pending}
+              className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+              onClick={() => void pasteFromClipboard()}
+            >
+              <Clipboard data-icon="inline-start" aria-hidden />
+              {th.home.paste}
+            </Button>
             <Button
               type="submit"
               aria-disabled={pending}
@@ -139,6 +179,11 @@ export function HomePage() {
             </Button>
           </InputGroupAddon>
         </InputGroup>
+        {pasteDenied && (
+          <p id="paste-hint" role="status" className="text-sm text-muted-foreground">
+            {fill(th.home.pasteDenied, { key: pasteShortcut() })}
+          </p>
+        )}
         {error && (
           <Alert variant="destructive">
             <CircleX aria-hidden />

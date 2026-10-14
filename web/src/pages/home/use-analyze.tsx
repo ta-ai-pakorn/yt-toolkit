@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from "react-router"
 import { showErrorToast } from "@/components/error-report/error-toast"
 import { th } from "@/i18n/th"
 import { api } from "@/lib/api"
-import { looksLikeYoutube } from "@/lib/paste"
+import { isSupportedLink } from "@/lib/paste"
 import { reportRequest } from "@/lib/report"
 import type { ResolveItem, ResolveResult } from "@/lib/types"
 
@@ -149,7 +149,7 @@ export function useGlobalPaste(onPaste: (text: string) => void, busy: boolean) {
     const target = event.target as HTMLElement | null
     if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable)) return
     const pasted = event.clipboardData?.getData("text") ?? ""
-    if (!looksLikeYoutube(pasted)) return
+    if (!isSupportedLink(pasted)) return
     event.preventDefault()
     onPaste(pasted)
   })
