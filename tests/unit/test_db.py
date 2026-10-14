@@ -457,15 +457,46 @@ def test_v1_migration_failure_rolls_back(tmp_path, monkeypatch):
 # ---------- M6 รอบ A: schema v3 (jobs.filename_style) ----------
 
 
+# สำเนาตาราง jobs ของ v2 ตามที่ M4-M6 รอบ B ส่งจริง (ตัวอักษรต่อตัวอักษร) แยกจากโค้ดที่ทดสอบ (รีวิว T2 M4):
+# ถ้า db._JOBS_V2 เพี้ยน เทสข้างล่างจะจับได้ แทนที่ fixture จะเพี้ยนตามไปด้วย
+V2_JOBS = """
+CREATE TABLE jobs (
+  id            TEXT PRIMARY KEY,
+  video_id      TEXT NOT NULL,
+  title         TEXT NOT NULL DEFAULT '',
+  kind          TEXT NOT NULL,
+  params_json   TEXT NOT NULL,
+  status        TEXT NOT NULL,
+  stage         TEXT,
+  progress      REAL,
+  speed_bps     INTEGER,
+  eta_s         INTEGER,
+  attempt       INTEGER NOT NULL DEFAULT 0,
+  bot_checks    INTEGER NOT NULL DEFAULT 0,
+  position      INTEGER NOT NULL,
+  error_code    TEXT,
+  error_message TEXT,
+  error_detail  TEXT,
+  notes_json    TEXT,
+  outputs_json  TEXT,
+  created_at    TEXT NOT NULL,
+  started_at    TEXT,
+  finished_at   TEXT
+);
+CREATE INDEX jobs_status_position ON jobs(status, position);
+CREATE INDEX IF NOT EXISTS jobs_video ON jobs(video_id, status);
+"""
+
+
 def _v2_database(path: Path) -> None:
-    """ฐานข้อมูล v2 ตามที่ M4-M6 รอบ B สร้างจริง (ตาราง jobs แบบ _JOBS_V2) พร้อมงานหนึ่งงานและค่าตั้งหนึ่งค่า"""
+    """ฐานข้อมูล v2 ตามที่ M4-M6 รอบ B สร้างจริง (ตาราง jobs แบบ V2_JOBS) พร้อมงานหนึ่งงานและค่าตั้งหนึ่งค่า"""
     raw = sqlite3.connect(path)
     raw.executescript(
         "CREATE TABLE schema_version (version INTEGER NOT NULL);"
         "CREATE TABLE videos (video_id TEXT PRIMARY KEY, title TEXT NOT NULL, channel TEXT, duration_s INTEGER,"
         " thumbnail_url TEXT, chapters_json TEXT, probe_json TEXT NOT NULL, probed_at TEXT NOT NULL,"
         " opened_at TEXT NOT NULL);"
-        f"{db_module._JOBS_V2}"
+        f"{V2_JOBS}"
         "CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);"
         "INSERT INTO schema_version (version) VALUES (2);"
     )
@@ -522,6 +553,7 @@ def test_v1_database_migrates_through_v2_to_v3(tmp_path):
 
 
 def test_migration_2_still_builds_the_frozen_v2_table():
+    assert db_module._JOBS_V2 == V2_JOBS  # ตารางที่แช่แข็งไว้ = ตาราง v2 ที่ส่งจริง
     assert "filename_style" not in db_module._JOBS_V2
     assert "filename_style" not in db_module._MIGRATIONS[2]
     assert db_module._JOBS_V2.strip() in db_module._MIGRATIONS[2]

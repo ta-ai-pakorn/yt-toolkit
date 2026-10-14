@@ -401,6 +401,19 @@ def test_the_report_hides_the_channel_name(env) -> None:
     assert channel not in env.report({"code": "E_NETWORK", "detail": f"x {channel} y", "videoId": BBB})
 
 
+def test_the_report_hides_a_short_channel_only_in_a_styled_file_name(env) -> None:
+    # รีวิว T2 M2: ช่องชื่อสั้น (TED) ถูกปิดในชื่อไฟล์แบบ title-channel ส่วนคำธรรมดาในประโยคคงไว้
+    env.db.execute(
+        "INSERT INTO videos (video_id, title, channel, probe_json, probed_at, opened_at)"
+        " VALUES (?, ?, 'TED', '{}', 'x', 'x')",
+        (BBB, TITLE),
+    )
+    styled = env.report({"code": "E_NETWORK", "detail": f"no free name for {TITLE} - TED.mp4", "videoId": BBB})
+    assert "TED" not in styled
+    plain = env.report({"code": "E_NETWORK", "detail": "the TED server refused the request", "videoId": BBB})
+    assert "the TED server refused the request" in plain
+
+
 def test_a_videos_only_report_hides_that_clips_chapter_titles(env) -> None:
     env.db.execute(
         "INSERT INTO videos (video_id, title, chapters_json, probe_json, probed_at, opened_at)"

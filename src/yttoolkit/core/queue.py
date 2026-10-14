@@ -47,7 +47,11 @@ def job_titles(job: Any, chapters_json: str | None, channel: str = "") -> tuple[
     """
     params = job.params if isinstance(getattr(job, "params", None), Mapping) else {}
     folder = params.get("folder")
-    names = [job.title, folder if isinstance(folder, str) else "", channel if isinstance(channel, str) else ""]
+    channel = channel if isinstance(channel, str) else ""
+    # " - ช่อง" ในชื่อไฟล์แบบ title-channel: ปิดได้แม้ช่องสั้นกว่า TITLE_MIN (TED, BBC) เพราะตัวคั่นกันชนคำธรรมดา
+    # ส่วนชื่อช่องเดี่ยว ๆ ใช้กฎเดิมของ scrub_titles (สั้นกว่า TITLE_MIN ไม่ปิด) (รีวิว T2 M2)
+    styled = f" - {channel}" if channel else ""
+    names = [job.title, folder if isinstance(folder, str) else "", styled, channel]
     try:
         chapters = json.loads(chapters_json) if chapters_json else []
     except (ValueError, TypeError, RecursionError):

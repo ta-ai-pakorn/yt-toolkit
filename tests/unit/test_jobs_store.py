@@ -437,3 +437,13 @@ def test_channel_of_reads_the_videos_row(store):
     assert store.channel_of("vid00000000") == "ครัวบ้านเรา"
     assert store.channel_of("vid00000001") == ""
     assert store.channel_of("missing0000") == ""
+
+def test_filename_style_is_written_once(store):
+    # รีวิว T2 M3: ตั้งได้ครั้งเดียว การเริ่มครั้งต่อไป (หรือ transition อื่น) ที่ส่งค่าอื่นมาไม่เปลี่ยนค่าแรก
+    (job,) = add(store)
+    store.transition(job.id, "running", filename_style="title-channel")
+    store.transition(job.id, "failed", error_code="E_NETWORK", error_message="m", filename_style="title")
+    store.requeue(job.id, reset_bot_checks=True)
+    again = store.transition(job.id, "running", filename_style="title-quality")
+    assert again.filename_style == "title-channel"
+    assert store.get(job.id).filename_style == "title-channel"

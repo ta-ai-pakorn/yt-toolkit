@@ -1358,7 +1358,7 @@ def test_network_retries_inside_one_run_keep_the_style(runner_factory, monkeypat
 
 def test_job_titles_include_the_channel():
     fake = type("J", (), {"title": "T1", "params": {}})()
-    assert queue_module.job_titles(fake, None, "ครัวบ้านเรา") == ("T1", "ครัวบ้านเรา")
+    assert queue_module.job_titles(fake, None, "ครัวบ้านเรา") == ("T1", " - ครัวบ้านเรา", "ครัวบ้านเรา")
     assert queue_module.job_titles(fake, None) == ("T1",)
 
 
@@ -1377,3 +1377,30 @@ def test_job_failed_hides_the_channel_name(runner_factory, caplog):
         spawn.run_all()
     (record,) = failed_records(caplog)
     assert channel not in record.getMessage() and "Somchai Kitchen" not in caplog.text
+
+
+def _failed_line_for(runner_factory, caplog, channel: str, detail: str) -> str:
+    r, spawn, _ = runner_factory(concurrency=1, fail={"vid00000001": YtError("E_OUTPUT_NOT_WRITABLE", detail)})
+    r.store._db.execute(
+        "INSERT INTO videos (video_id, title, channel, probe_json, probed_at, opened_at)"
+        " VALUES ('vid00000001', 'row title', ?, '{}', 'x', 'x')",
+        (channel,),
+    )
+    r.enqueue([NewJob("vid00000001", "video", {}, "Main Clip Title")])
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        r.tick()
+        spawn.run_all()
+    (record,) = failed_records(caplog)
+    return record.getMessage()
+
+
+def test_job_failed_hides_a_short_channel_in_a_styled_file_name(runner_factory, caplog):
+    # รีวิว T2 M2: ช่องชื่อสั้น (TED, BBC) สั้นกว่า TITLE_MIN แต่ในชื่อไฟล์แบบ title-channel ต้องถูกปิด
+    message = _failed_line_for(runner_factory, caplog, "TED", "no free name for Main Clip Title - TED.mp4")
+    assert "TED" not in message
+
+
+def test_job_failed_keeps_a_plain_word_that_matches_a_short_channel(runner_factory, caplog):
+    # คำธรรมดาที่ไม่ได้อยู่หลัง " - " ไม่ถูกปิด (ไม่ทำให้ข้อความวินิจฉัยเสีย)
+    message = _failed_line_for(runner_factory, caplog, "TED", "the TED server refused the request")
+    assert "the TED server refused the request" in message

@@ -356,6 +356,11 @@ def _assignments(fields: dict[str, Any]) -> tuple[list[str], list[Any]]:
     for field, value in fields.items():
         if field == "title" and value is None:
             continue  # title=None = ไม่แก้ชื่อเดิม
+        if field == "filename_style":
+            # เขียนครั้งเดียว (รีวิว T2 M3): ค่าแรกที่ตั้งตอนเริ่มครั้งแรกชนะ การเริ่ม/transition ครั้งต่อไปไม่ทับ
+            sets.append("filename_style = COALESCE(filename_style, ?)")
+            values.append(_encode(field, value))
+            continue
         sets.append(f"{_FIELD_COLUMNS[field]} = ?")
         values.append(_encode(field, value))
     return sets, values
