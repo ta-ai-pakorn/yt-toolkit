@@ -10,7 +10,6 @@ import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/u
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldTitle } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { th } from "@/i18n/th"
@@ -19,6 +18,8 @@ import { openOutputFolder, patchSettings, SETTINGS_KEY, settingsQuery } from "@/
 import type { Settings } from "@/lib/types"
 import { SwitchRow } from "@/pages/video/advanced/switch-row"
 
+import { ChoiceSelect } from "./choice-select"
+import { FilenameStyleField } from "./filename-style-field"
 import {
   AUDIO_FORMATS,
   CAPTURE_QUALITIES,
@@ -81,7 +82,7 @@ export function GeneralPanel() {
   if (settings.isPending) {
     return (
       <div className="flex max-w-xl flex-col gap-5" aria-busy="true">
-        {Array.from({ length: 7 }, (_, i) => (
+        {Array.from({ length: 8 }, (_, i) => (
           <Skeleton key={i} className="h-14 w-full" />
         ))}
       </div>
@@ -119,6 +120,13 @@ export function GeneralPanel() {
         onSave={submit}
         onOpen={() => void lastSave.current.then(() => open.mutate())}
         opening={open.isPending}
+      />
+
+      {/* M6 รอบ A (PRD :306, FR-OUT-8): รูปแบบชื่อไฟล์ + ตัวอย่างที่เปลี่ยนทันทีเมื่อเลือก */}
+      <FilenameStyleField
+        value={shown.filenameStyle}
+        outputDir={settings.data.outputDir}
+        onChange={(value) => choose(choicePatch("filenameStyle", value, shown))}
       />
 
       <Field>
@@ -216,32 +224,6 @@ export function GeneralPanel() {
       {/* M6 รอบ A (PRD :307): ล้างข้อมูลชั่วคราว · สำรองค่าตั้ง · นำเข้าค่าตั้ง */}
       <LocalDataSection />
     </FieldGroup>
-  )
-}
-
-type ChoiceSelectProps = {
-  labelId: string
-  hintId?: string
-  value: string
-  options: { value: string; label: string }[]
-  onChange: (value: string) => void
-}
-
-function ChoiceSelect({ labelId, hintId, value, options, onChange }: ChoiceSelectProps) {
-  const labels = new Map(options.map((o) => [o.value, o.label]))
-  return (
-    <Select<string> value={value} onValueChange={(next) => next && onChange(next)}>
-      <SelectTrigger aria-labelledby={labelId} aria-describedby={hintId} className="w-full min-w-0 sm:w-72">
-        <SelectValue>{(current: string | null) => (current ? (labels.get(current) ?? current) : "")}</SelectValue>
-      </SelectTrigger>
-      <SelectContent alignItemWithTrigger={false} align="start">
-        {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
-            {o.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
   )
 }
 

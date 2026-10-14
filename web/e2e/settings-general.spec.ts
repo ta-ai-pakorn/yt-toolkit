@@ -69,17 +69,24 @@ async function seriousViolations(page: Page) {
     .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))
 }
 
-test("/settings เปิดที่แท็บทั่วไป พร้อมเจ็ดช่อง", async ({ page }) => {
+test("/settings เปิดที่แท็บทั่วไป พร้อมแปดช่อง และส่วนข้อมูลในเครื่อง", async ({ page }) => {
   await page.goto("/settings")
   await expect(page.getByRole("tab", { name: "ทั่วไป" })).toHaveAttribute("aria-selected", "true")
   await expect(page.getByLabel("โฟลเดอร์ผลลัพธ์")).toBeVisible()
   await expect(page.getByRole("button", { name: "เปิดโฟลเดอร์" })).toBeVisible()
+  await expect(page.getByRole("combobox", { name: "รูปแบบชื่อไฟล์" })).toBeVisible()
+  await expect(page.getByText(/^ตัวอย่าง: .+\.mp4$/)).toBeVisible()
   await expect(page.getByRole("group", { name: "จำนวนงานพร้อมกัน" })).toBeVisible()
   await expect(page.getByRole("combobox", { name: "ภาษาเสียงเริ่มต้น" })).toBeVisible()
   await expect(page.getByRole("combobox", { name: "คุณภาพวิดีโอเริ่มต้น" })).toBeVisible()
   await expect(page.getByRole("combobox", { name: "ความละเอียดภาพที่ถ่าย" })).toBeVisible()
   await expect(page.getByRole("group", { name: "รูปแบบเสียงเริ่มต้น" })).toBeVisible()
   await expect(page.getByRole("switch", { name: "ทำภาพคมอัตโนมัติตอนโหลดวิดีโอ" })).toBeVisible()
+  // M6 รอบ A: ส่วน "ข้อมูลในเครื่อง" (ปุ่มล้างมีขนาดหรือไม่มีก็ได้ ขึ้นกับ cache ของ spec อื่นที่รันพร้อมกัน)
+  const local = page.getByRole("group", { name: "ข้อมูลในเครื่อง" })
+  await expect(local.getByRole("button", { name: /^ล้างข้อมูลชั่วคราว/ })).toBeVisible()
+  await expect(local.getByRole("button", { name: "สำรองค่าตั้ง" })).toBeVisible()
+  await expect(local.getByRole("button", { name: "นำเข้าค่าตั้ง" })).toBeVisible()
   // ไม่มีปุ่มบันทึก: ทุกช่องบันทึกเมื่อเปลี่ยน
   await expect(page.getByRole("button", { name: /^บันทึก/ })).toHaveCount(0)
 })
@@ -245,7 +252,11 @@ test("โหลดค่าตั้งไม่สำเร็จ → แจ้
 for (const scheme of ["dark", "light"] as const) {
   test(`axe: แท็บทั่วไปไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme })
+    // M6 รอบ A: ขนาดข้อมูลชั่วคราวมาทีหลัง ปุ่มล้างจึงจางจาก disabled เป็นปกติ (transition-all ของ Button)
+    // ถ้าคำตอบมาหลังรอหน้านิ่งแล้ว axe จะอ่านสีกลางทาง (4.41:1) จึงรอคำตอบก่อน แล้วให้ analyzeSettled รอการจางจบ
+    const storage = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/storage")
     await page.goto("/settings/general")
+    await storage
     await expect(page.getByLabel("โฟลเดอร์ผลลัพธ์")).toBeVisible()
     await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
     expect(await seriousViolations(page)).toEqual([])
