@@ -68,15 +68,17 @@ def parse_body(raw: bytes) -> dict[str, str] | str:
     return body
 
 
-def _video_row(ctx: AppContext, video_id: str | None) -> tuple[str, str | None]:
-    """(ชื่อคลิป, chapters_json) จากตาราง videos · ไม่มีแถวหรืออ่านไม่ได้ = ("", None)"""
+def _video_row(ctx: AppContext, video_id: str | None) -> tuple[str, str | None, str]:
+    """(ชื่อคลิป, chapters_json, ชื่อช่อง) จากตาราง videos · ไม่มีแถวหรืออ่านไม่ได้ = ("", None, "")"""
     if not video_id or ctx.db is None:
-        return "", None
+        return "", None, ""
     try:
-        rows = ctx.db.execute("SELECT title, chapters_json FROM videos WHERE video_id = ?", (video_id,))
+        rows = ctx.db.execute("SELECT title, chapters_json, channel FROM videos WHERE video_id = ?", (video_id,))
     except sqlite3.Error:
-        return "", None
-    return (str(rows[0]["title"] or ""), rows[0]["chapters_json"]) if rows else ("", None)
+        return "", None, ""
+    if not rows:
+        return "", None, ""
+    return str(rows[0]["title"] or ""), rows[0]["chapters_json"], str(rows[0]["channel"] or "")
 
 
 @dataclass(frozen=True)
@@ -117,9 +119,9 @@ def collect_inputs(ctx: AppContext, body: dict[str, str], statuses: ToolStatuses
                              context=body.get("context"))  # fmt: skip
     else:
         error, video_id = None, body.get("videoId")
-    row_title, chapters_json = _video_row(ctx, video_id)
-    # ชุดชื่อเดียวกับบรรทัด job_failed (job_titles): ชื่องาน โฟลเดอร์ playlist/ชุดงาน ชื่อ chapter + ชื่อในตาราง videos
-    names = job_titles(job if job is not None else _NoJob(), chapters_json)
+    row_title, chapters_json, channel = _video_row(ctx, video_id)
+    # ชุดชื่อเดียวกับบรรทัด job_failed (job_titles): ชื่องาน โฟลเดอร์ playlist/ชุดงาน ชื่อช่อง ชื่อ chapter + ชื่อในตาราง videos
+    names = job_titles(job if job is not None else _NoJob(), chapters_json, channel)
     titles = tuple(dict.fromkeys(t for t in (*names, row_title) if t))
     statuses = statuses or tool_statuses(ctx)
     return ReportInputs(

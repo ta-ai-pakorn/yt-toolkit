@@ -120,6 +120,7 @@ _FIELD_COLUMNS = {
     "error_detail": "error_detail",
     "notes": "notes_json",
     "outputs": "outputs_json",
+    "filename_style": "filename_style",  # M6 รอบ A: ตั้งครั้งเดียวตอน queued -> running ครั้งแรก (QueueRunner._start)
 }
 # update() แก้ได้เฉพาะค่าระหว่างรัน (งานต้องอยู่ในสถานะ running)
 _UPDATE_FIELDS = frozenset({"stage", "progress", "speed_bps", "eta_s", "attempt", "title"})
@@ -196,6 +197,7 @@ class JobContext(Protocol):
     job_id: str
     workdir: Path        # work/<jobId>/ ตัวรันคิวสร้างให้ และลบทิ้งหลังงานจบ
     output_root: Path    # outputDir ณ ตอนเริ่มงาน
+    filename_style: str  # M6 รอบ A: รูปแบบชื่อไฟล์ของงานนี้ (Job.filename_style ที่ตั้งตอนเริ่มครั้งแรก)
 
     def stage(self, stage: str) -> None: ...
     def progress(self, fraction: float | None, speed_bps: int | None = None, eta_s: int | None = None) -> None: ...
@@ -228,6 +230,9 @@ class Job:
     created_at: str
     started_at: str | None
     finished_at: str | None
+    # M6 รอบ A: รูปแบบชื่อไฟล์ ณ ตอนเริ่มครั้งแรก ลองใหม่ใช้ค่าเดิม (ชื่อไม่เปลี่ยน ตัวกวาดไฟล์ค้างหาเจอ)
+    # None = ยังไม่เคยเริ่ม หรืองานก่อน M6 (= "title") · ไม่อยู่ใน API (ข้อมูลภายใน)
+    filename_style: str | None = None
 
     def to_api(self) -> dict:
         """รูป Job ของ API/SSE (C2) ไม่มี "cancelling" (ชั้น API เติมเอง) และไม่มี path เต็มของไฟล์"""
@@ -327,6 +332,7 @@ def _from_row(row: Any) -> Job:
         created_at=row["created_at"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
+        filename_style=row["filename_style"],
     )
 
 
@@ -350,6 +356,11 @@ def _assignments(fields: dict[str, Any]) -> tuple[list[str], list[Any]]:
     for field, value in fields.items():
         if field == "title" and value is None:
             continue  # title=None = ไม่แก้ชื่อเดิม
+        if field == "filename_style":
+            # เขียนครั้งเดียว (รีวิว T2 M3): ค่าแรกที่ตั้งตอนเริ่มครั้งแรกชนะ การเริ่ม/transition ครั้งต่อไปไม่ทับ
+            sets.append("filename_style = COALESCE(filename_style, ?)")
+            values.append(_encode(field, value))
+            continue
         sets.append(f"{_FIELD_COLUMNS[field]} = ?")
         values.append(_encode(field, value))
     return sets, values
@@ -556,3 +567,12 @@ class JobStore:
         except sqlite3.Error:
             return None
         return rows[0]["chapters_json"] if rows else None
+
+    def channel_of(self, video_id: str) -> str:
+        """ชื่อช่องของคลิปจากตาราง videos (M6 รอบ A: ชื่อไฟล์แบบ title-channel ตัวกวาดไฟล์ค้าง และตัวปิดชื่อใน log)
+        ไม่มีแถว ค่าว่าง หรืออ่านไม่ได้ = "" ไม่ยกต่อ"""
+        try:
+            rows = self._db.execute("SELECT channel FROM videos WHERE video_id = ?", (video_id,))
+        except sqlite3.Error:
+            return ""
+        return str(rows[0]["channel"] or "") if rows else ""

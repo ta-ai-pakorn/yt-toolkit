@@ -38,15 +38,20 @@ log = logging.getLogger("yttoolkit")
 JOB_FAILED_DETAIL_MAX = 2000
 
 
-def job_titles(job: Any, chapters_json: str | None) -> tuple[str, ...]:
+def job_titles(job: Any, chapters_json: str | None, channel: str = "") -> tuple[str, ...]:
     """ชื่อที่ต้องปิดในข้อความเกี่ยวกับงานหนึ่งงาน (รีวิวท้ายรอบ I1): ชื่องาน ชื่อโฟลเดอร์ playlist/ชุดงาน (params.folder)
-    และชื่อ chapter ทุกตอนของคลิป (คอลัมน์ chapters_json ของตาราง videos) · ค่าที่อ่านไม่ได้ข้ามไป ไม่ยกต่อ
+    ชื่อช่อง (M6 รอบ A: ชื่อไฟล์แบบ title-channel มีชื่อช่อง) และชื่อ chapter ทุกตอนของคลิป
+    (คอลัมน์ chapters_json ของตาราง videos) · ค่าที่อ่านไม่ได้ข้ามไป ไม่ยกต่อ
 
     ใช้ทั้งบรรทัด job_failed ของ app.log และรายงานแจ้งปัญหา (api/diagnostics) จะได้ปิดชื่อชุดเดียวกัน
     """
     params = job.params if isinstance(getattr(job, "params", None), Mapping) else {}
     folder = params.get("folder")
-    names = [job.title, folder if isinstance(folder, str) else ""]
+    channel = channel if isinstance(channel, str) else ""
+    # " - ช่อง" ในชื่อไฟล์แบบ title-channel: ปิดได้แม้ช่องสั้นกว่า TITLE_MIN (TED, BBC) เพราะตัวคั่นกันชนคำธรรมดา
+    # ส่วนชื่อช่องเดี่ยว ๆ ใช้กฎเดิมของ scrub_titles (สั้นกว่า TITLE_MIN ไม่ปิด) (รีวิว T2 M2)
+    styled = f" - {channel}" if channel else ""
+    names = [job.title, folder if isinstance(folder, str) else "", styled, channel]
     try:
         chapters = json.loads(chapters_json) if chapters_json else []
     except (ValueError, TypeError, RecursionError):
@@ -77,15 +82,21 @@ def job_failed_message(
 
 
 def log_job_failed(
-    job: Job, code: str, detail: str | None, exc: BaseException | None, chapters_json: str | None = None
+    job: Job,
+    code: str,
+    detail: str | None,
+    exc: BaseException | None,
+    chapters_json: str | None = None,
+    channel: str = "",
 ) -> None:
     """WARNING สำหรับ YtError หรือไม่มี exception · ERROR สำหรับ exception ที่ไม่ได้คาดไว้ (E_UNKNOWN)
 
     chapters_json = คอลัมน์ของตาราง videos ของคลิปนี้ (JobStore.chapters_json) ชื่อ chapter จะถูกปิดด้วย
+    channel = ชื่อช่องของคลิป (JobStore.channel_of) ถูกปิดด้วย (M6 รอบ A)
     """
     level = logging.WARNING if exc is None or isinstance(exc, YtError) else logging.ERROR
     try:
-        message = job_failed_message(job, code, detail, exc, job_titles(job, chapters_json))
+        message = job_failed_message(job, code, detail, exc, job_titles(job, chapters_json, channel))
     except Exception:
         # ตัวปิดข้อมูล/จัดรูปแบบพัง: ห้ามขวางการเปลี่ยนสถานะงานเป็น failed · เหลือแค่ id กับรหัส (ไม่มี detail/traceback)
         log.warning("job_failed job=%s code=%s", job.id, code)
@@ -117,6 +128,7 @@ class PauseState:
 class SettingsView(Protocol):
     def concurrency(self) -> int: ...
     def output_dir(self) -> Path: ...
+    def filename_style(self) -> str: ...  # M6 รอบ A: อ่านตอนงานเริ่มครั้งแรก (D4)
 
 
 class QueueListener(Protocol):
@@ -137,6 +149,7 @@ class _JobContext:
         self.job_id = job.id
         self.workdir = workdir
         self.output_root = output_root
+        self.filename_style = job.filename_style or "title"  # M6 รอบ A: ค่าที่ _start ตั้งไว้ในงาน
         self.reason: str | None = None   # "user" | "shutdown" เมื่อถูกขอให้หยุด
         self.done = threading.Event()   # ตั้งเมื่อเธรดงานสรุปผลเสร็จ
         self._runner = runner
@@ -359,7 +372,9 @@ class QueueRunner:
     def _start(self, job: Job) -> str:
         try:
             output_root = self._settings.output_dir()
-            job = self.store.transition(job.id, "running")
+            # M6 รอบ A (D4): รูปแบบชื่อไฟล์ตั้งครั้งเดียวตอนเริ่มครั้งแรก ลองใหม่ (ทุกทาง) ใช้ค่าเดิมในงาน
+            style = job.filename_style or self._settings.filename_style()
+            job = self.store.transition(job.id, "running", filename_style=style)
         except (KeyError, InvalidTransition):
             return _SKIPPED
         workdir = self._work_root / job.id
@@ -375,7 +390,8 @@ class QueueRunner:
         except Exception as exc:
             # เปิดเธรดไม่ได้ (เช่นเครื่องทรัพยากรหมด): งานต้องไม่ค้าง running โดยไม่มีใครทำ
             detail = f"{type(exc).__name__}: {exc}"
-            log_job_failed(job, "E_UNKNOWN", detail, exc, self.store.chapters_json(job.video_id))
+            log_job_failed(job, "E_UNKNOWN", detail, exc, self.store.chapters_json(job.video_id),
+                           self.store.channel_of(job.video_id))  # fmt: skip
             ctx.close()
             self._forget(job.id, ctx)
             shutil.rmtree(workdir, ignore_errors=True)
@@ -415,7 +431,7 @@ class QueueRunner:
     def _log_crash(self, job: Job, ctx: _JobContext, exc: BaseException) -> None:
         """สรุปผลงานพัง: traceback ในข้อความผ่าน crash_trace (ชื่อของงานนี้ + ทุกอย่างใต้โฟลเดอร์ผลลัพธ์เป็น <path>)"""
         try:
-            titles = job_titles(job, self.store.chapters_json(job.video_id))
+            titles = job_titles(job, self.store.chapters_json(job.video_id), self.store.channel_of(job.video_id))
             trace = crash_trace(exc, titles=titles, roots=(ctx.output_root,))
         except Exception:
             trace = type(exc).__name__
@@ -478,7 +494,7 @@ class QueueRunner:
         self, job: Job, ctx: _JobContext, code: str, message: str, detail: str | None, exc: BaseException | None = None
     ) -> str:
         """ทุกความล้มเหลวของงานผ่านที่นี่ (ยกเว้นเปิดเธรดไม่ได้ใน _start): บรรทัด job_failed หนึ่งบรรทัดต่อครั้ง (AC-SET-03)"""
-        log_job_failed(job, code, detail, exc, self.store.chapters_json(job.video_id))
+        log_job_failed(job, code, detail, exc, self.store.chapters_json(job.video_id), self.store.channel_of(job.video_id))
         self._clear_workdir(ctx)
         self._end(job, ctx, "failed", error_code=code, error_message=message, error_detail=detail or None)
         return code

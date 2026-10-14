@@ -410,3 +410,40 @@ def test_plain_outputs_have_no_files_key(store):
     done = store.transition(job.id, "done", outputs=(plain,))
     assert store.get(job.id).outputs[0].files is None
     assert "files" not in done.to_api()["outputs"][0]
+
+# ---------- M6 รอบ A: jobs.filename_style และชื่อช่อง ----------
+
+def test_filename_style_is_written_on_start_and_survives_requeue(store):
+    (job,) = add(store)
+    assert job.filename_style is None
+    running = store.transition(job.id, "running", filename_style="title-channel")
+    assert running.filename_style == "title-channel"
+    failed = store.transition(job.id, "failed", error_code="E_NETWORK", error_message="m")
+    assert failed.filename_style == "title-channel"
+    again = store.requeue(job.id, reset_bot_checks=True)
+    assert again.filename_style == "title-channel" and again.error_code is None
+    assert "filenameStyle" not in again.to_api() and "filename_style" not in again.to_api()
+
+def test_update_cannot_change_the_filename_style(store):
+    (job,) = add(store)
+    store.transition(job.id, "running", filename_style="title")
+    with pytest.raises(ValueError):
+        store.update(job.id, filename_style="title-quality")
+
+def test_channel_of_reads_the_videos_row(store):
+    sql = "INSERT INTO videos (video_id, title, channel, probe_json, probed_at, opened_at) VALUES (?, 't', ?, '{}', 'x', 'x')"
+    store._db.execute(sql, ("vid00000000", "ครัวบ้านเรา"))
+    store._db.execute(sql, ("vid00000001", None))
+    assert store.channel_of("vid00000000") == "ครัวบ้านเรา"
+    assert store.channel_of("vid00000001") == ""
+    assert store.channel_of("missing0000") == ""
+
+def test_filename_style_is_written_once(store):
+    # รีวิว T2 M3: ตั้งได้ครั้งเดียว การเริ่มครั้งต่อไป (หรือ transition อื่น) ที่ส่งค่าอื่นมาไม่เปลี่ยนค่าแรก
+    (job,) = add(store)
+    store.transition(job.id, "running", filename_style="title-channel")
+    store.transition(job.id, "failed", error_code="E_NETWORK", error_message="m", filename_style="title")
+    store.requeue(job.id, reset_bot_checks=True)
+    again = store.transition(job.id, "running", filename_style="title-quality")
+    assert again.filename_style == "title-channel"
+    assert store.get(job.id).filename_style == "title-channel"

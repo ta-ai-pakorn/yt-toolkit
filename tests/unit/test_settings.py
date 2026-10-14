@@ -322,3 +322,12 @@ def test_auto_sharp_frames_can_be_switched_off_and_on(store):
 def test_capture_quality_accepts_the_three_choices(store):  # M5 รอบ B2 spec 2.4
     for value in ("1080", "720", "max"):
         assert store.patch({"captureQuality": value})["captureQuality"] == value
+
+
+# ---------- M6 รอบ A: คิวอ่านรูปแบบชื่อไฟล์ ----------
+
+
+def test_filename_style_reads_the_current_setting(store):
+    assert store.filename_style() == "title"
+    store.patch({"filenameStyle": "title-quality"})
+    assert store.filename_style() == "title-quality"
