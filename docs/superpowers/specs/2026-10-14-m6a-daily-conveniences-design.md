@@ -1,6 +1,6 @@
 # M6 round A: paste button, filename style, clearing temporary data, settings backup (design)
 
-Pete approved the design in conversation on 2026-10-14 (decisions file below). This written spec turns it into an implementable design. Every Thai string is sourced (§9); the gaps are listed in §11 with drafts and wait for Pete.
+Pete approved the design in conversation on 2026-10-14 (decisions file below). This written spec turns it into an implementable design. Every Thai string is sourced (§9). Pete answered the spec's four open questions the same day (§11); the copy is final.
 
 Round A implements four PRD M6 items:
 - the **"วาง"** button in W1 (BRD FR-IN-7, PRD W1 table `PRD.md:101`, AC-IN-08 / AC-IN-09);
@@ -43,7 +43,7 @@ Every task in the plan for this round must hold all of these. A reviewer rejects
 - **C4 Nothing personal leaves the app.** No clip titles, channel names, absolute paths, the token, or cookie names / values in `app.log`, SSE or API error bodies. New log lines use ASCII `key=value` fields with ids, counts and error class names only. The import never echoes a value from the file in `detail`. The exported settings file is a user download, not a log or an error; it carries `outputDir` on purpose (FR-SET-7 "เปลี่ยนเครื่อง") and nothing else personal (§4.1).
 - **C5 No regression of privacy tests.** `tests/unit/test_handlers.py` (`test_logs_have_no_absolute_paths`, `test_logs_have_no_clip_title`), `tests/unit/test_redact.py`, `tests/api/test_errors.py`, `tests/integration/test_account_privacy.py` keep passing unchanged.
 - **C6 LF line endings** in every file except `*.bat` (`.gitattributes`: `* text=auto eol=lf`). The exported JSON is written with `\n`.
-- **C7 Thai UI copy:** buttons start with a verb, no "กรุณา", no "!". **Never invent Thai.** Every string comes from the PRD, the BRD, the existing `web/src/i18n/th.ts` or the decisions file (§9). Gaps go to §11 with drafts and are not shipped until Pete answers.
+- **C7 Thai UI copy:** buttons start with a verb, no "กรุณา", no "!". **Never invent Thai.** Every string comes from the PRD, the BRD, the existing `web/src/i18n/th.ts` or the decisions file (§9). Gaps go to §11 with drafts and are not shipped until Pete answers (all four answered 2026-10-14).
 - **C8 Narrow window, not phones.** Target a 640 px-wide desktop window or 200 % zoom. No new phone polish. The app is served on 127.0.0.1 only.
 - **C9 New POSTs live under `/api`.** `LocalOnlyMiddleware` (`api/security.py:59-64`) then enforces `X-Toolkit-Token` + Origin. The web calls them through `api()` (`web/src/lib/api.ts:23-45`). The export download uses `downloadFile` (`web/src/lib/download.ts:68-96`, GET + `Content-Disposition`).
 - **C10 One naming rule, two languages.** Python `files.plan_names` and TS `planNames` must give the same output for every case in the shared fixture (§2.5). The fixture is generated from Python; the TS test never edits it.
@@ -175,11 +175,18 @@ The callers that only use `.parent` (`plan_chapter_output :154`, `plan_sharp_dir
 |---|---|---|
 | video | `f"{short_side}p"` (e.g. `1080p`, `2160p`; a vertical 1080×1920 clip gives `1080p`, the app's short-side rule) | `result.media.short_side` (`download.MediaFacts`, the file that was really downloaded) |
 | video, facts unknown (`media is None` or no height) | no quality part | — |
-| audio mp3 | `f"mp3 {kbps}k"` | `int(params.get("mp3Kbps") or DEFAULT_MP3_KBPS)` (`handlers.py:79`, `:836`) |
-| audio m4a | `f"m4a {round(abr)}k"`; unknown bitrate → `m4a` | new `MediaFacts.abr_kbps` |
+| audio mp3 | `f"mp3 {standard_kbps(kbps)}k"` | `int(params.get("mp3Kbps") or DEFAULT_MP3_KBPS)` (`handlers.py:79`, `:836`) |
+| audio m4a | `f"m4a {standard_kbps(abr)}k"` (e.g. YouTube's ~129.5 kbps → `m4a 128k`); unknown bitrate → `m4a` | new `MediaFacts.abr_kbps` |
 | audio wav | `wav` | — |
 
-**Audio bitrate fact:** add `abr_kbps: int | None = None` to `MediaFacts` (`core/download.py:47`); `media_facts(fmt)` fills it from `_number(fmt.get("abr"))`, rounded. `extractor._downloaded_facts` (`extractor.py:542-551`) returns the facts when **height or abr** is known (today: height only). The video path and `_auto_sharp_skip` keep reading `height` / `short_side`, so nothing else changes. The fake extractor's `_media_of` (`:1036`) reads the same keys from `behaviors.json`.
+**Standard bitrates** (Pete, spec Q4 = B). `STANDARD_KBPS = (32, 48, 64, 96, 128, 160, 192, 256, 320)` and `standard_kbps(value: float) -> int` live in `core/handlers.py` beside the two label helpers:
+- the result is the list entry with the smallest `abs(entry - value)`;
+- **tie** (exactly half-way, e.g. 112 between 96 and 128) → the **higher** entry, so a label never understates the quality;
+- below 32 → 32; above 320 → 320; a non-finite or non-positive value is treated as unknown (no bitrate, label `m4a`).
+- **mp3** goes through the same function. `mp3Kbps` is already restricted to 128 / 192 / 320 (`settings.MP3_KBPS`, `api/jobs.py` validation), which are list entries, so today the mp3 label is the chosen value unchanged; the rounding only guards against a future value.
+- The label is file-name text only; the web never computes it (the example line uses the fixed `1080p`), so `standard_kbps` needs no TS mirror.
+
+**Audio bitrate fact:** add `abr_kbps: float | None = None` to `MediaFacts` (`core/download.py:47`); `media_facts(fmt)` fills it from `_number(fmt.get("abr"))` as is (rounding happens once, in `standard_kbps`). `extractor._downloaded_facts` (`extractor.py:542-551`) returns the facts when **height or abr** is known (today: height only). The video path and `_auto_sharp_skip` keep reading `height` / `short_side`, so nothing else changes. The fake extractor's `_media_of` (`:1036`) reads the same keys from `behaviors.json`.
 
 `_video` passes `quality=_video_quality(result.media)` and `_audio` passes `quality=_audio_quality(fmt, params, result.media)` to `_finish`. These two helpers live in `handlers.py`. The other kinds pass `quality=None`.
 
@@ -205,7 +212,7 @@ The callers that only use `.parent` (`plan_chapter_output :154`, `plan_sharp_dir
   ```ts
   export function exampleFileName(style: FilenameStyle, clip: { title: string; channel: string; videoId: string } | undefined, outputDir: string): string
   ```
-  - clip = `history.data?.items[0]` when present, else the sample (`th.general.filenameSample`, `th.general.filenameSampleChannel`, `SAMPLE_CLIP_ID = "abcdefghijk"`), see §11 Q1.
+  - clip = `history.data?.items[0]` when present, else the sample (`th.general.filenameSample`, `th.general.filenameSampleChannel`, `SAMPLE_CLIP_ID = "abcdefghijk"`): title `สอนทำกับข้าวง่าย ๆ ใน 10 นาที`, channel `ครัวบ้านเรา` (Pete, spec Q1 = B).
   - `planNames({ baseLen: outputDir.length, title, clipId, uploader: channel, style, quality: "1080p", suffix: "", ext: "mp4" }).file`. `PathTooLongError` → retry with `baseLen: 0`. The example is always the video form, as the PRD line says ("ตัวอย่าง: <ชื่อไฟล์>.mp4").
 - **Field** (`pages/settings/filename-style-field.tsx`, new), placed right after `OutputDirField` in `GeneralPanel` (`general-panel.tsx:114-121`):
   - `FieldTitle id="general-filename"` `th.general.filenameStyle`;
@@ -337,7 +344,7 @@ The body is never logged (`ErrorLogMiddleware` logs method, path, status, code).
   - `STORAGE_KEY = ["storage"]`, `storageQuery()`, `clearStorage()` (`POST /storage/clear`);
   - `MAX_SETTINGS_FILE_BYTES = 1_048_576`.
 - Import flow: a hidden `<input type="file" accept=".json,application/json">` opened by the "นำเข้าค่าตั้ง" button. On pick: `file.size > MAX` → `showErrorToast(th.general.settingsInvalid, { id: "settings-import", request: { code: "E_SETTINGS_INVALID", detail: "file larger than 1048576 bytes", context: "settings-import" } })` without sending; else `await file.text()` → `importSettings`. The input value is reset so the same file can be picked again.
-- Success: `queryClient.setQueryData(SETTINGS_KEY, result.settings)` (theme and download defaults follow at once). No warnings → `toast.success(th.general.saved, { ...PLAIN_TOAST, id: "settings-import" })`. `warnings` includes `"outputDir"` → a warning toast with the copy of §11 Q3 (pending).
+- Success: `queryClient.setQueryData(SETTINGS_KEY, result.settings)` (theme and download defaults follow at once). No warnings → `toast.success(th.general.imported, { ...PLAIN_TOAST, id: "settings-import" })` (`นำเข้าค่าตั้งแล้ว`, Pete spec Q2 = B). `warnings` includes `"outputDir"` → `toast.warning(th.general.importedKeptFolder, { id: "settings-import", duration: Infinity })` (`นำเข้าค่าตั้งแล้ว แต่ใช้โฟลเดอร์ผลลัพธ์ในไฟล์บนเครื่องนี้ไม่ได้ จึงใช้โฟลเดอร์เดิมต่อ`, Pete spec Q3). It stays until dismissed, like other toasts the user must read; it has no copy-report button because nothing failed.
 - Failure: `showErrorToast(serverMessage(error), { id: "settings-import", request: reportRequest(error, { context: "settings-import" }) })`.
 - Export failure: `showErrorToast(error.message, { id: "settings-export", request: reportRequest(error, { context: "settings-export" }) })`; success shows no toast (the browser shows the download).
 
@@ -367,7 +374,7 @@ The body is never logged (`ErrorLogMiddleware` logs method, path, status, code).
 - **Clear while a capture runs:** its clip's cache and its `work/capture-*` are skipped. A capture that starts during phase 1 waits a few milliseconds on `_guard`.
 - **Clear with a file open in another program** (Windows): that folder is skipped, counted as not freed; `freedBytes` reports only what was removed.
 - **App closed mid-clear:** the `.clear-*` dirs are removed at the next start (§3.2).
-- **Import on a machine without the exported folder:** the old folder stays, the toast says so (§11 Q3), other keys are imported.
+- **Import on a machine without the exported folder:** the old folder stays, the toast `นำเข้าค่าตั้งแล้ว แต่ใช้โฟลเดอร์ผลลัพธ์ในไฟล์บนเครื่องนี้ไม่ได้ จึงใช้โฟลเดอร์เดิมต่อ` says so, other keys are imported.
 - **Import of a newer `schema`:** 422 `E_SETTINGS_INVALID` (the app cannot know the newer shape).
 - **Import while a job runs:** a new `outputDir` applies to jobs that start later (the queue reads it at each start, `queue.py:361`); the hook updates log masking at once.
 
@@ -377,7 +384,8 @@ The body is never logged (`ErrorLogMiddleware` logs method, path, status, code).
 - **`tests/unit/test_names_golden.py`** (new): the golden check of §2.5, plus Python-only asserts:
   - `style="title"` gives exactly today's `plan_output` result for a table of existing inputs (copy the cases from `tests/unit/test_files.py`): no name changes for current users;
   - AC-OUT-09: all three styles with the AC-OUT-01 and AC-OUT-02 titles → no forbidden characters, path ≤ 240, the `(1080p)` / `(mp3 192k)` part and the extension intact, and the folder name identical across styles.
-- **`tests/unit/test_handlers.py`:** one finish per kind × style (§2.1 table), using the fake downloader's `media` facts (height 1080 → `(1080p)`, `abr` 129.5 → `(m4a 130k)`, mp3 192 → `(mp3 192k)`, wav → `(wav)`, no facts → no part); chapter-split, sharp and capture names unchanged under every style; the job's `filename_style` drives the name, not the current setting.
+- **`tests/unit/test_handlers.py`:** one finish per kind × style (§2.1 table), using the fake downloader's `media` facts (height 1080 → `(1080p)`, `abr` 129.5 → `(m4a 128k)`, mp3 192 → `(mp3 192k)`, wav → `(wav)`, no facts → no part); chapter-split, sharp and capture names unchanged under every style; the job's `filename_style` drives the name, not the current setting.
+- **`standard_kbps`** (in `test_handlers.py`): 129.5 → 128, 112 → 128 (tie → higher), 144 → 160 (tie → higher), 150 → 160, 140 → 128, 20 → 32, 500 → 320, every list entry → itself, NaN / 0 / negative → unknown (`m4a`).
 - **`tests/unit/test_queue.py`:** first start stores the setting; a retry after a style change keeps the old snapshot; a job queued before a change and started after it uses the new one; `hold_active()` blocks `tick` from starting a job while held.
 - **`tests/unit/test_db.py`:** v1 → v3 and v2 → v3 migrations keep every row and add `filename_style` NULL; a fresh DB has the column; `_MIGRATIONS[2]` still uses the frozen `_JOBS_V2`.
 - **`tests/unit/test_lifecycle.py`:** the sweep removes a 0-byte `<T> - <C>.mp4`, `<T> (1080p).mp4`, a cut `<T…> - <C…> (01.30-05.00).mp4.part` and `<T> (mp3 192k).mp3`; it keeps a done output and a user file `<T> - notes.mp4` with content; `title` patterns unchanged (existing parametrised tests).
@@ -439,7 +447,8 @@ While the canary account is held: call `GET /settings/export` and assert that th
 | `general.filenameStyles["title-channel"]` | ชื่อคลิป - ช่อง | BRD FR-OUT-8 |
 | `general.filenameStyles["title-quality"]` | ชื่อคลิป (คุณภาพ) | BRD FR-OUT-8 |
 | `general.filenameExample` | ตัวอย่าง: {name} | PRD `:306` |
-| `general.filenameSample`, `general.filenameSampleChannel` | **pending, §11 Q1** | — |
+| `general.filenameSample` | สอนทำกับข้าวง่าย ๆ ใน 10 นาที | Pete, spec Q1 = B (2026-10-14) |
+| `general.filenameSampleChannel` | ครัวบ้านเรา | Pete, spec Q1 = B (2026-10-14) |
 | `general.localData` | ข้อมูลในเครื่อง | PRD `:307` |
 | `general.clearTemp` | ล้างข้อมูลชั่วคราว ({size}) | PRD `:307`, BRD FR-SET-6 |
 | `general.clearTempPlain` | ล้างข้อมูลชั่วคราว | BRD FR-SET-6 |
@@ -451,8 +460,8 @@ While the canary account is held: call `GET /settings/export` and assert that th
 | `general.backup` | สำรองค่าตั้ง | PRD `:307`, BRD FR-SET-7 |
 | `general.import` | นำเข้าค่าตั้ง | PRD `:307`, BRD FR-SET-7 |
 | `general.settingsInvalid` | ไฟล์นี้ไม่ใช่ไฟล์ค่าตั้งของ YT Toolkit หรือไฟล์เสียหาย ลองเลือกไฟล์ที่ได้จากปุ่ม "สำรองค่าตั้ง" | PRD §7 `:814` |
-| import success | บันทึกแล้ว (`general.saved`, reused) | PRD W6 `:303`; see §11 Q2 |
-| import warning `outputDir` | **pending, §11 Q3** | — |
+| `general.imported` | นำเข้าค่าตั้งแล้ว | Pete, spec Q2 = B (2026-10-14) |
+| `general.importedKeptFolder` | นำเข้าค่าตั้งแล้ว แต่ใช้โฟลเดอร์ผลลัพธ์ในไฟล์บนเครื่องนี้ไม่ได้ จึงใช้โฟลเดอร์เดิมต่อ | Pete, spec Q3 (2026-10-14) |
 
 Sizes use the existing `formatBytes` (`GB` with one decimal, `MB`), matching the BRD example "1.2 GB". Copy rules: buttons start with a verb ("วาง", "ล้าง…", "สำรอง…", "นำเข้า…"); no "กรุณา"; no "!".
 
@@ -465,16 +474,16 @@ Sizes use the existing `formatBytes` (`GB` with one decimal, `MB`), matching the
 - The storyboard (fast frames) and the sharp frames / capture paths, which rely on YouTube formats and storyboards.
 - SponsorBlock segments and YouTube chapters as cut / split sources.
 
-## 11. Open questions for the owner (with verbatim drafts)
+## 11. Spec questions (all answered by Pete, 2026-10-14)
 
-The spec does not ship these strings until Pete answers.
+All four are answered and folded into the sections shown. The drafts are kept for the record.
 
-| # | Question | Draft(s) |
-|---|---|---|
-| Q1 | **Sample clip for the example** when no clip was opened yet. PRD `:306` says "ชื่อตัวอย่างภาษาไทย" but gives none, and `title-channel` also needs a sample channel. | **A** reuse the PRD AC-OUT-01 title: title `ทดสอบ: "A/B" <ภาค 1>?` (shows the safe-name rule: `ทดสอบ AB ภาค 1`), channel `ช่องตัวอย่าง` · **B** title `สอนทำกับข้าวง่าย ๆ ใน 10 นาที`, channel `ครัวบ้านเรา` |
-| Q2 | **Import success toast.** The spec reuses "บันทึกแล้ว" (W6 already uses it after every change). A dedicated line? | **A** keep `บันทึกแล้ว` · **B** `นำเข้าค่าตั้งแล้ว` |
-| Q3 | **Import warning when the folder in the file cannot be used here** (FR-SET-7 "คงโฟลเดอร์เดิมและบอกผู้ใช้"; no copy in PRD/BRD). Shown as a warning toast that stays until dismissed. | `นำเข้าค่าตั้งแล้ว แต่ใช้โฟลเดอร์ผลลัพธ์ในไฟล์บนเครื่องนี้ไม่ได้ จึงใช้โฟลเดอร์เดิมต่อ` |
-| Q4 | **m4a quality label.** The spec uses the format name the staff pick plus the measured bitrate, e.g. `(m4a 130k)` (YouTube's ~129.5 kbps rounds to 130). Alternative: the nominal `(m4a 128k)` by rounding to the nearest of 48/64/96/128/160/256 k. Not Thai copy, but visible in every file name. | **A** measured, rounded: `(m4a 130k)` · **B** nominal: `(m4a 128k)` |
+| # | Question | Draft(s) | Answer | Where |
+|---|---|---|---|---|
+| Q1 | **Sample clip for the example** when no clip was opened yet. PRD `:306` says "ชื่อตัวอย่างภาษาไทย" but gives none, and `title-channel` also needs a sample channel. | **A** reuse the PRD AC-OUT-01 title: title `ทดสอบ: "A/B" <ภาค 1>?` (shows the safe-name rule: `ทดสอบ AB ภาค 1`), channel `ช่องตัวอย่าง` · **B** title `สอนทำกับข้าวง่าย ๆ ใน 10 นาที`, channel `ครัวบ้านเรา` | **B**: title `สอนทำกับข้าวง่าย ๆ ใน 10 นาที`, channel `ครัวบ้านเรา` | §2.6, §9 |
+| Q2 | **Import success toast.** The spec reuses "บันทึกแล้ว" (W6 already uses it after every change). A dedicated line? | **A** keep `บันทึกแล้ว` · **B** `นำเข้าค่าตั้งแล้ว` | **B**: `นำเข้าค่าตั้งแล้ว` (`th.general.imported`) | §4.3, §9 |
+| Q3 | **Import warning when the folder in the file cannot be used here** (FR-SET-7 "คงโฟลเดอร์เดิมและบอกผู้ใช้"; no copy in PRD/BRD). Shown as a warning toast that stays until dismissed. | `นำเข้าค่าตั้งแล้ว แต่ใช้โฟลเดอร์ผลลัพธ์ในไฟล์บนเครื่องนี้ไม่ได้ จึงใช้โฟลเดอร์เดิมต่อ` | The draft as written (`th.general.importedKeptFolder`), a warning toast | §4.3, §6, §9, acceptance AC-SET-09 |
+| Q4 | **m4a quality label.** The spec uses the format name the staff pick plus the measured bitrate, e.g. `(m4a 130k)` (YouTube's ~129.5 kbps rounds to 130). Alternative: the nominal `(m4a 128k)` by rounding to the nearest of 48/64/96/128/160/256 k. Not Thai copy, but visible in every file name. | **A** measured, rounded: `(m4a 130k)` · **B** nominal: `(m4a 128k)` | **B**: nearest of 32/48/64/96/128/160/192/256/320, tie → higher, same function for mp3 | §2.3, §7.1, PRD §6.4 |
 
 ## 12. Review focus (top 5 failure modes the tests may miss)
 
