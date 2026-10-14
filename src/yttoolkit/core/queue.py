@@ -19,7 +19,8 @@ import shutil
 import threading
 import time
 import traceback
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -125,6 +126,14 @@ class PauseState:
     reason: str
 
 
+@dataclass(frozen=True)
+class ActiveJobs:
+    """งานที่กำลังทำ ณ ตอนถือล็อกของคิว (M6 รอบ A ปุ่มล้างข้อมูลชั่วคราวข้าม work/<jobId> และ cache ของคลิปนั้น)"""
+
+    job_ids: frozenset[str]
+    video_ids: frozenset[str]
+
+
 class SettingsView(Protocol):
     def concurrency(self) -> int: ...
     def output_dir(self) -> Path: ...
@@ -147,6 +156,7 @@ class _JobContext:
 
     def __init__(self, runner: QueueRunner, job: Job, workdir: Path, output_root: Path) -> None:
         self.job_id = job.id
+        self.video_id = job.video_id  # M6 รอบ A: hold_active บอกคลิปที่ cache ห้ามถูกล้าง
         self.workdir = workdir
         self.output_root = output_root
         self.filename_style = job.filename_style or "title"  # M6 รอบ A: ค่าที่ _start ตั้งไว้ในงาน
@@ -646,6 +656,15 @@ class QueueRunner:
         log.info("ครบเวลาพักคิวแล้ว ทำงานต่อ")
         self._bus.publish("queue.resumed", {})
         return None
+
+    @contextmanager
+    def hold_active(self) -> Iterator[ActiveJobs]:
+        """ถือล็อกของคิวตลอดบล็อก (ล็อกเดียวกับที่ tick ใช้เริ่มงาน) แล้วให้ชุดงานที่กำลังทำ
+        งานที่เริ่มก่อนอยู่ในชุดเสมอ และไม่มีงานใหม่เริ่มระหว่างบล็อก · ผู้ถือต้องปล่อยเร็ว (ไม่ลบไฟล์ใต้ล็อก)
+        ลำดับล็อก: ล็อกคิว -> ล็อกของ CaptureService (M6 รอบ A spec 3.2)"""
+        with self._lock:
+            active = list(self._active.values())
+            yield ActiveJobs(frozenset(ctx.job_id for ctx in active), frozenset(ctx.video_id for ctx in active))
 
     def is_cancelling(self, job_id: str) -> bool:
         with self._lock:

@@ -592,3 +592,36 @@ def test_delete_with_a_network_style_root_removes_the_folder_copy(env: Env) -> N
     env.service.delete(BBB, capture.id)
     assert not (env.folder / "frame_00-00-01.jpg").exists()
     assert env.service.list(BBB) == []
+
+
+# ---------- M6 รอบ A: hold_active (ปุ่มล้างข้อมูลชั่วคราว spec 3.2) ----------
+
+
+def test_hold_active_reports_the_running_capture_and_its_work_dir(env: Env) -> None:
+    with env.service.hold_active() as idle:
+        assert idle is None
+    env.fetcher.gate = threading.Event()
+    worker = threading.Thread(target=lambda: env.service.capture(BBB, 1_000))
+    worker.start()
+    try:
+        assert env.fetcher.started.wait(5)
+        with env.service.hold_active() as current:
+            assert current is not None and current[0] == BBB
+            assert current[1].startswith("capture-") and (env.work / current[1]).is_dir()
+    finally:
+        env.fetcher.gate.set()
+        worker.join(10)
+    with env.service.hold_active() as after:
+        assert after is None
+    assert list(env.work.iterdir()) == []
+
+
+def test_a_capture_waits_while_the_active_set_is_held(env: Env) -> None:
+    done = threading.Event()
+    with env.service.hold_active():
+        worker = threading.Thread(target=lambda: (env.service.capture(BBB, 1_000), done.set()))
+        worker.start()
+        assert not done.wait(0.2)  # รอ _guard
+        assert not env.work.exists() or list(env.work.iterdir()) == []
+    worker.join(10)
+    assert done.is_set()

@@ -574,3 +574,14 @@ def test_v3_migration_failure_rolls_back_to_v2(tmp_path, monkeypatch):
         assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 3
     finally:
         db.close()
+
+
+# ---------- M6 รอบ A: cache_folder (ตัวตรวจเดียวกับการล้าง cache เก่า) ----------
+
+
+def test_cache_folder_accepts_only_video_id_folders_inside_the_root(tmp_path: Path):
+    root = (tmp_path / "cache").resolve()
+    root.mkdir()
+    assert db_module.cache_folder(root, "aqz-KE-bpKQ") == root / "aqz-KE-bpKQ"
+    for bad in ("..", "../x", "a/b", "a\\b", "short", "toolongvideoid1", "", ".clear-" + "a" * 32, "storyboard"):
+        assert db_module.cache_folder(root, bad) is None, bad
