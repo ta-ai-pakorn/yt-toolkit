@@ -254,3 +254,13 @@ def test_logs_have_no_absolute_paths(env, caplog):
     # controller ruling 2: ไม่มีชื่อคลิปหรือ path สัมพัทธ์ของโฟลเดอร์ภาพคมด้วย
     assert all(BBB_TITLE not in r.getMessage() and "ภาพคม/" not in r.getMessage() for r in caplog.records)
     assert any(JOB_ID in r.getMessage() and "11" in r.getMessage() for r in caplog.records)
+
+
+# ---------- M6 รอบ A: รูปแบบชื่อไฟล์ไม่เปลี่ยนชื่อโฟลเดอร์ภาพคม (D3) ----------
+
+
+@pytest.mark.parametrize("style", ["title-channel", "title-quality"])
+def test_the_sharp_folder_ignores_the_filename_style(env, style):
+    result, _ = env.run("frames_sharp", BBB, {"intervalS": 60}, style=style)
+    assert _folder(result) == files.plan_sharp_dir(env.out.resolve(), BBB_TITLE, BBB)
+    assert _folder(result).parent == _clip_folder(env)

@@ -427,3 +427,7 @@ def test_media_facts() -> None:
     unknown = media_facts({"filepath": "x"})
     assert unknown == MediaFacts(None, None, None) and unknown.short_side is None and unknown.hdr is None
     assert media_facts({"height": 720}).short_side == 720
+    # M6 รอบ A: bitrate เสียงตามที่ yt-dlp บอก (ยังไม่ปัด) ค่าที่ไม่ใช่ตัวเลขบวก = ไม่รู้
+    assert media_facts({"abr": 129.478}).abr_kbps == 129.478
+    assert media_facts({"abr": 0}).abr_kbps is None and media_facts({"abr": "x"}).abr_kbps is None
+    assert MediaFacts(1280, 720, "SDR").abr_kbps is None

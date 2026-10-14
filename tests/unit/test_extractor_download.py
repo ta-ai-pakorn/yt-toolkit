@@ -712,6 +712,13 @@ def test_real_download_reports_the_downloaded_format_facts(dl: type[DownloadYDL]
     assert result.media == MediaFacts(1280, 720, "SDR")
 
 
+def test_real_audio_download_reports_its_bitrate(dl: type[DownloadYDL], workdir: Path) -> None:
+    # M6 รอบ A: ไฟล์เสียงอย่างเดียวไม่มีความสูง แต่มี abr (ส่วน "(m4a 128k)" ของชื่อไฟล์)
+    dl.result = {"id": BBB, "requested_downloads": [{"filepath": str(workdir / "media.m4a"), "abr": 129.478}]}
+    result = YtDlpExtractor().download(BBB, _video(), workdir, Recorder().hooks)
+    assert result.media == MediaFacts(None, None, None, 129.478)
+
+
 def test_real_download_without_facts_reports_none(dl: type[DownloadYDL], workdir: Path) -> None:
     result = YtDlpExtractor().download(BBB, _video(), workdir, Recorder().hooks)
     assert result.media is None
