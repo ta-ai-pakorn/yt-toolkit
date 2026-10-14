@@ -58,7 +58,7 @@ from .jobs import (
     split_stage,
     valued_note,
 )
-from .media import SHARP_LONG_SIDE, CutMode, CutTarget, MediaMeta, MediaTools, SubtitleInput, iso639_2
+from .media import CUT_AAC_KBPS, SHARP_LONG_SIDE, CutMode, CutTarget, MediaMeta, MediaTools, SubtitleInput, iso639_2
 from .sharp import MAX_INTERVAL_S, fast_times, plan_sharp
 from .sharp_store import FOLDER as SHARP_FOLDER
 from .sharp_store import ManualSetKept, commit_sharp, discard_sharp, prepare_sharp, read_sharp
@@ -87,6 +87,8 @@ SHARP_FRAME_BYTES = 400_000  # spec 3.5: เผื่อภาพคมภาพ
 _TAIL_FRAME_MS = 1000  # ภาพที่เวลาอยู่ในวินาทีสุดท้ายของคลิปอาจไม่ได้ภาพตามปกติ (ไม่นับเป็นภาพหายผิดปกติ)
 # ยูทูปมีปัญหาชั่วคราว: ให้คิวลองใหม่ / พักคิว แทนการได้วิดีโอที่ไม่มีซับ
 _EMBED_RETRY_CODES = frozenset({"E_NETWORK", "E_BOT_CHECK"})
+# M6 รอบ A (Pete Q4 = B): ส่วนคุณภาพของชื่อไฟล์เสียงใช้ bitrate มาตรฐานที่ใกล้ที่สุด (กึ่งกลาง = ค่าที่สูงกว่า)
+STANDARD_KBPS = (32, 48, 64, 96, 128, 160, 192, 256, 320)
 
 
 def _default_disk_free(path: Path) -> int:
@@ -158,6 +160,8 @@ class _Clip:
     title: str
     root: Path  # โฟลเดอร์ผลลัพธ์แบบ absolute ที่ resolve แล้ว
     group: str | None = None  # params.folder ดิบ (files.plan_output ทำความสะอาดเอง) None = ไม่มีโฟลเดอร์กลุ่ม
+    style: str = "title"  # M6 รอบ A: รูปแบบชื่อไฟล์ของงาน (ctx.filename_style ที่คิวตั้งตอนเริ่มครั้งแรก)
+    uploader: str = ""  # ชื่อช่องดิบจากข้อมูลคลิป (files.plan_names ทำความสะอาดเอง) ใช้เฉพาะแบบ title-channel
 
     @property
     def meta(self) -> MediaMeta:
@@ -187,7 +191,8 @@ def _start(deps: HandlerDeps, job: Job, ctx: JobContext, report: _Reporter) -> _
     root = Path(ctx.output_root).resolve()
     files.ensure_output_root(root)
     ctx.check_cancelled()
-    return _Clip(job.video_id, info, title, root, job_group(job.params))
+    uploader = str(info.get("channel") or "")
+    return _Clip(job.video_id, info, title, root, job_group(job.params), style=ctx.filename_style, uploader=uploader)
 
 
 def job_group(params: Mapping[str, Any]) -> str | None:
@@ -546,10 +551,13 @@ def _finish(
     ext: str,
     kind: str,
     notes: Iterable[str] = (),
+    quality: str | None = None,
 ) -> JobResult:
-    """ย้ายไฟล์ที่เสร็จแล้วเข้าโฟลเดอร์ของคลิป เขียนแหล่งที่มา.txt แล้วคืนผลของงาน"""
+    """ย้ายไฟล์ที่เสร็จแล้วเข้าโฟลเดอร์ของคลิป เขียนแหล่งที่มา.txt แล้วคืนผลของงาน
+    ชื่อไฟล์ตามรูปแบบของงาน (clip.style) · quality = ส่วนคุณภาพของแบบ title-quality (วิดีโอ/เสียงเท่านั้น)"""
     ctx.check_cancelled()
-    planned = files.plan_output(clip.root, clip.title, clip.video_id, suffix, ext, clip.group)
+    planned = files.plan_output(clip.root, clip.title, clip.video_id, suffix, ext, clip.group,
+                                style=clip.style, uploader=clip.uploader, quality=quality)  # fmt: skip
     final = files.move_into_place(src, planned)
     rel = final.relative_to(clip.root).as_posix()
     _write_note(deps, ctx, clip, final.parent)
@@ -577,6 +585,33 @@ def _write_note(deps: HandlerDeps, ctx: JobContext, clip: _Clip, folder: Path) -
 
 def _unique(notes: Iterable[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(notes))
+
+
+def standard_kbps(value: float | None) -> int | None:
+    """bitrate มาตรฐานที่ใกล้ value ที่สุดจาก STANDARD_KBPS (ห่างเท่ากัน = ค่าที่สูงกว่า ชื่อไฟล์จะไม่บอกต่ำกว่าจริง)
+    ต่ำกว่า 32 = 32 · เกิน 320 = 320 · ไม่ใช่ตัวเลข ไม่จำกัด หรือไม่เกิน 0 = None (ไม่รู้)"""
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0:
+        return None
+    return min(STANDARD_KBPS, key=lambda kbps: (abs(kbps - value), -kbps))
+
+
+def _video_quality(media: MediaFacts | None) -> str | None:
+    """ส่วนคุณภาพของวิดีโอ: ด้านสั้นของไฟล์ที่โหลดจริง เช่น "1080p" (คลิปแนวตั้ง 1080x1920 ก็ "1080p") ไม่รู้ = None"""
+    if media is None or not media.short_side:
+        return None
+    return f"{media.short_side}p"
+
+
+def _audio_quality(fmt: str, params: Mapping[str, Any], media: MediaFacts | None, *, recoded: bool) -> str:
+    """ส่วนคุณภาพของเสียง: "mp3 192k" (ค่าที่ผู้ใช้เลือก) · "m4a 128k" (bitrate ของไฟล์ที่โหลด ปัดเป็นค่ามาตรฐาน
+    ถ้าตัดช่วงเวลา/โฆษณา = ไฟล์ถูกเข้ารหัสใหม่ที่ CUT_AAC_KBPS) ไม่รู้ bitrate = "m4a" · wav = "wav"
+    """
+    if fmt == "mp3":
+        return f"mp3 {standard_kbps(int(params.get('mp3Kbps') or DEFAULT_MP3_KBPS))}k"
+    if fmt == "wav":
+        return "wav"
+    kbps = standard_kbps(CUT_AAC_KBPS if recoded else (media.abr_kbps if media is not None else None))
+    return f"m4a {kbps}k" if kbps else "m4a"
 
 
 def _clip_duration_s(clip: _Clip) -> int:
@@ -776,7 +811,8 @@ def _video(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
     )
     suffix = (NO_AUDIO_SUFFIX if no_audio else "") + cut.suffix
     notes = (*result.choice.notes, *sub_notes, *ad_notes, *cut.notes, *split_notes)
-    finished = _finish(deps, ctx, clip, out, suffix=suffix, ext="mp4", kind="video", notes=notes)
+    finished = _finish(deps, ctx, clip, out, suffix=suffix, ext="mp4", kind="video", notes=notes,
+                       quality=_video_quality(result.media))  # fmt: skip
     _auto_sharp(deps, job, ctx, clip, report, finished, result.media)
     return finished
 
@@ -845,7 +881,8 @@ def _audio(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:
             deps.media.finalize_m4a(cut.path, out, meta, cover=cover, **common)
     report.stage("writing")
     notes = (*result.choice.notes, *ad_notes, *cut.notes, *split_notes)
-    return _finish(deps, ctx, clip, out, suffix=cut.suffix, ext=fmt, kind="audio", notes=notes)
+    quality = _audio_quality(fmt, params, result.media, recoded=cut.path != result.path)
+    return _finish(deps, ctx, clip, out, suffix=cut.suffix, ext=fmt, kind="audio", notes=notes, quality=quality)
 
 
 def _subtitle(deps: HandlerDeps, job: Job, ctx: JobContext) -> JobResult:

@@ -1206,6 +1206,7 @@ class _NoteCtx:
         self.job_id = job_id
         self.workdir = workdir
         self.output_root = output_root
+        self.filename_style = "title"  # M6 รอบ A: JobContext.filename_style
         workdir.mkdir(parents=True)
 
     def stage(self, stage: str) -> None:

@@ -43,6 +43,7 @@ class Ctx:
         self.job_id = JOB_ID
         self.workdir = workdir
         self.output_root = output_root
+        self.filename_style = "title"  # M6 รอบ A: JobContext.filename_style
 
     def stage(self, stage: str) -> None:
         return None

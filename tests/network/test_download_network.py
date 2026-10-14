@@ -71,6 +71,7 @@ class JobCtx:
         self.job_id = "01900000-0000-7000-8000-0000000000aa"
         self.workdir = workdir
         self.output_root = output_root
+        self.filename_style = "title"  # M6 รอบ A: JobContext.filename_style
         self.stages: list[str] = []
         self.titles: list[str] = []
         self.cancel_after_progress = False  # ตั้งธงยกเลิกเมื่อโหลดได้ความคืบหน้าแรก

@@ -38,6 +38,7 @@ class Ctx:
         self.job_id = JOB_ID
         self.workdir = workdir
         self.output_root = output_root
+        self.filename_style = "title"  # M6 รอบ A: JobContext.filename_style
         self.cancel_on = cancel_on
         self.stages: list[str] = []
         self.progresses: list[tuple[float | None, int | None, int | None]] = []
@@ -135,12 +136,20 @@ class SharpEnv:
         self._runs = 0
 
     def run(
-        self, kind: str, video_id: str, params: dict, *, cancel_on: str | None = None, deps: HandlerDeps | None = None
+        self,
+        kind: str,
+        video_id: str,
+        params: dict,
+        *,
+        cancel_on: str | None = None,
+        deps: HandlerDeps | None = None,
+        style: str = "title",
     ) -> tuple[JobResult, Ctx]:
         self._runs += 1
         workdir = self.tmp / "work" / str(self._runs)
         workdir.mkdir(parents=True)
         ctx = Ctx(workdir, self.out, cancel_on=cancel_on)
+        ctx.filename_style = style
         handler = build_handlers(deps or self.deps)[kind]
         return handler(make_job(kind, video_id, params), ctx), ctx
 
