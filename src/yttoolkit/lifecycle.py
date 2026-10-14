@@ -83,6 +83,8 @@ _SWEEP_SUB_EXTS = ("srt", "txt", "md")
 # M5 รอบ A: ส่วนต่อท้ายช่วงเวลา " (01.30-05.00)" / " (1.02.30-1.05.00)" (core/advanced.range_suffix)
 _RANGE_SUFFIX = r" \((?:\d{2}\.\d{2}-\d{2}\.\d{2}|\d{1,3}\.\d{2}\.\d{2}-\d{1,3}\.\d{2}\.\d{2})\)"
 _UNIQUE = r"(?: \((?:[2-9]|[1-9][0-9])\))?"  # " (2)" ... " (99)" จาก files._candidates
+# M6 รอบ A: ส่วนคุณภาพของแบบ title-quality (handlers._video_quality / _audio_quality) "(1080p)" "(mp3 192k)" "(m4a)" "(wav)"
+_QUALITY_PART = r"(?: \((?:\d{3,4}p|(?:mp3|m4a) \d{2,3}k|m4a|wav)\))?"
 # ไฟล์ในโฟลเดอร์ย่อย "แยกตาม chapter (<ext>)": "<NN> - <ชื่อ>.<ext>" หรือ "<NN>.<ext>" (files.plan_chapter_output)
 _CHAPTER_EXTS = ("mp4", "m4a", "mp3", "wav")
 _CHAPTER_FILE = re.compile(rf"\d{{2,3}}(?: - .+)?{_UNIQUE}\.(?:{'|'.join(_CHAPTER_EXTS)})(?:\.part)?")
@@ -457,13 +459,27 @@ def sweep_interrupted_outputs(store: JobStore, output_root: Path, job_ids: Itera
         if done.video_id in video_ids
         for output in done.outputs
     }
-    seen: set[Path] = set()
+    seen: set[tuple[Path, str, str]] = set()
+    seen_dirs: set[Path] = set()
     removed = 0
     for job in jobs.values():
+        # M6 รอบ A: ชื่อไฟล์ตามรูปแบบที่งานตั้งไว้ตอนเริ่ม (NULL = งานก่อน M6 = title) · ชื่อช่องจากตาราง videos
+        style = job.filename_style or "title"
+        uploader = store.channel_of(job.video_id) if style == "title-channel" else ""
         for folder, prefix in _clip_folders(root, job.video_id, job.title, job_group(job.params)):
-            if folder not in seen:
-                seen.add(folder)
-                removed += _sweep_folder(folder, toolkit_name_pattern(prefix), keep)
+            # สองงานของคลิปเดียวกันคนละรูปแบบ = ดูโฟลเดอร์เดียวกันด้วยทั้งสองรูปแบบ
+            if style and (folder, style, uploader) not in seen:
+                seen.add((folder, style, uploader))
+                try:
+                    ours = toolkit_name_pattern(prefix, style=style, uploader=uploader)
+                except ValueError:
+                    # รูปแบบที่ไม่รู้จัก (ฐานข้อมูลจากรุ่นใหม่กว่า/ข้อมูลเสีย) ข้ามงานนี้งานเดียว งานอื่นยังกวาดต่อ
+                    log.warning("sweep_skip job=%s reason=unknown_style", job.id)
+                    style = ""
+                else:
+                    removed += _sweep_folder(folder, ours, keep)
+            if folder not in seen_dirs:
+                seen_dirs.add(folder)
                 removed += _sweep_sharp_dirs(folder, sharp_dir_pattern(prefix), keep)
                 for name in _CHAPTER_DIRS:
                     chapters = folder / name
@@ -480,21 +496,39 @@ def _prefixes(name: str) -> str:
     return re.escape(name[:1]) + pattern
 
 
-def toolkit_name_pattern(prefix: str) -> re.Pattern[str]:
+def toolkit_name_pattern(prefix: str, *, style: str = "title", uploader: str = "") -> re.Pattern[str]:
     """ชื่อไฟล์ที่ตัวทำงานในคิวสร้างได้จริงในโฟลเดอร์ของคลิป (ใช้ fullmatch) ต่อท้าย .part ได้
 
     สื่อ/ภาพ/zip: <ชื่อ>[ส่วนต่อท้ายของชนิดงาน][ (N)].<นามสกุล>  เช่น "ชื่อ (ไม่มีเสียง) (2).mp4"
     M5 รอบ A: <ชื่อ>[ (ไม่มีเสียง)][ (ช่วงเวลา)][ (ตัดโฆษณา)][ (N)].<นามสกุล> (ต้องมีช่วงเวลาหรือตัดโฆษณา ชื่ออาจถูกตัดสั้น)
     ซับ: <ชื่อ>[ (ช่วงเวลา)][ (N)].<ภาษา>.<รูปแบบ>  (files วางเลขกันซ้ำไว้หน้ารหัสภาษา)
-    ชื่ออื่น (เช่นไฟล์ของผู้ใช้ "<ชื่อ> notes.docx") ไม่ตรง จึงไม่ถูกลบ"""
-    name = re.escape(prefix)
-    shrunk = _prefixes(prefix)
+    ชื่ออื่น (เช่นไฟล์ของผู้ใช้ "<ชื่อ> notes.docx") ไม่ตรง จึงไม่ถูกลบ
+    M6 รอบ A (spec 2.7): style = รูปแบบของงาน · title = แบบเดิมทุกตัวอักษร
+    title-channel: ส่วนชื่อ = <ชื่อ (ตัดสั้นได้)>[ - <ช่อง (ตัดสั้นได้)>] ทุกแบบ (ชื่อไฟล์ยาวเกินตัดได้ทั้งสองส่วน)
+    title-quality: สื่อ/ที่ตัดช่วง มี "(1080p)" "(mp3 192k)" "(m4a 128k)" "(m4a)" "(wav)" ต่อชื่อ (ตัดสั้นได้) ได้ · ซับเหมือน title
+    """
+    if style == "title":
+        name = re.escape(prefix)
+        shrunk = _prefixes(prefix)
+        quality = ""
+    elif style == "title-channel":
+        channel = files.safe_component(uploader, "")
+        name = _prefixes(prefix) + (rf"(?:{re.escape(files.CHANNEL_SEP)}{_prefixes(channel)})?" if channel else "")
+        shrunk = name
+        quality = ""
+    elif style == "title-quality":
+        name = re.escape(prefix)
+        shrunk = _prefixes(prefix)
+        quality = _QUALITY_PART
+    else:
+        raise ValueError(f"unknown filename style: {style!r}")
     suffixes = "|".join(re.escape(s) for s in _SWEEP_SUFFIXES)
     exts = "|".join(_SWEEP_MEDIA_EXTS)
     subs = "|".join(_SWEEP_SUB_EXTS)
     no_audio, ads = re.escape(NO_AUDIO_SUFFIX), re.escape(ADS_SUFFIX)
-    media = rf"{name}(?:{suffixes})?{_UNIQUE}\.(?:{exts})"
-    cut = rf"{shrunk}(?:{no_audio})?(?:{_RANGE_SUFFIX}(?:{ads})?|{ads}){_UNIQUE}\.(?:{exts})"
+    media_name = rf"{shrunk}{quality}" if quality else name
+    media = rf"{media_name}(?:{suffixes})?{_UNIQUE}\.(?:{exts})"
+    cut = rf"{shrunk}{quality}(?:{no_audio})?(?:{_RANGE_SUFFIX}(?:{ads})?|{ads}){_UNIQUE}\.(?:{exts})"
     subtitle = rf"{name}{_UNIQUE}\.[A-Za-z0-9-]+\.(?:{subs})"
     subtitle_range = rf"{shrunk}{_RANGE_SUFFIX}{_UNIQUE}\.[A-Za-z0-9-]+\.(?:{subs})"
     return re.compile(rf"(?:{media}|{cut}|{subtitle}|{subtitle_range})(?:\.part)?")
