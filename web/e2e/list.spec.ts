@@ -381,7 +381,8 @@ test.describe("D5 กลับมาหน้าแรกแล้วแตะ�
     await pasteThree(page)
     await page.reload()
     await expectThreeIntact(page)
-    await page.getByRole("button", { name: "วิเคราะห์" }).focus()
+    // M6 รอบ A: ปุ่ม "วาง" อยู่ระหว่างช่องกับปุ่มวิเคราะห์ จึงเริ่มถอยจากปุ่มวาง
+    await page.getByRole("button", { name: "วาง", exact: true }).focus()
     await page.keyboard.press("Shift+Tab")
     await expect(page.getByRole("textbox")).toBeFocused()
     const [start, end, length] = await selection(page)
@@ -466,7 +467,8 @@ test.describe("รอบแก้หลังรีวิว (2026-09-30)", () =
     await pasteThree(page)
     await page.reload()
     await expectThreeIntact(page)
-    await page.getByRole("button", { name: "วิเคราะห์" }).focus()
+    // M6 รอบ A: ปุ่ม "วาง" อยู่ระหว่างช่องกับปุ่มวิเคราะห์ จึงเริ่มถอยจากปุ่มวาง
+    await page.getByRole("button", { name: "วาง", exact: true }).focus()
     await page.keyboard.press("Shift+Tab")
     const box = page.getByRole("textbox")
     await expect(box).toBeFocused()
