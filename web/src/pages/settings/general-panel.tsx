@@ -31,6 +31,7 @@ import {
   serverMessage,
   type GeneralPatch,
 } from "./general-form"
+import { LocalDataSection } from "./local-data-section"
 
 const t = th.general
 const TOAST_ID = "settings-general"
@@ -211,6 +212,9 @@ export function GeneralPanel() {
         checked={shown.autoSharpFrames}
         onChange={(checked) => choose(choicePatch("autoSharpFrames", checked, shown))}
       />
+
+      {/* M6 รอบ A (PRD :307): ล้างข้อมูลชั่วคราว · สำรองค่าตั้ง · นำเข้าค่าตั้ง */}
+      <LocalDataSection />
     </FieldGroup>
   )
 }
