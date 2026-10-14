@@ -468,9 +468,16 @@ def sweep_interrupted_outputs(store: JobStore, output_root: Path, job_ids: Itera
         uploader = store.channel_of(job.video_id) if style == "title-channel" else ""
         for folder, prefix in _clip_folders(root, job.video_id, job.title, job_group(job.params)):
             # สองงานของคลิปเดียวกันคนละรูปแบบ = ดูโฟลเดอร์เดียวกันด้วยทั้งสองรูปแบบ
-            if (folder, style, uploader) not in seen:
+            if style and (folder, style, uploader) not in seen:
                 seen.add((folder, style, uploader))
-                removed += _sweep_folder(folder, toolkit_name_pattern(prefix, style=style, uploader=uploader), keep)
+                try:
+                    ours = toolkit_name_pattern(prefix, style=style, uploader=uploader)
+                except ValueError:
+                    # รูปแบบที่ไม่รู้จัก (ฐานข้อมูลจากรุ่นใหม่กว่า/ข้อมูลเสีย) ข้ามงานนี้งานเดียว งานอื่นยังกวาดต่อ
+                    log.warning("sweep_skip job=%s reason=unknown_style", job.id)
+                    style = ""
+                else:
+                    removed += _sweep_folder(folder, ours, keep)
             if folder not in seen_dirs:
                 seen_dirs.add(folder)
                 removed += _sweep_sharp_dirs(folder, sharp_dir_pattern(prefix), keep)

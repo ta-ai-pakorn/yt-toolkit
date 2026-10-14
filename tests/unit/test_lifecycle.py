@@ -2436,12 +2436,12 @@ def test_title_pattern_ignores_the_uploader():
         lifecycle.toolkit_name_pattern(TITLE, style="channel")
 
 
-def _styled_sweep_env(paths, style: str):
+def _styled_sweep_env(paths, style: str, channel: str = CHANNEL):
     db = Database(paths.db)
     db.migrate()
     db.execute(
         "INSERT INTO videos (video_id, title, channel, probe_json, probed_at, opened_at) VALUES (?, ?, ?, '{}', 'x', 'x')",
-        ("aqz-KE-bpKQ", TITLE, CHANNEL),
+        ("aqz-KE-bpKQ", TITLE, channel),
     )
     store = JobStore(db)
     root = (paths.data_root / "output").resolve()
@@ -2449,7 +2449,7 @@ def _styled_sweep_env(paths, style: str):
     folder.mkdir(parents=True)
     done, stopped = store.add([NewJob("aqz-KE-bpKQ", "video", {}, TITLE), NewJob("aqz-KE-bpKQ", "video", {}, TITLE)])
     store.transition(done.id, "running", filename_style=style)
-    done_name = f"{TITLE} - {CHANNEL} (2).mp4" if style == "title-channel" else f"{TITLE} (1080p) (2).mp4"
+    done_name = f"{TITLE} - {channel} (2).mp4" if style == "title-channel" else f"{TITLE} (1080p) (2).mp4"
     (folder / done_name).write_bytes(b"")  # ไฟล์ผลลัพธ์ของงานที่เสร็จ (ว่างจริง) ห้ามลบ
     store.transition(done.id, "done", outputs=(OutputFile(str(root), f"{folder.name}/{done_name}", 0, "video"),))
     store.transition(stopped.id, "running", filename_style=style)
@@ -2516,5 +2516,40 @@ def test_a_job_from_before_m6_is_swept_with_the_title_pattern(paths):
         store.interrupt_running("หยุดกลางคัน")
         assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 1
         assert (folder / f"{TITLE} - {CHANNEL}.mp4").exists()
+    finally:
+        db.close()
+
+
+def test_a_job_with_an_unknown_style_does_not_stop_the_sweep(paths, caplog):
+    db, store, root, folder, done_name = _styled_sweep_env(paths, "title-channel")
+    try:
+        (bad,) = store.add([NewJob("aqz-KE-bpKQ", "audio", {"format": "mp3"}, TITLE)])
+        store.transition(bad.id, "running", filename_style="bogus")
+        (folder / f"{TITLE} - {CHANNEL}.mp4").write_bytes(b"")
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+            assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 1
+        assert sorted(p.name for p in folder.iterdir()) == [done_name]
+        assert f"sweep_skip job={bad.id} reason=unknown_style" in caplog.text
+    finally:
+        db.close()
+
+
+def test_a_channel_with_regex_characters_and_thai_is_matched_literally(paths):
+    channel = "ครัว (บ้าน) [เรา]+"
+    db, store, root, folder, done_name = _styled_sweep_env(paths, "title-channel", channel)
+    try:
+        for name in (f"{TITLE} - {channel}.mp4", f"{TITLE} - {channel}.th.srt"):
+            (folder / name).write_bytes(b"")
+        # ถ้าชื่อช่องไม่ถูก escape "(บ้าน)" จะเป็นกลุ่ม และ "[เรา]+" จะเป็นชุดตัวอักษร: ชื่อนี้จะตรงและถูกลบผิด
+        kept = {done_name: b"", f"{TITLE} - ครัว บ้าน เราาา.mp4": b""}
+        for name, data in kept.items():
+            if not (folder / name).exists():
+                (folder / name).write_bytes(data)
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 2
+        assert sorted(p.name for p in folder.iterdir()) == sorted(kept)
     finally:
         db.close()
