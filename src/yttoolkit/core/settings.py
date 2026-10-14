@@ -2,6 +2,8 @@
 
 PATCH เป็นแบบ all-or-nothing: key ไหนผิด ไม่เก็บอะไรเลย (ไม่เขียนครึ่งๆ กลางๆ)
 core ไม่รู้จัก HTTP: ผิดเงื่อนไขโยน SettingsError พร้อมรหัสให้ชั้น api แปลงเป็น 422
+M6 รอบ A: นำเข้าไฟล์ค่าตั้ง (import_settings) ทั้งหมดหรือไม่เลยเหมือนกัน แต่ใจกว้างกว่า PATCH:
+key ที่ไม่รู้จัก/อ่านอย่างเดียว/เลิกใช้ถูกข้าม และ outputDir ที่ใช้บนเครื่องนี้ไม่ได้ = คงค่าเดิม + คำเตือน
 """
 
 from __future__ import annotations
@@ -42,10 +44,15 @@ READ_ONLY = ("statsResetAt",)
 # key ที่เลิกใช้แล้ว: แถวเก่าในฐานข้อมูลถูกข้ามตอนอ่าน (ไม่อยู่ในค่าเริ่มต้น) และถูกลบตอนบันทึกครั้งถัดไป
 # "cookies" = สถานะคุกกี้ของ PRD เดิม M5 รอบ C ใช้บัญชีชั่วคราวในหน่วยความจำแทน (C8)
 RETIRED_KEYS = ("cookies",)
+# M6 รอบ A: ไฟล์สำรองค่าตั้ง {app, schema, exportedAt, settings} (ไม่มีอะไรเฉพาะยูทูป C12)
+EXPORT_APP = "yt-toolkit"
+EXPORT_SCHEMA = 1
 
 
 class SettingsError(Exception):
-    """code: E_BAD_REQUEST | E_OUTPUT_NOT_WRITABLE"""
+    """code: E_BAD_REQUEST | E_OUTPUT_NOT_WRITABLE | E_SETTINGS_INVALID (นำเข้าไฟล์ค่าตั้ง M6 รอบ A)
+
+    detail เป็นภาษาอังกฤษคงที่ บอกชื่อ key ได้ ไม่ยกค่าจากผู้ใช้/ไฟล์ (C4)"""
 
     def __init__(self, code: str, detail: str, *, key: str | None = None) -> None:
         super().__init__(detail)
@@ -226,6 +233,11 @@ class SettingsStore:
             # ตรวจเขียนได้หลังตรวจทุก key ผ่านแล้ว จะได้ไม่สร้างโฟลเดอร์ทั้งที่ patch ล้ม
             # และทำนอก lock: โฟลเดอร์เครือข่ายที่ช้าต้องไม่ทำให้การอ่านตั้งค่าค้างตามไปด้วย
             ensure_writable(Path(clean["outputDir"]))
+        return self._save(clean)
+
+    def _save(self, clean: Mapping[str, Any]) -> dict:
+        """เขียนทุก key ที่ตรวจแล้วในธุรกรรมเดียว (ลบ key ที่เลิกใช้ไปด้วย) แล้วคืนค่าตั้งทั้งหมด
+        outputDir เปลี่ยน = เรียก on_output_dir นอกล็อก (ต่อสายตัวปิด path ใน log)"""
         if clean:
             with self._lock, self._db.transaction() as tx:
                 for key in RETIRED_KEYS:
@@ -241,6 +253,54 @@ class SettingsStore:
         if "outputDir" in clean and hook is not None:
             hook(Path(saved["outputDir"]))
         return saved
+
+    def exportable(self) -> dict:
+        """ค่าตั้งที่ใส่ในไฟล์สำรอง: ทุก key ยกเว้นค่าอ่านอย่างเดียว (statsResetAt) · cookies ไม่ใช่ key อยู่แล้ว"""
+        return {key: value for key, value in self.get().items() if key not in READ_ONLY}
+
+    def import_settings(self, doc: object) -> tuple[dict, list[str]]:
+        """นำเข้าไฟล์สำรองค่าตั้ง (M6 รอบ A spec 4.2) คืน (ค่าตั้งทั้งหมดหลังนำเข้า, คำเตือน)
+
+        ไฟล์ผิดรูป (ไม่ใช่ object, app/schema/settings ผิด) หรือค่าของ key ที่รู้จักผิดชนิด/นอกช่วง
+        = SettingsError E_SETTINGS_INVALID และไม่เปลี่ยนอะไรเลย · key ที่ไม่รู้จัก statsResetAt และ cookies ถูกข้าม
+        outputDir ที่ใช้บนเครื่องนี้ไม่ได้ (รูปแบบผิดหรือเขียนไม่ได้) = คงค่าเดิม และคำเตือน "outputDir"
+        key ที่ไม่มีในไฟล์คงค่าเดิม · ทุก key เขียนในธุรกรรมเดียว
+        """
+        if not isinstance(doc, Mapping):
+            raise SettingsError("E_SETTINGS_INVALID", "file must be a JSON object")
+        if doc.get("app") != EXPORT_APP:
+            raise SettingsError("E_SETTINGS_INVALID", "app invalid")
+        schema = doc.get("schema")
+        if type(schema) is not int or schema != EXPORT_SCHEMA:
+            raise SettingsError("E_SETTINGS_INVALID", "schema invalid")
+        values = doc.get("settings")
+        if not isinstance(values, Mapping):
+            raise SettingsError("E_SETTINGS_INVALID", "settings invalid")
+        clean: dict[str, Any] = {}
+        output_dir: str | None = None
+        for key, value in values.items():
+            if key in READ_ONLY or key in RETIRED_KEYS or key not in _VALIDATORS:
+                continue  # key ที่ไม่รู้จัก (ไฟล์จากรุ่นใหม่กว่า) / อ่านอย่างเดียว / เลิกใช้ = ข้าม
+            if key == "outputDir":
+                if not isinstance(value, str):
+                    raise SettingsError("E_SETTINGS_INVALID", "outputDir: invalid value", key=key)
+                output_dir = value  # ตรวจหลังทุก key ผ่าน (ด้านล่าง)
+                continue
+            try:
+                clean[key] = _VALIDATORS[key](value)
+            except SettingsError as error:
+                raise SettingsError("E_SETTINGS_INVALID", f"{key}: invalid value", key=key) from error
+        warnings: list[str] = []
+        if output_dir is not None:
+            # นอก lock เหมือน patch · ใช้บนเครื่องนี้ไม่ได้ (path ของเครื่องอื่น ไดรฟ์ที่ไม่มี เขียนไม่ได้) = คงโฟลเดอร์เดิม
+            try:
+                folder = _validate_output_dir(output_dir)
+                ensure_writable(Path(folder))
+            except SettingsError:
+                warnings.append("outputDir")
+            else:
+                clean["outputDir"] = folder
+        return self._save(clean), warnings
 
     def output_dir(self) -> Path:
         return Path(self.get()["outputDir"])
