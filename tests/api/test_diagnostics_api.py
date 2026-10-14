@@ -385,6 +385,22 @@ def test_the_report_hides_chapter_titles_and_the_playlist_folder(env) -> None:
     assert "no free name for 03 <title>.mp4" in report
 
 
+def test_the_report_hides_the_channel_name(env) -> None:
+    # M6 รอบ A: ชื่อไฟล์แบบ title-channel มีชื่อช่อง รายงานต้องปิดชื่อช่องด้วย (ทั้งงานในคิวและคลิปที่ไม่มีงาน)
+    channel = "Somchai Kitchen Channel"
+    env.db.execute(
+        "INSERT INTO videos (video_id, title, channel, probe_json, probed_at, opened_at)"
+        " VALUES (?, ?, ?, '{}', 'x', 'x')",
+        (BBB, TITLE, channel),
+    )
+    (job,) = env.store.add([NewJob(BBB, "video", {}, TITLE)])
+    env.store.transition(job.id, "running")
+    detail = f"no free name for {TITLE} - {channel}.mp4"
+    env.store.transition(job.id, "failed", error_code="E_OUTPUT_NOT_WRITABLE", error_message="m", error_detail=detail)
+    assert channel not in env.report({"jobId": job.id})
+    assert channel not in env.report({"code": "E_NETWORK", "detail": f"x {channel} y", "videoId": BBB})
+
+
 def test_a_videos_only_report_hides_that_clips_chapter_titles(env) -> None:
     env.db.execute(
         "INSERT INTO videos (video_id, title, chapters_json, probe_json, probed_at, opened_at)"

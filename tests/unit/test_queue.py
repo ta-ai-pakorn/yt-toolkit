@@ -143,12 +143,16 @@ class StubSettings:
     def __init__(self, concurrency: int, output: Path) -> None:
         self.value = concurrency
         self.output = output
+        self.style = "title"  # M6 รอบ A: รูปแบบชื่อไฟล์ปัจจุบัน (เทสเปลี่ยนได้)
 
     def concurrency(self) -> int:
         return self.value
 
     def output_dir(self) -> Path:
         return self.output
+
+    def filename_style(self) -> str:
+        return self.style
 
 
 def wait_for(predicate, timeout: float = 5.0) -> bool:
@@ -1260,3 +1264,116 @@ def test_a_crash_after_the_job_hides_paths_below_the_output_folder(runner_factor
     assert "PermissionError" in record.getMessage() and "<path>" in record.getMessage()
     assert "Another Clip Title" not in caplog.text
     assert record.exc_info is None
+
+
+# ---------- M6 รอบ A: รูปแบบชื่อไฟล์ตั้งตอนงานเริ่มครั้งแรก (D4) ----------
+
+
+class StyleRecorder(ScriptedHandler):
+    """ScriptedHandler ที่จดรูปแบบชื่อไฟล์ที่งานได้รับในแต่ละรอบ (ctx.filename_style)"""
+
+    def __init__(self, fail: dict | None = None) -> None:
+        super().__init__(fail)
+        self.styles: list[str] = []
+
+    def __call__(self, job, ctx) -> JobResult:
+        self.styles.append(ctx.filename_style)
+        return super().__call__(job, ctx)
+
+
+def test_the_first_start_stores_the_current_style(runner_factory):
+    h = StyleRecorder()
+    r, spawn, _ = runner_factory(concurrency=1, handler=h)
+    (job,) = r.enqueue(jobs_of("video", 1))
+    assert r.store.get(job.id).filename_style is None  # ยังไม่เริ่ม
+    r.settings_view.style = "title-channel"
+    r.tick()
+    assert r.store.get(job.id).filename_style == "title-channel"
+    spawn.run_all()
+    assert h.styles == ["title-channel"]
+    assert r.store.get(job.id).filename_style == "title-channel"
+    api = r.job_api(r.store.get(job.id))
+    assert "filenameStyle" not in api and "filename_style" not in api  # ข้อมูลภายใน ไม่อยู่ใน API
+
+
+def test_a_job_queued_before_a_style_change_uses_the_style_at_its_start(runner_factory):
+    h = StyleRecorder()
+    r, spawn, _ = runner_factory(concurrency=1, handler=h)
+    first, second = r.enqueue(jobs_of("frames_zip", 2, {"source": "fast"}))
+    r.tick()  # งานแรกเริ่มด้วย "title"
+    r.settings_view.style = "title-quality"  # เปลี่ยนระหว่างงานแรกรันอยู่ (AC-OUT-10)
+    spawn.run_all()
+    r.tick()
+    spawn.run_all()
+    assert h.styles == ["title", "title-quality"]
+    assert (r.store.get(first.id).filename_style, r.store.get(second.id).filename_style) == ("title", "title-quality")
+
+
+def test_a_retry_after_a_style_change_keeps_the_first_style(runner_factory):
+    h = StyleRecorder(fail={"vid00000001": ["E_YT_REFUSED", None]})
+    r, spawn, _ = runner_factory(concurrency=1, handler=h)
+    r.settings_view.style = "title-channel"
+    (job,) = r.enqueue(jobs_of("video", 1))
+    r.tick()
+    spawn.run_all()
+    assert r.store.get(job.id).status == "failed"
+    r.settings_view.style = "title-quality"
+    requeued = r.retry(job.id)
+    assert requeued.filename_style == "title-channel"  # requeue ไม่ล้างรูปแบบ
+    r.clock.t += 10  # พ้นช่วงเว้นระหว่างงานยูทูป
+    r.tick()
+    spawn.run_all()
+    assert r.store.get(job.id).status == "done"
+    assert h.styles == ["title-channel", "title-channel"]
+
+
+def test_the_bot_check_requeue_keeps_the_first_style(runner_factory):
+    h = StyleRecorder(fail={"vid00000001": ["E_BOT_CHECK", None]})
+    r, spawn, _ = runner_factory(concurrency=1, handler=h)
+    r.settings_view.style = "title-quality"
+    (job,) = r.enqueue(jobs_of("video", 1))
+    r.tick()
+    spawn.run_all()
+    assert r.store.get(job.id).status == "queued"  # ครั้งแรกกลับหัวคิว
+    r.settings_view.style = "title"
+    r.resume()
+    r.clock.t += 10  # พ้นช่วงเว้นระหว่างงานยูทูป
+    r.tick()
+    spawn.run_all()
+    assert h.styles == ["title-quality", "title-quality"]
+    assert r.store.get(job.id).filename_style == "title-quality"
+
+
+def test_network_retries_inside_one_run_keep_the_style(runner_factory, monkeypatch):
+    monkeypatch.setattr(queue_module._JobContext, "wait", lambda self, s: None)
+    h = StyleRecorder(fail={"vid00000001": ["E_NETWORK", "E_NETWORK", None]})
+    r, spawn, _ = runner_factory(concurrency=1, handler=h)
+    r.settings_view.style = "title-channel"
+    r.enqueue(jobs_of("video", 1))
+    r.tick()
+    r.settings_view.style = "title"
+    spawn.run_all()
+    assert h.styles == ["title-channel"] * 3
+
+
+def test_job_titles_include_the_channel():
+    fake = type("J", (), {"title": "T1", "params": {}})()
+    assert queue_module.job_titles(fake, None, "ครัวบ้านเรา") == ("T1", "ครัวบ้านเรา")
+    assert queue_module.job_titles(fake, None) == ("T1",)
+
+
+def test_job_failed_hides_the_channel_name(runner_factory, caplog):
+    channel = "Somchai Kitchen Channel"
+    detail = f"[Errno 13] Permission denied: '~\\\\Downloads\\\\Main Clip Title - {channel} [vid00000001]\\\\x.mp4'"
+    r, spawn, h = runner_factory(concurrency=1, fail={"vid00000001": YtError("E_OUTPUT_NOT_WRITABLE", detail)})
+    r.store._db.execute(
+        "INSERT INTO videos (video_id, title, channel, probe_json, probed_at, opened_at)"
+        " VALUES ('vid00000001', 'row title', ?, '{}', 'x', 'x')",
+        (channel,),
+    )
+    r.enqueue([NewJob("vid00000001", "video", {}, "Main Clip Title")])
+    with caplog.at_level(logging.INFO, logger="yttoolkit"):
+        r.tick()
+        spawn.run_all()
+    (record,) = failed_records(caplog)
+    assert channel not in record.getMessage() and "Somchai Kitchen" not in caplog.text

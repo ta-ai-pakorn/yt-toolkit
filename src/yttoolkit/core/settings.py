@@ -247,3 +247,7 @@ class SettingsStore:
 
     def concurrency(self) -> int:
         return int(self.get()["concurrency"])
+
+    def filename_style(self) -> str:
+        """รูปแบบชื่อไฟล์ปัจจุบัน (คิวอ่านตอนงานเริ่มครั้งแรก M6 รอบ A D4)"""
+        return str(self.get()["filenameStyle"])

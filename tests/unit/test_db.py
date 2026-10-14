@@ -373,16 +373,16 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
 INSERT INTO schema_version (version) VALUES (1);"""
 
 
-def test_fresh_database_is_v2_without_job_foreign_key(tmp_path):
+def test_fresh_database_is_v3_without_job_foreign_key(tmp_path):
     db = Database(tmp_path / "app.db")
     db.migrate()
-    assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 2
+    assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 3
     db.execute(
         "INSERT INTO jobs (id, video_id, kind, params_json, status, position, created_at) "
         "VALUES ('j1', 'notprobed01', 'video', '{}', 'queued', 1, '2026-10-01T00:00:00+00:00')"
     )
     cols = {r["name"] for r in db.execute("PRAGMA table_info(jobs)")}
-    assert {"title", "attempt", "bot_checks", "error_message", "notes_json"} <= cols
+    assert {"title", "attempt", "bot_checks", "error_message", "notes_json", "filename_style"} <= cols
     db.close()
 
 
@@ -398,7 +398,8 @@ def test_v1_database_migrates_and_keeps_rows(tmp_path):
     db.migrate()
     row = db.execute("SELECT * FROM jobs WHERE id = 'old'")[0]
     assert (row["status"], row["position"], row["title"], row["attempt"]) == ("done", 3, "", 0)
-    assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 2
+    assert row["filename_style"] is None  # งานก่อน M6 = แบบ "title"
+    assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 3
     assert not db.execute("SELECT 1 FROM sqlite_master WHERE name = 'jobs_v1'")
     # v2 ไม่มี foreign key แล้ว: งานของคลิปที่ไม่เคย probe ใส่ได้
     db.execute(
@@ -448,6 +449,96 @@ def test_v1_migration_failure_rolls_back(tmp_path, monkeypatch):
         assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 1
         assert not db.execute("SELECT 1 FROM sqlite_master WHERE name = 'jobs_v1'")
         db.migrate()
+        assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 3
+    finally:
+        db.close()
+
+
+# ---------- M6 รอบ A: schema v3 (jobs.filename_style) ----------
+
+
+def _v2_database(path: Path) -> None:
+    """ฐานข้อมูล v2 ตามที่ M4-M6 รอบ B สร้างจริง (ตาราง jobs แบบ _JOBS_V2) พร้อมงานหนึ่งงานและค่าตั้งหนึ่งค่า"""
+    raw = sqlite3.connect(path)
+    raw.executescript(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL);"
+        "CREATE TABLE videos (video_id TEXT PRIMARY KEY, title TEXT NOT NULL, channel TEXT, duration_s INTEGER,"
+        " thumbnail_url TEXT, chapters_json TEXT, probe_json TEXT NOT NULL, probed_at TEXT NOT NULL,"
+        " opened_at TEXT NOT NULL);"
+        f"{db_module._JOBS_V2}"
+        "CREATE TABLE settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);"
+        "INSERT INTO schema_version (version) VALUES (2);"
+    )
+    raw.execute("INSERT INTO videos VALUES ('aqz-KE-bpKQ','t','ช่อง',60,NULL,NULL,'{}','x','x')")
+    raw.execute(
+        "INSERT INTO jobs (id, video_id, title, kind, params_json, status, attempt, bot_checks, position, "
+        "error_code, notes_json, outputs_json, created_at, started_at, finished_at) VALUES "
+        "('v2job', 'aqz-KE-bpKQ', 'ชื่อ', 'audio', '{\"format\": \"mp3\"}', 'failed', 0, 1, 7, 'E_NETWORK', "
+        "'[\"NO_CHAPTERS\"]', NULL, 'c', 's', 'f')"
+    )
+    raw.execute("INSERT INTO settings VALUES ('concurrency', '3')")
+    raw.commit()
+    raw.close()
+
+
+def test_v2_database_migrates_to_v3_and_keeps_every_row(tmp_path):
+    _v2_database(tmp_path / "app.db")
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 3
+    assert len(db.execute("SELECT version FROM schema_version")) == 1
+    row = db.execute("SELECT * FROM jobs WHERE id = 'v2job'")[0]
+    assert (row["title"], row["kind"], row["params_json"], row["status"], row["bot_checks"], row["position"]) == (
+        "ชื่อ", "audio", '{"format": "mp3"}', "failed", 1, 7,
+    )  # fmt: skip
+    assert (row["error_code"], row["notes_json"], row["created_at"], row["finished_at"]) == (
+        "E_NETWORK", '["NO_CHAPTERS"]', "c", "f",
+    )  # fmt: skip
+    assert row["filename_style"] is None
+    assert db.execute("SELECT channel FROM videos")[0]["channel"] == "ช่อง"
+    assert db.execute("SELECT value_json FROM settings WHERE key = 'concurrency'")[0]["value_json"] == "3"
+    assert _jobs_video_index_columns(db) == ["video_id", "status"]
+    db.migrate()  # ครั้งที่สอง = ไม่ทำอะไร
+    assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 3
+    db.close()
+
+
+def test_v1_database_migrates_through_v2_to_v3(tmp_path):
+    raw = sqlite3.connect(tmp_path / "app.db")
+    raw.executescript(V1_JOBS)
+    raw.execute("INSERT INTO videos VALUES ('aqz-KE-bpKQ','t',NULL,NULL,NULL,NULL,'{}','x','x')")
+    raw.execute("INSERT INTO jobs (id, video_id, kind, params_json, status, position, created_at) "
+                "VALUES ('old', 'aqz-KE-bpKQ', 'video', '{}', 'done', 3, 'x')")  # fmt: skip
+    raw.commit()
+    raw.close()
+    db = Database(tmp_path / "app.db")
+    db.migrate()
+    cols = [r["name"] for r in db.execute("PRAGMA table_info(jobs)")]
+    assert cols.count("filename_style") == 1 and cols[-1] == "filename_style"
+    row = db.execute("SELECT * FROM jobs WHERE id = 'old'")[0]
+    assert (row["status"], row["position"], row["filename_style"]) == ("done", 3, None)
+    assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 3
+    db.close()
+
+
+def test_migration_2_still_builds_the_frozen_v2_table():
+    assert "filename_style" not in db_module._JOBS_V2
+    assert "filename_style" not in db_module._MIGRATIONS[2]
+    assert db_module._JOBS_V2.strip() in db_module._MIGRATIONS[2]
+    assert "filename_style" in db_module._JOBS and SCHEMA_VERSION == 3
+
+
+def test_v3_migration_failure_rolls_back_to_v2(tmp_path, monkeypatch):
+    _v2_database(tmp_path / "app.db")
+    db = Database(tmp_path / "app.db")
+    try:
+        with monkeypatch.context() as m:
+            m.setitem(db_module._MIGRATIONS, 3, "ALTER TABLE jobs ADD COLUMN filename_style TEXT; CREATE TABLE broken (;")
+            with pytest.raises(sqlite3.Error):
+                db.migrate()
         assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 2
+        assert "filename_style" not in {r["name"] for r in db.execute("PRAGMA table_info(jobs)")}
+        db.migrate()
+        assert db.execute("SELECT max(version) AS v FROM schema_version")[0]["v"] == 3
     finally:
         db.close()
