@@ -780,6 +780,7 @@ class VideoService:
         scope="all" = คลิปที่เปิดจริง หรือมีงานโหลดที่เสร็จแล้วและมีไฟล์ เรียงตามเวลาล่าสุดของสองอย่างนั้น
 
         outputs = ชนิดงานที่เสร็จและมีไฟล์ (ไม่ซ้ำ) เรียงตาม HISTORY_KIND_ORDER ทั้งสอง scope
+        channel = ชื่อช่อง ("" = ไม่รู้) ตัวอย่างชื่อไฟล์ในหน้าตั้งค่าใช้ (M6 รอบ A spec 2.6)
         """
         if scope not in HISTORY_SCOPES:
             raise ValueError(f"scope ไม่รู้จัก: {scope!r}")
@@ -797,7 +798,7 @@ class VideoService:
                 f"ELSE {done_at} END"
             )
         inner = (
-            f"SELECT v.video_id, v.title, v.thumbnail_url, v.duration_s, {last_at} AS last_at "
+            f"SELECT v.video_id, v.title, v.channel, v.thumbnail_url, v.duration_s, {last_at} AS last_at "
             "FROM videos v"
         )
         params: list[Any] = [PEEK_SENTINEL]
@@ -808,7 +809,7 @@ class VideoService:
         base = f"FROM ({inner}){where}"
         total = self._db.execute(f"SELECT count(*) AS n {base}", params)[0]["n"]
         rows = self._db.execute(
-            f"SELECT video_id, title, thumbnail_url, duration_s, last_at {base} "
+            f"SELECT video_id, title, channel, thumbnail_url, duration_s, last_at {base} "
             "ORDER BY last_at DESC, video_id LIMIT ? OFFSET ?",
             [*params, max(limit, 0), max(offset, 0)],
         )
@@ -817,6 +818,7 @@ class VideoService:
             {
                 "videoId": row["video_id"],
                 "title": row["title"],
+                "channel": row["channel"] or "",
                 "thumbnailUrl": row["thumbnail_url"] or "",
                 "durationS": row["duration_s"] or 0,
                 "outputs": outputs.get(row["video_id"], []),
