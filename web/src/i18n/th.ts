@@ -26,6 +26,9 @@ export const th = {
     placeholder: "https://youtube.com/watch?v=...",
     inputLabel: "ลิงก์ยูทูป",
     analyze: "วิเคราะห์",
+    // M6 รอบ A (PRD W1, BRD FR-IN-7): ปุ่มวางจากคลิปบอร์ด · เบราว์เซอร์ไม่ให้อ่าน = คำแนะนำใต้ช่อง ({key} = Ctrl+V / ⌘V)
+    paste: "วาง",
+    pasteDenied: "เบราว์เซอร์ไม่อนุญาตให้อ่านคลิปบอร์ด คลิกในช่องแล้วกด {key} แทน",
     resolveFailed: "วิเคราะห์ลิงก์ไม่สำเร็จ",
     results: {
       title: "ผลการวิเคราะห์",
@@ -583,6 +586,26 @@ export const th = {
     saved: "บันทึกแล้ว",
     saveFailed: "บันทึกไม่สำเร็จ ลองอีกครั้ง",
     loadError: "โหลดค่าตั้งไม่สำเร็จ",
+    // M6 รอบ A (spec 9): รูปแบบชื่อไฟล์ (PRD :306, BRD FR-OUT-8) · ชื่อตัวอย่างเมื่อยังไม่เคยเปิดคลิป (Pete Q1 = B)
+    filenameStyle: "รูปแบบชื่อไฟล์",
+    filenameStyles: { title: "ชื่อคลิป", "title-channel": "ชื่อคลิป - ช่อง", "title-quality": "ชื่อคลิป (คุณภาพ)" },
+    filenameExample: "ตัวอย่าง: {name}",
+    filenameSample: "สอนทำกับข้าวง่าย ๆ ใน 10 นาที",
+    filenameSampleChannel: "ครัวบ้านเรา",
+    // ข้อมูลในเครื่อง (PRD :307, W7 :325, BRD FR-SET-6..7, PRD §7 :814) · Pete Q2 = B, Q3
+    localData: "ข้อมูลในเครื่อง",
+    clearTemp: "ล้างข้อมูลชั่วคราว ({size})",
+    clearTempPlain: "ล้างข้อมูลชั่วคราว",
+    clearConfirmTitle: "ล้างข้อมูลชั่วคราว {size}?",
+    clearConfirmBody: "ไฟล์ที่โหลดไว้ ประวัติ และค่าตั้งยังอยู่ครบ แต่เปิดคลิปเก่าต้องดึงภาพใหม่",
+    clearCancel: "ยกเลิก",
+    clearConfirm: "ล้างเลย",
+    cleared: "ล้างแล้ว ได้พื้นที่คืน {size}",
+    backup: "สำรองค่าตั้ง",
+    import: "นำเข้าค่าตั้ง",
+    settingsInvalid: 'ไฟล์นี้ไม่ใช่ไฟล์ค่าตั้งของ YT Toolkit หรือไฟล์เสียหาย ลองเลือกไฟล์ที่ได้จากปุ่ม "สำรองค่าตั้ง"',
+    imported: "นำเข้าค่าตั้งแล้ว",
+    importedKeptFolder: "นำเข้าค่าตั้งแล้ว แต่ใช้โฟลเดอร์ผลลัพธ์ในไฟล์บนเครื่องนี้ไม่ได้ จึงใช้โฟลเดอร์เดิมต่อ",
   },
   errors: {
     downloadFailed: "โหลดไฟล์ไม่สำเร็จ ลองอีกครั้ง",

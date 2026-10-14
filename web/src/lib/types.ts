@@ -146,6 +146,8 @@ export type PlaylistInfo = {
 export type HistoryItem = {
   videoId: string
   title: string
+  /** ชื่อช่อง ("" = ไม่รู้) ใช้ทำตัวอย่างชื่อไฟล์แบบ title-channel ในหน้าตั้งค่า (M6 รอบ A) */
+  channel: string
   thumbnailUrl: string
   durationS: number
   /** ชนิดไฟล์ที่เคยโหลดของคลิปนี้ (ป้ายในหน้าประวัติ) ว่าง = เปิดดูอย่างเดียว */

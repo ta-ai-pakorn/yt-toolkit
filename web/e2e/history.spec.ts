@@ -16,6 +16,7 @@ function item(videoId: string, title: string, outputs: JobKind[] = [], minutesAg
   return {
     videoId,
     title,
+    channel: "",
     thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
     durationS: 19,
     outputs,
