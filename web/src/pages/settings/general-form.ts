@@ -3,7 +3,7 @@ import { ApiError } from "@/lib/api"
 import { audioLanguageName } from "@/lib/languages"
 import type { Settings } from "@/lib/types"
 
-/** ค่าที่หน้า "ทั่วไป" แก้ได้ (ทั้งเจ็ดช่อง) */
+/** ค่าที่หน้า "ทั่วไป" แก้ได้ (ทั้งแปดช่อง) */
 export type GeneralKey =
   | "outputDir"
   | "concurrency"
@@ -12,7 +12,11 @@ export type GeneralKey =
   | "audioDefault"
   | "autoSharpFrames"
   | "captureQuality"
+  | "filenameStyle"
 export type GeneralPatch = Partial<Pick<Settings, GeneralKey>>
+
+/** M6 รอบ A: รูปแบบชื่อไฟล์ เรียงตามที่แสดง (ตัวเดียวกับ lib/filename.ts = files.NAME_STYLES ของ backend) */
+export { FILENAME_STYLES } from "@/lib/filename"
 
 export const CONCURRENCY_CHOICES = [1, 2, 3] as const
 export const AUDIO_FORMATS = ["m4a", "mp3", "wav"] as const
