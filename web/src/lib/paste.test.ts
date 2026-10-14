@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { ID_LOOKS_RANDOM, looksLikeYoutube } from "./paste"
+import { ID_LOOKS_RANDOM, isSupportedLink, looksLikeYoutube } from "./paste"
 
 describe("looksLikeYoutube", () => {
   it.each([
@@ -99,5 +99,28 @@ describe("looksLikeYoutube", () => {
     ["information", false],
   ] as const)("ID_LOOKS_RANDOM %s → %s", (word, expected) => {
     expect(ID_LOOKS_RANDOM.test(word)).toBe(expected)
+  })
+})
+
+// M6 รอบ A (C12): จุดเดียวที่ทุกทางวางเรียก วันนี้ = looksLikeYoutube ทุกข้อความ
+describe("isSupportedLink", () => {
+  it.each([
+    "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+    "youtu.be/aqz-KE-bpKQ",
+    "aqz-KE-bpKQ",
+    "ดูคลิปนี้ youtu.be/aqz-KE-bpKQ นะ",
+    "สวัสดีครับ\n2. https://www.youtube.com/watch?v=jNQXAC9IVRw ขอบคุณครับ",
+    "(https://www.youtube.com/playlist?list=PLfakeplaylist250)",
+    "",
+    "   ",
+    "hello world",
+    "Goodmorning",
+    "development",
+    "https://example.com/youtu.be/aqz-KE-bpKQ",
+    "me@youtube.com/watch?v=dQw4w9WgXcQ",
+    "a.youtu.be/dQw4w9WgXcQ",
+    "https://vimeo.com/76979871",
+  ])("ตรงกับ looksLikeYoutube: %j", (text) => {
+    expect(isSupportedLink(text)).toBe(looksLikeYoutube(text))
   })
 })

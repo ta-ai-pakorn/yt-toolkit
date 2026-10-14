@@ -17,3 +17,11 @@ export function looksLikeYoutube(text: string): boolean {
   if (BARE_ID.test(trimmed) && ID_LOOKS_RANDOM.test(trimmed)) return true
   return trimmed.split(/\r?\n/).some((line) => YOUTUBE_LINK.test(line.trim()))
 }
+
+/**
+ * ข้อความนี้เป็นลิงก์ที่แอพวิเคราะห์ได้ไหม (วางแล้ววิเคราะห์ทันที) — จุดเดียวที่ทุกทางวางเรียก
+ * (ปุ่ม "วาง", วางในช่อง, Ctrl/⌘+V นอกช่อง) วันนี้รับแค่ยูทูป เว็บอื่นในอนาคตเพิ่มที่ฟังก์ชันนี้ที่เดียว (M6 รอบ A C12)
+ */
+export function isSupportedLink(text: string): boolean {
+  return looksLikeYoutube(text)
+}

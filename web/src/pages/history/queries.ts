@@ -1,4 +1,4 @@
-import { infiniteQueryOptions, keepPreviousData } from "@tanstack/react-query"
+import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query"
 
 import { th } from "@/i18n/th"
 import { api } from "@/lib/api"
@@ -44,6 +44,20 @@ export function historyQuery(q: string) {
     getNextPageParam: (_last, pages) => nextHistoryOffset(pages),
     // พิมพ์ค้นหาแล้วรอผลใหม่: ยังแสดงรายการเดิมไว้ ไม่วูบเป็นโครงรอทุกครั้งที่พิมพ์
     placeholderData: keepPreviousData,
+  })
+}
+
+/** W1 "ล่าสุด" จำนวนคลิป */
+export const RECENT_LIMIT = 5
+
+/**
+ * คลิปที่เปิดดูล่าสุด (W1 "ล่าสุด" และตัวอย่างชื่อไฟล์ในหน้าตั้งค่า M6 รอบ A) ใช้คีย์เดียวกันจึงใช้ cache ร่วมกัน
+ * "opened" = เฉพาะคลิปที่เคยเปิดดูในหน้า W2 (หน้า /history แสดงคลิปที่โหลดไฟล์ด้วย)
+ */
+export function recentQuery(limit = RECENT_LIMIT) {
+  return queryOptions({
+    queryKey: ["history", { limit, scope: "opened" }] as const,
+    queryFn: () => api<HistoryPage>(historyPath({ limit, scope: "opened" })),
   })
 }
 
