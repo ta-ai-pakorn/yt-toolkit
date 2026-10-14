@@ -469,7 +469,8 @@ def test_history_after_two_probes(api):
     assert body["total"] == 2
     assert {item["videoId"] for item in body["items"]} == {BBB, ZOO}
     item = next(i for i in body["items"] if i["videoId"] == BBB)
-    assert set(item) == {"videoId", "title", "thumbnailUrl", "durationS", "outputs", "lastAt"}
+    assert set(item) == {"videoId", "title", "channel", "thumbnailUrl", "durationS", "outputs", "lastAt"}
+    assert item["channel"] == "Blender"
 
 
 def test_history_search_and_paging(api):
