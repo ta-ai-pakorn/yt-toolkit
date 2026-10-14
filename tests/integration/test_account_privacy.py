@@ -7,6 +7,8 @@
 และไม่มีไฟล์ใดในโฟลเดอร์ข้อมูลหรือโฟลเดอร์ temp ที่มี canary
 (M6 รอบ B · AC-SET-06) รายงานแจ้งปัญหา POST /api/diagnostics ทั้งสามแบบ (งานที่พลาด error จากหน้าเว็บ หน้าตรวจสุขภาพ)
 ผ่านเงื่อนไขเดียวกัน ไม่มีชื่อคุกกี้เลย และพูดถึงบัญชีแค่บรรทัดสถานะ
+(M6 รอบ A spec 7.3) ไฟล์สำรองค่าตั้ง GET /api/settings/export และ GET /api/storage · POST /api/storage/clear
+ตอนถือบัญชีอยู่ ผ่านเงื่อนไขเดียวกัน (การล้างต้องไม่เขียนข้อมูลคุกกี้ลงที่ใด ตรวจด้วยการเดินไฟล์ท้ายเทส)
 """
 
 from __future__ import annotations
@@ -131,6 +133,14 @@ def test_canaries_never_leave_memory(app_env, paths, caplog, capsys) -> None:
         head = report.split("### log ล่าสุด", 1)[0]
         assert [line for line in head.splitlines() if "บัญชี" in line] == ["- บัญชียูทูป: ใช้บัญชีชั่วคราวอยู่"]
     assert "- รหัส: E_VIDEO_PRIVATE · งาน: video (videoId PRIVATEVID1)" in reports[0]
+    # M6 รอบ A (spec 7.3): ไฟล์สำรองค่าตั้ง และขนาด/ล้างข้อมูลชั่วคราว ตอนถือบัญชีอยู่ ไม่มีคุกกี้ ชื่อคุกกี้ หรือ token
+    exported = client.get("/api/settings/export")
+    bodies.append(exported.text)
+    assert exported.status_code == 200 and exported.json()["app"] == "yt-toolkit"
+    for name in ("SAPISID", "__Secure-3PSID", "LOGIN_INFO", CANARIES[3], TOKEN, "cookies"):
+        assert name not in exported.text, f"{name} อยู่ในไฟล์สำรองค่าตั้ง"
+    assert set(call("GET", "/api/storage")) == {"cacheBytes", "workBytes", "reclaimableBytes"}
+    assert set(call("POST", "/api/storage/clear", headers=AUTH)) == {"freedBytes"}
     assert call("DELETE", "/api/cookies", headers=AUTH)["active"] is False
 
     for text in bodies:
