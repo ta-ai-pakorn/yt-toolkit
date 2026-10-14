@@ -170,6 +170,21 @@ def test_unknown_style_and_bad_quality_are_programming_errors():
             files.plan_names(10, "t", ID, suffix="", ext="mp4", style="title-quality", quality=bad)
 
 
+def test_title_quality_in_a_very_deep_folder_drops_the_quality_instead_of_failing():
+    """โฟลเดอร์ลึกจนต้องใช้รหัสคลิปแทนชื่อ: title-quality ไม่ล้ม ได้ชื่อเดียวกับแบบ title (ไม่มีส่วนคุณภาพ)"""
+    for base in range(150, 231):
+        try:
+            plain = files.plan_names(base, "คลิป", ID, suffix="", ext="mp4", style="title")
+        except YtError:
+            continue
+        if plain[0] != ID:
+            continue
+        assert files.plan_names(base, "คลิป", ID, suffix="", ext="mp4", style="title-quality", quality="1080p") == plain
+        return
+    pytest.fail("no base length reaches the clip-id fallback")
+
+
 def test_zz_golden_was_not_regenerated():
     """ต้องอยู่ท้ายไฟล์: รอบที่เขียน golden เองเทสอื่นผ่านเพราะเทียบกับไฟล์ที่เพิ่งเขียน จึงต้องจบแดงเสมอ"""
     assert not _REGENERATED, "golden regenerated, review git diff and re-run without YT_UPDATE_GOLDEN"
+

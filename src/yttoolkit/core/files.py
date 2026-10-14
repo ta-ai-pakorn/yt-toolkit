@@ -164,7 +164,8 @@ def plan_names(
         channel = safe_component(uploader, "") if style == "title-channel" else ""
         file = f"{_stem(short, channel, avail) or clip_id}{tail}"
     else:
-        folder, file = clip_id, f"{clip_id}{tail}"
+        # โฟลเดอร์ลึกจนต้องใช้รหัสคลิป: ทิ้งส่วนคุณภาพ ได้ชื่อเดียวกับแบบ title (เลือกรูปแบบชื่อแล้วโหลดไม่ล้ม)
+        folder, file = clip_id, f"{clip_id}{suffix}.{ext}"
     if base_len + 1 + _u16(folder) + 1 + _u16(file) > PATH_LIMIT - UNIQUE_RESERVE:
         raise YtError("E_OUTPUT_NOT_WRITABLE", "path too long")
     return folder, file
