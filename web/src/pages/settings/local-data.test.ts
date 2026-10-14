@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest"
 
 import { th } from "@/i18n/th"
 
-import { clearButton, CLIP_CACHE_KEYS, forgetClipCaches, importNotice, importTooLarge, TOO_LARGE_REQUEST } from "./local-data"
+import {
+  clearButton,
+  CLIP_CACHE_KEYS,
+  forgetClipCaches,
+  importNotice,
+  importTooLarge,
+  readImportFile,
+  TOO_LARGE_REQUEST,
+} from "./local-data"
 
 describe("clearButton", () => {
   it("มีขนาด: ป้ายตาม BRD (1.2 GB) และกดได้", () => {
@@ -48,5 +56,25 @@ describe("import helpers", () => {
   it("ข้อความหลังนำเข้า: สำเร็จ / ใช้โฟลเดอร์ในไฟล์ไม่ได้", () => {
     expect(importNotice({ warnings: [] })).toEqual({ kind: "success", message: "นำเข้าค่าตั้งแล้ว" })
     expect(importNotice({ warnings: ["outputDir"] })).toEqual({ kind: "warning", message: th.general.importedKeptFolder })
+  })
+
+  it("อ่านไฟล์: ได้ข้อความ · เกิน 1 MB ไม่อ่าน · อ่านไม่ได้ (ไฟล์ถูกย้าย) = รายงานแทนการหลุดเงียบ", async () => {
+    expect(await readImportFile({ size: 2, text: () => Promise.resolve("{}") })).toEqual({ ok: true, text: "{}" })
+
+    let read = false
+    const big = {
+      size: 1_048_577,
+      text: () => {
+        read = true
+        return Promise.resolve("")
+      },
+    }
+    expect(await readImportFile(big)).toEqual({ ok: false, request: TOO_LARGE_REQUEST })
+    expect(read).toBe(false)
+
+    const gone = new DOMException("The file could not be read", "NotReadableError")
+    const result = await readImportFile({ size: 2, text: () => Promise.reject(gone) })
+    expect(result).toMatchObject({ ok: false, request: { code: "E_UNKNOWN", context: "settings-import" } })
+    expect(!result.ok && result.request.detail).toMatch(/^NotReadableError: The file could not be read/)
   })
 })

@@ -2,7 +2,7 @@ import type { QueryClient } from "@tanstack/react-query"
 
 import { fill, th } from "@/i18n/th"
 import { formatBytes } from "@/lib/format"
-import type { ReportRequest } from "@/lib/report"
+import { reportRequest, type ReportRequest } from "@/lib/report"
 import { MAX_SETTINGS_FILE_BYTES, STORAGE_KEY, type ImportResult, type StorageUsage } from "@/lib/settings-api"
 
 /**
@@ -46,7 +46,22 @@ export const TOO_LARGE_REQUEST: ReportRequest = {
   context: IMPORT_TOAST_ID,
 }
 
-export type ImportNotice = { kind: "success" | "warning"; message: string }
+export type ImportRead = { ok: true; text: string } | { ok: false; request: ReportRequest }
+
+/**
+ * อ่านไฟล์ที่เลือกนำเข้า: เกิน 1 MB ไม่อ่าน · อ่านไม่ได้ (เช่นไฟล์ถูกย้ายหลังเลือก) = รายงานของ error นั้น
+ * ไม่ให้ error หลุดเงียบ (หน้าเว็บแสดง "ไฟล์นี้ไม่ใช่ไฟล์ค่าตั้ง..." แบบเดียวกับไฟล์ใหญ่เกิน)
+ */
+export async function readImportFile(file: Pick<Blob, "size" | "text">): Promise<ImportRead> {
+  if (importTooLarge(file)) return { ok: false, request: TOO_LARGE_REQUEST }
+  try {
+    return { ok: true, text: await file.text() }
+  } catch (error) {
+    return { ok: false, request: reportRequest(error, { context: IMPORT_TOAST_ID }) }
+  }
+}
+
+export type ImportNotice ={ kind: "success" | "warning"; message: string }
 
 /** นำเข้าสำเร็จ: ไม่มีคำเตือน = "นำเข้าค่าตั้งแล้ว" · ใช้โฟลเดอร์ในไฟล์ไม่ได้ = คำเตือนที่ค้างจนกดปิด (Pete Q2 = B, Q3) */
 export function importNotice(result: Pick<ImportResult, "warnings">): ImportNotice {

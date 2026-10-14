@@ -32,8 +32,7 @@ import {
   forgetClipCaches,
   IMPORT_TOAST_ID,
   importNotice,
-  importTooLarge,
-  TOO_LARGE_REQUEST,
+  readImportFile,
 } from "./local-data"
 
 const t = th.general
@@ -106,11 +105,12 @@ export function LocalDataSection() {
     const file = input.files?.[0]
     input.value = "" // เลือกไฟล์เดิมซ้ำได้
     if (!file) return
-    if (importTooLarge(file)) {
-      showErrorToast(t.settingsInvalid, { id: IMPORT_TOAST_ID, request: TOO_LARGE_REQUEST })
+    const read = await readImportFile(file)
+    if (!read.ok) {
+      showErrorToast(t.settingsInvalid, { id: IMPORT_TOAST_ID, request: read.request })
       return
     }
-    importing.mutate(await file.text())
+    importing.mutate(read.text)
   }
 
   return (
