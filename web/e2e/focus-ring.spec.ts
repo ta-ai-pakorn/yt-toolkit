@@ -1,4 +1,4 @@
-import { colorsOf, contrastRatio, focusRingContrast } from "./contrast"
+import { colorsOf, contrastRatio, focusRingContrast, textContrast } from "./contrast"
 import { expect, test, type Page } from "@playwright/test"
 
 // M6 D1 T1: ขอบโฟกัส (WCAG 2.2 non-text contrast) ต้องต่างจากพื้นหลังอย่างน้อย 3:1 ทั้งธีมสว่างและมืด
@@ -35,7 +35,8 @@ for (const scheme of ["light", "dark"] as const) {
   test.describe(`ขอบโฟกัส ≥ 3:1 (${scheme})`, () => {
     test("W1: ช่องวางลิงก์และปุ่มวาง", async ({ page }) => {
       await themed(page, scheme, "/")
-      expect(await focusRingContrast(page, page.getByRole("textbox"))).toBeGreaterThanOrEqual(MIN)
+      // วงขอบของช่องวางลิงก์ถูกวาดบนกรอบ InputGroup ไม่ใช่บน textarea เอง
+      expect(await focusRingContrast(page, page.getByRole("textbox"), page.locator('[data-slot="input-group"]'))).toBeGreaterThanOrEqual(MIN)
       expect(await focusRingContrast(page, page.getByRole("button", { name: "วาง", exact: true }))).toBeGreaterThanOrEqual(MIN)
     })
 
@@ -73,6 +74,47 @@ for (const scheme of ["light", "dark"] as const) {
       const tab = page.getByRole("tab", { name: "ขั้นสูง" })
       await expect(tab).toBeVisible()
       expect(await focusRingContrast(page, tab)).toBeGreaterThanOrEqual(MIN)
+    })
+
+    test("ประวัติ: ช่องค้นหา (วงขอบอยู่ที่กรอบ InputGroup)", async ({ page }) => {
+      await page.route("**/api/history*", (route) =>
+        route.fulfill({
+          json: {
+            items: [{ videoId: "jNQXAC9IVRw", title: "Me at the zoo", channel: "", thumbnailUrl: "", durationS: 19, outputs: [], lastAt: new Date().toISOString() }],
+            total: 1,
+          },
+        }),
+      )
+      await themed(page, scheme, "/history")
+      const input = page.getByRole("textbox")
+      await expect(input).toBeVisible()
+      expect(await focusRingContrast(page, input, page.locator('[data-slot="input-group"]'))).toBeGreaterThanOrEqual(MIN)
+    })
+
+    test("ในการ์ด (แท็บซับ): ปุ่มปรับเอง และปุ่มเลื่อนค่า (slider)", async ({ page }) => {
+      await themed(page, scheme, "/v/88o5Sk8_m1Y?tab=subs")
+      const custom = page.getByRole("button", { name: "ปรับเอง" })
+      await expect(custom).toBeVisible()
+      await expect(custom.locator('xpath=ancestor::*[@data-slot="card"]')).toHaveCount(1)
+      expect(await focusRingContrast(page, custom)).toBeGreaterThanOrEqual(MIN)
+      await page.keyboard.press("Enter")
+      const slider = page.getByRole("slider").first()
+      await expect(slider).toBeVisible()
+      expect(await focusRingContrast(page, slider, page.locator('[data-slot="slider-thumb"]').first())).toBeGreaterThanOrEqual(MIN)
+    })
+
+    test("ปุ่มสีแดง (destructive) ในกล่องยืนยันปิดโปรแกรม: วงขอบ ≥ 3:1 และตัวอักษร ≥ 4.5:1", async ({ page }) => {
+      await page.route("**/api/shutdown", (route) =>
+        route.fulfill({ status: 409, json: { error: { code: "E_JOBS_PENDING", message: "มีงานค้าง", detail: null }, pendingJobs: 4 } }),
+      )
+      await themed(page, scheme, "/settings/health")
+      await page.getByRole("button", { name: "ปิดโปรแกรม" }).focus()
+      await page.keyboard.press("Enter")
+      const dialog = page.getByRole("alertdialog", { name: "ปิดโปรแกรมตอนนี้?" })
+      await expect(dialog).toBeVisible()
+      const danger = dialog.getByRole("button", { name: "ปิดเลย" })
+      expect(await focusRingContrast(page, danger)).toBeGreaterThanOrEqual(MIN)
+      expect(await textContrast(danger)).toBeGreaterThanOrEqual(4.5)
     })
   })
 }

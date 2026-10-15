@@ -57,7 +57,10 @@ export async function colorsOf(target: Locator): Promise<{ ring: string; bg: str
       const spread = parseFloat(l.replace(colourToken, " ").trim().split(/\s+/)[3] ?? "0")
       return colour && !isClear(colour) && spread > 0
     })
-    const ring = ringLayer ? ringLayer.match(colourToken)![0] : style.outlineColor
+    // what is really visible: an outline only when it is drawn (the base rule gives every element an outline-color), else the ring
+    const outlineDrawn = style.outlineStyle !== "none" && parseFloat(style.outlineWidth) > 0 && !isClear(style.outlineColor)
+    const ring = outlineDrawn ? style.outlineColor : ringLayer?.match(colourToken)?.[0]
+    if (!ring) throw new Error("no visible focus indicator (no outline, no box-shadow ring) on " + el.tagName)
 
     // stack translucent ancestor backgrounds until an opaque one, then flatten them (outermost first)
     const stack: number[][] = []
@@ -78,12 +81,38 @@ export async function colorsOf(target: Locator): Promise<{ ring: string; bg: str
 }
 
 /**
- * Focus the element, read its focus-ring colour (box-shadow ring colour,
- * or outline colour when there is no ring), and the nearest non-transparent background behind it.
+ * Focus the element with the keyboard path (must match :focus-visible), then measure the indicator that is actually drawn:
+ * outline if its style is not none and width > 0, else the box-shadow ring, against the opaque surface behind it.
+ * Pass `owner` when the ring is drawn on a wrapper instead of the focused element (e.g. InputGroup).
  */
-export async function focusRingContrast(page: Page, target: Locator): Promise<number> {
+export async function focusRingContrast(page: Page, target: Locator, owner?: Locator): Promise<number> {
   await target.focus()
+  if (!(await target.evaluate((el) => el.matches(":focus-visible")))) throw new Error("focus() did not give :focus-visible")
   await settleAnimations(page)
-  const { ring, bg } = await colorsOf(target)
+  const { ring, bg } = await colorsOf(owner ?? target)
   return contrastRatio(ring, bg)
+}
+
+/** Contrast of a control's text over its own (possibly translucent) fill, flattened onto the surface behind it */
+export async function textContrast(target: Locator): Promise<number> {
+  const { bg } = await colorsOf(target)
+  const { text, fill } = await target.evaluate((el) => {
+    const canvas = document.createElement("canvas")
+    canvas.width = canvas.height = 1
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })!
+    const toRgba = (color: string) => {
+      ctx.clearRect(0, 0, 1, 1)
+      ctx.fillStyle = "#000"
+      ctx.fillStyle = color
+      ctx.fillRect(0, 0, 1, 1)
+      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data
+      return `rgba(${r}, ${g}, ${b}, ${a / 255})`
+    }
+    const style = getComputedStyle(el)
+    return { text: toRgba(style.color), fill: toRgba(style.backgroundColor) }
+  })
+  const [r, g, b, a] = parse(fill)
+  const surface = parse(bg)
+  const flat = [r, g, b].map((v, i) => Math.round(v * a + surface[i] * (1 - a)))
+  return contrastRatio(text, `rgb(${flat.join(", ")})`)
 }
