@@ -322,3 +322,153 @@ def test_auto_sharp_frames_can_be_switched_off_and_on(store):
 def test_capture_quality_accepts_the_three_choices(store):  # M5 รอบ B2 spec 2.4
     for value in ("1080", "720", "max"):
         assert store.patch({"captureQuality": value})["captureQuality"] == value
+
+
+# ---------- M6 รอบ A: คิวอ่านรูปแบบชื่อไฟล์ ----------
+
+
+def test_filename_style_reads_the_current_setting(store):
+    assert store.filename_style() == "title"
+    store.patch({"filenameStyle": "title-quality"})
+    assert store.filename_style() == "title-quality"
+
+
+# ---------- M6 รอบ A: นำเข้าไฟล์สำรองค่าตั้ง (spec 4.2, AC-SET-09 / AC-SET-10) ----------
+
+
+def _doc(settings: dict, **top) -> dict:
+    return {"app": "yt-toolkit", "schema": 1, "exportedAt": "2026-10-14T05:00:00+00:00", "settings": settings, **top}
+
+
+def _rows(db) -> list[tuple[str, str]]:
+    return [(r["key"], r["value_json"]) for r in db.execute("SELECT key, value_json FROM settings ORDER BY key")]
+
+
+def test_import_round_trips_an_export_on_a_fresh_store(db, store, tmp_path):
+    store.patch({"concurrency": 3, "theme": "dark", "filenameStyle": "title-channel", "outputDir": str(tmp_path / "v")})
+    exported = store.exportable()
+    assert "statsResetAt" not in exported and "cookies" not in exported
+    fresh_db = Database(tmp_path / "fresh.db")
+    fresh_db.migrate()
+    try:
+        fresh = SettingsStore(fresh_db, tmp_path / "other")
+        saved, warnings = fresh.import_settings(_doc(exported))
+        assert warnings == []
+        assert {k: v for k, v in saved.items() if k != "statsResetAt"} == exported
+        assert fresh.get() == {**exported, "statsResetAt": None}
+    finally:
+        fresh_db.close()
+
+
+def test_import_skips_unknown_read_only_and_retired_keys(db, store):
+    saved, warnings = store.import_settings(_doc({
+        "concurrency": 1, "futureKey": {"x": 1}, "statsResetAt": "2026-01-01T00:00:00+00:00", "cookies": {"a": 1},
+    }))  # fmt: skip
+    assert warnings == [] and saved["concurrency"] == 1 and saved["statsResetAt"] is None
+    assert {key for key, _ in _rows(db)} == {"concurrency"}
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"theme": "dark", "concurrency": 5},
+        {"concurrency": 2, "theme": 1},
+        {"outputDir": 3, "theme": "dark"},
+        {"mp3Kbps": 192.0},
+        {"autoSharpFrames": "true"},
+        {"sponsorblockDefault": []},
+        {"subCustom": {"maxChars": -1}},
+    ],
+)
+def test_import_with_one_bad_value_changes_nothing(db, store, settings):
+    store.patch({"concurrency": 3})
+    before = _rows(db)
+    with pytest.raises(SettingsError) as err:
+        store.import_settings(_doc(settings))
+    assert err.value.code == "E_SETTINGS_INVALID"
+    assert err.value.detail.endswith(": invalid value") and err.value.key in settings
+    assert _rows(db) == before
+
+
+@pytest.mark.parametrize(
+    ("doc", "detail"),
+    [
+        ([1, 2], "file must be a JSON object"),
+        ("text", "file must be a JSON object"),
+        ({"app": "other", "schema": 1, "settings": {}}, "app invalid"),
+        ({"schema": 1, "settings": {}}, "app invalid"),
+        ({"app": "yt-toolkit", "schema": 2, "settings": {}}, "schema invalid"),
+        ({"app": "yt-toolkit", "schema": "1", "settings": {}}, "schema invalid"),
+        ({"app": "yt-toolkit", "schema": True, "settings": {}}, "schema invalid"),
+        ({"app": "yt-toolkit", "schema": 1.0, "settings": {}}, "schema invalid"),
+        ({"app": "yt-toolkit", "schema": 1, "settings": [1]}, "settings invalid"),
+        ({"app": "yt-toolkit", "schema": 1}, "settings invalid"),
+    ],
+)
+def test_import_of_a_file_that_is_not_ours_is_invalid(db, store, doc, detail):
+    before = _rows(db)
+    with pytest.raises(SettingsError) as err:
+        store.import_settings(doc)
+    assert (err.value.code, err.value.detail) == ("E_SETTINGS_INVALID", detail)
+    assert _rows(db) == before
+
+
+def test_empty_settings_is_valid_and_changes_nothing(db, store):
+    store.patch({"theme": "light"})
+    before = _rows(db)
+    saved, warnings = store.import_settings(_doc({}))
+    assert warnings == [] and saved["theme"] == "light" and _rows(db) == before
+
+
+# path ของเครื่องอื่น: บน Windows "/Users/..." ไม่ใช่ path เต็ม · บน macOS สร้างโฟลเดอร์ใต้ /Users ไม่ได้ (คำเตือนทั้งคู่)
+@pytest.mark.parametrize("folder", ["relative/folder", "", "   ", "/Users/somchai-not-here/Movies", "D:\\a\x00b"])
+def test_an_output_dir_that_cannot_be_used_here_keeps_the_old_one(store, tmp_path, folder):
+    old = store.get()["outputDir"]
+    saved, warnings = store.import_settings(_doc({"outputDir": folder, "theme": "dark"}))
+    assert warnings == ["outputDir"]
+    assert saved["outputDir"] == old and saved["theme"] == "dark"
+
+
+def test_an_unwritable_output_dir_keeps_the_old_one(store, tmp_path):
+    a_file = tmp_path / "file.txt"
+    a_file.write_text("x")
+    old = store.get()["outputDir"]
+    saved, warnings = store.import_settings(_doc({"outputDir": str(a_file), "concurrency": 1}))
+    assert (warnings, saved["outputDir"], saved["concurrency"]) == (["outputDir"], old, 1)
+
+
+def test_the_output_dir_hook_fires_once_with_the_new_folder(store, tmp_path):
+    calls: list[Path] = []
+    store.on_output_dir = calls.append
+    store.import_settings(_doc({"outputDir": str(tmp_path / "new"), "theme": "dark"}))
+    assert calls == [tmp_path / "new"]
+    store.import_settings(_doc({"outputDir": "relative", "theme": "light"}))  # คำเตือน = ไม่เปลี่ยนโฟลเดอร์
+    store.import_settings(_doc({"theme": "dark"}))
+    assert calls == [tmp_path / "new"]
+
+
+def test_all_imported_keys_are_written_in_one_transaction(db, store, monkeypatch):
+    from yttoolkit.core import db as db_module
+
+    before = _rows(db)
+    real = db_module.Transaction.execute
+    seen = {"upserts": 0}
+
+    def failing(self, sql, params=()):
+        if sql.startswith("INSERT INTO settings"):
+            seen["upserts"] += 1
+            if seen["upserts"] == 2:
+                raise RuntimeError("disk gone")
+        return real(self, sql, params)
+
+    monkeypatch.setattr(db_module.Transaction, "execute", failing)
+    with pytest.raises(RuntimeError):
+        store.import_settings(_doc({"theme": "dark", "concurrency": 1}))
+    monkeypatch.undo()
+    assert _rows(db) == before
+
+
+def test_import_deletes_retired_rows_like_patch(db, store):
+    db.execute("INSERT INTO settings (key, value_json) VALUES ('cookies', '{\"state\": \"none\"}')")
+    store.import_settings(_doc({"theme": "dark"}))
+    assert {key for key, _ in _rows(db)} == {"theme"}

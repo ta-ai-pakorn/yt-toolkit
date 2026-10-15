@@ -50,6 +50,8 @@ class MediaFacts:
     width: int | None
     height: int | None
     dynamic_range: str | None  # "SDR" | "HDR10" | "HLG" | ... (yt-dlp ใส่ "SDR" ให้ format วิดีโอที่ไม่บอก)
+    # M6 รอบ A: bitrate เสียงของไฟล์ที่โหลดจริง (kbps ตามที่ yt-dlp บอก ยังไม่ปัด) ใช้ทำส่วน "(m4a 128k)" ของชื่อไฟล์
+    abr_kbps: float | None = None
 
     @property
     def short_side(self) -> int | None:
@@ -69,6 +71,7 @@ def media_facts(fmt: Mapping[str, Any]) -> MediaFacts:
         round(width) if width is not None else None,
         round(height) if height is not None else None,
         dynamic if isinstance(dynamic, str) and dynamic else None,
+        _number(fmt.get("abr")),
     )
 
 

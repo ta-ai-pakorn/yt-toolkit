@@ -4,6 +4,8 @@
   ทุกงานของคลิปเดียวกันจึงลงโฟลเดอร์เดียวกัน
 - งานจากหน้าเลือกหลายคลิป (W3) มีโฟลเดอร์กลุ่มคั่นกลาง: `<outputDir>/<ชื่อโฟลเดอร์>/<ชื่อคลิป> [<videoId>]/`
 - path เต็มต้องไม่เกิน 240 ตัวอักษร (เผื่อ " (99)" ไว้ต่อท้ายตอนชื่อซ้ำ)
+- M6 รอบ A: ชื่อไฟล์ตามรูปแบบ (title / title-channel / title-quality) คิดใน plan_names ที่เดียว
+  หน้าเว็บมีตัวเดียวกันที่ web/src/lib/filename.ts (เทียบกันด้วย tests/fixtures/names/*.json)
 - แหล่งที่มา.txt: UTF-8 ไม่มี BOM ขึ้นบรรทัดแบบ CRLF มีไฟล์เดียวต่อโฟลเดอร์ เขียนทับเมื่อมีงานใหม่
 core/ ไม่ import api/ หรือ platform/
 """
@@ -37,6 +39,11 @@ GROUP_FALLBACK = "YT-Toolkit batch"  # ชื่อโฟลเดอร์ก�
 SHARP_DIR_SUFFIX = " - ภาพคม"  # D2: โฟลเดอร์ภาพคม "<ชื่อคลิป> - ภาพคม" ในโฟลเดอร์ของคลิป
 PARTIAL_MARKER = ".yttoolkit-partial"  # อยู่ในโฟลเดอร์ภาพคมเฉพาะระหว่างย้ายไฟล์เข้า (เจอตอนเปิดโปรแกรม = ของค้าง)
 _LONGEST_FRAME_NAME = "frame_000-00-00_200.jpg"  # ชื่อภาพคมยาวสุด: ชั่วโมง 3 หลัก ภาพที่ 200 ในวินาทีเดียวกัน
+
+# M6 รอบ A: รูปแบบชื่อไฟล์ (ค่าเดียวกับ settings.FILENAME_STYLES ซึ่งเป็นที่ตรวจค่าตั้ง files ไม่ import settings)
+NAME_STYLES = ("title", "title-channel", "title-quality")
+CHANNEL_SEP = " - "  # "<ชื่อคลิป> - <ช่อง>"
+QUALITY_LABEL = re.compile(r"[a-z0-9 ]{1,16}")  # ส่วนคุณภาพ เช่น "1080p" "mp3 192k" "m4a" "wav"
 
 _MIN_TITLE = 8
 _FORBIDDEN = frozenset('\\/:*?"<>|')
@@ -100,32 +107,93 @@ def group_folder_name(folder: str) -> str:
     return safe_component(folder, GROUP_FALLBACK)
 
 
-def plan_output(root: Path, title: str, video_id: str, suffix: str, ext: str, group: str | None = None) -> Path:
+def _stem(short: str, channel: str, avail: int) -> str:
+    """ชื่อไฟล์ก่อนส่วนท้าย (ยาวไม่เกิน avail) ไม่มีช่อง = กฎเดิมของ M4 ทุกตัวอักษร · มีช่อง = ตัดชื่อคลิปก่อน
+    (เหลืออย่างน้อย 8 ตัว) แล้วค่อยตัดชื่อช่อง ยังไม่พอ = ทิ้งชื่อช่อง · คืน "" = ให้ผู้เรียกใช้รหัสคลิปแทน"""
+    if not channel:
+        return short if _u16(short) <= avail else truncate_title(short, avail)
+    joined = f"{short}{CHANNEL_SEP}{channel}"
+    if _u16(joined) <= avail:
+        return joined
+    sep = _u16(CHANNEL_SEP)
+    cut = truncate_title(short, max(avail - sep - _u16(channel), _MIN_TITLE))
+    if cut and _u16(f"{cut}{CHANNEL_SEP}{channel}") <= avail:
+        return f"{cut}{CHANNEL_SEP}{channel}"
+    room = avail - _u16(cut) - sep
+    short_channel = truncate_title(channel, room) if cut and room >= 1 else ""
+    if short_channel:
+        return f"{cut}{CHANNEL_SEP}{short_channel}"
+    return truncate_title(short, avail)
+
+
+def plan_names(
+    base_len: int,
+    title: str,
+    clip_id: str,
+    *,
+    suffix: str,
+    ext: str,
+    style: str = "title",
+    uploader: str = "",
+    quality: str | None = None,
+) -> tuple[str, str]:
+    """(ชื่อโฟลเดอร์ของคลิป, ชื่อไฟล์) ตามรูปแบบชื่อไฟล์ (M6 รอบ A spec 2.2) กฎเดียวกับ web/src/lib/filename.ts
+
+    base_len = ความยาว UTF-16 ของโฟลเดอร์ที่โฟลเดอร์ของคลิปจะอยู่ (โฟลเดอร์ผลลัพธ์ + "\\<กลุ่ม>" ถ้ามี)
+    clip_id = รหัสคลิปแบบข้อความทึบ (ใช้เป็นชื่อสำรองและใน " [<id>]" เท่านั้น ไม่ตรวจรูปแบบ C12)
+    uploader = ชื่อช่อง (ใช้เฉพาะแบบ title-channel) · quality = ส่วนคุณภาพ เช่น "1080p" / "mp3 192k" (เฉพาะ title-quality)
+    ชื่อโฟลเดอร์ไม่ขึ้นกับรูปแบบ (ทุกงานของคลิปลงโฟลเดอร์เดียวกัน) · ยาวเกิน = ตัดชื่อคลิปก่อน แล้วชื่อช่อง
+    ไม่ตัดส่วนคุณภาพและนามสกุล · path ยาวเกินแม้ใช้รหัสคลิป = E_OUTPUT_NOT_WRITABLE
+    """
+    if style not in NAME_STYLES:
+        raise ValueError(f"unknown filename style: {style!r}")
+    if quality is not None and not QUALITY_LABEL.fullmatch(quality):
+        raise ValueError(f"bad quality label: {quality!r}")
+    quality_part = f" ({quality})" if style == "title-quality" and quality else ""
+    tail = f"{quality_part}{suffix}.{ext}"
+    assert _u16(tail) <= TAIL_MAX, "suffix + extension longer than TAIL_MAX"
+    t = safe_component(title, clip_id)
+    budget = PATH_LIMIT - (base_len + 1) - _u16(f" [{clip_id}]") - 1 - TAIL_RESERVE - UNIQUE_RESERVE
+    cap = budget // 2
+    short = truncate_title(t, min(TITLE_MAX, cap)) if cap >= _MIN_TITLE else ""
+    if short:
+        # ชื่อโฟลเดอร์คิดจากงบเดิมเสมอ (ทุกงานของคลิปลงโฟลเดอร์เดียวกัน) ส่วนท้ายที่ยาวกว่า TAIL_RESERVE
+        # ตัดเฉพาะชื่อไฟล์ลงเท่าส่วนที่เกิน: ชื่อแบบ M4 (ส่วนท้าย <= 30) จึงเหมือนเดิมทุกตัวอักษร
+        folder = f"{short} [{clip_id}]"
+        avail = budget - _u16(short) + TAIL_RESERVE - _u16(tail)
+        channel = safe_component(uploader, "") if style == "title-channel" else ""
+        file = f"{_stem(short, channel, avail) or clip_id}{tail}"
+    else:
+        # โฟลเดอร์ลึกจนต้องใช้รหัสคลิป: ทิ้งส่วนคุณภาพ ได้ชื่อเดียวกับแบบ title (เลือกรูปแบบชื่อแล้วโหลดไม่ล้ม)
+        folder, file = clip_id, f"{clip_id}{suffix}.{ext}"
+    if base_len + 1 + _u16(folder) + 1 + _u16(file) > PATH_LIMIT - UNIQUE_RESERVE:
+        raise YtError("E_OUTPUT_NOT_WRITABLE", "path too long")
+    return folder, file
+
+
+def plan_output(
+    root: Path,
+    title: str,
+    video_id: str,
+    suffix: str,
+    ext: str,
+    group: str | None = None,
+    *,
+    style: str = "title",
+    uploader: str = "",
+    quality: str | None = None,
+) -> Path:
     """path ปลายทางที่วางแผนไว้ (ยังไม่สร้างอะไร) ชื่อยาวเกินให้ตัดชื่อคลิป ถ้าไม่พอแม้แต่ 8 ตัวใช้ videoId แทน
 
     group = ชื่อโฟลเดอร์กลุ่มดิบจากงาน (params.folder) มี = `<root>/<กลุ่มที่ปลอดภัย>/<ชื่อคลิป> [<id>]/<ไฟล์>`
     ชื่อกลุ่มไม่ถูกตัด: path ยาวเกินให้ตัดชื่อคลิปก่อน แล้วค่อยใช้ทางสำรองเดิม (videoId / E_OUTPUT_NOT_WRITABLE)
+    style / uploader / quality = รูปแบบชื่อไฟล์ (M6 รอบ A ดู plan_names) ผู้เรียกที่ใช้แค่ .parent ไม่ต้องส่ง
     """
-    tail = f"{suffix}.{ext}"
-    assert _u16(tail) <= TAIL_MAX, "suffix + extension longer than TAIL_MAX"
     base = root / group_folder_name(group) if group else root
-    t = safe_component(title, video_id)
-    budget = PATH_LIMIT - (_u16(str(base)) + 1) - _u16(f" [{video_id}]") - 1 - TAIL_RESERVE - UNIQUE_RESERVE
-    cap = budget // 2
-    short = ""
-    if cap >= _MIN_TITLE:
-        short = truncate_title(t, min(TITLE_MAX, cap))
-    if short:
-        # ชื่อโฟลเดอร์คิดจากงบเดิมเสมอ (ทุกงานของคลิปลงโฟลเดอร์เดียวกัน) ส่วนท้ายที่ยาวกว่า TAIL_RESERVE
-        # ตัดเฉพาะชื่อไฟล์ลงเท่าส่วนที่เกิน: ชื่อแบบ M4 (ส่วนท้าย <= 30) จึงเหมือนเดิมทุกตัวอักษร
-        file_cap = budget - _u16(short) + TAIL_RESERVE - _u16(tail)
-        stem = short if _u16(short) <= file_cap else truncate_title(short, file_cap)
-        planned = base / f"{short} [{video_id}]" / f"{stem or video_id}{tail}"
-    else:
-        planned = base / video_id / f"{video_id}{tail}"
-    if _u16(str(planned)) > PATH_LIMIT - UNIQUE_RESERVE:
-        raise YtError("E_OUTPUT_NOT_WRITABLE", "path too long")
-    return planned
+    folder, file = plan_names(
+        _u16(str(base)), title, video_id, suffix=suffix, ext=ext, style=style, uploader=uploader, quality=quality
+    )
+    return base / folder / file
 
 
 def chapter_dir_name(ext: str, *, no_audio: bool = False) -> str:

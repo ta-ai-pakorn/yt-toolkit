@@ -791,3 +791,24 @@ def test_full_width_partial_height_grid_measures_width_only(tmp_path: Path) -> N
         assert_no_bleed(
             tmp_path / "storyboard" / frame["file"], PALETTE_25[cell], (REAL_W, REAL_H)
         )
+
+
+# ---------- M6-A final fix ----------
+
+
+def test_build_recreates_cache_folder_removed_by_a_concurrent_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_dir = tmp_path / "cache" / VID
+    real_uuid4 = storyboard.uuid.uuid4
+
+    def clear_then_uuid():
+        # a clear in another tab renames data/cache/<id> away between the two mkdirs
+        shutil.rmtree(cache_dir)
+        return real_uuid4()
+
+    monkeypatch.setattr(storyboard.uuid, "uuid4", clear_then_uuid)
+    fetch = fetch_from({"https://x.invalid/M0.jpg": make_grid(9)})
+    index = build(VID, make_raw(make_sb([36])), cache_dir, fetch)
+    assert len(index["frames"]) == 9
+    assert (cache_dir / "storyboard" / "index.json").is_file()

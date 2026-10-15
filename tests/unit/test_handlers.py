@@ -21,7 +21,7 @@ import pytest
 from PIL import Image
 
 from helpers_ffmpeg import ffprobe_json, find_test_ffmpeg, requires_ffmpeg
-from yttoolkit.core import files
+from yttoolkit.core import files, handlers
 from yttoolkit.core.cancel import JobCancelled
 from yttoolkit.core.db import Database
 from yttoolkit.core.advanced import ADS_SUFFIX
@@ -30,6 +30,7 @@ from yttoolkit.core.download import (
     Downloader,
     DownloadHooks,
     DownloadResult,
+    MediaFacts,
     SponsorBlockError,
     audio_choice,
     video_choice,
@@ -61,10 +62,13 @@ PLENTY = 10**13
 class RecordingContext:
     """JobContext ที่จดขั้นตอน ความคืบหน้า ชื่องาน และการรอ `cancel_on` = ตั้งธงยกเลิกเมื่อถึงขั้นนี้"""
 
-    def __init__(self, workdir: Path, output_root: Path, cancel_on: str | None = None) -> None:
+    def __init__(
+        self, workdir: Path, output_root: Path, cancel_on: str | None = None, filename_style: str = "title"
+    ) -> None:
         self.job_id = "01900000-0000-7000-8000-000000000001"
         self.workdir = workdir
         self.output_root = output_root
+        self.filename_style = filename_style  # M6 รอบ A: รูปแบบชื่อไฟล์ที่คิวตั้งให้งาน
         self.cancel_on = cancel_on
         self.stages: list[str] = []
         self.progresses: list[tuple[float | None, int | None, int | None]] = []
@@ -104,6 +108,7 @@ class StubDownloader:
         self.choices: list[DownloadChoice] = []
         self.hooks: list[DownloadHooks] = []
         self.fetched: list[str] = []
+        self.media: MediaFacts | None = None  # M6 รอบ A: ข้อมูลไฟล์ที่โหลดจริง (ส่วนคุณภาพของชื่อไฟล์)
 
     def download(
         self, video_id: str, choose: Callable[[dict], DownloadChoice], workdir: Path, hooks: DownloadHooks
@@ -131,7 +136,7 @@ class StubDownloader:
             source = MEDIA / "audio.m4a"
             target = workdir / "media.m4a"
         shutil.copyfile(source, target)
-        return DownloadResult(target, info, choice)
+        return DownloadResult(target, info, choice, self.media)
 
     def fetch(self, url: str) -> bytes:
         self.fetched.append(url)
@@ -215,12 +220,19 @@ class Env:
         return self.free
 
     def run(
-        self, kind: str, video_id: str, params: dict, *, cancel_on: str | None = None, deps: HandlerDeps | None = None
+        self,
+        kind: str,
+        video_id: str,
+        params: dict,
+        *,
+        cancel_on: str | None = None,
+        deps: HandlerDeps | None = None,
+        style: str = "title",
     ) -> tuple[JobResult, RecordingContext]:
         self._runs += 1
         workdir = self.tmp / "work" / str(self._runs)
         workdir.mkdir(parents=True)
-        ctx = RecordingContext(workdir, self.out, cancel_on=cancel_on)
+        ctx = RecordingContext(workdir, self.out, cancel_on=cancel_on, filename_style=style)
         handler = build_handlers(deps or self.deps)[kind]
         return handler(make_job(kind, video_id, params), ctx), ctx
 
@@ -1453,3 +1465,164 @@ def test_cancel_during_the_chapter_split_leaves_nothing(env):
     with pytest.raises(JobCancelled):
         env.run("video", ZOO, video_params(splitChapters=True), cancel_on="splitting:2/3")
     assert folders(env.out) == []
+
+
+# ---------- M6 รอบ A: รูปแบบชื่อไฟล์ (spec 2.1 / 2.3, D3) ----------
+
+THAI_CHANNEL = "KOD THAI"
+THAI_SAFE = "Thai Listening Practice EP.1 Beginner"  # "|" ใช้ในชื่อไฟล์ไม่ได้
+FULL_HD = MediaFacts(1920, 1080, "SDR")
+
+
+def styled(env: Env, video_id: str, title: str, suffix: str, ext: str, style: str, quality: str | None) -> Path:
+    channel = THAI_CHANNEL if video_id == THAI else ""
+    return files.plan_output(env.out.resolve(), title, video_id, suffix, ext, style=style, uploader=channel,
+                             quality=quality)  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("style", "name"),
+    [
+        ("title", f"{THAI_SAFE}.mp4"),
+        ("title-channel", f"{THAI_SAFE} - {THAI_CHANNEL}.mp4"),
+        ("title-quality", f"{THAI_SAFE} (1080p).mp4"),
+    ],
+)
+def test_video_name_follows_the_job_style(env, style, name):
+    env.downloader.media = FULL_HD
+    result, _ = env.run("video", THAI, video_params(), style=style)
+    path = output_path(result)
+    assert path.name == name
+    assert path == styled(env, THAI, THAI_TITLE, "", "mp4", style, "1080p")
+    assert path.parent == env.planned(THAI, THAI_TITLE, "", "mp4").parent  # โฟลเดอร์ของคลิปเดิมทุกแบบ
+
+
+def test_a_vertical_video_uses_the_short_side(env):
+    env.downloader.media = MediaFacts(1080, 1920, "SDR")
+    result, _ = env.run("video", THAI, video_params(), style="title-quality")
+    assert output_path(result).name == f"{THAI_SAFE} (1080p).mp4"
+
+
+def test_unknown_video_facts_give_no_quality_part(env):
+    result, _ = env.run("video", THAI, video_params(), style="title-quality")
+    assert output_path(result).name == f"{THAI_SAFE}.mp4"
+
+
+def test_the_quality_part_comes_before_the_existing_suffixes(env):
+    env.downloader.media = MediaFacts(1280, 720, "SDR")
+    result, _ = env.run("video", THAI, video_params(noAudio=True, range={"startMs": 90_000, "endMs": 300_000}),
+                        style="title-quality")  # fmt: skip
+    assert output_path(result).name == f"{THAI_SAFE} (720p) (ไม่มีเสียง) (01.30-05.00).mp4"
+
+
+@pytest.mark.parametrize(
+    ("fmt", "params", "media", "quality"),
+    [
+        ("mp3", {}, None, "mp3 192k"),
+        ("mp3", {"mp3Kbps": 320}, None, "mp3 320k"),
+        ("m4a", {}, MediaFacts(None, None, None, 129.5), "m4a 128k"),
+        ("m4a", {}, MediaFacts(None, None, None, 49.2), "m4a 48k"),
+        ("m4a", {}, None, "m4a"),
+        ("wav", {}, MediaFacts(None, None, None, 129.5), "wav"),
+    ],
+)
+def test_audio_quality_part(env, fmt, params, media, quality):
+    env.downloader.media = media
+    result, _ = env.run("audio", THAI, audio_params(fmt, **params), style="title-quality")
+    assert output_path(result).name == f"{THAI_SAFE} ({quality}).{fmt}"
+
+
+def test_a_cut_m4a_is_named_by_the_re_encoded_bitrate(env):
+    env.downloader.media = MediaFacts(None, None, None, 129.5)
+    result, _ = env.run("audio", THAI, audio_params("m4a", range={"startMs": 90_000, "endMs": 300_000}),
+                        style="title-quality")  # fmt: skip
+    assert output_path(result).name == f"{THAI_SAFE} (m4a 192k) (01.30-05.00).m4a"
+
+
+def test_audio_title_channel(env):
+    result, _ = env.run("audio", THAI, audio_params("mp3"), style="title-channel")
+    assert output_path(result).name == f"{THAI_SAFE} - {THAI_CHANNEL}.mp3"
+
+
+@pytest.mark.parametrize(
+    ("kind", "params", "plain", "channel"),
+    [
+        ("subtitle", {"trackId": "a.th-orig", "format": "srt", "options": MEDIUM}, ".th.srt",
+         f" - {THAI_CHANNEL}.th.srt"),
+        ("note", {}, ".note.md", f" - {THAI_CHANNEL}.note.md"),
+        ("contact_sheet", {"source": "fast", "columns": 5}, " - contact sheet.jpg",
+         f" - {THAI_CHANNEL} - contact sheet.jpg"),
+        ("frames_zip", {"source": "fast"}, " - frames.zip", f" - {THAI_CHANNEL} - frames.zip"),
+    ],
+)
+def test_other_kinds_get_the_channel_but_never_a_quality_part(env, kind, params, plain, channel):
+    env.downloader.media = FULL_HD
+    plain_result, _ = env.run(kind, THAI, params, style="title-quality")
+    channel_result, _ = env.run(kind, THAI, params, style="title-channel")
+    assert output_path(plain_result).name == f"{THAI_SAFE}{plain}"
+    assert output_path(channel_result).name == f"{THAI_SAFE}{channel}"
+    assert output_path(plain_result).parent == output_path(channel_result).parent
+
+
+@pytest.mark.parametrize("style", ["title-channel", "title-quality"])
+def test_chapter_split_names_ignore_the_style(env, style):
+    env.downloader.media = FULL_HD
+    result, _ = env.run("video", ZOO, video_params(splitChapters=True), style=style)
+    clip_folder = env.planned(ZOO, ZOO_TITLE, "", "mp4").parent
+    assert [Path(o.rel).name for o in result.outputs] == [f"{n}.mp4" for n in ZOO_NAMES]
+    assert {(Path(o.root) / o.rel).parent for o in result.outputs} == {clip_folder / "แยกตาม chapter (mp4)"}
+
+
+def test_an_unknown_channel_gives_the_plain_title(env, monkeypatch):
+    real = env.videos.get
+    monkeypatch.setattr(env.videos, "get", lambda video_id, **kw: {**real(video_id, **kw), "channel": None})
+    result, _ = env.run("video", THAI, video_params(), style="title-channel")
+    assert output_path(result).name == f"{THAI_SAFE}.mp4"
+
+
+def test_the_style_names_never_reach_the_log(env, caplog):
+    caplog.set_level(logging.DEBUG, logger="yttoolkit")
+    env.downloader.media = FULL_HD
+    env.run("video", THAI, video_params(), style="title-channel")
+    env.run("audio", THAI, audio_params("mp3"), style="title-quality")
+    assert THAI_CHANNEL not in caplog.text and "Thai Listening" not in caplog.text
+    assert "1080p" not in caplog.text and "mp3 192k" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (129.5, 128), (112, 128), (144, 160), (150, 160), (140, 128), (20, 32), (500, 320),
+        *((kbps, kbps) for kbps in handlers.STANDARD_KBPS),
+        (float("nan"), None), (float("inf"), None), (0, None), (-5, None), (None, None), (True, None),
+    ],
+)
+def test_standard_kbps(value, expected):
+    assert handlers.standard_kbps(value) == expected
+
+
+# ---------- M6-A final fix: audio labels (P2) and the mp3 guard ----------
+
+
+@pytest.mark.parametrize(
+    ("segments", "suffix", "quality", "notes"),
+    [
+        (ADS, ADS_SUFFIX, "m4a 192k", ()),  # ads-only cut = re-encoded at CUT_AAC_KBPS
+        ((), "", "m4a 128k", ("SPONSORBLOCK_EMPTY",)),  # nothing cut = the downloaded file's bitrate
+    ],
+    ids=["ads-cut", "sponsorblock-empty"],
+)
+def test_m4a_label_with_ads_requested(env, segments, suffix, quality, notes):
+    env.downloader.media = MediaFacts(None, None, None, 129.5)
+    params = audio_params("m4a", sponsorblock=["sponsor"])
+    result, _ = run_with(env, StubSponsors(segments), "audio", BBB, params, style="title-quality")
+    assert output_path(result) == styled(env, BBB, BBB_TITLE, suffix, "m4a", "title-quality", quality)
+    assert output_path(result).name.endswith(f" ({quality}){suffix}.m4a")
+    assert result.notes == notes
+
+
+@pytest.mark.parametrize("kbps", [-5, -192])
+def test_an_unusable_mp3_bitrate_gives_the_bare_mp3_label(env, kbps):
+    # the API allows only 128 / 192 / 320; this guards a future value (standard_kbps gives None)
+    result, _ = env.run("audio", THAI, audio_params("mp3", mp3Kbps=kbps), style="title-quality")
+    assert output_path(result).name == f"{THAI_SAFE} (mp3).mp3"

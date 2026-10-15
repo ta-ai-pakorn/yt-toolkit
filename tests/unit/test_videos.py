@@ -955,6 +955,7 @@ def test_recent_orders_by_opened_at_desc_with_expected_fields(
     assert items[0] == {
         "videoId": ZOO,
         "title": "Me at the zoo",
+        "channel": "jawed",
         "thumbnailUrl": "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg",
         "durationS": 19,
         "outputs": [],

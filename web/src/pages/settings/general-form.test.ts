@@ -5,7 +5,15 @@ import { ApiError } from "@/lib/api"
 import { PRESETS } from "@/lib/sub-options"
 import type { Settings } from "@/lib/types"
 
-import { CAPTURE_QUALITIES, choicePatch, displayed, languageOptions, outputDirPatch, serverMessage } from "./general-form"
+import {
+  CAPTURE_QUALITIES,
+  choicePatch,
+  displayed,
+  FILENAME_STYLES,
+  languageOptions,
+  outputDirPatch,
+  serverMessage,
+} from "./general-form"
 
 const SAVED: Settings = {
   outputDir: "C:\\Users\\u\\Videos\\YT-Toolkit",
@@ -39,6 +47,26 @@ describe("outputDirPatch", () => {
   })
   it("ที่อยู่แบบสัมพัทธ์ยังส่งไปให้เซิร์ฟเวอร์ตัดสิน", () => {
     expect(outputDirPatch("abc", SAVED.outputDir)).toEqual({ outputDir: "abc" })
+  })
+})
+
+describe("M6 รอบ A: รูปแบบชื่อไฟล์", () => {
+  it("สามแบบตามลำดับ BRD FR-OUT-8 มีป้ายไทยครบ", () => {
+    expect(FILENAME_STYLES).toEqual(["title", "title-channel", "title-quality"])
+    expect(FILENAME_STYLES.map((s) => th.general.filenameStyles[s])).toEqual([
+      "ชื่อคลิป",
+      "ชื่อคลิป - ช่อง",
+      "ชื่อคลิป (คุณภาพ)",
+    ])
+  })
+
+  it("choicePatch ส่งเฉพาะ filenameStyle เมื่อเปลี่ยน · เท่าเดิม = null", () => {
+    expect(choicePatch("filenameStyle", "title-channel", SAVED)).toEqual({ filenameStyle: "title-channel" })
+    expect(choicePatch("filenameStyle", "title", SAVED)).toBeNull()
+  })
+
+  it("ระหว่างรอบันทึก ค่าที่แสดง (และบรรทัดตัวอย่าง) เป็นค่าที่เพิ่งเลือก", () => {
+    expect(displayed(SAVED, { filenameStyle: "title-quality" }).filenameStyle).toBe("title-quality")
   })
 })
 

@@ -327,7 +327,7 @@ def build(
         for stale in parent.glob(f"{FOLDER}.tmp-*"):  # ซากจากรอบที่โปรเซสตายกลางคัน
             shutil.rmtree(stale, ignore_errors=True)
         tmp = parent / f"{FOLDER}.tmp-{uuid.uuid4().hex}"
-        tmp.mkdir()
+        tmp.mkdir(parents=True)  # a clear may have moved the clip folder away meanwhile
         try:
             index = _build_into(tmp, sb, frames, fetch, max_workers)
             if target.exists():  # โฟลเดอร์เก่าที่ index เสีย/ไฟล์เฟรมหาย

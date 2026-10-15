@@ -1206,6 +1206,7 @@ class _NoteCtx:
         self.job_id = job_id
         self.workdir = workdir
         self.output_root = output_root
+        self.filename_style = "title"  # M6 รอบ A: JobContext.filename_style
         workdir.mkdir(parents=True)
 
     def stage(self, stage: str) -> None:
@@ -2376,3 +2377,180 @@ def test_account_grace_can_be_shortened_only_in_fake_mode(monkeypatch, fake, raw
     else:
         monkeypatch.setenv(lifecycle.ACCOUNT_GRACE_ENV, raw)
     assert lifecycle.account_grace_s(fake) == expected
+
+
+
+# ---------- M6 รอบ A: ไฟล์ค้างของงานที่ตั้งชื่อแบบ title-channel / title-quality (spec 2.7) ----------
+
+CHANNEL = "Blender Studio"
+
+
+@pytest.mark.parametrize(
+    ("name", "ours"),
+    [
+        (f"{TITLE} - {CHANNEL}.mp4", True),
+        (f"{TITLE} - {CHANNEL} (2).mp4", True),
+        (f"{TITLE} - {CHANNEL} (ไม่มีเสียง).mp4", True),
+        (f"{TITLE} - {CHANNEL} - contact sheet.jpg", True),
+        (f"{TITLE} - {CHANNEL}.th.srt", True),
+        (f"{TITLE} - {CHANNEL}.note.md", True),
+        ("Big Bu - Blen (01.30-05.00).mp4.part", True),  # ตัดทั้งชื่อคลิปและชื่อช่อง
+        (f"{TITLE}.mp4", True),  # ชื่อช่องถูกทิ้งเมื่อยาวเกิน
+        (f"{TITLE} - notes.mp4", False),
+        (f"{TITLE} - {CHANNEL} notes.docx", False),
+        (f"{TITLE} (1080p).mp4", False),
+    ],
+)
+def test_title_channel_pattern(name, ours):
+    assert bool(lifecycle.toolkit_name_pattern(TITLE, style="title-channel", uploader=CHANNEL).fullmatch(name)) is ours
+
+
+@pytest.mark.parametrize(
+    ("name", "ours"),
+    [
+        (f"{TITLE} (1080p).mp4", True),
+        (f"{TITLE} (2160p) (2).mp4", True),
+        (f"{TITLE} (720p) (ไม่มีเสียง).mp4", True),
+        (f"{TITLE} (mp3 192k).mp3", True),
+        (f"{TITLE} (m4a 128k).m4a.part", True),
+        (f"{TITLE} (m4a).m4a", True),
+        (f"{TITLE} (mp3).mp3", True),  # mp3 ที่ไม่รู้ kbps (handlers._audio_quality)
+        (f"{TITLE} (wav).wav", True),
+        ("Big (1080p) (01.30-05.00).mp4", True),  # ชื่อถูกตัดเพราะส่วนท้ายยาว
+        (f"{TITLE}.mp4", True),  # ไม่รู้คุณภาพ = ไม่มีส่วนคุณภาพ
+        (f"{TITLE}.th.srt", True),
+        (f"{TITLE} - contact sheet.jpg", True),
+        (f"{TITLE} (1080).mp4", False),
+        (f"{TITLE} (flac 900k).mp3", False),
+        (f"{TITLE} - {CHANNEL}.mp4", False),
+    ],
+)
+def test_title_quality_pattern(name, ours):
+    assert bool(lifecycle.toolkit_name_pattern(TITLE, style="title-quality").fullmatch(name)) is ours
+
+
+def test_title_pattern_ignores_the_uploader():
+    plain = lifecycle.toolkit_name_pattern(TITLE)
+    assert lifecycle.toolkit_name_pattern(TITLE, style="title", uploader=CHANNEL).pattern == plain.pattern
+    assert lifecycle.toolkit_name_pattern(TITLE, style="title-channel", uploader="").fullmatch(f"{TITLE}.mp4")
+    with pytest.raises(ValueError):
+        lifecycle.toolkit_name_pattern(TITLE, style="channel")
+
+
+def _styled_sweep_env(paths, style: str, channel: str = CHANNEL):
+    db = Database(paths.db)
+    db.migrate()
+    db.execute(
+        "INSERT INTO videos (video_id, title, channel, probe_json, probed_at, opened_at) VALUES (?, ?, ?, '{}', 'x', 'x')",
+        ("aqz-KE-bpKQ", TITLE, channel),
+    )
+    store = JobStore(db)
+    root = (paths.data_root / "output").resolve()
+    folder = files.plan_output(root, TITLE, "aqz-KE-bpKQ", "", "mp4").parent
+    folder.mkdir(parents=True)
+    done, stopped = store.add([NewJob("aqz-KE-bpKQ", "video", {}, TITLE), NewJob("aqz-KE-bpKQ", "video", {}, TITLE)])
+    store.transition(done.id, "running", filename_style=style)
+    done_name = f"{TITLE} - {channel} (2).mp4" if style == "title-channel" else f"{TITLE} (1080p) (2).mp4"
+    (folder / done_name).write_bytes(b"")  # ไฟล์ผลลัพธ์ของงานที่เสร็จ (ว่างจริง) ห้ามลบ
+    store.transition(done.id, "done", outputs=(OutputFile(str(root), f"{folder.name}/{done_name}", 0, "video"),))
+    store.transition(stopped.id, "running", filename_style=style)
+    return db, store, root, folder, done_name
+
+
+def test_sweep_removes_leftovers_of_a_title_channel_job(paths):
+    db, store, root, folder, done_name = _styled_sweep_env(paths, "title-channel")
+    try:
+        leftovers = [f"{TITLE} - {CHANNEL}.mp4", "Big Bu - Blen (01.30-05.00).mp4.part", f"{TITLE} - {CHANNEL}.th.srt"]
+        for name in leftovers:
+            (folder / name).write_bytes(b"" if not name.endswith(".part") else b"half")
+        kept = {done_name: b"", f"{TITLE} - notes.mp4": b"user file", f"{TITLE} - {CHANNEL} (3).mp4": b"real video"}
+        for name, data in kept.items():
+            if not (folder / name).exists():
+                (folder / name).write_bytes(data)
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 3
+        assert sorted(p.name for p in folder.iterdir()) == sorted(kept)
+    finally:
+        db.close()
+
+
+def test_sweep_removes_leftovers_of_a_title_quality_job(paths):
+    db, store, root, folder, done_name = _styled_sweep_env(paths, "title-quality")
+    try:
+        for name in (f"{TITLE} (1080p).mp4", f"{TITLE} (mp3 192k).mp3", f"{TITLE} (m4a 128k).m4a.part"):
+            (folder / name).write_bytes(b"")
+        kept = {done_name: b"", f"{TITLE} (1080p) notes.docx": b""}
+        for name, data in kept.items():
+            if not (folder / name).exists():
+                (folder / name).write_bytes(data)
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 3
+        assert sorted(p.name for p in folder.iterdir()) == sorted(kept)
+    finally:
+        db.close()
+
+
+def test_two_jobs_of_one_clip_with_different_styles_are_both_swept(paths):
+    db, store, root, folder, done_name = _styled_sweep_env(paths, "title-channel")
+    try:
+        (other,) = store.add([NewJob("aqz-KE-bpKQ", "audio", {"format": "mp3"}, TITLE)])
+        store.transition(other.id, "running", filename_style="title-quality")
+        (folder / f"{TITLE} - {CHANNEL}.mp4").write_bytes(b"")
+        (folder / f"{TITLE} (mp3 192k).mp3").write_bytes(b"")
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 2
+        assert sorted(p.name for p in folder.iterdir()) == [done_name]
+    finally:
+        db.close()
+
+
+def test_a_job_from_before_m6_is_swept_with_the_title_pattern(paths):
+    db, store, root, folder, done_name = _styled_sweep_env(paths, "title")
+    try:
+        db.execute("UPDATE jobs SET filename_style = NULL")
+        (folder / f"{TITLE}.mp4").write_bytes(b"")
+        (folder / f"{TITLE} - {CHANNEL}.mp4").write_bytes(b"")  # ไม่ใช่ชื่อแบบ title: ไม่แตะ
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 1
+        assert (folder / f"{TITLE} - {CHANNEL}.mp4").exists()
+    finally:
+        db.close()
+
+
+def test_a_job_with_an_unknown_style_does_not_stop_the_sweep(paths, caplog):
+    db, store, root, folder, done_name = _styled_sweep_env(paths, "title-channel")
+    try:
+        (bad,) = store.add([NewJob("aqz-KE-bpKQ", "audio", {"format": "mp3"}, TITLE)])
+        store.transition(bad.id, "running", filename_style="bogus")
+        (folder / f"{TITLE} - {CHANNEL}.mp4").write_bytes(b"")
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+            assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 1
+        assert sorted(p.name for p in folder.iterdir()) == [done_name]
+        assert f"sweep_skip job={bad.id} reason=unknown_style" in caplog.text
+    finally:
+        db.close()
+
+
+def test_a_channel_with_regex_characters_and_thai_is_matched_literally(paths):
+    channel = "ครัว (บ้าน) [เรา]+"
+    db, store, root, folder, done_name = _styled_sweep_env(paths, "title-channel", channel)
+    try:
+        for name in (f"{TITLE} - {channel}.mp4", f"{TITLE} - {channel}.th.srt"):
+            (folder / name).write_bytes(b"")
+        # ถ้าชื่อช่องไม่ถูก escape "(บ้าน)" จะเป็นกลุ่ม และ "[เรา]+" จะเป็นชุดตัวอักษร: ชื่อนี้จะตรงและถูกลบผิด
+        kept = {done_name: b"", f"{TITLE} - ครัว บ้าน เราาา.mp4": b""}
+        for name, data in kept.items():
+            if not (folder / name).exists():
+                (folder / name).write_bytes(data)
+        stranded = [job.id for job in store.running()]
+        store.interrupt_running("หยุดกลางคัน")
+        assert lifecycle.sweep_interrupted_outputs(store, paths.data_root / "output", stranded) == 2
+        assert sorted(p.name for p in folder.iterdir()) == sorted(kept)
+    finally:
+        db.close()

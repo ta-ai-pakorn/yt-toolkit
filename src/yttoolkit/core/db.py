@@ -16,10 +16,12 @@ from .inputs import VIDEO_ID
 
 log = logging.getLogger("yttoolkit")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # v2: ไม่มี foreign key ไป videos (W3 เข้าคิวคลิปที่ยังไม่เคย probe ได้) และมีช่องของงาน M4 เพิ่ม
-_JOBS = """
+# แช่แข็งไว้ตามที่เป็นตอน v2: _MIGRATIONS[2] ต้องสร้างตารางแบบ v2 เสมอ ไม่งั้นอัปเกรด v1 -> v2 -> v3
+# จะได้คอลัมน์ของ v3 ตั้งแต่ขั้น 2 แล้ว ALTER ของขั้น 3 ล้ม (duplicate column)
+_JOBS_V2 = """
 CREATE TABLE jobs (
   id            TEXT PRIMARY KEY,
   video_id      TEXT NOT NULL,
@@ -42,6 +44,36 @@ CREATE TABLE jobs (
   created_at    TEXT NOT NULL,
   started_at    TEXT,
   finished_at   TEXT
+);
+CREATE INDEX jobs_status_position ON jobs(status, position);
+CREATE INDEX IF NOT EXISTS jobs_video ON jobs(video_id, status);
+"""
+
+# v3 (M6 รอบ A): filename_style = รูปแบบชื่อไฟล์ ณ ตอนเริ่มงานครั้งแรก (NULL = ยังไม่เริ่ม หรืองานก่อน M6 = "title")
+_JOBS = """
+CREATE TABLE jobs (
+  id            TEXT PRIMARY KEY,
+  video_id      TEXT NOT NULL,
+  title         TEXT NOT NULL DEFAULT '',
+  kind          TEXT NOT NULL,
+  params_json   TEXT NOT NULL,
+  status        TEXT NOT NULL,
+  stage         TEXT,
+  progress      REAL,
+  speed_bps     INTEGER,
+  eta_s         INTEGER,
+  attempt       INTEGER NOT NULL DEFAULT 0,
+  bot_checks    INTEGER NOT NULL DEFAULT 0,
+  position      INTEGER NOT NULL,
+  error_code    TEXT,
+  error_message TEXT,
+  error_detail  TEXT,
+  notes_json    TEXT,
+  outputs_json  TEXT,
+  created_at    TEXT NOT NULL,
+  started_at    TEXT,
+  finished_at   TEXT,
+  filename_style TEXT
 );
 CREATE INDEX jobs_status_position ON jobs(status, position);
 CREATE INDEX IF NOT EXISTS jobs_video ON jobs(video_id, status);
@@ -75,10 +107,14 @@ _MIGRATIONS: dict[int, str] = {
     2: f"""
 DROP INDEX IF EXISTS jobs_status_position;
 ALTER TABLE jobs RENAME TO jobs_v1;
-{_JOBS}
+{_JOBS_V2}
 INSERT INTO jobs ({_V1_JOB_COLUMNS}) SELECT {_V1_JOB_COLUMNS} FROM jobs_v1;
 DROP TABLE jobs_v1;
 UPDATE schema_version SET version = 2;
+""",
+    3: """
+ALTER TABLE jobs ADD COLUMN filename_style TEXT;
+UPDATE schema_version SET version = 3;
 """,
 }
 
@@ -203,20 +239,33 @@ def purge_stale_cache(db: Database, cache_root: Path, now: datetime, days: int =
     return removed
 
 
+def cache_folder(root: Path, name: str) -> Path | None:
+    """โฟลเดอร์ cache ของคลิป `<root>/<name>` (resolve แล้ว) เมื่อ name เป็นรหัสคลิปที่ถูกรูป และยังอยู่ใต้ root
+    (ไม่ใช่ root เอง) · ไม่ผ่าน = None ผู้เรียกต้องไม่แตะดิสก์ · root ต้อง resolve มาแล้ว
+    ที่เดียวที่ตัดสินว่าชื่อไหนเป็นโฟลเดอร์ cache ที่แอพสร้าง (ล้าง cache เก่า และปุ่มล้างข้อมูลชั่วคราว M6 รอบ A)
+    งานในอนาคต (เว็บอื่น C12): เปลี่ยนการตรวจ VIDEO_ID ตรงนี้เป็นตัวตรวจ cache key ที่เดียว"""
+    if not VIDEO_ID.fullmatch(name):
+        return None
+    folder = (root / name).resolve()
+    if folder == root or not folder.is_relative_to(root):
+        return None
+    return folder
+
+
 def _remove_cache_folder(root: Path, video_id: str) -> bool:
     """คืน True เมื่อไม่มีโฟลเดอร์เหลือค้าง (ลบแล้ว ไม่มี หรือ id ผิดรูปจึงไม่แตะดิสก์)"""
     if not VIDEO_ID.fullmatch(video_id):
         log.warning("ข้ามการลบโฟลเดอร์ cache: video_id รูปแบบไม่ถูกต้อง %r", video_id)
         return True
-    folder = (root / video_id).resolve()
-    if folder == root or not folder.is_relative_to(root):
-        log.warning("ข้ามการลบโฟลเดอร์ cache: %s อยู่นอก %s", folder, root)
+    folder = cache_folder(root, video_id)
+    if folder is None:
+        log.warning("cache_skip reason=outside_root")
         return True
     if not folder.exists():
         return True
     try:
         shutil.rmtree(folder)
     except OSError as e:
-        log.warning("ลบโฟลเดอร์ cache ไม่ได้ %s: %s", folder, e)
+        log.warning("cache_skip reason=remove_failed errno=%s", e.errno)
         return False
     return True

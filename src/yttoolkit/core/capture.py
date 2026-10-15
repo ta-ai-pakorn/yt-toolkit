@@ -22,7 +22,8 @@ import shutil
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -197,14 +198,23 @@ class CaptureService:
         self._now = now
         self._accounts = accounts  # M5 รอบ C: ลองซ้ำด้วยบัญชีชั่วคราว (ทั้งการอ่านคลิปและการโหลดชิ้นภาพ)
         self._busy = threading.Lock()  # ถ่ายได้ครั้งละภาพทั้งแอพ (ไม่รอ: ถือไว้อยู่ = E_CAPTURE_BUSY)
-        self._guard = threading.Lock()
+        self._guard = threading.Lock()  # ห้ามถือแล้วเรียกออกไปนอกบริการ (ลำดับล็อก: คิว -> _guard)
         self._clip_locks: dict[str, threading.Lock] = {}
+        # M6 รอบ A: การถ่ายที่กำลังทำ (รหัสคลิป, ชื่อโฟลเดอร์ทำงานใน work/) ปุ่มล้างข้อมูลชั่วคราวข้ามสองที่นี้
+        self._current: tuple[str, str] | None = None
 
     # ---------- ที่เก็บ ----------
 
     def _clip_lock(self, video_id: str) -> threading.Lock:
         with self._guard:
             return self._clip_locks.setdefault(video_id, threading.Lock())
+
+    @contextmanager
+    def hold_active(self) -> Iterator[tuple[str, str] | None]:
+        """ถือ _guard ตลอดบล็อกแล้วให้ (รหัสคลิป, ชื่อโฟลเดอร์ทำงาน) ของการถ่ายที่กำลังทำ ไม่มี = None
+        การถ่ายที่จะเริ่มระหว่างบล็อกรอจนปล่อย (ไม่กี่มิลลิวินาที) จึงไม่สร้างโฟลเดอร์ทำงานแทรกกลาง"""
+        with self._guard:
+            yield self._current
 
     def _folder(self, video_id: str) -> Path:
         return self._cache_root / video_id / CAPTURE_FOLDER
@@ -278,20 +288,24 @@ class CaptureService:
             raise YtError("E_FFMPEG_MISSING")
         if not self._busy.acquire(blocking=False):
             raise YtError("E_CAPTURE_BUSY", "another capture is running")
+        tmp = self._work_root / f"capture-{uuid.uuid4().hex}"
+        with self._guard:
+            self._current = (video_id, tmp.name)  # ก่อนสร้างโฟลเดอร์ทำงาน: ปุ่มล้างข้อมูลชั่วคราวเห็นเสมอ
         try:
             existing = self._existing(video_id, t_ms)
             if existing is not None:
                 return existing, False
-            return self._capture_locked(video_id, str(info.get("title") or ""), t_ms), True
+            return self._capture_locked(video_id, str(info.get("title") or ""), t_ms, tmp), True
         except YtError as exc:
             self._brake_on_bot_check(exc)
             log.warning("ถ่ายภาพคม %s ไม่สำเร็จ (%s)", video_id, exc.code)
             raise
         finally:
+            with self._guard:
+                self._current = None
             self._busy.release()
 
-    def _capture_locked(self, video_id: str, title: str, t_ms: int) -> Capture:
-        tmp = self._work_root / f"capture-{uuid.uuid4().hex}"
+    def _capture_locked(self, video_id: str, title: str, t_ms: int, tmp: Path) -> Capture:
         try:
             try:
                 tmp.mkdir(parents=True)

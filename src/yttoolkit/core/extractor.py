@@ -540,14 +540,14 @@ def _media_path(result: object, workdir: Path) -> Path:
 
 
 def _downloaded_facts(result: object) -> MediaFacts | None:
-    """ขนาดภาพและช่วงสีของไฟล์ที่โหลดจริง: requested_downloads ตัวสุดท้าย (yt-dlp รวมค่าของภาพไว้ให้ตอนรวมไฟล์)
-    หรือผลระดับบน · ไม่รู้ความสูง = None"""
+    """ขนาดภาพ ช่วงสี และ bitrate เสียงของไฟล์ที่โหลดจริง: requested_downloads ตัวสุดท้าย (yt-dlp รวมค่าของภาพไว้ให้
+    ตอนรวมไฟล์) หรือผลระดับบน · ไม่รู้ทั้งความสูงและ bitrate เสียง = None (M6 รอบ A: ไฟล์เสียงอย่างเดียวมีแค่ bitrate)"""
     if not isinstance(result, dict):
         return None
     downloads = result.get("requested_downloads")
     source = downloads[-1] if isinstance(downloads, list) and downloads and isinstance(downloads[-1], dict) else result
     facts = media_facts(source)
-    return facts if facts.height is not None else None
+    return facts if facts.height is not None or facts.abr_kbps is not None else None
 
 
 class YtDlpExtractor:

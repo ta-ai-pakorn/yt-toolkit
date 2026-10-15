@@ -120,7 +120,29 @@ def test_scope_all_includes_never_opened_clip_with_done_job(env):
     zoo = body["items"][0]
     assert zoo["outputs"] == ["video"]
     assert zoo["lastAt"] == stamp(T0 + timedelta(hours=2))  # ไม่เคยเปิด = เวลางานเสร็จ
-    assert set(zoo) == {"videoId", "title", "thumbnailUrl", "durationS", "outputs", "lastAt"}
+    assert set(zoo) == {"videoId", "title", "channel", "thumbnailUrl", "durationS", "outputs", "lastAt"}
+
+
+# ---------- M6 รอบ A: ชื่อช่อง (ตัวอย่างชื่อไฟล์แบบ title-channel ในหน้าตั้งค่า) ----------
+
+
+@pytest.mark.parametrize("scope", ["opened", "all"])
+def test_items_carry_the_channel(env, scope):
+    client, clock, _ = env
+    client.get(f"/api/videos/{BBB}")
+    clock.advance(minutes=1)
+    client.get(f"/api/videos/{THAI}")
+    items = client.get("/api/history", params={"scope": scope}).json()["items"]
+    assert [(i["videoId"], i["channel"]) for i in items] == [(THAI, "KOD THAI"), (BBB, "Blender")]
+
+
+def test_an_unknown_channel_is_an_empty_string(env):
+    client, _, _ = env
+    client.get(f"/api/videos/{BBB}")
+    env_db = client.app.state.ctx.db
+    env_db.execute("UPDATE videos SET channel = NULL WHERE video_id = ?", (BBB,))
+    (item,) = client.get("/api/history", params={"scope": "opened"}).json()["items"]
+    assert item["channel"] == ""
 
 
 def test_default_scope_is_all(env):

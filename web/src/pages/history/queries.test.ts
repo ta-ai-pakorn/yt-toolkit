@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import type { HistoryItem, HistoryPage } from "@/lib/types"
 
-import { HISTORY_PAGE_SIZE, historyPath, historyQuery, nextHistoryOffset, outputLabels } from "./queries"
+import { HISTORY_PAGE_SIZE, historyPath, historyQuery, nextHistoryOffset, outputLabels, RECENT_LIMIT, recentQuery } from "./queries"
 
 const item = (n: number): HistoryItem => ({
   videoId: `video${n}`,
   title: `คลิป ${n}`,
+  channel: "",
   thumbnailUrl: "",
   durationS: 10,
   outputs: [],
@@ -64,6 +65,14 @@ describe("historyQuery", () => {
     const next = options.getNextPageParam as (last: HistoryPage, pages: HistoryPage[], p: number, ps: number[]) => number | undefined
     expect(next(page(50, 70), [page(50, 70)], 0, [0])).toBe(50)
     expect(next(page(20, 70), [page(50, 70), page(20, 70)], 50, [0, 50])).toBeUndefined()
+  })
+})
+
+describe("recentQuery", () => {
+  it("คีย์เดิมของ W1 'ล่าสุด' (5 คลิป scope=opened) หน้าตั้งค่าใช้ตัวเดียวกันจึงได้ cache เดียวกัน", () => {
+    expect(RECENT_LIMIT).toBe(5)
+    expect(recentQuery().queryKey).toEqual(["history", { limit: 5, scope: "opened" }])
+    expect(recentQuery(1).queryKey).toEqual(["history", { limit: 1, scope: "opened" }])
   })
 })
 
