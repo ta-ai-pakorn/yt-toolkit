@@ -168,3 +168,9 @@ def test_result_has_no_title_or_path(db):
     text = json.dumps(compute(db, None, NOW), ensure_ascii=False)
     for leak in ("ชื่อคลิปลับ", "secret-root", "C:/", ".bin"):
         assert leak not in text
+
+
+def test_non_string_kind_is_skipped_not_fatal(db):
+    add(db, "A", "2026-10-02T03:00:00+00:00", [out("video", 7), {"kind": ["video"], "sizeBytes": 5}, {"kind": {"a": 1}, "sizeBytes": 5}])
+    stats = compute(db, None, NOW)
+    assert (stats["clips"], stats["files"], stats["totalBytes"]) == (1, 1, 7)

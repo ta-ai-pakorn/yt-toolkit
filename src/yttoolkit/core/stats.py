@@ -54,7 +54,8 @@ def _outputs(raw: object) -> list[tuple[str, int]]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        group = KIND_GROUP.get(item.get("kind"))  # type: ignore[arg-type]
+        kind = item.get("kind")
+        group = KIND_GROUP.get(kind) if isinstance(kind, str) else None
         if group is None:
             continue
         size = item.get("sizeBytes")

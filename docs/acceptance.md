@@ -174,7 +174,7 @@
 ## M6 รอบ C (สถิติของฉัน · นับในเครื่อง ไม่ส่งออก)
 | AC | ขั้นตอน | ผ่าน |
 |---|---|---|
-| AC-STAT-01 | ตาราง `jobs` ตัวอย่าง (done 5 งานจาก 3 คลิป ใน 2 เดือน, failed 2, cancelled 1) → `GET /stats` ได้ 3 คลิป 5 ไฟล์ ขนาดรวมเท่าผลรวม `size_bytes` · `byMonth` แบ่งตามเดือนของ `finished_at` เวลาไทย (+07:00) · `byKind` เรียงจากมากไปน้อย (เทส: `tests/unit/test_stats.py::test_ac_stat_01_counts_done_jobs_only`) | ☐ |
+| AC-STAT-01 | ตาราง `jobs` ตัวอย่าง (done 5 งานจาก 3 คลิป ใน 2 เดือน, failed 2, cancelled 1) → `GET /stats` ได้ 3 คลิป 5 ไฟล์ ขนาดรวมเท่าผลรวม `sizeBytes` ใน `outputs_json` · `byMonth` แบ่งตามเดือนของ `finished_at` เวลาไทย (+07:00) · `byKind` เรียงจากมากไปน้อย (เทส: `tests/unit/test_stats.py::test_ac_stat_01_counts_done_jobs_only`) | ☐ |
 | AC-STAT-02 | เปิดแท็บ "สถิติของฉัน" → ทุกคำขอของหน้าเว็บไปที่ `127.0.0.1:<port>` เท่านั้น (ตรวจจาก network log ของ Playwright) และ `/stats` ตอบได้ตอนตัดเน็ต (เทส: `tests/api/test_stats_api.py::test_ac_stat_02_answers_with_the_network_cut` + `web/e2e/settings-stats.spec.ts` "AC-STAT-02") | ☐ |
 | AC-STAT-03 | กด "ล้างสถิติ" แล้วยืนยัน → `/stats` เป็น 0 ทุกค่าและมี `since` · `/history`, งานในคิว และไฟล์ผลลัพธ์ไม่เปลี่ยน · งานที่เสร็จหลังจากนั้นถูกนับ (เทส: `tests/api/test_stats_api.py::test_ac_stat_03_reset_zeroes_and_keeps_everything_else`) | ☐ |
 | AC-STAT-04 | ยังไม่มีงานที่เสร็จ → แท็บแสดง Empty "ยังไม่มีสถิติ" (เทส: `web/e2e/settings-stats.spec.ts` "AC-STAT-04") | ☐ |
