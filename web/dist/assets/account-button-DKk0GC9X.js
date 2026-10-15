@@ -1,1 +1,0 @@
-import{Cn as e,Lt as t,Rt as n,ni as r,v as i}from"./skeleton-CYgl_Lm_.js";var a=r();function o({onImported:r,origin:o=`error`,variant:s=`outline`,size:c=`sm`,className:l}){return(0,a.jsxs)(n,{variant:s,size:c,className:l,onClick:()=>i({origin:o,onImported:r}),children:[(0,a.jsx)(e,{"aria-hidden":!0}),t.account.use]})}export{o as t};
