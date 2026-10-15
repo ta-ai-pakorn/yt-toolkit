@@ -25,7 +25,7 @@ These are binding. They come from Pete's answers to Q1-Q3 and the approved appro
 |---|---|---|
 | D1 | **"วาง" replaces the box content** (Q1 = A). A YouTube link starts analysis at once; other text is only filled in. `readText()` is called only on click. Denied or unsupported → the PRD hint under the box + focus the box; no red error, no toast. | §1 |
 | D2 | **Clear temporary data** (Q2 = A) clears `data/cache/<id>/` (storyboard, sharp, captures, subs, `pinned.json`) and stale `work/` dirs (`work/<jobId>`, `work/capture-*`). It never deletes the cache or work of an active job or capture, outputs, `app.db` (history, videos, settings), the visitor session (`data/visitor-session.*`) or `run/logs`. Reopening an old clip re-fetches its frames; every cache reader must tolerate a missing folder. | §3 |
-| D3 | **Which files get the style** (Q3 = A). `title-channel`: every title-based file of a clip (video, audio, subtitles `.lang`, note `.note`, contact sheet, frames zip). `title-quality`: only video and audio, as `(1080p)` / `(mp3 192k)`; other kinds keep the plain title + their suffix. Unchanged: chapter-split files, captures, the sharp-frames dir and the clip folder `<title> [<id>]`. Too long → cut the title first, then the channel; never the quality part or the extension. FR-OUT-2 rules; path ≤ 240. | §2 |
+| D3 | **Which files get the style** (Q3 = A). `title-channel`: every title-based file of a clip (video, audio, subtitles `.lang`, note `.note`, contact sheet, frames zip). `title-quality`: only video and audio, as `(1080p)` / `(mp3 192k)`; other kinds keep the plain title + their suffix. Unchanged: chapter-split files, captures, the sharp-frames dir and the clip folder `<title> [<id>]`. Too long → cut the title first, then the channel; never the quality part or the extension, except in the clip-id fallback when the output folder is too deep for any title; there the name is the same as the `title` style (Pete 2026-10-15, Q5 = A). FR-OUT-2 rules; path ≤ 240. | §2 |
 | D4 | **The job snapshots the style when it starts**; the snapshot stays on the job so a retry keeps the name and the leftover sweep still finds files. Changing the style mid-run does not rename a running job. | §2.4 |
 | D5 | **The example is computed in the web without an API call** (AC-OUT-10), by a TS mirror of the Python rules with shared fixture parity tests. It uses the latest opened clip's title, else the PRD's Thai sample. | §2.6 |
 | D6 | **Backup / import:** `GET /settings/export` (attachment `yt-toolkit-settings-YYYY-MM-DD.json`, `{app, schema:1, exportedAt, settings}`, no `statsResetAt`, cookies, history or stats). `POST /settings/import`: token, 1 MB cap (413), all-or-nothing validation (non-JSON, `app` ≠ `yt-toolkit`, bad type → 422 `E_SETTINGS_INVALID`, nothing changes), unknown keys skipped, unwritable `outputDir` keeps the old value + `warnings: ["outputDir"]`, returns `{settings, warnings}`, fires the `on_output_dir` hook. `E_SETTINGS_INVALID` goes into `MESSAGES` and `th` with the PRD text. | §4 |
@@ -141,7 +141,7 @@ export function truncateTitle(text: string, limit: number): string
 4. `t = safe_component(title, clip_id)`.
 5. `budget = PATH_LIMIT - (base_len + 1) - _u16(f" [{clip_id}]") - 1 - TAIL_RESERVE - UNIQUE_RESERVE`; `cap = budget // 2` — exactly `plan_output :113-114` today.
 6. `short = truncate_title(t, min(TITLE_MAX, cap))` when `cap >= _MIN_TITLE`, else `""`.
-7. **Fallback** (`short == ""`): folder = `clip_id`, file = `clip_id + tail` (the quality part is kept, the channel dropped). Go to step 10.
+7. **Fallback** (`short == ""`): folder = `clip_id`, file = `clip_id + suffix + "." + ext` (the quality part and the channel are dropped, so the name is the same as the `title` style; Pete 2026-10-15, Q5 = A). Go to step 10.
 8. Folder = `f"{short} [{clip_id}]"` (style never changes it). `avail = budget - _u16(short) + TAIL_RESERVE - _u16(tail)` — the stem room, equal to today's `file_cap`.
 9. Stem:
    - `c = safe_component(uploader, "")` when `style == "title-channel"`, else `""`.
@@ -420,7 +420,7 @@ While the canary account is held: call `GET /settings/export` and assert that th
   - `general-form.test.ts`: `filenameStyle` in `choicePatch`.
 - **Chromium e2e** (project `chromium`, API mocked with `page.route`, **no real jobs**):
   - `web/e2e/home-paste.spec.ts`: grant `clipboard-read` → write a link → "วาง" → the box holds the link and `/api/resolve` is called (AC-IN-08); plain text → filled, no resolve; spy on `navigator.clipboard.readText` via `addInitScript` and assert 0 calls before the click; deny (`addInitScript` making `readText` reject with `NotAllowedError`) and remove `readText` → the hint text, the box focused, no `role="alert"`, no toast (AC-IN-09); at 640 px the addon row does not overflow.
-  - `web/e2e/settings-local-data.spec.ts`: change the style → the example changes with **no** request to `/api/*` after the change apart from the `PATCH /api/settings` save (AC-OUT-10: count requests); mock `/api/history?…scope=opened` with and without an item; clear: button shows the mocked size, dialog title, "ล้างเลย" → `POST /api/storage/clear` → toast "ล้างแล้ว ได้พื้นที่คืน …"; cancel sends nothing; export → a download event with the dated name; import a valid file → toast "บันทึกแล้ว" and the new values on screen; import → mocked 422 → error toast with the copy-report button; a 2 MB file → no request, `E_SETTINGS_INVALID` toast.
+  - `web/e2e/settings-local-data.spec.ts`: change the style → the example changes with **no** request to `/api/*` after the change apart from the `PATCH /api/settings` save (AC-OUT-10: count requests); mock `/api/history?…scope=opened` with and without an item; clear: button shows the mocked size, dialog title, "ล้างเลย" → `POST /api/storage/clear` → toast "ล้างแล้ว ได้พื้นที่คืน …"; cancel sends nothing; export → a download event with the dated name; import a valid file → toast "นำเข้าค่าตั้งแล้ว" and the new values on screen; import → mocked 422 → error toast with the copy-report button; a 2 MB file → no request, `E_SETTINGS_INVALID` toast.
   - **Axe** (`analyzeSettled`): light and dark on the General tab with the new section and on the open dialog; the W1 page with the paste hint shown.
   - **640 px:** `document.documentElement.scrollWidth <= 640` on the General tab with a 300-character example and on W1 with the hint.
 
@@ -476,7 +476,7 @@ Sizes use the existing `formatBytes` (`GB` with one decimal, `MB`), matching the
 
 ## 11. Spec questions (all answered by Pete, 2026-10-14)
 
-All four are answered and folded into the sections shown. The drafts are kept for the record.
+All five are answered and folded into the sections shown. The drafts are kept for the record.
 
 | # | Question | Draft(s) | Answer | Where |
 |---|---|---|---|---|
@@ -484,6 +484,7 @@ All four are answered and folded into the sections shown. The drafts are kept fo
 | Q2 | **Import success toast.** The spec reuses "บันทึกแล้ว" (W6 already uses it after every change). A dedicated line? | **A** keep `บันทึกแล้ว` · **B** `นำเข้าค่าตั้งแล้ว` | **B**: `นำเข้าค่าตั้งแล้ว` (`th.general.imported`) | §4.3, §9 |
 | Q3 | **Import warning when the folder in the file cannot be used here** (FR-SET-7 "คงโฟลเดอร์เดิมและบอกผู้ใช้"; no copy in PRD/BRD). Shown as a warning toast that stays until dismissed. | `นำเข้าค่าตั้งแล้ว แต่ใช้โฟลเดอร์ผลลัพธ์ในไฟล์บนเครื่องนี้ไม่ได้ จึงใช้โฟลเดอร์เดิมต่อ` | The draft as written (`th.general.importedKeptFolder`), a warning toast | §4.3, §6, §9, acceptance AC-SET-09 |
 | Q4 | **m4a quality label.** The spec uses the format name the staff pick plus the measured bitrate, e.g. `(m4a 130k)` (YouTube's ~129.5 kbps rounds to 130). Alternative: the nominal `(m4a 128k)` by rounding to the nearest of 48/64/96/128/160/256 k. Not Thai copy, but visible in every file name. | **A** measured, rounded: `(m4a 130k)` · **B** nominal: `(m4a 128k)` | **B**: nearest of 32/48/64/96/128/160/192/256/320, tie → higher, same function for mp3 | §2.3, §7.1, PRD §6.4 |
+| Q5 | **`title-quality` in the clip-id fallback** (final review I1, 2026-10-15). When the output folder is so deep that no title fits, the clip folder and file use the clip id. Keeping ` (1080p)` there would make the download fail with `E_OUTPUT_NOT_WRITABLE`. | **A** drop the quality part (same name as `title`, the download succeeds) · **B** keep it and accept the error | **A** (Pete, 2026-10-15) | D3, §2.2 step 7, PRD AC-OUT-09 |
 
 ## 12. Review focus (top 5 failure modes the tests may miss)
 
