@@ -472,3 +472,30 @@ def test_import_deletes_retired_rows_like_patch(db, store):
     db.execute("INSERT INTO settings (key, value_json) VALUES ('cookies', '{\"state\": \"none\"}')")
     store.import_settings(_doc({"theme": "dark"}))
     assert {key for key, _ in _rows(db)} == {"theme"}
+
+
+# ---------- M6 รอบ C: statsResetAt เขียนได้ทางเดียว (spec §2.1, C4) ----------
+
+
+def test_reset_stats_writes_only_stats_reset_at(store):
+    before = store.get()
+    since = store.reset_stats("2026-10-15T05:00:00+00:00")
+    assert since == "2026-10-15T05:00:00+00:00"
+    after = store.get()
+    assert after["statsResetAt"] == since
+    assert {k: v for k, v in after.items() if k != "statsResetAt"} == {
+        k: v for k, v in before.items() if k != "statsResetAt"
+    }
+
+
+def test_reset_stats_moves_forward_and_persists(db, tmp_path, store):
+    store.reset_stats("2026-10-15T05:00:00+00:00")
+    store.reset_stats("2026-10-16T05:00:00+00:00")
+    assert SettingsStore(db, tmp_path / "out").get()["statsResetAt"] == "2026-10-16T05:00:00+00:00"
+
+
+def test_stats_reset_at_stays_read_only_for_patch_and_export(store):
+    store.reset_stats("2026-10-15T05:00:00+00:00")
+    with pytest.raises(SettingsError):
+        store.patch({"statsResetAt": None})
+    assert "statsResetAt" not in store.exportable()
