@@ -334,7 +334,7 @@ export const th = {
   },
   settings: {
     title: "ตั้งค่า",
-    tabs: { health: "ตรวจสุขภาพระบบ", about: "เกี่ยวกับ", general: "ทั่วไป", advanced: "ขั้นสูง" },
+    tabs: { health: "ตรวจสุขภาพระบบ", about: "เกี่ยวกับ", general: "ทั่วไป", stats: "สถิติของฉัน", advanced: "ขั้นสูง" },
   },
   health: {
     status: { ok: "พร้อม", warn: "เตือน", error: "ใช้ไม่ได้" },
@@ -606,6 +606,26 @@ export const th = {
     settingsInvalid: 'ไฟล์นี้ไม่ใช่ไฟล์ค่าตั้งของ YT Toolkit หรือไฟล์เสียหาย ลองเลือกไฟล์ที่ได้จากปุ่ม "สำรองค่าตั้ง"',
     imported: "นำเข้าค่าตั้งแล้ว",
     importedKeptFolder: "นำเข้าค่าตั้งแล้ว แต่ใช้โฟลเดอร์ผลลัพธ์ในไฟล์บนเครื่องนี้ไม่ได้ จึงใช้โฟลเดอร์เดิมต่อ",
+  },
+  // M6 รอบ C (spec §7): แท็บสถิติของฉัน · PRD :309 :326 · ชื่อช่อง/ชนิด/toast = Pete Q3 = A
+  stats: {
+    clips: "คลิป",
+    files: "ไฟล์",
+    totalSize: "ขนาดรวม",
+    topKind: "ใช้บ่อยที่สุด",
+    topKindFiles: "{n} ไฟล์",
+    kinds: { video: "วิดีโอ", audio: "เสียง", subtitle: "ซับ", image: "ภาพ" },
+    month: "เดือน",
+    size: "ขนาด",
+    privacy: "คำนวณในเครื่องนี้เท่านั้น ไม่ส่งไปที่ไหน",
+    since: "นับตั้งแต่ {date}",
+    empty: "ยังไม่มีสถิติ",
+    reset: "ล้างสถิติ",
+    resetTitle: "เริ่มนับสถิติใหม่?",
+    resetBody: "ประวัติและไฟล์ที่โหลดไว้ยังอยู่ครบ",
+    resetCancel: "ยกเลิก",
+    resetConfirm: "ล้างสถิติ",
+    resetDone: "ล้างสถิติแล้ว",
   },
   errors: {
     downloadFailed: "โหลดไฟล์ไม่สำเร็จ ลองอีกครั้ง",
