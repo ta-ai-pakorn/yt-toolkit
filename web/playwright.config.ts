@@ -57,6 +57,11 @@ export default defineConfig({
       // spec ที่สร้างงานจริงในคิว (queue-*.spec.ts) แยก backend เพื่อไม่ให้คิวที่ค้างรบกวน spec อื่น
       name: "queue",
       use: { ...devices["Desktop Chrome"], baseURL: `http://127.0.0.1:${QUEUE_PORT}` },
+      // backend เดียวมีสถานะรวมทั้งแอพ: คิวพัก (ติดบอท) บัญชีชั่วคราว ตัวล็อกถ่ายภาพ และชื่อไฟล์ในโฟลเดอร์ออก
+      // spec ที่รันพร้อมกันจึงชนกันเอง (เช่นงานของ spec อื่นทำให้คิวไม่ว่าง queue-account จึงไม่เห็นบัญชีถูกลบเองหลัง grace
+      // หรือสองเทสต์ถ่ายภาพพร้อมกันได้ E_CAPTURE_BUSY)
+      // จำกัดไว้ที่ project นี้ ไม่ใช่แค่ใน npm run e2e: --workers ที่ส่งทับ (เช่น --workers=4) ไม่ทำให้ project นี้รันขนาน
+      workers: 1,
       testMatch: /queue-.*\.spec\.ts/,
     },
   ],

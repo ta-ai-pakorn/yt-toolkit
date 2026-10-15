@@ -38,6 +38,9 @@ async function openAndPlay(page: Page, videoId: string) {
   await page.getByRole("button", { name: "เล่นคลิป", exact: true }).click()
   await expect.poll(async () => (await fakeYTLog(page)).calls).toContain("play")
   await expect(page.locator('[data-slot="video-header"]')).toHaveAttribute("data-layout", "theater-wide")
+  // รอ view transition ของการขยายจบก่อนกด: ระหว่างนั้นชั้นภาพของ transition รับคลิกแทน Playwright จึงลองกดใหม่
+  // และครั้งที่ 4 เลื่อนจอให้ปุ่มชิดขอบบน (block "start") ช่องตัวเล่นพ้นจอเกินครึ่ง ตัวเล่นลอย แถวปุ่มใต้ตัวเล่นหายไป
+  await expect(page.locator("html[data-theater-switching]")).toHaveCount(0)
 }
 
 test("ถ่ายจริงกับ backend ปลอม: แถบ ไฟล์ในโฟลเดอร์ของคลิป เวลาเดิมได้ภาพเดิม และลบทั้งสองที่", async ({ page, request }) => {

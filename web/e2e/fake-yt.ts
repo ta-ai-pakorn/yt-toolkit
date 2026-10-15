@@ -1,4 +1,4 @@
-import type { Page, Request } from "@playwright/test"
+import { expect, type Page, type Request } from "@playwright/test"
 
 /**
  * YouTube IFrame API ปลอมสำหรับ e2e (M3.5): เทสต์ไม่ต่อยูทูปจริง
@@ -42,6 +42,7 @@ const FAKE_SCRIPT = String.raw`(function () {
     this.staleUntil = 0;
     this.staleValue = 0;
     this.plays = 0;
+    this.readsSinceSeek = 0;
     if (node.tagName !== "IFRAME") {
       var f = document.createElement("iframe");
       f.src = (this.opts.host || "https://www.youtube.com") + "/embed/" + (this.opts.videoId || "");
@@ -116,6 +117,7 @@ const FAKE_SCRIPT = String.raw`(function () {
   Player.prototype.seekTo = function (sec) {
     log.calls.push("seek");
     log.seeks.push(sec);
+    this.readsSinceSeek = 0;
     if (cfg.staleAfterSeekMs) {
       this.staleValue = this.now();
       this.staleUntil = performance.now() + cfg.staleAfterSeekMs;
@@ -124,8 +126,13 @@ const FAKE_SCRIPT = String.raw`(function () {
   };
   Player.prototype.getCurrentTime = function () {
     if (performance.now() < this.staleUntil) return this.staleValue;
+    this.readsSinceSeek += 1;
     this.checkEnded();
     return this.now();
+  };
+  /** เวลาเล่นเดินไปถึง sec เอง (ไม่ใช่ seek: ไม่บันทึกใน seeks) ใช้กับ playTo() ในเทสต์ */
+  Player.prototype.playTo = function (sec) {
+    this.base = Math.min(sec, this.duration()); this.since = performance.now();
   };
   Player.prototype.getDuration = function () { return this.duration(); };
   Player.prototype.getPlaybackRate = function () { return cfg.rate || 1; };
@@ -178,4 +185,27 @@ export async function fakeYTLog(page: Page): Promise<{ seeks: number[]; states: 
       ? { seeks: [...log.seeks], states: [...log.states], calls: [...log.calls], players: log.players.length }
       : { seeks: [], states: [], calls: [], players: 0 }
   })
+}
+
+type FakePlayerHandle = { readsSinceSeek: number; playTo(seconds: number): void }
+
+/**
+ * ให้ตัวเล่นปลอมตัวล่าสุด "เล่นถึง" เวลานี้ (วินาที) เหมือนเวลาเดินไปเอง ไม่นับเป็น seek
+ * ใช้คู่กับ rate ต่ำมาก (นาฬิกาแทบหยุด): แต่ละสถานะของแอพค้างอยู่จนเทสต์ตรวจเสร็จ ไม่ต้องแข่งกับเวลาที่เร่งไว้
+ * รอให้แอพอ่านเวลาหลัง seek ล่าสุดก่อน: adapter ทิ้งเวลาที่ห่างจากจุด seek เกินค่าที่ยอมรับ จนกว่าจะเห็นว่า seek ถึงแล้ว
+ * (การอ่านครั้งนั้นกับการยืนยัน seek เกิดใน tick เดียวกัน อ่านแล้ว = adapter รับเวลาถัดไปแน่นอน)
+ */
+export async function playTo(page: Page, seconds: number): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const players = (window as unknown as { __fakeYT: { players: FakePlayerHandle[] } }).__fakeYT.players
+        return (players.at(-1)?.readsSinceSeek ?? 0) > 0
+      }),
+    )
+    .toBe(true)
+  await page.evaluate((value) => {
+    const players = (window as unknown as { __fakeYT: { players: FakePlayerHandle[] } }).__fakeYT.players
+    players.at(-1)?.playTo(value)
+  }, seconds)
 }
