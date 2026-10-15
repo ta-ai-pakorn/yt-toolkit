@@ -202,7 +202,13 @@ class StorageService:
             moved = skipped = 0
             with self._hold() as active:
                 for root, cache in ((self._cache_root, True), (self._work_root, False)):
-                    targets = [e.path for e in self._list(root, active, cache=cache) if e.clearable]
+                    try:
+                        listed = self._list(root, active, cache=cache)
+                    except OSError:  # อ่าน root ไม่ได้ (เช่นสิทธิ์): ข้าม root นี้ แต่ยังลบถังขยะที่ย้ายไปแล้ว
+                        skipped += 1
+                        log.warning("storage_skip root=%s", "cache" if cache else "work")
+                        continue
+                    targets = [e.path for e in listed if e.clearable]
                     if not targets:
                         continue
                     trash = root / f"{TRASH_PREFIX}{uuid.uuid4().hex}"

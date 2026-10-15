@@ -325,3 +325,28 @@ def test_logs_have_no_paths_or_titles(env, caplog, monkeypatch):
     assert "storage_skip reason=PermissionError" in caplog.text
     assert str(paths.data_root) not in caplog.text and "คลิปลับ" not in caplog.text
     assert BBB not in caplog.text and ZOO not in caplog.text
+
+
+# ---------- M6-A final fix: a root that cannot be listed ----------
+
+
+def test_a_work_root_that_cannot_be_listed_is_skipped_and_the_cache_trash_still_goes(env, caplog, monkeypatch):
+    paths, _, _, service = env
+    sized(paths.cache / BBB / "storyboard" / "f.jpg", MB)
+    sized(paths.work / JOB / "f.part", MB)
+    real = os.scandir
+
+    def denied(path):
+        if Path(path) == paths.work:
+            raise PermissionError(13, f"denied {path}")
+        return real(path)
+
+    monkeypatch.setattr(storage_module.os, "scandir", denied)
+    with caplog.at_level(logging.DEBUG, logger="yttoolkit"):
+        freed = service.clear()
+    assert freed == MB
+    assert list(paths.cache.iterdir()) == []  # no stranded .clear-* trash
+    assert (paths.work / JOB / "f.part").is_file()
+    assert "storage_skip root=work" in caplog.text
+    assert "storage_clear freed=1000000 entries=1 skipped=1" in caplog.text
+    assert str(paths.data_root) not in caplog.text and str(paths.work) not in caplog.text
