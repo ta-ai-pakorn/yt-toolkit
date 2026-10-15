@@ -5,8 +5,8 @@ import type { Stats, StatsKind } from "@/lib/types"
 
 export const RESET_TOAST_ID = "stats-reset"
 
-const MONTH = new Intl.DateTimeFormat("th-TH", { month: "long", year: "numeric", timeZone: "UTC" })
-const SINCE = new Intl.DateTimeFormat("th-TH", { dateStyle: "long", timeZone: "Asia/Bangkok" })
+export const MONTH = new Intl.DateTimeFormat("th-TH", { month: "long", year: "numeric", timeZone: "UTC" })
+export const SINCE = new Intl.DateTimeFormat("th-TH", { dateStyle: "long", timeZone: "Asia/Bangkok" })
 const NUMBER = new Intl.NumberFormat("th-TH")
 
 export function kindLabel(kind: StatsKind): string {

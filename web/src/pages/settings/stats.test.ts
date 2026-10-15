@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import type { Stats } from "@/lib/types"
 
-import { count, isEmpty, kindLabel, monthLabel, sinceLabel, topKind } from "./stats"
+import { count, isEmpty, kindLabel, MONTH, monthLabel, SINCE, sinceLabel, topKind } from "./stats"
 
 const base: Stats = { since: null, clips: 0, files: 0, totalBytes: 0, byKind: [], byMonth: [] }
 
@@ -32,6 +32,11 @@ describe("stats model (M6 รอบ C spec §3.3)", () => {
     // 17:30 UTC = 00:30 ของวันถัดไปในเวลาไทย
     expect(sinceLabel("2026-10-14T17:30:00+00:00")).toBe("15 ตุลาคม 2569")
     expect(sinceLabel("2026-10-15T16:59:59+00:00")).toBe("15 ตุลาคม 2569")
+  })
+
+  it("ตรึงเขตเวลาไว้ ไม่ขึ้นกับเครื่อง (final review M2)", () => {
+    expect(MONTH.resolvedOptions().timeZone).toBe("UTC")
+    expect(SINCE.resolvedOptions().timeZone).toBe("Asia/Bangkok")
   })
 
   it("ตัวเลขมีคั่นหลักพัน", () => {

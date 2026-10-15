@@ -74,7 +74,7 @@ export function StatsPanel() {
       ) : (
         <>
           <Tiles stats={data} />
-          <Months stats={data} />
+          {data.byMonth.length > 0 && <Months stats={data} />}
         </>
       )}
       <div className="flex flex-col gap-1 text-sm text-muted-foreground">

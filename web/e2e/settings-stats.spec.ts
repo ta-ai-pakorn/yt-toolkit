@@ -80,6 +80,13 @@ test("ตัวเลข 4 ช่องและตารางรายเด�
   await expect(rows.nth(2)).toContainText("200 MB")
 })
 
+test("นับได้แต่ไม่มีเดือนในหน้าต่าง 12 เดือน = มีตัวเลข ไม่มีตาราง", async ({ page }) => {
+  await stubStats(page, { ...FILLED, byMonth: [] })
+  await page.goto("/settings/stats")
+  await expect(page.getByTestId("stats-tiles")).toContainText("1.4 GB")
+  await expect(page.getByRole("table")).toHaveCount(0)
+})
+
 test("AC-STAT-04: ไม่มีงานที่เสร็จ = ยังไม่มีสถิติ ไม่มีปุ่มล้าง", async ({ page }) => {
   await stubStats(page, EMPTY)
   await page.goto("/settings/stats")
