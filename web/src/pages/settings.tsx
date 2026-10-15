@@ -9,8 +9,9 @@ import { AboutPanel } from "./settings/about-panel"
 import { AdvancedPanel } from "./settings/advanced-panel"
 import { GeneralPanel } from "./settings/general-panel"
 import { HealthPanel } from "./settings/health-panel"
+import { StatsPanel } from "./settings/stats-panel"
 
-const TABS = ["general", "advanced", "health", "about"] as const
+const TABS = ["general", "advanced", "stats", "health", "about"] as const
 type Tab = (typeof TABS)[number]
 
 // แท็บที่ไม่ได้เลือก: สี muted ผ่านเกณฑ์ contrast บนพื้น bg-muted ทั้งธีมสว่างและมืด (ค่าเริ่มต้น text-foreground/60 ได้ 4.32:1
@@ -32,6 +33,7 @@ export function SettingsPage() {
         <TabsList>
           <TabsTrigger value="general" className={TRIGGER}>{th.settings.tabs.general}</TabsTrigger>
           <TabsTrigger value="advanced" className={TRIGGER}>{th.settings.tabs.advanced}</TabsTrigger>
+          <TabsTrigger value="stats" className={TRIGGER}>{th.settings.tabs.stats}</TabsTrigger>
           <TabsTrigger value="health" className={TRIGGER}>{th.settings.tabs.health}</TabsTrigger>
           <TabsTrigger value="about" className={TRIGGER}>{th.settings.tabs.about}</TabsTrigger>
         </TabsList>
@@ -40,6 +42,9 @@ export function SettingsPage() {
         </TabsContent>
         <TabsContent value="advanced" className="pt-4">
           <AdvancedPanel />
+        </TabsContent>
+        <TabsContent value="stats" className="pt-4">
+          <StatsPanel />
         </TabsContent>
         <TabsContent value="health" className="pt-4">
           <HealthPanel onShutdown={() => setClosed(true)} />
