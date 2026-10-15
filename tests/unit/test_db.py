@@ -585,3 +585,18 @@ def test_cache_folder_accepts_only_video_id_folders_inside_the_root(tmp_path: Pa
     assert db_module.cache_folder(root, "aqz-KE-bpKQ") == root / "aqz-KE-bpKQ"
     for bad in ("..", "../x", "a/b", "a\\b", "short", "toolongvideoid1", "", ".clear-" + "a" * 32, "storyboard"):
         assert db_module.cache_folder(root, bad) is None, bad
+
+
+# ---------- M6-A final fix: C4 ----------
+
+
+def test_purge_skip_for_folder_outside_root_logs_no_path(db: Database, tmp_path: Path, monkeypatch, caplog):
+    cache = tmp_path / "cache"
+    add_video(db, "oldvideo001", NOW - timedelta(days=40))
+    make_cache(cache, "oldvideo001")
+    # a symlinked id folder resolves outside data/cache (symlinks need admin on Windows, so fake the check)
+    monkeypatch.setattr(db_module, "cache_folder", lambda root, name: None)
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        assert purge_stale_cache(db, cache, NOW) == 1
+    assert "cache_skip reason=outside_root" in caplog.text
+    assert str(tmp_path) not in caplog.text and "oldvideo001" not in caplog.text

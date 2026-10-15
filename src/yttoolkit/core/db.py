@@ -259,7 +259,7 @@ def _remove_cache_folder(root: Path, video_id: str) -> bool:
         return True
     folder = cache_folder(root, video_id)
     if folder is None:
-        log.warning("ข้ามการลบโฟลเดอร์ cache: %s อยู่นอก %s", root / video_id, root)
+        log.warning("cache_skip reason=outside_root")
         return True
     if not folder.exists():
         return True
