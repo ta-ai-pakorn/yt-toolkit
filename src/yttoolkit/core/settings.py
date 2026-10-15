@@ -235,6 +235,11 @@ class SettingsStore:
             ensure_writable(Path(clean["outputDir"]))
         return self._save(clean)
 
+    def reset_stats(self, now_iso: str) -> str:
+        """M6 รอบ C (FR-STAT-4): ทางเดียวที่เขียน statsResetAt ได้ (patch/import ยังปฏิเสธ/ข้าม key นี้)
+        ไม่แตะ key อื่น งาน ประวัติ หรือไฟล์ · คืนค่าที่บันทึก"""
+        return self._save({"statsResetAt": now_iso})["statsResetAt"]
+
     def _save(self, clean: Mapping[str, Any]) -> dict:
         """เขียนทุก key ที่ตรวจแล้วในธุรกรรมเดียว (ลบ key ที่เลิกใช้ไปด้วย) แล้วคืนค่าตั้งทั้งหมด
         outputDir เปลี่ยน = เรียก on_output_dir นอกล็อก (ต่อสายตัวปิด path ใน log)"""
