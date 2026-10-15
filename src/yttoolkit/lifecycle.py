@@ -83,8 +83,8 @@ _SWEEP_SUB_EXTS = ("srt", "txt", "md")
 # M5 รอบ A: ส่วนต่อท้ายช่วงเวลา " (01.30-05.00)" / " (1.02.30-1.05.00)" (core/advanced.range_suffix)
 _RANGE_SUFFIX = r" \((?:\d{2}\.\d{2}-\d{2}\.\d{2}|\d{1,3}\.\d{2}\.\d{2}-\d{1,3}\.\d{2}\.\d{2})\)"
 _UNIQUE = r"(?: \((?:[2-9]|[1-9][0-9])\))?"  # " (2)" ... " (99)" จาก files._candidates
-# M6 รอบ A: ส่วนคุณภาพของแบบ title-quality (handlers._video_quality / _audio_quality) "(1080p)" "(mp3 192k)" "(m4a)" "(wav)"
-_QUALITY_PART = r"(?: \((?:\d{3,4}p|(?:mp3|m4a) \d{2,3}k|m4a|wav)\))?"
+# M6 รอบ A: ส่วนคุณภาพของแบบ title-quality (handlers._video_quality / _audio_quality) "(1080p)" "(mp3 192k)" "(m4a)" "(mp3)" "(wav)"
+_QUALITY_PART = r"(?: \((?:\d{3,4}p|(?:mp3|m4a) \d{2,3}k|m4a|mp3|wav)\))?"
 # ไฟล์ในโฟลเดอร์ย่อย "แยกตาม chapter (<ext>)": "<NN> - <ชื่อ>.<ext>" หรือ "<NN>.<ext>" (files.plan_chapter_output)
 _CHAPTER_EXTS = ("mp4", "m4a", "mp3", "wav")
 _CHAPTER_FILE = re.compile(rf"\d{{2,3}}(?: - .+)?{_UNIQUE}\.(?:{'|'.join(_CHAPTER_EXTS)})(?:\.part)?")

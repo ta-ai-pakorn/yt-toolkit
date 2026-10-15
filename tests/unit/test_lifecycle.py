@@ -2414,6 +2414,7 @@ def test_title_channel_pattern(name, ours):
         (f"{TITLE} (mp3 192k).mp3", True),
         (f"{TITLE} (m4a 128k).m4a.part", True),
         (f"{TITLE} (m4a).m4a", True),
+        (f"{TITLE} (mp3).mp3", True),  # mp3 ที่ไม่รู้ kbps (handlers._audio_quality)
         (f"{TITLE} (wav).wav", True),
         ("Big (1080p) (01.30-05.00).mp4", True),  # ชื่อถูกตัดเพราะส่วนท้ายยาว
         (f"{TITLE}.mp4", True),  # ไม่รู้คุณภาพ = ไม่มีส่วนคุณภาพ

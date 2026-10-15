@@ -600,3 +600,18 @@ def test_purge_skip_for_folder_outside_root_logs_no_path(db: Database, tmp_path:
         assert purge_stale_cache(db, cache, NOW) == 1
     assert "cache_skip reason=outside_root" in caplog.text
     assert str(tmp_path) not in caplog.text and "oldvideo001" not in caplog.text
+
+
+def test_purge_failed_delete_logs_no_path(db: Database, tmp_path: Path, monkeypatch, caplog):
+    cache = tmp_path / "cache"
+    add_video(db, "oldvideo001", NOW - timedelta(days=40))
+    make_cache(cache, "oldvideo001")
+
+    def locked(path):
+        raise PermissionError(13, "Access is denied", str(path))
+
+    monkeypatch.setattr(db_module.shutil, "rmtree", locked)
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        assert purge_stale_cache(db, cache, NOW) == 0
+    assert "cache_skip reason=remove_failed" in caplog.text
+    assert str(tmp_path) not in caplog.text and "oldvideo001" not in caplog.text

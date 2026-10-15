@@ -266,6 +266,6 @@ def _remove_cache_folder(root: Path, video_id: str) -> bool:
     try:
         shutil.rmtree(folder)
     except OSError as e:
-        log.warning("ลบโฟลเดอร์ cache ไม่ได้ %s: %s", folder, e)
+        log.warning("cache_skip reason=remove_failed errno=%s", e.errno)
         return False
     return True
