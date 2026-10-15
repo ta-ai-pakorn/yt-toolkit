@@ -214,7 +214,7 @@ function PlaylistClips({ title, entries, shown, playlistId, mixVideoId }: Playli
             <Link
               to={`/v/${entry.videoId}`}
               state={state}
-              className="flex min-h-11 items-center gap-3 rounded-md p-1.5 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="flex min-h-11 items-center gap-3 rounded-md p-1.5 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
             >
               <Thumbnail src={thumbnailUrl(entry.videoId)} className="w-16" />
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">

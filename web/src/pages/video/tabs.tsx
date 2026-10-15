@@ -31,7 +31,7 @@ const LIST =
   "w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden group-data-horizontal/tabs:h-auto"
 
 // แผงของแท็บรับโฟกัสได้ (Base UI ตั้ง tabIndex 0) จึงต้องมีวงโฟกัสให้เห็น แบบเดียวกับ breadcrumb
-const PANEL = "rounded-md pt-2 focus-visible:ring-3 focus-visible:ring-ring/50"
+const PANEL = "rounded-md pt-2 focus-visible:ring-3 focus-visible:ring-ring"
 
 /** แท็บข้อมูลคลิปมีปุ่มที่โฟกัสได้แน่นอนเมื่อมีส่วนเครดิต (ปุ่ม "คัดลอกเครดิต", M4 T16): ใช้เงื่อนไขเดียวกับ infoSections */
 function panelHasButtons(video: VideoInfo | undefined): boolean {

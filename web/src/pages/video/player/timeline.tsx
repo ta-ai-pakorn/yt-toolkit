@@ -115,7 +115,7 @@ function TimelineBar({ durationMs, chapters, replayed, className }: Omit<Props, 
       }}
       // pan-y: ปัดขึ้นลงบนแถบ = เลื่อนหน้า (จอสัมผัส) · แตะ = กระโดด
       className={cn(
-        "group/timeline relative flex h-6 w-full cursor-pointer touch-pan-y items-center rounded-sm outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 max-sm:h-11",
+        "group/timeline relative flex h-6 w-full cursor-pointer touch-pan-y items-center rounded-sm outline-none select-none focus-visible:ring-3 focus-visible:ring-ring max-sm:h-11",
         className,
       )}
     >

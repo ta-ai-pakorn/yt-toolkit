@@ -27,12 +27,12 @@ const ITEM =
 
 // ปุ่มเวลาหน้าบรรทัด (M3.5): กดแล้วเล่นคลิปจากบรรทัดนั้น · ไอคอน ▶ เล็ก ๆ บอกว่ากดแล้วเล่น
 const TIME =
-  "inline-flex shrink-0 items-baseline gap-1 rounded-sm px-1.5 py-1.5 font-mono text-xs text-muted-foreground tabular-nums outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 in-data-playing:text-foreground"
+  "inline-flex shrink-0 items-baseline gap-1 rounded-sm px-1.5 py-1.5 font-mono text-xs text-muted-foreground tabular-nums outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring in-data-playing:text-foreground"
 
 // บรรทัดของเวลาที่มาจาก "ดูซับช่วงนี้" (?at=) = แถบซ้ายสีอำพันเข้ม (--accent-text ผ่าน 3:1 ทั้งสองธีม) + พื้นจาง
 // ต่างจากวงโฟกัส (วงรอบทั้งปุ่ม) และแถบพื้นของบรรทัดที่กำลังเล่น จึงเห็นทั้งหมดพร้อมกันได้โดยไม่สับสน
 const LINE =
-  "flex min-w-0 flex-1 items-baseline gap-2 rounded-sm border-l-2 border-transparent px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 data-highlighted:border-accent-text data-highlighted:bg-muted"
+  "flex min-w-0 flex-1 items-baseline gap-2 rounded-sm border-l-2 border-transparent px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring data-highlighted:border-accent-text data-highlighted:bg-muted"
 
 /** ข้อความของบรรทัด โดยครอบคำที่ตรงคำค้นด้วย <mark> (คำนวณเฉพาะบรรทัดที่แสดง) */
 function Highlighted({ line, needle }: { line: PreparedLine; needle: string }) {

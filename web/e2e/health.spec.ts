@@ -1,3 +1,4 @@
+import { analyzeSettled } from "./axe-settled"
 import { expect, test } from "@playwright/test"
 
 test("AC-SET-02: ไม่มี ffmpeg → แสดงใช้ไม่ได้พร้อมปุ่มโหลดใหม่", async ({ page }) => {
@@ -139,3 +140,24 @@ test("M5 รอบ C: ใช้บัญชีอยู่ = ใช้บัญ�
   await expect(page.getByTestId("tool-network")).toBeVisible({ timeout: 15_000 })
   await expect(page.getByTestId("tool-account")).toHaveCount(0)
 })
+
+// M6 D1 T1 (spec 1.3): สีของแถวเตือน (warn) และใช้ไม่ได้ (error) ต้องผ่าน axe ทั้งสองธีม · ตอบ /api/health จริงแล้วแก้สองแถวให้เป็นสถานะนั้น
+for (const scheme of ["light", "dark"] as const) {
+  test(`axe: หน้าตรวจสุขภาพที่มีแถวเตือนและใช้ไม่ได้ ไม่มีปัญหาระดับ serious/critical (${scheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await page.route("**/api/health", async (route) => {
+      const response = await route.fetch()
+      const body = await response.json()
+      body.tools.ffmpeg = { ...body.tools.ffmpeg, status: "error", version: null, message: "หาโปรแกรมไม่เจอ" }
+      body.disk = { ...body.disk, status: "warn", message: "พื้นที่เหลือน้อย" }
+      await route.fulfill({ response, json: body })
+    })
+    await page.goto("/settings/health")
+    await expect(page.getByTestId("tool-ffmpeg")).toContainText("ใช้ไม่ได้", { timeout: 15_000 })
+    await expect(page.getByTestId("tool-disk")).toContainText("เตือน")
+    await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
+    const results = await analyzeSettled(page)
+    const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")
+    expect(serious.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target.join(" ")).slice(0, 5) }))).toEqual([])
+  })
+}
