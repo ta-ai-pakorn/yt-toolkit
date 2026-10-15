@@ -41,7 +41,7 @@ def env(make_client, tmp_path):
 def recent(days_ago: int = 0) -> str:
     from datetime import UTC, datetime, timedelta
 
-    return (datetime.now(UTC) - timedelta(days=days_ago)).isoformat(timespec="seconds")
+    return (datetime.now(UTC) - timedelta(days=days_ago)).isoformat(timespec="microseconds")
 
 
 def test_no_stats_router_without_settings(make_client, tmp_path):
@@ -111,6 +111,26 @@ def test_ac_stat_03_reset_zeroes_and_keeps_everything_else(env, tmp_path):
     assert output.read_bytes() == b"x" * 10
     add_job("C", recent())  # เสร็จหลังล้าง = นับ
     assert client.get("/api/stats").json()["clips"] == 1
+
+
+def test_reset_counts_from_the_click_at_sub_second_precision(env, monkeypatch):
+    """final review I1: งานที่เสร็จก่อนกดล้างไม่ถึงวินาที ต้องไม่ถูกนับหลังล้าง"""
+    from datetime import UTC, datetime
+
+    client, _, _, add_job = env
+    clock = datetime(2099, 1, 1, 5, 0, 0, 900000, tzinfo=UTC)
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock
+
+    monkeypatch.setattr("yttoolkit.api.stats.datetime", FrozenDatetime)
+    add_job("A", "2099-01-01T05:00:00.400000+00:00")
+    resp = client.post("/api/stats/reset", headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json()["since"] == "2099-01-01T05:00:00.900000+00:00"
+    assert client.get("/api/stats").json()["clips"] == 0
 
 
 def test_reset_changes_only_stats_reset_at(env):

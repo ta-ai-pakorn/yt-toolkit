@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from .. import runstate
 from ..core.stats import compute
 
 if TYPE_CHECKING:
@@ -33,6 +32,8 @@ def build_stats_router(ctx: AppContext) -> APIRouter:
 
     @router.post("/stats/reset")
     def stats_reset() -> JSONResponse:
-        return JSONResponse({"since": settings.reset_stats(runstate.now_iso())}, headers=NO_STORE)
+        # ละเอียดระดับไมโครวินาทีเท่ากับ finished_at ของงาน เพื่อให้ "นับใหม่จากตอนกด" ตรงจริง (FR-STAT-4)
+        stamp = datetime.now(UTC).isoformat(timespec="microseconds")
+        return JSONResponse({"since": settings.reset_stats(stamp)}, headers=NO_STORE)
 
     return router

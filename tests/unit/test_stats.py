@@ -149,10 +149,19 @@ def test_bad_items_and_sizes(db):
     assert stats["files"] == 5 and stats["totalBytes"] == 0
 
 
-@pytest.mark.parametrize("finished", [None, "", "yesterday"])
+@pytest.mark.parametrize(
+    "finished",
+    [None, "", "yesterday", "9999-12-31T23:30:00+00:00", "0001-01-01T00:00:00+05:00"],  # สองอันหลัง: แปลงเป็น UTC+07:00 แล้วล้น
+)
 def test_unparsable_finished_at_skips_the_job(db, finished):
     add(db, "A", finished, [out("video", 1)])
     assert compute(db, None, NOW)["clips"] == 0
+
+
+def test_far_past_finished_at_still_counts(db):
+    add(db, "A", "0001-01-01T00:00:00+00:00", [out("video", 1)])
+    stats = compute(db, None, NOW)
+    assert stats["clips"] == 1 and stats["byMonth"] == []  # นอกหน้าต่าง 12 เดือน นับเฉพาะยอดรวม
 
 
 def test_clip_in_two_months_counts_in_both_rows_once_in_total(db):

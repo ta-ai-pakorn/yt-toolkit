@@ -37,7 +37,13 @@ def _parse(value: object) -> datetime | None:
         parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    aware = parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    try:  # ปี 9999 / ปี 1 แปลงเขตเวลาแล้วล้นได้ = ถือเป็นเวลาที่อ่านไม่ได้ (C6)
+        aware.astimezone(THAI)
+        aware.astimezone(UTC)
+    except (OverflowError, ValueError):
+        return None
+    return aware
 
 
 def _outputs(raw: object) -> list[tuple[str, int]]:

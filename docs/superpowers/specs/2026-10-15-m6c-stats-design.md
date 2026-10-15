@@ -90,7 +90,7 @@ A new public method in `core/settings.py`. It writes `statsResetAt = now_iso` th
 ### 2.2 `api/stats.py` → `build_stats_router(ctx)`
 
 - `GET /stats` → `compute(ctx.db, settings["statsResetAt"], now)`; 200 with §1.5.
-- `POST /stats/reset` → `since = ctx.settings.reset_stats(runstate.now_iso())`; 200 `{since}`.
+- `POST /stats/reset` → `since = ctx.settings.reset_stats(datetime.now(UTC).isoformat(timespec="microseconds"))`; 200 `{since}`. The stamp has microsecond precision, the same as `jobs.finished_at`, so a job finished a moment before the click is not counted after it (final review I1, 2026-10-15).
 - Mounted in `app.py` with prefix `/api`, guarded by `if ctx.settings is not None` (it needs both the DB and settings). Under `/api`, `LocalOnlyMiddleware` already requires the token + Origin on the POST.
 - No request body on either route. Errors go through the existing handlers (`E_UNKNOWN` on an unexpected exception, logged by `ErrorLogMiddleware` with no path).
 - `ctx.db` access matches the other routers; the call is synchronous and fast, so it runs in FastAPI's thread pool like the history route.
