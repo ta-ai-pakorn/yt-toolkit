@@ -1599,3 +1599,30 @@ def test_the_style_names_never_reach_the_log(env, caplog):
 )
 def test_standard_kbps(value, expected):
     assert handlers.standard_kbps(value) == expected
+
+
+# ---------- M6-A final fix: audio labels (P2) and the mp3 guard ----------
+
+
+@pytest.mark.parametrize(
+    ("segments", "suffix", "quality", "notes"),
+    [
+        (ADS, ADS_SUFFIX, "m4a 192k", ()),  # ads-only cut = re-encoded at CUT_AAC_KBPS
+        ((), "", "m4a 128k", ("SPONSORBLOCK_EMPTY",)),  # nothing cut = the downloaded file's bitrate
+    ],
+    ids=["ads-cut", "sponsorblock-empty"],
+)
+def test_m4a_label_with_ads_requested(env, segments, suffix, quality, notes):
+    env.downloader.media = MediaFacts(None, None, None, 129.5)
+    params = audio_params("m4a", sponsorblock=["sponsor"])
+    result, _ = run_with(env, StubSponsors(segments), "audio", BBB, params, style="title-quality")
+    assert output_path(result) == styled(env, BBB, BBB_TITLE, suffix, "m4a", "title-quality", quality)
+    assert output_path(result).name.endswith(f" ({quality}){suffix}.m4a")
+    assert result.notes == notes
+
+
+@pytest.mark.parametrize("kbps", [-5, -192])
+def test_an_unusable_mp3_bitrate_gives_the_bare_mp3_label(env, kbps):
+    # the API allows only 128 / 192 / 320; this guards a future value (standard_kbps gives None)
+    result, _ = env.run("audio", THAI, audio_params("mp3", mp3Kbps=kbps), style="title-quality")
+    assert output_path(result).name == f"{THAI_SAFE} (mp3).mp3"

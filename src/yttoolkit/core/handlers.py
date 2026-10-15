@@ -604,10 +604,11 @@ def _video_quality(media: MediaFacts | None) -> str | None:
 
 def _audio_quality(fmt: str, params: Mapping[str, Any], media: MediaFacts | None, *, recoded: bool) -> str:
     """ส่วนคุณภาพของเสียง: "mp3 192k" (ค่าที่ผู้ใช้เลือก) · "m4a 128k" (bitrate ของไฟล์ที่โหลด ปัดเป็นค่ามาตรฐาน
-    ถ้าตัดช่วงเวลา/โฆษณา = ไฟล์ถูกเข้ารหัสใหม่ที่ CUT_AAC_KBPS) ไม่รู้ bitrate = "m4a" · wav = "wav"
+    ถ้าตัดช่วงเวลา/โฆษณา = ไฟล์ถูกเข้ารหัสใหม่ที่ CUT_AAC_KBPS) ไม่รู้ bitrate = "m4a" / "mp3" · wav = "wav"
     """
     if fmt == "mp3":
-        return f"mp3 {standard_kbps(int(params.get('mp3Kbps') or DEFAULT_MP3_KBPS))}k"
+        mp3_kbps = standard_kbps(int(params.get("mp3Kbps") or DEFAULT_MP3_KBPS))
+        return f"mp3 {mp3_kbps}k" if mp3_kbps else "mp3"  # ค่าใช้ไม่ได้ = ไม่บอก bitrate (เหมือน m4a)
     if fmt == "wav":
         return "wav"
     kbps = standard_kbps(CUT_AAC_KBPS if recoded else (media.abr_kbps if media is not None else None))
