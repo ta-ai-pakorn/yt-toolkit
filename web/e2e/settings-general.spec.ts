@@ -256,7 +256,10 @@ for (const scheme of ["dark", "light"] as const) {
     // ถ้าคำตอบมาหลังรอหน้านิ่งแล้ว axe จะอ่านสีกลางทาง (4.41:1) จึงรอคำตอบก่อน แล้วให้ analyzeSettled รอการจางจบ
     const storage = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/storage")
     await page.goto("/settings/general")
-    await storage
+    const { reclaimableBytes } = (await (await storage).json()) as { reclaimableBytes: number }
+    // ปุ่มต้องถึงสถานะสุดท้ายก่อน (ไม่มีอะไรให้ล้าง = ยังจางอยู่ตามจริง ขึ้นกับ cache ของ spec อื่น)
+    const clear = page.getByRole("group", { name: "ข้อมูลในเครื่อง" }).getByRole("button", { name: /^ล้างข้อมูลชั่วคราว/ })
+    await expect(clear).toBeEnabled({ enabled: reclaimableBytes > 0 })
     await expect(page.getByLabel("โฟลเดอร์ผลลัพธ์")).toBeVisible()
     await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /light/)
     expect(await seriousViolations(page)).toEqual([])
