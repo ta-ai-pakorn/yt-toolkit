@@ -339,3 +339,14 @@ export type Settings = {
   statsResetAt: string | null
   lastUsed: Record<string, unknown>
 }
+
+/** M6 รอบ C (spec §1.5): GET /api/stats · 4 กลุ่มของ BRD */
+export type StatsKind = "video" | "audio" | "subtitle" | "image"
+export type Stats = {
+  since: string | null
+  clips: number
+  files: number
+  totalBytes: number
+  byKind: { kind: StatsKind; files: number; bytes: number }[]
+  byMonth: { month: string; clips: number; files: number; bytes: number }[]
+}
