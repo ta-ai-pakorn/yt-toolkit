@@ -8,8 +8,7 @@ import { cancelJobsFor, enqueue, gotoReady, openQueueSheet, waitForJob } from ".
 // รันด้วย `npm run build && npm run shots` ไฟล์ไปอยู่ที่ docs/images/ ลำดับเทสต้องเรียงตามเลขรูป
 const BBB = "aqz-KE-bpKQ"
 const THAI = "88o5Sk8_m1Y"
-const ZOO = "jNQXAC9IVRw"
-const ZOO_TITLE = "Me at the zoo"
+const BBB_TITLE = "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film"
 const SLOW = "SLOWDOWNLD1"
 const SLOW_TITLE = "คลิปโหลดช้า 1"
 const IMAGES = path.join(import.meta.dirname, "../../docs/images")
@@ -24,6 +23,16 @@ const shot = (page: Page, name: string, opts: { fullPage?: boolean; clip?: { x: 
 /** รอให้ฟอนต์โหลดครบและแอนิเมชันที่จบได้จบก่อนถ่าย */
 async function settle(page: Page) {
   await page.evaluate(() => document.fonts.ready)
+  // ภาพที่อยู่ในหน้าจอ (เช่นปกคลิป) ต้องโหลดเสร็จ ไม่ถ่ายตอนยังเป็นกรอบเทา
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from(document.images)
+          .filter((img) => img.getBoundingClientRect().top < window.innerHeight)
+          .every((img) => img.complete && img.naturalWidth > 0),
+      ),
+    )
+    .toBe(true)
   await page.evaluate(() =>
     Promise.all(
       document
@@ -59,6 +68,8 @@ test("02-clip-frames", async ({ page }) => {
   // รอจนภาพเฟรมทุกภาพโหลดเสร็จ (ไม่ถ่ายตอนยังเป็นกรอบเทา)
   const frames = page.getByRole("list", { name: "รายการภาพเฟรม" }).locator("img")
   await expect(frames.first()).toBeVisible()
+  // กดตัวกรอง "ดูซ้ำบ่อย" เหลือไม่กี่ภาพ: ภาพแรกของคลิปเป็นสีดำสนิท (ดูเหมือนภาพเสีย) และไฟล์รูปเล็กลง
+  await page.getByRole("button", { name: /^ดูซ้ำบ่อย \(\d+ ภาพ\)/ }).click()
   await expect
     // ภาพที่อยู่นอกจอโหลดแบบ lazy จึงเช็กเฉพาะภาพที่อยู่ในหน้าจอ
     .poll(() =>
@@ -69,8 +80,8 @@ test("02-clip-frames", async ({ page }) => {
     )
     .toBe(true)
   await settle(page)
-  // ตัดเหลือหัวคลิป แท็บ และแถวภาพแรก (ภาพถ่ายหลายแถวทำให้ไฟล์ใหญ่เกิน 300 KB)
-  await shot(page, "02-clip-frames", { clip: { x: 160, y: 60, width: 960, height: 520 } })
+  // ตัดเหลือบางส่วนของหน้า (ภาพถ่ายหลายแถวทำให้ไฟล์ใหญ่เกิน 300 KB) ลำดับเทสมีผล: 06 นับปกคลิปจากคลิปที่ 03-05 เปิดไป
+  await shot(page, "02-clip-frames", { clip: { x: 160, y: 300, width: 960, height: 300 } })
 })
 
 test("03-clip-subtitles", async ({ page }) => {
@@ -91,7 +102,7 @@ test("04-download", async ({ page }) => {
 test("05-queue", async ({ page, request }) => {
   // งานแรกให้จบเพื่อขึ้นประวัติ งานที่สองโหลดช้า ให้คิวมีงานที่กำลังทำอยู่ตอนถ่าย
   const [done] = await enqueue(request, [
-    { videoId: ZOO, kind: "audio", params: { format: "m4a", splitChapters: false, audioLanguage: "original" }, title: ZOO_TITLE },
+    { videoId: BBB, kind: "audio", params: { format: "m4a", splitChapters: false, audioLanguage: "original" }, title: BBB_TITLE },
   ])
   await waitForJob(request, (job) => job.id === done.id && job.status === "done", { timeout: 60_000 })
   await enqueue(request, [
@@ -114,10 +125,10 @@ test("05-queue", async ({ page, request }) => {
 
 test("06-history", async ({ page }) => {
   await page.goto("/history")
-  await expect(page.getByRole("link", { name: ZOO_TITLE })).toBeVisible()
+  await expect(page.getByRole("link", { name: BBB_TITLE })).toBeVisible()
   // รอปกคลิปทุกภาพโหลดเสร็จ (ไม่ถ่ายตอนยังเป็นกรอบเทา)
   const covers = page.locator("tbody img")
-  await expect(covers).toHaveCount(3)
+  await expect(covers).toHaveCount(2)
   await expect
     .poll(() => covers.evaluateAll((imgs) => (imgs as HTMLImageElement[]).every((img) => img.complete && img.naturalWidth > 0)))
     .toBe(true)
@@ -127,8 +138,10 @@ test("06-history", async ({ page }) => {
 
 test("07-settings", async ({ page }) => {
   await page.goto("/settings/general")
-  await expect(page.getByText(NEUTRAL_OUTPUT_DIR)).toBeVisible().catch(() => undefined)
   await expect(page.getByRole("tab", { name: "ทั่วไป", exact: true })).toHaveAttribute("aria-selected", "true")
+  // ตัวกันข้อมูลจริงรั่ว (C4): ช่องโฟลเดอร์ต้องเป็นที่อยู่สมมติ และทั้งหน้าต้องไม่มีชื่อผู้ใช้จริงของเครื่อง
+  await expect(page.getByRole("textbox", { name: "โฟลเดอร์ผลลัพธ์" })).toHaveValue(NEUTRAL_OUTPUT_DIR)
+  expect(await page.locator("body").innerText()).not.toContain("khumj")
   await settle(page)
   await shot(page, "07-settings")
 })

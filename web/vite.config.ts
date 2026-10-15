@@ -30,8 +30,8 @@ function devToken(): Plugin {
 
 export default defineConfig({
   test: {
-    // e2e/ เป็นของ Playwright ไม่ใช่ vitest
-    exclude: [...configDefaults.exclude, "**/dist/**", "e2e/**"],
+    // e2e/ และ e2e-shots/ เป็นของ Playwright ไม่ใช่ vitest
+    exclude: [...configDefaults.exclude, "**/dist/**", "e2e/**", "e2e-shots/**"],
     // ปิดคำแนะนำ fsModuleCache ของ vitest (ไม่ใช่คำเตือนจากเทส แต่รกผลรัน)
     experimental: { diagnostics: false },
   },
