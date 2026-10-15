@@ -56,7 +56,7 @@ function AccountRow({ account }: { account: AccountHealth }) {
       ? fill(th.account.healthOn, { time: localClock(account.importedAt) })
       : th.account.statusOff
   return (
-    <Item variant="outline" data-testid="tool-account">
+    <Item role="listitem" variant="outline" data-testid="tool-account">
       <ItemMedia>
         <CircleCheck aria-hidden className={TONE.ok} />
       </ItemMedia>
@@ -155,7 +155,7 @@ export function HealthPanel({ onShutdown }: { onShutdown: () => void }) {
           const Icon = ICON[tool.status]
           const text = detail(key, tool)
           return (
-            <Item key={key} variant="outline" data-testid={`tool-${key}`}>
+            <Item key={key} role="listitem" variant="outline" data-testid={`tool-${key}`}>
               <ItemMedia>
                 <Icon aria-hidden className={TONE[tool.status]} />
               </ItemMedia>

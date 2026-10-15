@@ -13,7 +13,7 @@ import { fill, th } from "@/i18n/th"
 
 // พื้นที่กดสูง 32 px และวงโฟกัสชัด (margin ติดลบให้ตัวอักษรยังตรงแนวเดิม)
 const CRUMB =
-  "-mx-1.5 inline-flex min-h-8 items-center rounded-md px-1.5 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+  "-mx-1.5 inline-flex min-h-8 items-center rounded-md px-1.5 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
 
 type Props = {
   /** ชื่อคลิป · undefined = ยังโหลดอยู่ */

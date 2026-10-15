@@ -40,7 +40,7 @@ function SortableRow({ job }: { job: Job }) {
       {...attributes}
       {...listeners}
       aria-label={fill(th.queue.dragHandle, { title: jobTitle(job) })}
-      className="-ml-1 inline-flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 active:cursor-grabbing [&_svg]:size-4"
+      className="-ml-1 inline-flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring active:cursor-grabbing [&_svg]:size-4"
     >
       <GripVertical aria-hidden />
     </button>
