@@ -110,8 +110,11 @@ test("ล้างสถิติ: ยกเลิกแล้วตัวเล
   await expect(page.getByRole("alertdialog")).toHaveCount(0)
   await page.getByRole("tabpanel").getByRole("button", { name: "ล้างสถิติ" }).click()
   const confirm = page.getByRole("alertdialog").getByRole("button", { name: "ล้างสถิติ" })
-  await confirm.click()
-  await confirm.click({ force: true, timeout: 1000 }).catch(() => undefined) // กดซ้ำระหว่างรอ
+  // กดสองครั้งติดกันก่อน React วาดใหม่ (isPending/disabled ยังเป็นค่าเก่า) = ต้องยิง POST ครั้งเดียว
+  await confirm.evaluate((el: HTMLElement) => {
+    el.click()
+    el.click()
+  })
   await expect(toast(page, "ล้างสถิติแล้ว")).toBeVisible()
   expect(calls.reset).toBe(1)
   await expect(page.getByText("ยังไม่มีสถิติ")).toBeVisible()

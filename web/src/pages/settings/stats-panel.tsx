@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Eraser } from "lucide-react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { ErrorDetails } from "@/components/error-report/error-details"
@@ -37,6 +37,7 @@ export function StatsPanel() {
   const queryClient = useQueryClient()
   const stats = useQuery(statsQuery())
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const submitting = useRef(false)
 
   const reset = useMutation({
     mutationFn: () => resetStats(),
@@ -104,9 +105,11 @@ export function StatsPanel() {
             <AlertDialogCancel disabled={reset.isPending}>{t.resetCancel}</AlertDialogCancel>
             <AlertDialogAction
               disabled={reset.isPending}
-              onClick={(event) => {
-                event.preventDefault() // ค้างกล่องไว้ระหว่างรอ ปิดเองตอนสำเร็จหรือพลาด
-                if (!reset.isPending) reset.mutate()
+              onClick={() => {
+                // isPending/disabled อัปเดตหลัง React วาดใหม่ คลิกซ้ำก่อนนั้นจึงต้องกันด้วย ref ที่เปลี่ยนทันที
+                if (submitting.current) return
+                submitting.current = true
+                reset.mutate(undefined, { onSettled: () => (submitting.current = false) })
               }}
             >
               {reset.isPending && <Spinner />}
