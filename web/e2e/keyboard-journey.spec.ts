@@ -136,7 +136,8 @@ test("คีย์บอร์ดอย่างเดียว: วางลิ
   await tabTo(page, settings)
   await expectFocused(page, settings)
   await page.keyboard.press("Enter")
-  await expect(page).toHaveURL(/\/settings$/)
+  // /settings เด้งต่อไป /settings/general ทันที (router.tsx) จึงรอที่ปลายทาง ไม่ใช่ URL ชั่วคราว
+  await expect(page).toHaveURL(/\/settings\/general$/)
   const settingsTab = (name: string) => page.getByRole("tab", { name, exact: true })
   await tabTo(page, settingsTab("ทั่วไป"))
   await expectFocused(page, settingsTab("ทั่วไป"))
