@@ -93,6 +93,32 @@ test.describe("W5 ประวัติ", () => {
     await expect(page.getByRole("alert")).toHaveCount(0)
   })
 
+  test("โหลดไม่สำเร็จตอนเน็ตหลุด แล้วเบราว์เซอร์แจ้งว่าเน็ตกลับมา (online) → โหลดใหม่เอง ไม่ต้องกดลองใหม่", async ({ page }) => {
+    // networkMode "always" (router.tsx) ปิด refetchOnReconnect ของ react-query เป็นค่าเริ่มต้น จึงตั้งกลับเป็น true ไว้เอง
+    let fail = true
+    let calls = 0
+    await page.route("**/api/history*", (route) => {
+      calls += 1
+      return fail
+        ? route.fulfill({ status: 503, json: { error: { code: "E_NETWORK", message: "เน็ตหลุด ลองใหม่อีกครั้ง", detail: null } } })
+        : json(route, { items: [item(ZOO, ZOO_TITLE)], total: 1 })
+    })
+    await mockThumbnails(page)
+    await page.goto("/history")
+    const alert = page.getByRole("alert")
+    await expect(alert).toContainText("โหลดประวัติไม่สำเร็จ")
+    const failed = calls
+    fail = false
+    // เน็ตหลุดแล้วกลับมา: onlineManager เปลี่ยนสถานะเฉพาะตอนสลับ จึงส่ง offline ก่อน online
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("offline"))
+      window.dispatchEvent(new Event("online"))
+    })
+    await expect(page.getByRole("link", { name: ZOO_TITLE })).toBeVisible()
+    await expect(page.getByRole("alert")).toHaveCount(0)
+    expect(calls).toBeGreaterThan(failed)
+  })
+
   test("ตารางมีหัวคอลัมน์ครบ ป้ายไฟล์ไม่ซ้ำ (ภาพ) และเวลาแบบสัมพัทธ์ · แถวที่ไม่มีไฟล์ไม่มีป้าย", async ({ page }) => {
     await page.route("**/api/history*", (route) =>
       json(route, {
