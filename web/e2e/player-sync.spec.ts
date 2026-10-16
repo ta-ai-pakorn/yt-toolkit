@@ -368,9 +368,32 @@ test.describe("M3.5 ทรานสคริปต์ตามการเล่
     const target = lineItems(page).nth(15)
     await target.locator(".font-mono").click()
     await expect(target).toHaveAttribute("data-playing", "")
+    // เฟรมที่กักไว้ต้องมีการเลื่อนตามจริง (ไม่ใช่แค่เฟรมอื่นของหน้า เช่น scroll area): ลองรันทุกเฟรมแบบไม่ให้เลื่อนจริง
+    // (ดักการตั้ง scrollTop ของกรอบรายการไว้ จดค่าแต่ไม่ใช้) เฟรมยังอยู่ในคิวเหมือนเดิม · ไม่มีเฟรมไหนจะเลื่อนกรอบ = เทสต์นี้ไม่ได้ทดสอบอะไร
     await expect
-      .poll(() => page.evaluate(() => (window as unknown as { __raf: { queue: unknown[] } }).__raf.queue.length))
-      .toBeGreaterThan(0)
+      .poll(() =>
+        page.evaluate(() => {
+          const raf = (window as unknown as { __raf: { queue: { cb: FrameRequestCallback }[] } }).__raf
+          const viewport = document
+            .querySelector('[aria-label="บรรทัดในทรานสคริปต์"]')!
+            .closest<HTMLElement>('[data-slot="scroll-area-viewport"]')!
+          const real = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")!
+          const writes: number[] = []
+          Object.defineProperty(viewport, "scrollTop", {
+            configurable: true,
+            get: () => real.get!.call(viewport) as number,
+            set: (value: number) => writes.push(value),
+          })
+          try {
+            for (const held of raf.queue) held.cb(performance.now())
+          } finally {
+            delete (viewport as { scrollTop?: number }).scrollTop
+          }
+          const now = real.get!.call(viewport) as number
+          return writes.some((value) => value !== now)
+        }),
+      )
+      .toBe(true)
 
     const scrollTop = await page.evaluate(() => {
       const raf = (window as unknown as { __raf: { hold: boolean; queue: { cb: FrameRequestCallback }[] } }).__raf
