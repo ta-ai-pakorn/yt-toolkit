@@ -332,6 +332,65 @@ test.describe("M3.5 ทรานสคริปต์ตามการเล่
     expect(offset).toBeLessThanOrEqual(height + 2)
   })
 
+  test("ล้อเมาส์ในเฟรมเดียวกับที่รายการกำลังจะเลื่อนตาม: ไม่ถูกดึงกลับทับตำแหน่งที่ผู้ใช้เลื่อนไป", async ({ page }) => {
+    // การเลื่อนตามรอหนึ่งเฟรม (requestAnimationFrame) ส่วนล้อเมาส์เป็นเหตุการณ์ต่อเนื่อง React จึงวาดใหม่ (หยุดเลื่อนตาม) ทีหลังได้
+    // เครื่องช้า: เฟรมนั้นมาถึงก่อน แล้วรายการกระโดดกลับไปที่บรรทัดที่กำลังเล่น ทับที่ผู้ใช้เพิ่งเลื่อนขึ้นไป
+    // เทสต์นี้ทำลำดับนั้นให้เกิดแน่นอน: กักเฟรมไว้ ยิงล้อเมาส์ + เลื่อนขึ้นบนสุด แล้วปล่อยเฟรมในงานเดียวกัน (ก่อน React วาดใหม่)
+    await page.setViewportSize(TALL)
+    await installFakeYT(page, { rate: 0.001 })
+    await page.addInitScript(() => {
+      type Held = { id: number; cb: FrameRequestCallback }
+      const raf = { hold: false, queue: [] as Held[], next: 1_000_000 }
+      const request = window.requestAnimationFrame.bind(window)
+      const cancel = window.cancelAnimationFrame.bind(window)
+      window.requestAnimationFrame = (cb) => {
+        if (!raf.hold) return request(cb)
+        raf.next += 1
+        raf.queue.push({ id: raf.next, cb })
+        return raf.next
+      }
+      window.cancelAnimationFrame = (id) => {
+        const index = raf.queue.findIndex((held) => held.id === id)
+        if (index >= 0) raf.queue.splice(index, 1)
+        else cancel(id)
+      }
+      ;(window as unknown as { __raf: typeof raf }).__raf = raf
+    })
+    await page.goto(`/v/${THAI}?tab=transcript`)
+    await expect(lineItems(page).first()).toBeVisible()
+    await lineItems(page).first().locator(".font-mono").click()
+    await expect(lineItems(page).first()).toHaveAttribute("data-playing", "")
+
+    // กักเฟรม แล้วเล่นจากบรรทัดกลางรายการ: การเลื่อนตามไปบรรทัดนั้นค้างรอเฟรมอยู่
+    await page.evaluate(() => {
+      ;(window as unknown as { __raf: { hold: boolean } }).__raf.hold = true
+    })
+    const target = lineItems(page).nth(15)
+    await target.locator(".font-mono").click()
+    await expect(target).toHaveAttribute("data-playing", "")
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __raf: { queue: unknown[] } }).__raf.queue.length))
+      .toBeGreaterThan(0)
+
+    const scrollTop = await page.evaluate(() => {
+      const raf = (window as unknown as { __raf: { hold: boolean; queue: { cb: FrameRequestCallback }[] } }).__raf
+      const viewport = document
+        .querySelector('[aria-label="บรรทัดในทรานสคริปต์"]')!
+        .closest<HTMLElement>('[data-slot="scroll-area-viewport"]')!
+      // ผู้ใช้หมุนล้อเมาส์ขึ้นจนสุดรายการ
+      viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -2000, bubbles: true, cancelable: true }))
+      viewport.scrollTop = 0
+      // เฟรมถัดไปมาถึงก่อนที่ React จะวาดใหม่
+      raf.hold = false
+      for (const held of raf.queue.splice(0)) held.cb(performance.now())
+      return viewport.scrollTop
+    })
+    expect(scrollTop).toBe(0)
+    await expect(backToPlaying(page)).toBeVisible()
+    await page.waitForTimeout(500)
+    expect(await inListView(lineItems(page).first())).toBe(true)
+  })
+
   test("กด 'กลับไปบรรทัดที่กำลังเล่น' ระหว่างเล่นอยู่: โฟกัสบรรทัดที่เล่นตอนกด แล้วเลื่อนตามต่อโดยโฟกัสไม่ตาม", async ({ page }) => {
     await page.setViewportSize(TALL)
     await installFakeYT(page, { rate: 1 })
