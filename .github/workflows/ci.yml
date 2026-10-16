@@ -72,3 +72,11 @@ jobs:
         working-directory: web
       - run: npm run e2e
         working-directory: web
+      - name: เก็บ trace ของเทสต์ที่พัง
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-test-results
+          path: web/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
