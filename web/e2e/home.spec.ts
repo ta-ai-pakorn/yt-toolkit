@@ -440,12 +440,17 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     let inFlight = 0
     let peak = 0
     const fetched: string[] = []
+    // กั้นคำตอบไว้จนมีคำขอค้างครบ 3 ตัวพร้อมกัน (เดิมหน่วง 150 ms: route ที่ช้ากว่านั้นได้ peak 2 ทั้งที่แอพถูก)
+    // ถ้าแอพยิงเกิน 3 ตัวที่ 4 จะมาระหว่างที่สามตัวแรกยังค้าง peak จึงเกิน 3
+    let release!: () => void
+    const full = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/videos/*", async (route) => {
       const id = new URL(route.request().url()).pathname.split("/").pop() ?? ""
       fetched.push(id)
       inFlight += 1
       peak = Math.max(peak, inFlight)
-      await new Promise((resolve) => setTimeout(resolve, 150))
+      if (inFlight === 3) release()
+      await full
       inFlight -= 1
       await route.fulfill({ json: fakeVideo(id) })
     })
@@ -506,10 +511,15 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
   test("เพลย์ลิสต์ดึงข้อมูลครั้งละไม่เกิน 3 รายการ", async ({ page }) => {
     let inFlight = 0
     let peak = 0
+    // กั้นคำตอบไว้จนมีคำขอค้างครบ 3 ตัวพร้อมกัน (เดิมหน่วง 150 ms: route ที่ช้ากว่านั้นได้ peak 2 ทั้งที่แอพถูก)
+    // ถ้าแอพยิงเกิน 3 ตัวที่ 4 จะมาระหว่างที่สามตัวแรกยังค้าง peak จึงเกิน 3
+    let release!: () => void
+    const full = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/playlists/*", async (route) => {
       inFlight += 1
       peak = Math.max(peak, inFlight)
-      await new Promise((resolve) => setTimeout(resolve, 150))
+      if (inFlight === 3) release()
+      await full
       inFlight -= 1
       await route.fulfill({ json: { title: "รายการทดสอบ", total: 3, truncated: false, entries: [{ videoId: ZOO }] } })
     })
