@@ -79,7 +79,11 @@ test("งานคลิปจำกัดอายุพลาด → ปุ่
     await expect(row).toContainText(AGE_MESSAGE)
     await row.getByRole("button", { name: USE }).click()
     await dialog.getByLabel("cookies.txt").setInputFiles({ name: "cookies.txt", mimeType: "text/plain", buffer: Buffer.from(COOKIES) })
+    // รอคำตอบของการนำเข้าก่อน: นำเข้าครั้งแรกของ backend โหลดตัวอ่าน cookies ของ yt-dlp (import yt_dlp ราว 3 วินาทีตอนเครื่องว่าง)
+    // เครื่องที่มีโหลดเกิน 5 วินาทีได้ กล่องปิดเมื่อคำตอบมาถึงเท่านั้น
+    const imported = page.waitForResponse((r) => r.url().endsWith("/api/cookies/import") && r.request().method() === "POST")
     await dialog.getByRole("button", { name: "นำเข้าแล้วลองใหม่" }).click()
+    expect((await imported).ok()).toBe(true)
     await expect(dialog).toHaveCount(0)
     await expect(banner(page)).toContainText("กำลังใช้บัญชียูทูปชั่วคราว")
     // ส่งงานของคลิปที่บัญชีไม่มีสิทธิ์ทันที ก่อนงานแรกจบ: คิวไม่ว่างตอนงานแรกจบ จึงไม่มี grace จนกว่างานนี้จะพลาด (ไม่แข่งกับเวลา 5 วินาที)

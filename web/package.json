@@ -11,7 +11,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "shots": "playwright test -c playwright.shots.config.ts",
-    "e2e": "playwright test --project=chromium && playwright test --project=queue --workers=1 --pass-with-no-tests",
+    "e2e": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {

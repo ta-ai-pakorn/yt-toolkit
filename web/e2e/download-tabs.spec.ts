@@ -47,6 +47,8 @@ async function switchTab(page: Page, name: string) {
   await tab(page, name).click()
   await expect(tab(page, name)).toHaveAttribute("aria-selected", "true")
   await expect(page.getByRole("tabpanel")).toHaveCount(1)
+  // แผงที่เหลือคือแผงของแท็บที่เลือก (แผงตั้งชื่อตามแท็บด้วย aria-labelledby)
+  await expect(page.getByRole("tabpanel", { name, exact: true })).toBeVisible()
 }
 const combobox = (page: Page, name: string) => page.getByRole("combobox", { name, exact: true })
 // ค่าที่เลือกอยู่ของช่องเลือก: ปุ่ม combobox มีไอคอนลูกศรของ Base UI ที่มีอักษร "▼" ซ่อนอยู่ใน svg (aria-hidden)
