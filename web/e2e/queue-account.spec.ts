@@ -73,6 +73,8 @@ test("งานคลิปจำกัดอายุพลาด → ปุ่
     // Esc ใน dialog ที่เปิดจากแถวในชีตคิว: ปิดแค่ dialog ชีตคิวยังเปิดอยู่
     await row.getByRole("button", { name: USE }).click()
     await expect(dialog).toBeVisible()
+    // dialog ขึ้นก่อน แล้วโฟกัสจึงย้ายเข้า dialog ทีหลัง (แบบเดียวกับเมนูภาพเฟรม): รอให้โฟกัสอยู่ใน dialog ก่อนกด Esc
+    await expect.poll(() => dialog.evaluate((el) => el.contains(document.activeElement))).toBe(true)
     await page.keyboard.press("Escape")
     await expect(dialog).toHaveCount(0)
     await expect(sheet).toBeVisible()
