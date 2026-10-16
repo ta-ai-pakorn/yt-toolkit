@@ -60,13 +60,17 @@ test.describe("W5 ประวัติ", () => {
   })
 
   test("ระหว่างโหลดแสดงโครงรอ แล้วเป็นตาราง", async ({ page }) => {
+    // กั้นคำตอบไว้จนเห็นโครงรอ: หน่วงด้วยเวลาตายตัว runner ที่ช้าตรวจไม่ทันก่อนตารางมา
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/history*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 600))
+      await held
       await json(route, { items: [item(ZOO, ZOO_TITLE)], total: 1 })
     })
     await mockThumbnails(page)
     await page.goto("/history")
     await expect(page.locator("[aria-busy=true] [data-slot=skeleton]").first()).toBeVisible()
+    release()
     await expect(page.getByRole("link", { name: ZOO_TITLE })).toBeVisible()
     await expect(page.locator("[aria-busy=true]")).toHaveCount(0)
   })

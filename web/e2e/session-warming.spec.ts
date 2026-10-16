@@ -249,11 +249,14 @@ test.describe("ซับแปลรอเซสชันของยูทู�
   }) => {
     // คำขอแรก = E_SESSION_WARMING 2 วินาที · คำขอตอนครบเวลาค้าง 3 วินาที (เหมือน backend รอ 429) · คำขอต่อไปผ่านทันที
     const calls = { n: 0 }
+    // คำขอตอนครบเวลาค้างจนผู้ใช้เปลี่ยนแทร็กเสร็จ (เดิมหน่วง 3 วินาทีตายตัว: runner ที่ช้ากดไม่ทันก่อนคำขอนั้นตอบ)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route(`**/api/videos/${THAI}/subtitles/${TRACK}/tokens`, async (route: Route) => {
       calls.n += 1
       if (calls.n === 1) return route.fulfill({ status: 503, json: warmingBody(2) })
       if (calls.n === 2) {
-        await new Promise((resolve) => setTimeout(resolve, 3_000))
+        await held
         // เบราว์เซอร์ยกเลิกคำขอนี้ไปแล้ว (ผู้ใช้เปลี่ยนแทร็ก) continue จึงอาจล้มเหลว
         return route.continue().catch(() => undefined)
       }
@@ -269,6 +272,7 @@ test.describe("ซับแปลรอเซสชันของยูทู�
     await page.getByRole("option", { name: "ไทย (อัตโนมัติ)" }).click()
     await expect(page).toHaveURL(/[?&]track=a\.th-orig(&|$)/)
     await expect(cues(page)).toHaveCount(5)
+    release()
     // กลับไปซับแปลอังกฤษ: ต้องได้ซับมาแสดง
     await page.getByRole("combobox", { name: "แทร็กซับ" }).click()
     await page.getByRole("option", { name: "เลือกซับแปลอัตโนมัติ…" }).click()
