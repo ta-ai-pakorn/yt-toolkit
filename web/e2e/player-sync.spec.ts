@@ -368,9 +368,37 @@ test.describe("M3.5 ทรานสคริปต์ตามการเล่
     const target = lineItems(page).nth(15)
     await target.locator(".font-mono").click()
     await expect(target).toHaveAttribute("data-playing", "")
+    // เฟรมที่กักไว้ต้องมีการเลื่อนตามจริง (ไม่ใช่แค่เฟรมอื่นของหน้า เช่น scroll area): เลื่อนกรอบขึ้นบนสุดแบบเดียวกับขั้นถัดไป
+    // แล้วลองรันทุกเฟรมแบบไม่ให้เลื่อนจริง (ดักการตั้ง scrollTop ของกรอบรายการไว้ จดค่าแต่ไม่ใช้) เฟรมยังอยู่ในคิวเหมือนเดิม
+    // ไม่มีเฟรมไหนจะดึงกรอบลงไปที่บรรทัดที่เล่น = เทสต์นี้ไม่ได้ทดสอบอะไร
     await expect
-      .poll(() => page.evaluate(() => (window as unknown as { __raf: { queue: unknown[] } }).__raf.queue.length))
-      .toBeGreaterThan(0)
+      .poll(() =>
+        page.evaluate(() => {
+          const raf = (window as unknown as { __raf: { queue: { cb: FrameRequestCallback }[] } }).__raf
+          const viewport = document
+            .querySelector('[aria-label="บรรทัดในทรานสคริปต์"]')!
+            .closest<HTMLElement>('[data-slot="scroll-area-viewport"]')!
+          const real = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")!
+          real.set!.call(viewport, 0)
+          const writes: number[] = []
+          Object.defineProperty(viewport, "scrollTop", {
+            configurable: true,
+            get: () => real.get!.call(viewport) as number,
+            set: (value: number) => writes.push(value),
+          })
+          // เฟรมที่ขอใหม่ระหว่างลองรัน (เช่นตัวที่ขอเฟรมต่อเองทุกเฟรม) ทิ้งไป: ตัวเดิมยังอยู่ในคิว
+          const held = raf.queue
+          raf.queue = []
+          try {
+            for (const frame of held) frame.cb(performance.now())
+          } finally {
+            raf.queue = held
+            delete (viewport as { scrollTop?: number }).scrollTop
+          }
+          return writes.some((value) => value > 0)
+        }),
+      )
+      .toBe(true)
 
     const scrollTop = await page.evaluate(() => {
       const raf = (window as unknown as { __raf: { hold: boolean; queue: { cb: FrameRequestCallback }[] } }).__raf

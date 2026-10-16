@@ -2,6 +2,7 @@
 import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Page } from "@playwright/test"
 
+import { expectFocusInside } from "./focus"
 import { mockEnqueue } from "./queue-helpers"
 
 // owner round 5: ภาพเฟรมในช่วงที่คนดูซ้ำบ่อยเด่นขึ้น (กรอบอำพัน + ป้าย "ดูซ้ำบ่อย") · ตัวกรอง "ดูซ้ำบ่อย (n ภาพ)" (?replayed=1)
@@ -130,6 +131,8 @@ test.describe("แท็บภาพเฟรม: ตัวกรอง 'ดู�
     await expect(frameList(page).getByRole("listitem")).toHaveCount(3)
     await frameButtons(page).first().click()
     await expect(lightbox(page)).toHaveAttribute("aria-label", "ภาพเฟรมที่ 00:00:24")
+    // ←/→ ฟังที่ตัวภาพใหญ่: รอโฟกัสย้ายเข้าไปก่อน
+    await expectFocusInside(lightbox(page))
     await page.keyboard.press("ArrowRight")
     await expect(lightbox(page)).toHaveAttribute("aria-label", "ภาพเฟรมที่ 00:00:29")
     // ข้ามภาพ 00:00:34 ... 00:00:58 ที่ถูกกรองออก

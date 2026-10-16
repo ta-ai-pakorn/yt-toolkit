@@ -2,6 +2,7 @@
 import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Page } from "@playwright/test"
 
+import { expectFocusInside } from "./focus"
 import { mockEnqueue } from "./queue-helpers"
 
 const BBB = "aqz-KE-bpKQ"
@@ -685,6 +686,8 @@ test.describe("W2 ภาพใหญ่ (lightbox)", () => {
     const src = (await frameSrc(page, "00:00:09"))!
     await frameButton(page, "00:00:00").click()
     await expect(lightbox(page)).toHaveAttribute("aria-label", "ภาพเฟรมที่ 00:00:00")
+    // ←/→ ฟังที่ตัวภาพใหญ่ ไม่ใช่ที่ภาพเฟรม: รอโฟกัสย้ายเข้าไปก่อน
+    await expectFocusInside(lightbox(page))
     await page.keyboard.press("ArrowLeft")
     await expect(lightbox(page)).toHaveAttribute("aria-label", "ภาพเฟรมที่ 00:00:00")
     await page.keyboard.press("ArrowRight")
@@ -701,6 +704,7 @@ test.describe("W2 ภาพใหญ่ (lightbox)", () => {
   test("→ ไปภาพถัดไปที่ต้องเลื่อนจอถึงจะเห็นได้ · ปิดแล้วโฟกัสอยู่ที่ภาพนั้น", async ({ page }) => {
     await openBbb(page)
     await frameButton(page, "00:00:54").click()
+    await expectFocusInside(lightbox(page))
     await page.keyboard.press("ArrowRight")
     await expect(lightbox(page)).toHaveAttribute("aria-label", /ภาพเฟรมที่ 00:00:59/)
     await page.keyboard.press("Escape")

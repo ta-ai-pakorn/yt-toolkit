@@ -35,7 +35,9 @@ export default defineConfig({
   testDir: "e2e",
   timeout: 30_000,
   // CI: เก็บ trace ของเทสต์ที่พังไว้ใน test-results (ci.yml อัปโหลดเป็น artifact) ไว้หาต้นเหตุเทสต์ที่พังเฉพาะบน runner
-  use: { trace: process.env.CI ? "retain-on-failure" : "off" },
+  // retain-on-failure บันทึกทุกเทสต์ (ทิ้งเมื่อผ่าน) จึงไม่บันทึก screencast: บน 2 คอร์ screencast ทำให้ทั้งชุดช้าลงราว 40%
+  // (CI 16-17 นาที -> 22 นาที) runner ที่ช้าลงทำให้เทสต์ที่แข่งกับเวลาพังบ่อยขึ้น · ลำดับคำสั่ง เวลา network console และ DOM snapshot ยังอยู่ครบ
+  use: { trace: process.env.CI ? { mode: "retain-on-failure", screenshots: false } : "off" },
   // ค่าเริ่มต้นของ Playwright คือครึ่งหนึ่งของจำนวนคอร์ (8 บนเครื่อง 16 คอร์) ทำให้ CPU เต็ม 100% และ RAM 16 GB แทบหมด
   // เทสที่รอหน้าโหลดจึงหลุดเวลาแบบสุ่มทีละตัว (backend ตอบเร็ว ไม่ใช่คอขวด) จำกัดไว้ 4 พอ ส่ง --workers ทับได้
   // CI (GitHub ตั้ง CI=true): runner windows-latest ของ repo ส่วนตัวมีแค่ 2 vCPU ค่าเริ่มต้นเดิมจึงได้ 1 worker และเขียวมาตลอด

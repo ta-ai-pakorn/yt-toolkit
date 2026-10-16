@@ -56,17 +56,24 @@ const RESULT_ROWS = 'section[aria-labelledby="results-title"] [role="listitem"]'
 
 test.describe("W1 วิเคราะห์ลิงก์", () => {
   test("กดวิเคราะห์ลิงก์คลิปเดียว → ไปหน้าคลิป และปุ่มหมุนพร้อมปิดใช้งานระหว่างรอ", async ({ page }) => {
+    // กั้นคำขอ resolve ไว้จนตรวจสถานะ "กำลังรอ" ครบ: ถ้าหน่วงด้วยเวลาตายตัว runner ที่ช้าตรวจไม่ทัน
+    // คำตอบมาก่อน แอพเปลี่ยนไปหน้าคลิปแล้ว ปุ่มที่ตรวจอยู่ก็หายไปจากหน้า
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/resolve", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 400))
+      await held
       await route.continue()
     })
     await page.goto("/")
     await page.getByRole("textbox").fill(BBB_URL)
     const button = page.getByRole("button", { name: "วิเคราะห์" })
+    const resolving = page.waitForRequest("**/api/resolve")
     await button.click()
+    await resolving
     await expect(button).toBeDisabled()
     await expect(button).toHaveCSS("opacity", "0.5")
     await expect(button.getByRole("status", { name: "กำลังโหลด" })).toBeVisible()
+    release()
     await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
   })
@@ -240,8 +247,11 @@ test.describe("W1 วิเคราะห์ลิงก์", () => {
   })
 
   test("แถวเพลย์ลิสต์ระหว่างโหลดแสดงโครงรอ แล้วกลายเป็นข้อมูลจริง", async ({ page }) => {
+    // กั้นคำตอบไว้จนเห็นโครงรอ: หน่วงด้วยเวลาตายตัว runner ที่ช้าตรวจไม่ทันก่อนข้อมูลจริงมา
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route(`**/api/playlists/${PLAYLIST_ID}`, async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 600))
+      await held
       await route.continue()
     })
     await page.goto("/")
@@ -249,6 +259,7 @@ test.describe("W1 วิเคราะห์ลิงก์", () => {
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
     const row = page.locator(RESULT_ROWS)
     await expect(row.getByText("กำลังโหลดข้อมูลเพลย์ลิสต์")).toBeAttached()
+    release()
     await expect(row).toContainText(PLAYLIST_TITLE)
   })
 
@@ -301,12 +312,16 @@ test.describe("W1 ล่าสุด", () => {
   })
 
   test("ระหว่างโหลดแสดงโครงรอ", async ({ page }) => {
+    // กั้นคำตอบไว้จนเห็นโครงรอ: หน่วงด้วยเวลาตายตัว runner ที่ช้าตรวจไม่ทัน
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/history*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 800))
+      await held
       await route.fulfill({ json: { items: [], total: 0 } })
     })
     await page.goto("/")
     await expect(page.locator("section[aria-busy=true] [data-slot=skeleton]").first()).toBeVisible()
+    release()
     await expect(page.locator("section[aria-busy=true]")).toHaveCount(0)
   })
 
@@ -425,12 +440,17 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     let inFlight = 0
     let peak = 0
     const fetched: string[] = []
+    // กั้นคำตอบไว้จนมีคำขอค้างครบ 3 ตัวพร้อมกัน (เดิมหน่วง 150 ms: route ที่ช้ากว่านั้นได้ peak 2 ทั้งที่แอพถูก)
+    // ถ้าแอพยิงเกิน 3 ตัวที่ 4 จะมาระหว่างที่สามตัวแรกยังค้าง peak จึงเกิน 3
+    let release!: () => void
+    const full = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/videos/*", async (route) => {
       const id = new URL(route.request().url()).pathname.split("/").pop() ?? ""
       fetched.push(id)
       inFlight += 1
       peak = Math.max(peak, inFlight)
-      await new Promise((resolve) => setTimeout(resolve, 150))
+      if (inFlight === 3) release()
+      await full
       inFlight -= 1
       await route.fulfill({ json: fakeVideo(id) })
     })
@@ -469,8 +489,11 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
   })
 
   test("ระหว่างรอชื่อ แสดงโครงรอ", async ({ page }) => {
+    // กั้นคำตอบไว้จนตรวจโครงรอครบ: หน่วงด้วยเวลาตายตัว runner ที่ช้าตรวจไม่ทัน
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/videos/*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 700))
+      await held
       await route.continue()
     })
     await page.goto("/")
@@ -481,16 +504,22 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     await expect(row.locator("[data-slot=skeleton]")).toBeVisible()
     // โครงรอต้องไม่ถูกประกาศทีละแถว
     await expect(row.getByRole("status")).toHaveCount(0)
+    release()
     await expect(row).toContainText("Me at the zoo")
   })
 
   test("เพลย์ลิสต์ดึงข้อมูลครั้งละไม่เกิน 3 รายการ", async ({ page }) => {
     let inFlight = 0
     let peak = 0
+    // กั้นคำตอบไว้จนมีคำขอค้างครบ 3 ตัวพร้อมกัน (เดิมหน่วง 150 ms: route ที่ช้ากว่านั้นได้ peak 2 ทั้งที่แอพถูก)
+    // ถ้าแอพยิงเกิน 3 ตัวที่ 4 จะมาระหว่างที่สามตัวแรกยังค้าง peak จึงเกิน 3
+    let release!: () => void
+    const full = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/playlists/*", async (route) => {
       inFlight += 1
       peak = Math.max(peak, inFlight)
-      await new Promise((resolve) => setTimeout(resolve, 150))
+      if (inFlight === 3) release()
+      await full
       inFlight -= 1
       await route.fulfill({ json: { title: "รายการทดสอบ", total: 3, truncated: false, entries: [{ videoId: ZOO }] } })
     })
@@ -576,9 +605,12 @@ test.describe("W1 การวาง การเข้าถึง และข
   }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"])
     let calls = 0
+    // กั้น /resolve ไว้จนวางเสร็จ: การวางต้องเกิด "ระหว่างกำลังวิเคราะห์" จริง ไม่แข่งกับเวลาที่หน่วงไว้
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/resolve", async (route) => {
       calls += 1
-      await new Promise((resolve) => setTimeout(resolve, 700))
+      await held
       await route.continue()
     })
     await page.goto("/")
@@ -590,6 +622,7 @@ test.describe("W1 การวาง การเข้าถึง และข
     await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(`https://youtu.be/${ZOO}`)})`)
     await page.keyboard.press("Control+V")
     await expect(page.getByRole("textbox")).toHaveValue(BBB_URL)
+    release()
     await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
     expect(calls).toBe(1)
   })

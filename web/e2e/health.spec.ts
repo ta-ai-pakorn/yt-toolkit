@@ -101,8 +101,11 @@ test("ปิดโปรแกรม: ปุ่มหมุนระหว่า
   await page.route("**/api/tools/ffmpeg/install", (route) =>
     route.fulfill({ json: { status: "error", name: "ffmpeg", version: null, message: "แจ้งเตือนเก่า", path: null } }),
   )
+  // กั้นคำตอบไว้จนเห็นวงหมุน: หน่วงด้วยเวลาตายตัว runner ที่ช้าตรวจไม่ทันก่อนขึ้นหน้าปิดแล้ว
+  let release!: () => void
+  const held = new Promise<void>((resolve) => (release = resolve))
   await page.route("**/api/shutdown", async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await held
     await route.fulfill({ json: { ok: true } })
   })
   await page.goto("/settings/health")
@@ -110,6 +113,7 @@ test("ปิดโปรแกรม: ปุ่มหมุนระหว่า
   await expect(page.getByText("แจ้งเตือนเก่า")).toBeVisible()
   await page.getByRole("button", { name: "ปิดโปรแกรม" }).click()
   await expect(page.getByRole("button", { name: "ปิดโปรแกรม" }).getByRole("status", { name: "กำลังโหลด" })).toBeVisible()
+  release()
   await expect(page.getByText("ปิดโปรแกรมแล้ว")).toBeVisible()
   await expect(page.getByText("แจ้งเตือนเก่า")).toHaveCount(0)
 })

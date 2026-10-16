@@ -38,6 +38,25 @@ def reap_when_it_exits(proc: subprocess.Popen) -> None:
     threading.Thread(target=proc.wait, name="reap-serve", daemon=True).start()
 
 
+class KillRecorder:
+    """ส่งต่อทุกอย่างให้ platform จริง แต่จดไว้ว่า lifecycle.stop สั่ง kill หรือไม่
+
+    แอพที่ปิดตัวเองช้ากว่า STOP_WAIT_S ถูก kill แล้วก็ยังออกด้วยรหัส 0 ได้ (uvicorn ออกเงียบ ๆ เมื่อโดน SIGTERM)
+    เทสต์ที่ดูแค่รหัสออกกับเวลารวมจึงแยกไม่ออกว่าแอพปิดตัวเองเรียบร้อย หรือโดนบังคับปิด
+    """
+
+    def __init__(self, plat) -> None:
+        self._plat = plat
+        self.killed: list[int] = []
+
+    def kill(self, pid: int) -> None:
+        self.killed.append(pid)
+        self._plat.kill(pid)
+
+    def __getattr__(self, name: str):
+        return getattr(self._plat, name)
+
+
 class App:
     """serve หนึ่งรอบ (โปรเซสจริง) กับตัวช่วยเรียก API"""
 
@@ -190,11 +209,15 @@ def test_stop_with_running_job_exits_and_job_is_interrupted(tmp_path):
         (job,) = app.post_jobs(video_item(SLOW))
         app.wait_job(job["id"], is_status("running"))
         asked: list[str] = []
+        plat = KillRecorder(app.plat)
         started = time.monotonic()
-        code = lifecycle.stop(app.paths, app.plat, ask=lambda q: asked.append(q) or "y", out=lambda m: None)
+        code = lifecycle.stop(app.paths, plat, ask=lambda q: asked.append(q) or "y", out=lambda m: None)
+        elapsed = time.monotonic() - started
         assert code == 0
+        # แอพปิดตัวเองเรียบร้อยภายในเวลาที่ stop รอ (ออกแบบไว้ราว 8.5 วินาทีเมื่อแย่ที่สุด) ไม่ใช่โดน kill ตอนครบ STOP_WAIT_S
+        assert plat.killed == []
+        assert elapsed < lifecycle.STOP_WAIT_S
         assert app.proc.wait(timeout=15) == 0
-        assert time.monotonic() - started < 15
         assert asked and "1" in asked[0]  # ถามยืนยันเพราะมีงานค้าง
         assert not app.plat.pid_alive(app.info.pid)
         assert not app.paths.app_json.exists()

@@ -131,7 +131,7 @@ describe("createYouTubeAdapter", () => {
     expect(getPlayerState().status).toBe("playing")
   })
 
-  it("ก่อนพร้อม คำสั่งของ store ไม่ไปถึงตัวเล่น (เก็บเป็น pendingSeek)", () => {
+  it("ก่อนพร้อม การขอเล่นจากเวลาใหม่ไม่ไปถึงตัวเล่น (เก็บเป็น pendingSeek) · พร้อมแล้วจึง seek ไปเวลาล่าสุดแล้วเล่น", () => {
     playerActions.playFrom()
     const { player } = setup()
     playerActions.playFrom(5000)
