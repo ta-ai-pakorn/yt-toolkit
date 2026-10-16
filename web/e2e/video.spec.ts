@@ -267,7 +267,8 @@ test.describe("W2 ภาพเฟรม", () => {
     await openBbb(page)
     await frameButton(page, "00:00:04").focus()
     await page.keyboard.press("Shift+F10")
-    await expect(page.getByRole("menu")).toBeVisible()
+    // เมนูขึ้นก่อน แล้วโฟกัสจึงย้ายเข้ารายการแรกในอีกราว 10-20 ms: กดลูกศรระหว่างนั้น ปุ่มไปที่ภาพเฟรม ไม่ใช่เมนู
+    await expect(page.getByRole("menuitem", { name: "คัดลอกภาพ" })).toBeFocused()
     await page.keyboard.press("ArrowDown")
     await page.keyboard.press("ArrowDown")
     await expect(page.getByRole("menuitem", { name: "คัดลอกเวลา" })).toBeFocused()
