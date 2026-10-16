@@ -56,6 +56,11 @@ const INITIAL: PlayerState = {
 
 let state: PlayerState = INITIAL
 let adapter: PlayerAdapter | null = null
+/**
+ * ตัวเล่นพร้อมแล้ว (onReady) ให้เล่นเลยไหม · กดหยุดระหว่างโหลด (เช่น "หยุดเล่นช่วงไฮไลต์") = ไม่เล่นเองตอนพร้อม
+ * (เดิม pause ระหว่างโหลดหายไปเฉย ๆ เพราะ adapter ยังไม่พร้อม แล้ว onReady สั่งเล่นทับ คลิปจึงเล่นทั้งที่ผู้ใช้กดหยุดแล้ว)
+ */
+let playOnReady = true
 const listeners = new Set<() => void>()
 
 function set(patch: Partial<PlayerState>): void {
@@ -95,6 +100,7 @@ function request(ms: number | undefined, reel: PlayerState["reel"]): void {
     adapter.play()
     return
   }
+  playOnReady = true
   set({
     status: "loading",
     started: true,
@@ -111,6 +117,7 @@ export const playerActions = {
     if (state.videoId === videoId) return
     adapter?.stop()
     adapter = null
+    playOnReady = true
     state = { ...INITIAL, videoId }
     for (const listener of listeners) listener()
   },
@@ -127,18 +134,23 @@ export const playerActions = {
   stopReel(): void {
     if (state.reel) set({ reel: null })
   },
+  /** หยุดคลิป · ตัวเล่นยังโหลดอยู่ = ไม่เล่นเองตอนพร้อม (หยุดรอที่เวลาที่ขอไว้) */
   pause(): void {
+    if (state.status === "loading") playOnReady = false
     adapter?.pause()
   },
   /** ปิดตัวเล่น: หยุด คืนทรัพยากร กลับไปเป็นภาพปกในหัวคลิป */
   close(): void {
     adapter?.stop()
     adapter = null
+    playOnReady = true
     set({ status: "idle", started: false, currentMs: 0, reel: null, pendingSeekMs: null, error: null, errorAtMs: null })
   },
   /** หลังโหลดสคริปต์ไม่ได้ (offline) ลองใหม่ */
   retry(): void {
-    if (state.status === "error") set({ status: "loading", error: null, started: true })
+    if (state.status !== "error") return
+    playOnReady = true
+    set({ status: "loading", error: null, started: true })
   },
 }
 
@@ -154,6 +166,12 @@ export const playerAdapterHooks = {
     const ms = state.pendingSeekMs
     if (ms !== null) set({ pendingSeekMs: null })
     return ms
+  },
+  /** ตอนพร้อม (onReady): ควรสั่งเล่นไหม (false = ผู้ใช้กดหยุดไว้ระหว่างโหลด) อ่านแล้วกลับเป็นค่าเริ่มต้น */
+  takePlayOnReady(): boolean {
+    const play = playOnReady
+    playOnReady = true
+    return play
   },
   onStatus(status: Exclude<PlayerStatus, "loading" | "error">): void {
     if (status === "ended") set({ status, reel: null })
@@ -198,6 +216,7 @@ export function usePlayerValue<T>(select: (s: PlayerState) => T): T {
 /** ทดสอบเท่านั้น */
 export function __resetPlayerForTests(): void {
   adapter = null
+  playOnReady = true
   state = INITIAL
   for (const listener of listeners) listener()
 }
