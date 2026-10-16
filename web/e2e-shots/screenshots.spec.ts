@@ -1,3 +1,4 @@
+import os from "node:os"
 import path from "node:path"
 
 import { expect, test, type Page } from "@playwright/test"
@@ -17,8 +18,21 @@ const NEUTRAL_OUTPUT_DIR = "C:\\Users\\พนักงาน\\Downloads\\YT-Tool
 
 test.describe.configure({ mode: "serial" })
 
-const shot = (page: Page, name: string, opts: { fullPage?: boolean; clip?: { x: number; y: number; width: number; height: number } } = {}) =>
-  page.screenshot({ path: path.join(IMAGES, `${name}.png`), ...opts })
+// ตัวกันข้อมูลจริงรั่ว (C4): ชื่อผู้ใช้และโฟลเดอร์บ้านของเครื่องที่ถ่าย อ่านจากเครื่องตอนรัน ไม่เขียนค่าจริงไว้ในไฟล์
+const PRIVATE_STRINGS = [os.userInfo().username, path.basename(os.homedir()), os.homedir()].filter((s) => s.length >= 3)
+
+/** ทั้งหน้า (ข้อความที่เห็นและค่าในช่องกรอก) ต้องไม่มีชื่อผู้ใช้หรือที่อยู่บ้านของเครื่องนี้ */
+async function expectNoPrivateData(page: Page) {
+  const seen = await page.evaluate(() =>
+    [document.body.innerText, ...Array.from(document.querySelectorAll("input, textarea")).map((el) => (el as HTMLInputElement).value)].join("\n"),
+  )
+  for (const secret of PRIVATE_STRINGS) expect(seen.toLowerCase()).not.toContain(secret.toLowerCase())
+}
+
+const shot = async (page: Page, name: string, opts: { fullPage?: boolean; clip?: { x: number; y: number; width: number; height: number } } = {}) => {
+  await expectNoPrivateData(page) // ตรวจทุกรูปก่อนถ่าย
+  return page.screenshot({ path: path.join(IMAGES, `${name}.png`), ...opts })
+}
 
 /** รอให้ฟอนต์โหลดครบและแอนิเมชันที่จบได้จบก่อนถ่าย */
 async function settle(page: Page) {
@@ -141,7 +155,6 @@ test("07-settings", async ({ page }) => {
   await expect(page.getByRole("tab", { name: "ทั่วไป", exact: true })).toHaveAttribute("aria-selected", "true")
   // ตัวกันข้อมูลจริงรั่ว (C4): ช่องโฟลเดอร์ต้องเป็นที่อยู่สมมติ และทั้งหน้าต้องไม่มีชื่อผู้ใช้จริงของเครื่อง
   await expect(page.getByRole("textbox", { name: "โฟลเดอร์ผลลัพธ์" })).toHaveValue(NEUTRAL_OUTPUT_DIR)
-  expect(await page.locator("body").innerText()).not.toContain("khumj")
   await settle(page)
   await shot(page, "07-settings")
 })

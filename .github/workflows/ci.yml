@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   python:
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +25,7 @@ jobs:
       - run: uv run pytest -v
 
   web:
+    timeout-minutes: 15
     runs-on: ubuntu-24.04 # ตรึงเวอร์ชัน ให้ขั้นตรวจ web/dist ไม่เปลี่ยนเองเมื่อ ubuntu-latest ขยับ
     defaults:
       run:
@@ -46,6 +48,7 @@ jobs:
           test -z "$(git status --porcelain -- dist)"
 
   e2e:
+    timeout-minutes: 45
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
