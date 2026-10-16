@@ -336,8 +336,9 @@ def test_a_work_root_that_cannot_be_listed_is_skipped_and_the_cache_trash_still_
     sized(paths.work / JOB / "f.part", MB)
     real = os.scandir
 
-    def denied(path):
-        if Path(path) == paths.work:
+    def denied(path="."):
+        # os.scandir ถูกแทนทั้งโปรเซส: shutil.rmtree บน macOS/Linux เรียก os.scandir(fd) (ตัวเลข) ไม่ใช่ path ส่งต่อตามเดิม
+        if not isinstance(path, int) and Path(path) == paths.work:
             raise PermissionError(13, f"denied {path}")
         return real(path)
 
