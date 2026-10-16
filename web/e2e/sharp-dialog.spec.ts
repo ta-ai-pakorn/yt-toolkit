@@ -25,6 +25,18 @@ const customRadio = (page: Page) => dialog(page).getByRole("radio", { name: "ต
 const customField = (page: Page) => dialog(page).getByRole("textbox", { name: "ตั้งเอง ทุก วินาที" })
 const start = (page: Page) => dialog(page).getByRole("button", { name: "เริ่มดึงภาพคม" })
 
+/**
+ * กด "เริ่มดึงภาพคม" แล้วรอ POST /api/jobs ออกไปจริง ก่อนตรวจว่ากล่องปิด
+ * พังที่นี่ = การกดไม่ถึงคำสั่งเริ่ม · พังที่ toBeHidden = ส่งแล้วแต่กล่องไม่ปิด (แยกสองกรณีออกจากกัน)
+ */
+async function clickStart(page: Page) {
+  const posted = page.waitForRequest((r) => new URL(r.url()).pathname === "/api/jobs" && r.method() === "POST", {
+    timeout: 5_000,
+  })
+  await start(page).click()
+  await posted
+}
+
 async function openDialog(page: Page, videoId = BBB) {
   await page.goto(`/v/${videoId}`)
   await page.getByRole("button", { name: "ขอภาพคม" }).click()
@@ -51,7 +63,7 @@ test("ค่าเริ่มต้น: เวลาเดียวกับภ
   await expect(dialog(page)).toContainText("ต้องโหลดวิดีโอชั่วคราวราว 151 MB (ลบทิ้งเมื่อเสร็จ)")
   await expect(dialog(page)).toContainText("ภาพกว้าง 1280 px")
   await expect(dialog(page)).not.toContainText("ภาพคมชุดเดิมในแอพ")
-  await start(page).click()
+  await clickStart(page)
   await expect(dialog(page)).toBeHidden()
   await expect(page.getByText("เพิ่มเข้าคิวแล้ว", { exact: true })).toBeVisible()
   expect(queue.bodies).toEqual([[{ videoId: BBB, kind: "frames_sharp", params: {}, title: BBB_TITLE }]])
@@ -102,7 +114,7 @@ test("ตั้งเอง ทุก 7 วินาที: 91 ภาพ ส่�
   await customField(page).fill("7")
   await expect(customRadio(page)).toBeChecked()
   await expect(dialog(page)).toContainText("· 91 ภาพ")
-  await start(page).click()
+  await clickStart(page)
   await expect(dialog(page)).toBeHidden()
   expect(queue.bodies[0][0].params).toEqual({ intervalS: 7 })
 })
@@ -116,7 +128,7 @@ test("AC-FRAME-04: ทุก 2 วินาทีเกิน 200 ภาพ บ�
   await customField(page).fill("2")
   await expect(dialog(page).getByRole("status")).toHaveText("ทุก 2 วินาทีจะได้ 318 ภาพ เกินที่ดึงได้ 200 ภาพ จะใช้ทุก 4 วินาทีแทน")
   await expect(dialog(page)).not.toContainText("· 318 ภาพ")
-  await start(page).click()
+  await clickStart(page)
   await expect(dialog(page)).toBeHidden()
   expect(queue.bodies[0][0].params).toEqual({ intervalS: 4 })
 })
@@ -138,7 +150,7 @@ test("เวลาเดียวกับภาพเร็วที่เก�
   await expect(sameRadio(page)).toBeChecked()
   await expect(dialog(page).getByRole("status")).toHaveText("ทุก 3.0 วินาทีจะได้ 212 ภาพ เกินที่ดึงได้ 200 ภาพ จะใช้ทุก 4 วินาทีแทน")
   await expect(dialog(page)).not.toContainText("ทุก ~3.0 วินาที · 212 ภาพ")
-  await start(page).click()
+  await clickStart(page)
   await expect(dialog(page)).toBeHidden()
   expect(queue.bodies[0][0].params).toEqual({ intervalS: 4 })
 })
@@ -180,7 +192,7 @@ test("คลิปไม่มี storyboard: ไม่มีตัวเลื�
   await expect(customField(page)).toHaveValue("1")
   await expect(dialog(page)).toContainText("· 19 ภาพ")
   await expect(dialog(page)).toContainText("คลิปนี้มีภาพสูงสุด 240p ภาพจะเล็กกว่าปกติ")
-  await start(page).click()
+  await clickStart(page)
   await expect(dialog(page)).toBeHidden()
   expect(queue.bodies[0][0].params).toEqual({ intervalS: 1 })
 })
