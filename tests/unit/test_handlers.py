@@ -1494,6 +1494,9 @@ def assert_name(env: Env, path: Path, name: str) -> None:
     tail = name.removeprefix(THAI_SAFE)
     assert tail != name and path.name.endswith(tail), path.name
     cut = path.name.removesuffix(tail)
+    if folder_title == THAI_SAFE and len(tail) <= files.TAIL_RESERVE:
+        # root สั้นพอและส่วนท้ายอยู่ในงบที่จองไว้ = ไม่มีอะไรต้องตัด ชื่อต้องตรงทุกตัวอักษร
+        assert path.name == name, path.name
     # ไฟล์ใช้ชื่อคลิปเดียวกับโฟลเดอร์ (ส่วนท้ายยาวกว่าที่จองไว้ = ชื่อไฟล์ตัดเพิ่มได้อีก แต่ยังเป็นต้นชื่อเดิม)
     assert cut == folder_title or (cut and folder_title.startswith(cut)), path.name
 
