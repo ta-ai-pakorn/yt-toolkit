@@ -55,6 +55,17 @@ async function seriousViolations(page: Page) {
   return results.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => v.id)
 }
 
+test("เบราว์เซอร์แจ้งว่าเครื่องไม่ได้ต่อเน็ต (offline): กดเริ่มแล้วส่งงานจริง ไม่ค้างวงหมุน (backend อยู่ในเครื่องนี้)", async ({ page }) => {
+  // react-query ค่าเริ่มต้นพักทุกคำขอเมื่อเบราว์เซอร์บอก offline (ถอดสาย/ปิด Wi-Fi) ทั้งที่ 127.0.0.1 ยังต่อได้
+  // ปุ่มจะหมุนค้างไปเรื่อย ๆ โดยไม่มีคำขอออกไปเลย
+  const queue = await mockEnqueue(page)
+  await openDialog(page)
+  await page.evaluate(() => window.dispatchEvent(new Event("offline")))
+  await clickStart(page)
+  await expect(dialog(page)).toBeHidden()
+  expect(queue.bodies).toHaveLength(1)
+})
+
 test("ค่าเริ่มต้น: เวลาเดียวกับภาพเร็ว 128 ภาพ ขนาดและความละเอียด · เริ่ม = ส่ง {} แล้วปิด dialog", async ({ page }) => {
   const queue = await mockEnqueue(page)
   await openDialog(page)
