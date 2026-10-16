@@ -286,6 +286,9 @@ test.describe("เล่นเฉพาะช่วงที่ดูซ้ำ�
     await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 2/)
     // ประกาศให้โปรแกรมอ่านหน้าจอจาก aria-live ที่อยู่ตลอดข้างปุ่ม
     await expect(actionRow(page).locator('[aria-live="polite"]')).toHaveText("ช่วง 1 จาก 2")
+    // สถานะขึ้นตั้งแต่ตอนกด (ตัวเล่นยังโหลดอยู่): เทสต์นี้ตรวจการหยุดคลิปที่กำลังเล่น จึงรอให้ตัวเล่นเล่นแล้วก่อน
+    // (กดหยุดระหว่างโหลดมีเทสต์ของตัวเองข้างล่าง)
+    await expect.poll(async () => (await fakeYTLog(page)).calls).toContain("play")
     await page.getByRole("button", { name: REEL_STOP }).click()
     await expect(reelStatus(page)).toHaveCount(0)
     // ปุ่มหยุดหายไป โฟกัสไม่หลุดไป body: ไปที่แถบไทม์ไลน์ในแถวเดียวกัน
@@ -296,6 +299,32 @@ test.describe("เล่นเฉพาะช่วงที่ดูซ้ำ�
     await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 2/)
     await timeline(page).click({ position: { x: 5, y: 10 } })
     await expect(reelStatus(page)).toHaveCount(0)
+    await expect(reelButton(page)).toBeVisible()
+  })
+
+  test("กด 'หยุดเล่นช่วงไฮไลต์' ระหว่างตัวเล่นยังโหลด: พร้อมแล้วอยู่ที่ต้นช่วงแต่ไม่เล่นเอง", async ({ page }) => {
+    // เน็ตช้า: ผู้ใช้กดหยุดก่อนตัวเล่นพร้อม (เดิมคำสั่งหยุดหายไป แล้วตัวเล่นเล่นเองตอนพร้อม)
+    await installFakeYT(page, { rate: 1 })
+    // กักสคริปต์ตัวเล่นไว้จนกดหยุดเสร็จ (route ที่ลงทีหลังทำงานก่อน แล้วส่งต่อให้ตัวเล่นปลอม)
+    let release = () => {}
+    const scriptHeld = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route("https://www.youtube.com/iframe_api", async (route) => {
+      await scriptHeld
+      await route.fallback()
+    })
+    await open(page, { mostReplayed: REPLAYED })
+    await reelButton(page).click()
+    await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 2/)
+    await page.getByRole("button", { name: REEL_STOP }).click()
+    await expect(reelStatus(page)).toHaveCount(0)
+    release()
+    // ตัวเล่นพร้อม = seek ไปต้นช่วง 1 (คำสั่ง seek กับ play อยู่ใน onReady เดียวกัน เห็น seek แล้วจึงรู้ผลของ play แน่นอน)
+    await expect.poll(async () => (await fakeYTLog(page)).seeks).toEqual([20])
+    const log = await fakeYTLog(page)
+    expect(log.calls).not.toContain("play")
+    expect(log.states).not.toContain(1) // ไม่เคยเข้า PLAYING
     await expect(reelButton(page)).toBeVisible()
   })
 })

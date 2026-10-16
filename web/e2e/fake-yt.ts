@@ -194,12 +194,13 @@ type FakePlayerHandle = { readsSinceSeek: number; playTo(seconds: number): void 
  * ใช้คู่กับ rate ต่ำมาก (นาฬิกาแทบหยุด): แต่ละสถานะของแอพค้างอยู่จนเทสต์ตรวจเสร็จ ไม่ต้องแข่งกับเวลาที่เร่งไว้
  * รอให้แอพอ่านเวลาหลัง seek ล่าสุดก่อน: adapter ทิ้งเวลาที่ห่างจากจุด seek เกินค่าที่ยอมรับ จนกว่าจะเห็นว่า seek ถึงแล้ว
  * (การอ่านครั้งนั้นกับการยืนยัน seek เกิดใน tick เดียวกัน อ่านแล้ว = adapter รับเวลาถัดไปแน่นอน)
+ * สคริปต์ตัวเล่นอาจยังโหลดไม่เสร็จ (ยังไม่มี window.__fakeYT): แอพแสดงสถานะ เช่น "ช่วง 1 จาก 2" ตั้งแต่ตอนกด ก่อนตัวเล่นพร้อม จึงรอด้วย
  */
 export async function playTo(page: Page, seconds: number): Promise<void> {
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const players = (window as unknown as { __fakeYT: { players: FakePlayerHandle[] } }).__fakeYT.players
+        const players = (window as unknown as { __fakeYT?: { players: FakePlayerHandle[] } }).__fakeYT?.players ?? []
         return (players.at(-1)?.readsSinceSeek ?? 0) > 0
       }),
     )

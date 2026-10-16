@@ -34,6 +34,8 @@ function backend(port: number, root: string) {
 export default defineConfig({
   testDir: "e2e",
   timeout: 30_000,
+  // CI: เก็บ trace ของเทสต์ที่พังไว้ใน test-results (ci.yml อัปโหลดเป็น artifact) ไว้หาต้นเหตุเทสต์ที่พังเฉพาะบน runner
+  use: { trace: process.env.CI ? "retain-on-failure" : "off" },
   // ค่าเริ่มต้นของ Playwright คือครึ่งหนึ่งของจำนวนคอร์ (8 บนเครื่อง 16 คอร์) ทำให้ CPU เต็ม 100% และ RAM 16 GB แทบหมด
   // เทสที่รอหน้าโหลดจึงหลุดเวลาแบบสุ่มทีละตัว (backend ตอบเร็ว ไม่ใช่คอขวด) จำกัดไว้ 4 พอ ส่ง --workers ทับได้
   // CI (GitHub ตั้ง CI=true): runner windows-latest ของ repo ส่วนตัวมีแค่ 2 vCPU ค่าเริ่มต้นเดิมจึงได้ 1 worker และเขียวมาตลอด

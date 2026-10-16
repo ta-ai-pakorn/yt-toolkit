@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -27,6 +28,16 @@ VIDEO_PARAMS = {"maxQuality": False, "splitChapters": False, "noAudio": False, "
 PORTS = range(8850, 8870)
 
 
+def reap_when_it_exits(proc: subprocess.Popen) -> None:
+    """เก็บโปรเซส serve ทันทีที่มันจบ (เธรดรอ proc.wait) ให้ pid_alive เห็นว่าแอพปิดแล้วเหมือนของจริง
+
+    เทสต์นี้เป็นแม่ของ serve: บน macOS/Linux โปรเซสลูกที่จบแล้วแต่แม่ยังไม่ wait จะค้างเป็น zombie
+    os.kill(pid, 0) ยังสำเร็จ lifecycle.stop จึงคิดว่าแอพยังเปิดอยู่และรอครบ STOP_WAIT_S ทุกครั้ง
+    ของจริงไม่เป็นแบบนี้: คำสั่ง stop เป็นคนละโปรเซสกับแม่ของแอพ (Windows ไม่มี zombie เวลาจึงสั้นอยู่แล้ว)
+    """
+    threading.Thread(target=proc.wait, name="reap-serve", daemon=True).start()
+
+
 class App:
     """serve หนึ่งรอบ (โปรเซสจริง) กับตัวช่วยเรียก API"""
 
@@ -42,6 +53,7 @@ class App:
             "YT_TOOLKIT_FFMPEG_PATH_LOOKUP": "0",
         }
         self.proc = subprocess.Popen([sys.executable, "-m", "yttoolkit", "serve", "--port", str(port)], env=env)
+        reap_when_it_exits(self.proc)
         deadline = time.monotonic() + 30
         info = None
         while time.monotonic() < deadline and info is None:

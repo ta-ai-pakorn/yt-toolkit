@@ -164,7 +164,8 @@ export function createYouTubeAdapter(YT: YTNamespace, iframe: HTMLIFrameElement,
         hooks.onStatus("paused")
         const ms = hooks.takePendingSeek()
         if (ms !== null) adapter.seekTo(ms)
-        adapter.play()
+        // กดหยุดไว้ระหว่างโหลด = อยู่ที่เวลาที่ขอไว้แต่ไม่เล่นเอง
+        if (hooks.takePlayOnReady()) adapter.play()
       },
       onStateChange: (event) => {
         if (stopped) return
