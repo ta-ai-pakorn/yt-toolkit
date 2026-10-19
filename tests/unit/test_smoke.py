@@ -2,7 +2,7 @@ import yttoolkit
 
 
 def test_version_is_set():
-    assert yttoolkit.__version__ == "0.1.0"
+    assert yttoolkit.__version__ == "1.0.0"
 
 
 def test_sources_compile_without_warnings():

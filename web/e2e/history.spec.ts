@@ -60,13 +60,17 @@ test.describe("W5 ประวัติ", () => {
   })
 
   test("ระหว่างโหลดแสดงโครงรอ แล้วเป็นตาราง", async ({ page }) => {
+    // กั้นคำตอบไว้จนเห็นโครงรอ: หน่วงด้วยเวลาตายตัว runner ที่ช้าตรวจไม่ทันก่อนตารางมา
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/history*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 600))
+      await held
       await json(route, { items: [item(ZOO, ZOO_TITLE)], total: 1 })
     })
     await mockThumbnails(page)
     await page.goto("/history")
     await expect(page.locator("[aria-busy=true] [data-slot=skeleton]").first()).toBeVisible()
+    release()
     await expect(page.getByRole("link", { name: ZOO_TITLE })).toBeVisible()
     await expect(page.locator("[aria-busy=true]")).toHaveCount(0)
   })
@@ -87,6 +91,32 @@ test.describe("W5 ประวัติ", () => {
     await alert.getByRole("button", { name: "ลองใหม่" }).click()
     await expect(page.getByRole("link", { name: ZOO_TITLE })).toBeVisible()
     await expect(page.getByRole("alert")).toHaveCount(0)
+  })
+
+  test("โหลดไม่สำเร็จตอนเน็ตหลุด แล้วเบราว์เซอร์แจ้งว่าเน็ตกลับมา (online) → โหลดใหม่เอง ไม่ต้องกดลองใหม่", async ({ page }) => {
+    // networkMode "always" (router.tsx) ปิด refetchOnReconnect ของ react-query เป็นค่าเริ่มต้น จึงตั้งกลับเป็น true ไว้เอง
+    let fail = true
+    let calls = 0
+    await page.route("**/api/history*", (route) => {
+      calls += 1
+      return fail
+        ? route.fulfill({ status: 503, json: { error: { code: "E_NETWORK", message: "เน็ตหลุด ลองใหม่อีกครั้ง", detail: null } } })
+        : json(route, { items: [item(ZOO, ZOO_TITLE)], total: 1 })
+    })
+    await mockThumbnails(page)
+    await page.goto("/history")
+    const alert = page.getByRole("alert")
+    await expect(alert).toContainText("โหลดประวัติไม่สำเร็จ")
+    const failed = calls
+    fail = false
+    // เน็ตหลุดแล้วกลับมา: onlineManager เปลี่ยนสถานะเฉพาะตอนสลับ จึงส่ง offline ก่อน online
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("offline"))
+      window.dispatchEvent(new Event("online"))
+    })
+    await expect(page.getByRole("link", { name: ZOO_TITLE })).toBeVisible()
+    await expect(page.getByRole("alert")).toHaveCount(0)
+    expect(calls).toBeGreaterThan(failed)
   })
 
   test("ตารางมีหัวคอลัมน์ครบ ป้ายไฟล์ไม่ซ้ำ (ภาพ) และเวลาแบบสัมพัทธ์ · แถวที่ไม่มีไฟล์ไม่มีป้าย", async ({ page }) => {

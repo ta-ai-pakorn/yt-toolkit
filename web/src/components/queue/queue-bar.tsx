@@ -71,7 +71,7 @@ function BarPanel({ summary, pausedUntil }: { summary: BarSummary; pausedUntil: 
         aria-label={th.queue.open}
         aria-describedby={summaryId}
         onClick={() => queueSheet.open()}
-        className="relative block w-full text-left transition-colors outline-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
+        className="relative block w-full text-left transition-colors outline-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
       >
         {/* เส้นอำพัน 4 px: รู้ % = ยาวตาม % · ยังไม่รู้ = เต็มเส้นกะพริบช้า ๆ (ปิดการเคลื่อนไหว = นิ่ง) */}
         {current && (

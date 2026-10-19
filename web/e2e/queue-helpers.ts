@@ -22,6 +22,13 @@ import type { Job, JobStatus, NewJob } from "../src/lib/types"
 
 type Auth = { token: string; origin: string }
 
+/**
+ * คำขอของตัวช่วยเปิดการเชื่อมต่อใหม่ทุกครั้ง (ไม่ใช้ socket keep-alive ที่ว่างค้างอยู่ซ้ำ)
+ * uvicorn ปิด socket ที่ว่างครบ 5 วินาที: runner ที่ CPU ตึงทั้งสองฝั่งอาจส่งคำขอลง socket ตอนที่ฝั่ง server กำลังปิดพอดี
+ * ได้ "socket hang up" ทั้งที่ backend ปกติ (เบราว์เซอร์จริงส่งซ้ำให้เองในกรณีนี้ ผู้ใช้ไม่เจอ) · localhost เปิดใหม่ถูกมาก
+ */
+const FRESH_CONNECTION = { Connection: "close" }
+
 const TOKEN_META = /<meta name="yt-token" content="([^"]+)"/
 const authCache = new WeakMap<APIRequestContext, Auth>()
 
@@ -41,7 +48,7 @@ export async function token(page: Page): Promise<string> {
 async function auth(request: APIRequestContext): Promise<Auth> {
   const cached = authCache.get(request)
   if (cached) return cached
-  const response = await request.get("/")
+  const response = await request.get("/", { headers: FRESH_CONNECTION })
   const match = TOKEN_META.exec(await response.text())
   if (!response.ok() || !match)
     throw new Error(`อ่าน token จากหน้าแรกไม่ได้ (HTTP ${response.status()})`)
@@ -59,7 +66,7 @@ async function mutate(
   const { token: value, origin } = await auth(request)
   return request.fetch(path, {
     method,
-    headers: { "X-Toolkit-Token": value, Origin: origin },
+    headers: { ...FRESH_CONNECTION, "X-Toolkit-Token": value, Origin: origin },
     ...(data === undefined ? {} : { data }),
   })
 }
@@ -70,7 +77,8 @@ export async function listJobs(
   status?: JobStatus
 ): Promise<Job[]> {
   const response = await request.get(
-    status ? `/api/jobs?status=${status}&limit=200` : "/api/jobs"
+    status ? `/api/jobs?status=${status}&limit=200` : "/api/jobs",
+    { headers: FRESH_CONNECTION }
   )
   expect(response.ok(), `GET /api/jobs ตอบ ${response.status()}`).toBe(true)
   return ((await response.json()) as { jobs: Job[] }).jobs

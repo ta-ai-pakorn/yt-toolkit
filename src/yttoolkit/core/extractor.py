@@ -328,6 +328,46 @@ def _subtitle_request(ydl: Any, url: str) -> Any:
     return Request(url)
 
 
+_child_adopt: Callable[[Any], None] | None = None  # Platform.adopt_child ที่ใช้กับลูกของ yt-dlp (None = ไม่ผูก)
+_child_wrap_lock = threading.Lock()
+_ADOPT_MARK = "_yttoolkit_adopts"
+
+
+def adopt_ytdlp_children(adopt: Callable[[Any], None] | None) -> None:
+    """ผูกโปรเซสลูกที่ yt-dlp เปิดเอง (ffmpeg ตอนรวม/ซ่อมไฟล์, ffprobe, deno) ไว้กับแอพ เหมือนลูกที่แอพเปิดเอง
+
+    yt-dlp เปิดลูกทุกตัวผ่าน yt_dlp.utils.Popen จึงห่อ __init__ ของคลาสนั้นครั้งเดียวต่อโปรเซส (เรียกซ้ำ = เปลี่ยนแค่
+    ตัวผูก ไม่ห่อซ้อน) ตัวผูกพัง = บันทึก debug แล้วโหลดต่อ ไม่ทำให้งานพัง · ไม่ใช่ Windows ตัวผูกของ Platform ไม่ทำอะไร
+    ข้อจำกัดเดียวกับ adopt_child: ลูกที่เป็น shim (เช่น ffmpeg ของ Chocolatey/Scoop) อาจเปิดหลานก่อนผูกทัน
+    """
+    global _child_adopt
+    _child_adopt = adopt
+    try:
+        import yt_dlp.utils
+
+        popen = yt_dlp.utils.Popen
+        with _child_wrap_lock:
+            original = popen.__init__
+            if getattr(original, _ADOPT_MARK, False):
+                return
+
+            @functools.wraps(original)
+            def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+                original(self, *args, **kwargs)
+                hook = _child_adopt
+                if hook is None:
+                    return
+                try:
+                    hook(self)
+                except Exception as exc:  # ผูกไม่ได้ต้องไม่ทำให้การโหลดพัง
+                    log.debug("ผูกโปรเซสลูกของ yt-dlp ไม่ได้: %s", type(exc).__name__)
+
+            setattr(__init__, _ADOPT_MARK, True)
+            popen.__init__ = __init__  # type: ignore[method-assign]
+    except (ImportError, AttributeError) as exc:  # yt-dlp รุ่นใหม่ไม่มี utils.Popen: โหลดได้ แค่ไม่ผูกลูกของ yt-dlp
+        log.warning("ผูกโปรเซสลูกของ yt-dlp ไม่ได้ (%s)", type(exc).__name__)
+
+
 @functools.cache
 def impersonation_info() -> tuple[bool, str | None]:
     """(yt-dlp ทำตัวเป็นเบราว์เซอร์ได้ไหม, เวอร์ชัน curl_cffi) สำหรับหน้าตรวจสุขภาพ ไม่ต่อเน็ต

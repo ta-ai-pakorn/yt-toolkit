@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import random
+import sys
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -1438,3 +1439,66 @@ def test_no_job_starts_while_the_active_set_is_held(runner_factory):
         assert r.store.running() == []
     ticker.join(5)
     assert len(started[0]) == 1
+
+
+# ---------- M6 รอบ D1: ไฟล์ค้างใน work/ ที่ยังถูกล็อก (ffmpeg ค้างจากแอพที่โดน End task) ----------
+
+
+def _leftover_job(r, tmp_path):
+    (job,) = r.enqueue(jobs_of("frames_zip", 1))
+    r.store.transition(job.id, "running")  # left over from a previous run
+    leftover = tmp_path / "work" / job.id
+    leftover.mkdir(parents=True)
+    return job, leftover
+
+
+def _retry_and_finish(r, spawn, job, leftover):
+    r.retry(job.id)
+    started = r.tick()
+    assert started == [job.id]
+    spawn.run_all()
+    got = r.store.get(job.id)
+    assert got.status == "done"
+    assert leftover.exists()  # the locked leftover was not touched by the retry
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ไฟล์ที่เปิดค้างลบไม่ได้แค่บน Windows")
+def test_recover_skips_a_locked_work_file_and_the_retry_uses_a_fresh_folder(runner_factory, tmp_path, caplog):
+    r, spawn, h = runner_factory()
+    job, leftover = _leftover_job(r, tmp_path)
+    locked = leftover / "media.mp4"
+    with open(locked, "wb") as handle:  # Python เปิดไฟล์แบบไม่แชร์สิทธิ์ลบ เหมือน ffmpeg ที่ยังเขียนอยู่
+        handle.write(b"x")
+        with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+            assert r.recover() == 1  # must not raise
+        assert locked.exists()
+        stuck = [rec.getMessage() for rec in caplog.records if "ลบของค้างในโฟลเดอร์ทำงานไม่ได้" in rec.getMessage()]
+        assert len(stuck) == 1
+        assert str(tmp_path) not in stuck[0] and "media.mp4" not in stuck[0]  # ไม่มี path ใน log
+        assert r.store.get(job.id).status == "interrupted"
+        _retry_and_finish(r, spawn, job, leftover)
+        assert h.calls == ["vid00000001"]
+    r.shutdown(timeout=0.2)
+    assert not leftover.exists()  # ปิดไฟล์แล้ว รอบเก็บกวาดถัดไปลบได้
+
+
+def test_retry_uses_a_fresh_folder_when_the_old_one_cannot_be_removed(runner_factory, tmp_path, monkeypatch, caplog):
+    r, spawn, h = runner_factory()
+    job, leftover = _leftover_job(r, tmp_path)
+    (leftover / "media.mp4").write_bytes(b"x")
+    monkeypatch.setattr(queue_module.shutil, "rmtree", lambda path, ignore_errors=False: None)  # ลบไม่ได้ทุกอย่าง
+    with caplog.at_level(logging.WARNING, logger="yttoolkit"):
+        assert r.recover() == 1
+    assert any("ลบของค้างในโฟลเดอร์ทำงานไม่ได้ 1 รายการ" in rec.getMessage() for rec in caplog.records)
+    seen: list[Path] = []
+    original = h.__call__
+
+    class Recording(ScriptedHandler):
+        def __call__(self, job, ctx):
+            seen.append(ctx.workdir)
+            return original(job, ctx)
+
+    r._handlers = dict.fromkeys(KINDS, Recording())  # type: ignore[attr-defined]
+    _retry_and_finish(r, spawn, job, leftover)
+    assert len(seen) == 1 and seen[0] != leftover and seen[0].parent == leftover.parent
+    assert seen[0].name.startswith(f"{job.id}-")

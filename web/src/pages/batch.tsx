@@ -67,7 +67,7 @@ const ENQUEUE_MESSAGES = {
 
 // พื้นที่กดสูง 32 px และวงโฟกัสชัด (margin ติดลบให้ตัวอักษรยังตรงแนวเดิม) เหมือน breadcrumb ของ W2
 const CRUMB =
-  "-mx-1.5 inline-flex min-h-8 items-center rounded-md px-1.5 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+  "-mx-1.5 inline-flex min-h-8 items-center rounded-md px-1.5 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
 
 /** breadcrumb: หน้าแรก › รายการที่วาง (N ลิงก์) › เลือกคลิป · listCount = undefined (รายการไม่อยู่แล้ว) ไม่มีขั้นกลาง */
 function BatchCrumbs({ listCount }: { listCount?: number }) {

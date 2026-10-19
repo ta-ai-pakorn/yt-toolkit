@@ -7,6 +7,7 @@ import { expect, test, type Page } from "@playwright/test"
 import type { Capture } from "../src/lib/types"
 
 import { fakeYTLog, installFakeYT } from "./fake-yt"
+import { expectFocusInside } from "./focus"
 
 /**
  * M5 รอบ B2 ถ่ายภาพคมตรงจุด (spec 2): ปุ่มใต้ตัวเล่น ปุ่มบนตัวเล่นลอย เมนูภาพเฟรม แถบ "ภาพที่ถ่ายไว้" ภาพใหญ่ และการลบ
@@ -29,9 +30,10 @@ function clock(ms: number): string {
 }
 
 /**
+ * hold = กั้นคำตอบของการถ่ายไว้จน promise นี้จบ (ตรวจสถานะ "กำลังถ่าย…" ได้โดยไม่แข่งกับเวลา)
  * maxTMs = ตอบ 422 แบบ backend เมื่อ tMs เกินค่านี้ (ตรวจว่าเว็บไม่ส่งเวลาที่เลยท้ายคลิป)
  */
-type MockOptions = { delayMs?: number; error?: { status: number; code: string; message: string }; maxTMs?: number }
+type MockOptions = { hold?: Promise<void>; error?: { status: number; code: string; message: string }; maxTMs?: number }
 type MockState = { list: Capture[]; posts: number[]; deletes: string[]; reveals: number }
 
 /** จำลอง API ถ่ายภาพของคลิป BBB: รายการ ถ่าย (หน่วงได้ / ตอบ error ได้) ลบ เปิดโฟลเดอร์ และไฟล์ภาพ */
@@ -41,7 +43,7 @@ async function mockCaptures(page: Page, initial: Capture[] = [], options: MockOp
     if (route.request().method() === "GET") return route.fulfill({ json: { captures: state.list } })
     const { tMs } = route.request().postDataJSON() as { tMs: number }
     state.posts.push(tMs)
-    if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs))
+    if (options.hold) await options.hold
     if (options.maxTMs !== undefined && tMs > options.maxTMs) {
       const message = "ข้อมูลที่ส่งมาไม่ถูกต้อง ลองรีเฟรชหน้าเว็บ"
       return route.fulfill({ status: 422, json: { error: { code: "E_BAD_REQUEST", message, detail: null } } })
@@ -110,7 +112,9 @@ async function seriousViolations(page: Page) {
 }
 
 test("ปุ่มมีหลังเริ่มเล่น · กำลังถ่าย… · toast ดูภาพเปิดภาพที่เพิ่งถ่าย · ภาพเข้าแถบ · เวลาปัดทีละ 100 ms", async ({ page }) => {
-  const state = await mockCaptures(page, [], { delayMs: 800 })
+  let release!: () => void
+  const hold = new Promise<void>((resolve) => (release = resolve))
+  const state = await mockCaptures(page, [], { hold })
   await open(page)
   await expect(captureButton(page)).toHaveCount(0)
   await expect(strip(page)).toHaveCount(0)
@@ -121,6 +125,7 @@ test("ปุ่มมีหลังเริ่มเล่น · กำลั�
 
   await captureButton(page).click()
   await expect(page.locator('[data-slot="player-controls"]').getByRole("button", { name: "กำลังถ่าย…" })).toBeDisabled()
+  release()
   await expect(toast(page, /^ถ่ายภาพคมแล้ว · /)).toBeVisible()
   expect(state.posts).toHaveLength(1)
   expect(state.posts[0] % 100).toBe(0)
@@ -144,7 +149,10 @@ test("ภาพใหญ่ ←/→ · Esc/ยกเลิกปิดแค่�
   await open(page)
   await expect(page.getByRole("heading", { name: "ภาพที่ถ่ายไว้ (3)" })).toBeVisible()
   await tile(page, "0:02").click()
-  await expect(page.getByRole("dialog", { name: "ภาพเฟรมที่ 0:02" })).toBeVisible()
+  const second = page.getByRole("dialog", { name: "ภาพเฟรมที่ 0:02" })
+  await expect(second).toBeVisible()
+  // ←/→ ฟังที่ตัวภาพใหญ่: กดก่อนโฟกัสย้ายเข้าไป ปุ่มไปที่ภาพในแถบแทน (CI run 38870704595)
+  await expectFocusInside(second)
   await page.keyboard.press("ArrowRight")
   const last = page.getByRole("dialog", { name: "ภาพเฟรมที่ 0:03" })
   await expect(last).toBeVisible()
@@ -154,6 +162,7 @@ test("ภาพใหญ่ ←/→ · Esc/ยกเลิกปิดแค่�
   // Esc ในกล่องยืนยัน = ปิดแค่กล่องยืนยัน ภาพใหญ่ยังเปิดอยู่
   await remove.click()
   await expect(confirm).toBeVisible()
+  await expectFocusInside(confirm)
   await page.keyboard.press("Escape")
   await expect(confirm).toHaveCount(0)
   await expect(last).toBeVisible()

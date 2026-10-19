@@ -40,7 +40,7 @@ function HistoryRow({ item }: { item: HistoryItem }) {
       <TableCell className="min-w-0 whitespace-normal">
         <Link
           to={`/v/${item.videoId}`}
-          className="line-clamp-2 rounded-sm font-medium [overflow-wrap:anywhere] outline-none after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="line-clamp-2 rounded-sm font-medium [overflow-wrap:anywhere] outline-none after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:ring-3 focus-visible:ring-ring"
         >
           {item.title}
         </Link>

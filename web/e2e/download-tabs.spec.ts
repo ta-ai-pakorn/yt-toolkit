@@ -38,6 +38,18 @@ function fixtureTitle(videoId: string): string {
 }
 
 const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: true })
+
+/**
+ * กดแท็บแล้วรอจนเหลือแผงเดียว: Base UI ยังไม่ถอดแผงเดิมทันทีหลังสลับ (รอแอนิเมชันปิดของแผงก่อน แม้ไม่มีก็รอรอบ effect)
+ * ช่วงนั้นมีสองแผงในหน้า locator ที่หาทั้งหน้า (ปุ่มสีเหลือง, ช่องภาษาเสียง) จึงเจอสองตัว
+ */
+async function switchTab(page: Page, name: string) {
+  await tab(page, name).click()
+  await expect(tab(page, name)).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByRole("tabpanel")).toHaveCount(1)
+  // แผงที่เหลือคือแผงของแท็บที่เลือก (แผงตั้งชื่อตามแท็บด้วย aria-labelledby)
+  await expect(page.getByRole("tabpanel", { name, exact: true })).toBeVisible()
+}
 const combobox = (page: Page, name: string) => page.getByRole("combobox", { name, exact: true })
 // ค่าที่เลือกอยู่ของช่องเลือก: ปุ่ม combobox มีไอคอนลูกศรของ Base UI ที่มีอักษร "▼" ซ่อนอยู่ใน svg (aria-hidden)
 // toHaveText ของทั้งปุ่มจึงได้ "…▼" อ่านจาก SelectValue แทน
@@ -100,7 +112,7 @@ test.describe("W2 แท็บวิดีโอและเสียง: แถ
 
   test("กดแท็บเสียง → URL ?tab=audio · หัวข้อ 'เสียง'", async ({ page }) => {
     await openTab(page, BBB, "video")
-    await tab(page, "เสียง").click()
+    await switchTab(page, "เสียง")
     await expect(page).toHaveURL(new RegExp(`/v/${BBB}\\?tab=audio$`))
     await expect(page.getByRole("heading", { level: 2, name: "เสียง" })).toBeVisible()
     await expect(downloadAudio(page)).toBeVisible()
@@ -111,7 +123,7 @@ test.describe("W2 แท็บวิดีโอและเสียง: แถ
     const primary = page.locator("[data-slot=button].bg-primary")
     await expect(primary).toHaveCount(1)
     await expect(primary).toHaveText(DOWNLOAD_MP4)
-    await tab(page, "เสียง").click()
+    await switchTab(page, "เสียง")
     await expect(primary).toHaveCount(1)
     await expect(primary).toHaveText(DOWNLOAD_AUDIO)
     await expect(page.getByText(/^ขนาดประมาณ \d/)).toBeVisible()
@@ -150,7 +162,7 @@ test.describe("W2 แท็บวิดีโอ", () => {
   test("BBB ไม่มีช่อง 'ภาษาเสียง' ทั้งแท็บวิดีโอและแท็บเสียง (เสียงภาษาเดียว)", async ({ page }) => {
     await openTab(page, BBB, "video")
     await expect(combobox(page, LANGUAGE)).toHaveCount(0)
-    await tab(page, "เสียง").click()
+    await switchTab(page, "เสียง")
     await expect(downloadAudio(page)).toBeVisible()
     await expect(combobox(page, LANGUAGE)).toHaveCount(0)
   })
@@ -205,11 +217,11 @@ test.describe("W2 แท็บวิดีโอ", () => {
     await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
     expect((bodies[0][0].params as VideoJobParams).audioLanguage).toBe("en-US")
 
-    await tab(page, "เสียง").click()
+    await switchTab(page, "เสียง")
     await expect(selectedValue(page, LANGUAGE)).toHaveText("อังกฤษ (สหรัฐอเมริกา)")
     // เปลี่ยนที่แท็บเสียง แท็บวิดีโอก็เปลี่ยนตาม
     await choose(page, LANGUAGE, "ต้นฉบับ (ไทย)")
-    await tab(page, "วิดีโอ").click()
+    await switchTab(page, "วิดีโอ")
     await expect(selectedValue(page, LANGUAGE)).toHaveText("ต้นฉบับ (ไทย)")
   })
 
@@ -404,12 +416,12 @@ test.describe("W2 แท็บวิดีโอและเสียง: กา
 })
 
 test.describe("W2 กับค่าตั้ง (M4 follow-up)", () => {
-  /** ตอบ GET /api/settings ด้วยค่าตั้งของ backend ที่แก้บางช่อง (ไม่แก้การตั้งค่าจริง) delayMs = ตอบช้า */
-  async function withSettings(page: Page, patch: Record<string, unknown>, delayMs = 0) {
+  /** ตอบ GET /api/settings ด้วยค่าตั้งของ backend ที่แก้บางช่อง (ไม่แก้การตั้งค่าจริง) hold = กั้นคำตอบไว้จน promise นี้จบ */
+  async function withSettings(page: Page, patch: Record<string, unknown>, hold?: Promise<void>) {
     await page.route("**/api/settings", async (route) => {
       if (route.request().method() !== "GET") return route.fallback()
       const response = await route.fetch()
-      if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs))
+      if (hold) await hold
       await route.fulfill({ response, json: { ...((await response.json()) as object), ...patch } })
     })
   }
@@ -429,10 +441,14 @@ test.describe("W2 กับค่าตั้ง (M4 follow-up)", () => {
 
   test("ปุ่มโหลดรอจนค่าตั้งมาถึง แล้วจึงใช้เพดานของค่าตั้ง", async ({ page }) => {
     const { bodies } = await mockEnqueue(page)
-    await withSettings(page, { videoDefault: "compat-720" }, 1500)
+    // กั้นค่าตั้งไว้จนเห็นปุ่มปิดอยู่: หน่วง 1.5 วินาทีตายตัว runner ที่ช้าอาจยังวาดแท็บไม่เสร็จตอนค่าตั้งมาถึง
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await withSettings(page, { videoDefault: "compat-720" }, held)
     await page.goto(`/v/${BBB}?tab=video`)
     await expect(downloadMp4(page)).toBeDisabled()
-    await expect(downloadMp4(page)).toBeEnabled({ timeout: 5000 })
+    release()
+    await expect(downloadMp4(page)).toBeEnabled()
     await downloadMp4(page).click()
     await expect.poll(() => bodies.length).toBe(1)
     expect((bodies[0][0].params as VideoJobParams).maxHeight).toBe(720)

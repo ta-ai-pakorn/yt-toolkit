@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { __resetPlayerForTests, getPlayerState, playerActions } from "./player-store"
+import { stopReel } from "./reel"
 import { createPlayerIframe, createYouTubeAdapter, embedUrl, mapYouTubeError, POLL_MS, seekLanded } from "./youtube-adapter"
 import type { YTEvents, YTNamespace, YTPlayerOptions } from "./youtube-api"
 
@@ -130,14 +131,32 @@ describe("createYouTubeAdapter", () => {
     expect(getPlayerState().status).toBe("playing")
   })
 
-  it("ก่อนพร้อม คำสั่งของ store ไม่ไปถึงตัวเล่น (เก็บเป็น pendingSeek)", () => {
+  it("ก่อนพร้อม การขอเล่นจากเวลาใหม่ไม่ไปถึงตัวเล่น (เก็บเป็น pendingSeek) · พร้อมแล้วจึง seek ไปเวลาล่าสุดแล้วเล่น", () => {
     playerActions.playFrom()
     const { player } = setup()
     playerActions.playFrom(5000)
-    playerActions.pause()
     expect(player.calls).toEqual([])
     player.ready()
     expect(player.calls).toEqual(["seek:5", "play"])
+  })
+
+  it("กดหยุดระหว่างโหลด (หยุดเล่นช่วงไฮไลต์): พร้อมแล้วไปที่เวลาที่ขอไว้แต่ไม่เล่นเอง · ขอเล่นใหม่ระหว่างโหลด = เล่นตามเดิม", () => {
+    playerActions.playReel([{ startMs: 20_000, endMs: 30_000 }])
+    const { player } = setup()
+    stopReel()
+    expect(player.calls).toEqual([])
+    player.ready()
+    expect(player.calls).toEqual(["seek:20"])
+    expect(getPlayerState()).toMatchObject({ status: "paused", reel: null, currentMs: 20_000 })
+
+    // ครั้งถัดไปไม่ค้างค่า "ไม่เล่น": โหลดใหม่ กดหยุด แล้วกดเล่นอีกครั้งก่อนพร้อม = เล่น
+    playerActions.close()
+    playerActions.playFrom(1000)
+    const second = setup().player
+    playerActions.pause()
+    playerActions.playFrom(2000)
+    second.ready()
+    expect(second.calls).toEqual(["seek:2", "play"])
   })
 
   it("ระหว่างเล่นอ่านเวลาทุก 250 ms · pause แล้วหยุดอ่าน", () => {

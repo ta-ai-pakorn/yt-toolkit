@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import threading
 import time
 
 from yttoolkit import lifecycle, runstate
@@ -12,6 +13,9 @@ def test_serve_then_stop(tmp_path):
     port = runstate.pick_port(range(8850, 8870))
     env = {**os.environ, "YT_TOOLKIT_DATA_ROOT": str(tmp_path), "YT_TOOLKIT_FFMPEG_PATH_LOOKUP": "0"}
     proc = subprocess.Popen([sys.executable, "-m", "yttoolkit", "serve", "--port", str(port)], env=env)
+    # เก็บโปรเซสทันทีที่จบ: ไม่งั้นบน macOS/Linux มันค้างเป็น zombie ของเทสต์นี้ stop จึงรอครบ STOP_WAIT_S
+    # (ดู reap_when_it_exits ใน test_queue_serve.py)
+    threading.Thread(target=proc.wait, name="reap-serve", daemon=True).start()
     paths = Paths(data_root=tmp_path)
     plat = current()
     try:

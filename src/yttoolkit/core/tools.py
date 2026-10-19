@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Literal
 
 import httpx
 
+from ..children import run_adopted
 from ..config import Paths, env_flag
 
 if TYPE_CHECKING:  # ใช้แค่เป็นชนิดของพารามิเตอร์ ผู้เรียกส่ง Platform เข้ามา (core ไม่ import platform, PRD 6.6)
@@ -57,8 +58,9 @@ class ToolInstallError(RuntimeError):
 
 def _run_version(exe: Path | str, plat: Platform, arg: str = "--version") -> str | None:
     try:
-        out = subprocess.run(
+        out = run_adopted(
             [str(exe), arg],
+            plat.adopt_child,
             capture_output=True,
             text=True,
             errors="replace",  # byte แปลก ๆ จาก ffmpeg หรือ deno ต้องไม่ทำให้หน้าตรวจสุขภาพพัง

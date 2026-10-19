@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -27,6 +28,35 @@ VIDEO_PARAMS = {"maxQuality": False, "splitChapters": False, "noAudio": False, "
 PORTS = range(8850, 8870)
 
 
+def reap_when_it_exits(proc: subprocess.Popen) -> None:
+    """เก็บโปรเซส serve ทันทีที่มันจบ (เธรดรอ proc.wait) ให้ pid_alive เห็นว่าแอพปิดแล้วเหมือนของจริง
+
+    เทสต์นี้เป็นแม่ของ serve: บน macOS/Linux โปรเซสลูกที่จบแล้วแต่แม่ยังไม่ wait จะค้างเป็น zombie
+    os.kill(pid, 0) ยังสำเร็จ lifecycle.stop จึงคิดว่าแอพยังเปิดอยู่และรอครบ STOP_WAIT_S ทุกครั้ง
+    ของจริงไม่เป็นแบบนี้: คำสั่ง stop เป็นคนละโปรเซสกับแม่ของแอพ (Windows ไม่มี zombie เวลาจึงสั้นอยู่แล้ว)
+    """
+    threading.Thread(target=proc.wait, name="reap-serve", daemon=True).start()
+
+
+class KillRecorder:
+    """ส่งต่อทุกอย่างให้ platform จริง แต่จดไว้ว่า lifecycle.stop สั่ง kill หรือไม่
+
+    แอพที่ปิดตัวเองช้ากว่า STOP_WAIT_S ถูก kill แล้วก็ยังออกด้วยรหัส 0 ได้ (uvicorn ออกเงียบ ๆ เมื่อโดน SIGTERM)
+    เทสต์ที่ดูแค่รหัสออกกับเวลารวมจึงแยกไม่ออกว่าแอพปิดตัวเองเรียบร้อย หรือโดนบังคับปิด
+    """
+
+    def __init__(self, plat) -> None:
+        self._plat = plat
+        self.killed: list[int] = []
+
+    def kill(self, pid: int) -> None:
+        self.killed.append(pid)
+        self._plat.kill(pid)
+
+    def __getattr__(self, name: str):
+        return getattr(self._plat, name)
+
+
 class App:
     """serve หนึ่งรอบ (โปรเซสจริง) กับตัวช่วยเรียก API"""
 
@@ -42,6 +72,7 @@ class App:
             "YT_TOOLKIT_FFMPEG_PATH_LOOKUP": "0",
         }
         self.proc = subprocess.Popen([sys.executable, "-m", "yttoolkit", "serve", "--port", str(port)], env=env)
+        reap_when_it_exits(self.proc)
         deadline = time.monotonic() + 30
         info = None
         while time.monotonic() < deadline and info is None:
@@ -178,11 +209,15 @@ def test_stop_with_running_job_exits_and_job_is_interrupted(tmp_path):
         (job,) = app.post_jobs(video_item(SLOW))
         app.wait_job(job["id"], is_status("running"))
         asked: list[str] = []
+        plat = KillRecorder(app.plat)
         started = time.monotonic()
-        code = lifecycle.stop(app.paths, app.plat, ask=lambda q: asked.append(q) or "y", out=lambda m: None)
+        code = lifecycle.stop(app.paths, plat, ask=lambda q: asked.append(q) or "y", out=lambda m: None)
+        elapsed = time.monotonic() - started
         assert code == 0
+        # แอพปิดตัวเองเรียบร้อยภายในเวลาที่ stop รอ (ออกแบบไว้ราว 8.5 วินาทีเมื่อแย่ที่สุด) ไม่ใช่โดน kill ตอนครบ STOP_WAIT_S
+        assert plat.killed == []
+        assert elapsed < lifecycle.STOP_WAIT_S
         assert app.proc.wait(timeout=15) == 0
-        assert time.monotonic() - started < 15
         assert asked and "1" in asked[0]  # ถามยืนยันเพราะมีงานค้าง
         assert not app.plat.pid_alive(app.info.pid)
         assert not app.paths.app_json.exists()

@@ -27,12 +27,12 @@ const ITEM =
 
 // ปุ่มเวลาหน้าบรรทัด (M3.5): กดแล้วเล่นคลิปจากบรรทัดนั้น · ไอคอน ▶ เล็ก ๆ บอกว่ากดแล้วเล่น
 const TIME =
-  "inline-flex shrink-0 items-baseline gap-1 rounded-sm px-1.5 py-1.5 font-mono text-xs text-muted-foreground tabular-nums outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 in-data-playing:text-foreground"
+  "inline-flex shrink-0 items-baseline gap-1 rounded-sm px-1.5 py-1.5 font-mono text-xs text-muted-foreground tabular-nums outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring in-data-playing:text-foreground"
 
 // บรรทัดของเวลาที่มาจาก "ดูซับช่วงนี้" (?at=) = แถบซ้ายสีอำพันเข้ม (--accent-text ผ่าน 3:1 ทั้งสองธีม) + พื้นจาง
 // ต่างจากวงโฟกัส (วงรอบทั้งปุ่ม) และแถบพื้นของบรรทัดที่กำลังเล่น จึงเห็นทั้งหมดพร้อมกันได้โดยไม่สับสน
 const LINE =
-  "flex min-w-0 flex-1 items-baseline gap-2 rounded-sm border-l-2 border-transparent px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 data-highlighted:border-accent-text data-highlighted:bg-muted"
+  "flex min-w-0 flex-1 items-baseline gap-2 rounded-sm border-l-2 border-transparent px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring data-highlighted:border-accent-text data-highlighted:bg-muted"
 
 /** ข้อความของบรรทัด โดยครอบคำที่ตรงคำค้นด้วย <mark> (คำนวณเฉพาะบรรทัดที่แสดง) */
 function Highlighted({ line, needle }: { line: PreparedLine; needle: string }) {
@@ -144,6 +144,9 @@ export function LineList({ cues, lines, visible, needle, current, replayed, reve
   const playing = usePlayerValue((state) => nowPlayingLine(cues, state))
   const active = usePlayerValue(hasPlayhead)
   const [following, setFollowing] = useState(true)
+  // ค่าเดียวกับ following แต่ตัวจัดการล้อเมาส์/ปุ่มเปลี่ยนทันที: การเลื่อนตามรอหนึ่งเฟรม (requestAnimationFrame)
+  // ถ้าผู้ใช้เลื่อนเองในเฟรมนั้น (React ยังไม่ทันวาดใหม่ เพราะล้อเมาส์เป็นเหตุการณ์ต่อเนื่อง) ต้องไม่ดึงรายการกลับทับที่ผู้ใช้เลื่อน
+  const followingNow = useRef(true)
   // ตัวเล่นปิด/เล่นจบ (ไม่มีตำแหน่งแล้ว) = ล้างการหยุดเลื่อนตาม เล่นรอบใหม่ก็เลื่อนตามตั้งแต่ต้น
   const [wasActive, setWasActive] = useState(active)
   if (wasActive !== active) {
@@ -194,10 +197,15 @@ export function LineList({ cues, lines, visible, needle, current, replayed, reve
     }
   }, [revealKey, current, shown])
 
+  useEffect(() => {
+    followingNow.current = following
+  }, [following])
+
   // เลื่อนกรอบรายการตามบรรทัดที่กำลังเล่น ให้อยู่กลางกรอบ (เลื่อนเฉพาะในกรอบ ไม่ดึงหน้า) · รอหนึ่งเฟรมให้บรรทัดวาดเสร็จก่อน
   useEffect(() => {
     if (!following || !playingShown) return
     const frame = requestAnimationFrame(() => {
+      if (!followingNow.current) return
       const button = buttons.current.get(playing)
       if (button) centerWithinList(button)
     })
@@ -206,7 +214,10 @@ export function LineList({ cues, lines, visible, needle, current, replayed, reve
 
   // ผู้ใช้เลื่อนรายการเอง (ดูจากเจตนา ไม่ใช่เหตุการณ์ scroll ซึ่งรวมการเลื่อนที่แอปสั่งเอง) = หยุดเลื่อนตาม
   function onIntent(input: FollowInput) {
-    if (following && isUserScroll(input)) setFollowing(false)
+    if (following && isUserScroll(input)) {
+      followingNow.current = false
+      setFollowing(false)
+    }
   }
 
   // กลับไปเลื่อนตาม: ปุ่มนี้จะหายไป จึงโฟกัสบรรทัดที่กำลังเล่นตอนกด (โฟกัสไม่วิ่งตามบรรทัดต่อ ๆ ไป) · ก่อนบรรทัดแรก = บรรทัดที่ใกล้ที่สุด

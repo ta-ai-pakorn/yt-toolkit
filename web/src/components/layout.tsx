@@ -25,7 +25,7 @@ const NAV: NavItem[] = [
 
 // พื้นที่กดสูง 44 px · หน้าที่อยู่ = ตัวอักษรเข้ม + ขีดสีอำพันด้านล่าง
 const NAV_LINK =
-  "relative inline-flex h-11 items-center gap-1.5 rounded-md px-3 text-sm text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 [&_svg]:size-4"
+  "relative inline-flex h-11 items-center gap-1.5 rounded-md px-3 text-sm text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring [&_svg]:size-4"
 const NAV_ACTIVE =
   "font-medium text-foreground after:absolute after:inset-x-3 after:bottom-1 after:h-0.5 after:rounded-full after:bg-primary"
 
@@ -55,7 +55,7 @@ export function Layout() {
       <header className="mx-auto flex max-w-[960px] items-center justify-between gap-2 px-4 py-2">
         <Link
           to="/"
-          className="-ml-2 inline-flex h-11 items-center gap-2 rounded-md px-2 font-medium transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="-ml-2 inline-flex h-11 items-center gap-2 rounded-md px-2 font-medium transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
         >
           <img src="/favicon.svg" alt="" className="size-6" />
           {th.app.name}

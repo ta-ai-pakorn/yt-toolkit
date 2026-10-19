@@ -100,7 +100,7 @@ function PreviewBody({ data, options, range }: { data: SubTokens; options: SubOp
         ref={boxRef}
         // บรรทัดซับไม่ถูกตัดขึ้นบรรทัดใหม่: จอแคบเลื่อนแนวนอนได้ และเฉพาะตอนเลื่อนได้จึงรับโฟกัส (เลื่อนด้วยคีย์บอร์ด)
         tabIndex={overflowing ? 0 : undefined}
-        className="overflow-x-auto rounded-lg border bg-muted/30 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="overflow-x-auto rounded-lg border bg-muted/30 outline-none focus-visible:ring-3 focus-visible:ring-ring"
       >
         <ol ref={listRef} className="flex w-max min-w-full flex-col divide-y">
           {cues.slice(0, PREVIEW_CUES).map((cue, index) => (

@@ -2,7 +2,7 @@
 import { analyzeSettled } from "./axe-settled"
 import { expect, test, type Page } from "@playwright/test"
 
-import { fakeYTLog, installFakeYT } from "./fake-yt"
+import { fakeYTLog, installFakeYT, playTo } from "./fake-yt"
 
 // M3.5 ตัวเล่นคลิปใน W2 (lane P): ช่องตัวเล่นที่หัวคลิป ลอยมุมจอ แถบไทม์ไลน์ ช่วงไฮไลต์ ข้อผิดพลาด และปุ่ม "ดูภาพปก"
 // ไม่ต่อยูทูปจริง: installFakeYT ดักสคริปต์ API และ iframe (ต้องเรียกก่อน goto ทุกครั้ง)
@@ -258,7 +258,9 @@ test.describe("เล่นเฉพาะช่วงที่ดูซ้ำ�
   })
 
   test("เล่นทีละช่วงตามลำดับ 'ช่วง 1 จาก 2' → 'ช่วง 2 จาก 2' แล้วหยุดหลังช่วงสุดท้าย", async ({ page }) => {
-    await installFakeYT(page, { rate: 20 })
+    // นาฬิกาของตัวเล่นปลอมแทบหยุด แล้วเทสต์พาเวลาไปถึงปลายแต่ละช่วงเอง (playTo): แต่ละสถานะค้างจนตรวจเสร็จ
+    // (เดิมเร่ง 20 เท่า ช่วง 2 ยาวแค่ 0.3 วินาที เครื่อง CI ที่ช้าตรวจไม่ทัน สถานะข้ามจาก "ช่วง 1" ไปหายเลย)
+    await installFakeYT(page, { rate: 0.001 })
     await open(page, { mostReplayed: REPLAYED })
     const button = reelButton(page)
     await expect(button).toBeVisible()
@@ -267,8 +269,10 @@ test.describe("เล่นเฉพาะช่วงที่ดูซ้ำ�
     const controls = page.locator('[data-slot="player-controls"]')
     await expect(controls.locator('[data-slot="reel-status"]')).toHaveText(/ช่วง 1 จาก 2/)
     await expect(controls.getByRole("button", { name: REEL_STOP })).toBeVisible()
+    await playTo(page, 30.5) // พ้นปลายช่วง 1 (30 วินาที)
     await expect(reelStatus(page)).toHaveText(/ช่วง 2 จาก 2/)
-    await expect(reelStatus(page)).toHaveCount(0, { timeout: 5000 })
+    await playTo(page, 66.5) // พ้นปลายช่วงสุดท้าย (66 วินาที)
+    await expect(reelStatus(page)).toHaveCount(0)
     await expect(page.getByRole("button", { name: REEL_STOP })).toHaveCount(0)
     const log = await fakeYTLog(page)
     expect(log.seeks.slice(0, 2)).toEqual([20, 60])
@@ -282,6 +286,9 @@ test.describe("เล่นเฉพาะช่วงที่ดูซ้ำ�
     await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 2/)
     // ประกาศให้โปรแกรมอ่านหน้าจอจาก aria-live ที่อยู่ตลอดข้างปุ่ม
     await expect(actionRow(page).locator('[aria-live="polite"]')).toHaveText("ช่วง 1 จาก 2")
+    // สถานะขึ้นตั้งแต่ตอนกด (ตัวเล่นยังโหลดอยู่): เทสต์นี้ตรวจการหยุดคลิปที่กำลังเล่น จึงรอให้ตัวเล่นเล่นแล้วก่อน
+    // (กดหยุดระหว่างโหลดมีเทสต์ของตัวเองข้างล่าง)
+    await expect.poll(async () => (await fakeYTLog(page)).calls).toContain("play")
     await page.getByRole("button", { name: REEL_STOP }).click()
     await expect(reelStatus(page)).toHaveCount(0)
     // ปุ่มหยุดหายไป โฟกัสไม่หลุดไป body: ไปที่แถบไทม์ไลน์ในแถวเดียวกัน
@@ -292,6 +299,32 @@ test.describe("เล่นเฉพาะช่วงที่ดูซ้ำ�
     await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 2/)
     await timeline(page).click({ position: { x: 5, y: 10 } })
     await expect(reelStatus(page)).toHaveCount(0)
+    await expect(reelButton(page)).toBeVisible()
+  })
+
+  test("กด 'หยุดเล่นช่วงไฮไลต์' ระหว่างตัวเล่นยังโหลด: พร้อมแล้วอยู่ที่ต้นช่วงแต่ไม่เล่นเอง", async ({ page }) => {
+    // เน็ตช้า: ผู้ใช้กดหยุดก่อนตัวเล่นพร้อม (เดิมคำสั่งหยุดหายไป แล้วตัวเล่นเล่นเองตอนพร้อม)
+    await installFakeYT(page, { rate: 1 })
+    // กักสคริปต์ตัวเล่นไว้จนกดหยุดเสร็จ (route ที่ลงทีหลังทำงานก่อน แล้วส่งต่อให้ตัวเล่นปลอม)
+    let release = () => {}
+    const scriptHeld = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route("https://www.youtube.com/iframe_api", async (route) => {
+      await scriptHeld
+      await route.fallback()
+    })
+    await open(page, { mostReplayed: REPLAYED })
+    await reelButton(page).click()
+    await expect(reelStatus(page)).toHaveText(/ช่วง 1 จาก 2/)
+    await page.getByRole("button", { name: REEL_STOP }).click()
+    await expect(reelStatus(page)).toHaveCount(0)
+    release()
+    // ตัวเล่นพร้อม = seek ไปต้นช่วง 1 (คำสั่ง seek กับ play อยู่ใน onReady เดียวกัน เห็น seek แล้วจึงรู้ผลของ play แน่นอน)
+    await expect.poll(async () => (await fakeYTLog(page)).seeks).toEqual([20])
+    const log = await fakeYTLog(page)
+    expect(log.calls).not.toContain("play")
+    expect(log.states).not.toContain(1) // ไม่เคยเข้า PLAYING
     await expect(reelButton(page)).toBeVisible()
   })
 })

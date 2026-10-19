@@ -221,7 +221,10 @@ def test_unwritable_output_root_error_names_no_path(env: Env, tmp_path: Path) ->
     assert info.value.code == "E_OUTPUT_NOT_WRITABLE"
     detail = info.value.detail
     assert detail.isidentifier() and detail.endswith("Error")
-    assert not any(part.strip("\\/") in str(info.value) for part in root.parts if part.strip("\\/"))
+    # ข้อความทั้งก้อนเป็นแค่รหัส + ชื่อชนิดของ error จึงไม่มีส่วนใดของ path เลย
+    # (เดิมตรวจว่าทุกส่วนของ path ไม่อยู่ในข้อความ ซึ่งล้มเองบน macOS: tmp มีโฟลเดอร์ชื่อ "T" ที่บังเอิญอยู่ใน "E_OUTPUT_NOT_WRITABLE")
+    assert str(info.value) == f"E_OUTPUT_NOT_WRITABLE: {detail}"
+    assert not any(name in str(info.value) for name in ("ผลลัพธ์ของพิธ", "blocked-output-root", tmp_path.name))
     _no_chain(info.value)  # traceback ใน log ของ error 500 ต้องไม่พา OSError (มี path) ตามมาด้วย
 
 

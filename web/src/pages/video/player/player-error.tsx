@@ -53,7 +53,7 @@ export function PlayerErrorView({ videoId, error }: { videoId: string; error: Pl
       role="alert"
       data-slot="player-error"
       data-error={error}
-      className="flex size-full flex-col items-center justify-center gap-2 rounded-md border bg-muted p-3 text-center text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="flex size-full flex-col items-center justify-center gap-2 rounded-md border bg-muted p-3 text-center text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring"
     >
       <Icon aria-hidden className="size-5 text-muted-foreground" />
       <p className="text-balance">{MESSAGE[error]}</p>

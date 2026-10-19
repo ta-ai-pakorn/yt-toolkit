@@ -90,7 +90,7 @@ yt-dl/                               (repo: ta-ai-pakorn/yt-toolkit, private)
 
 - [ ] **Step 1: เริ่ม git และสร้างโปรเจกต์ uv**
 
-รันที่ `C:\Users\khumj\yt-dl` (มี `BRD.md` `PRD.md` `docs/` อยู่แล้ว)
+รันที่โฟลเดอร์โปรเจกต์ `yt-dl` (มี `BRD.md` `PRD.md` `docs/` อยู่แล้ว)
 
 ```bash
 git init -b main
