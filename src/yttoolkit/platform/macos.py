@@ -74,3 +74,10 @@ class MacPlatform:
         # platform ตัวนี้คือโมดูลของ stdlib (import แบบ absolute) ไม่ใช่แพ็กเกจ yttoolkit.platform
         release = platform.mac_ver()[0]
         return f"macOS {release}" if release else "macOS"
+
+    def adopt_child(self, proc: subprocess.Popen) -> None:
+        """macOS ยังไม่มีกลไกผูกโปรเซสลูก (M7) ไม่ทำอะไร"""
+
+    def kill_children(self) -> None:
+        """ไม่มีโปรเซสลูกที่ผูกไว้ ไม่ทำอะไร"""
+

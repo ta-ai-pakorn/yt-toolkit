@@ -574,18 +574,19 @@ def test_find_running_rejects_instance_whose_ping_reports_other_pid(paths, fake_
 def test_git_commit_passes_platform_popen_flags(monkeypatch, tmp_path, fake_platform):
     captured: dict = {}
 
-    def fake_run(cmd, **kwargs):
-        captured.update(kwargs)
+    def fake_run(cmd, adopt, **kwargs):
+        captured.update(kwargs, adopt=adopt)
 
         class Out:
             stdout = "abc1234\n"
 
         return Out()
 
-    monkeypatch.setattr(lifecycle.subprocess, "run", fake_run)
+    monkeypatch.setattr(lifecycle, "run_adopted", fake_run)
     fake_platform.popen_flags = 0x1234
     assert lifecycle.git_commit(tmp_path, fake_platform) == "abc1234"
     assert captured["creationflags"] == 0x1234
+    assert captured["adopt"] == fake_platform.adopt_child  # M6 รอบ D1: git ผูกกับแอพเหมือนโปรเซสลูกตัวอื่น
 
 
 def test_ensure_ffmpeg_installs_only_when_platform_supports_it(paths, fake_platform, monkeypatch):
@@ -2554,3 +2555,4 @@ def test_a_channel_with_regex_characters_and_thai_is_matched_literally(paths):
         assert sorted(p.name for p in folder.iterdir()) == sorted(kept)
     finally:
         db.close()
+

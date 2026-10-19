@@ -21,6 +21,7 @@ import uvicorn
 
 from . import __version__, runstate
 from .app import AppContext, create_app
+from .children import run_adopted
 from .config import CODE_ROOT, HOST, Paths, default_paths, env_flag
 from .core import files, thai_fallback, tools
 from .core.account_session import GRACE_S, AccountService
@@ -111,12 +112,12 @@ def prepare_environment() -> None:
 
 def git_commit(root: Path, plat: Platform) -> str | None:
     try:
-        out = subprocess.run(
+        out = run_adopted(
             ["git", "rev-parse", "--short", "HEAD"],
+            plat.adopt_child,
             cwd=root,
             capture_output=True,
             text=True,
-            check=False,
             timeout=5,
             creationflags=plat.popen_flags,
         )
@@ -322,7 +323,9 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         if fake:
             media = FakeMediaTools(CODE_ROOT / "tests" / "fixtures" / "media")
         else:
-            media = FfmpegTools(lambda: tools.find_ffmpeg(paths, plat), popen_flags=plat.popen_flags)
+            media = FfmpegTools(
+                lambda: tools.find_ffmpeg(paths, plat), popen_flags=plat.popen_flags, adopt=plat.adopt_child
+            )
         events = EventBus()
         # ตัวเดียวกับที่ API ข้อมูลคลิปใช้ (ctx.pinned): งานโน้ตในคิวกับ GET pinned-comment ใช้ cache และล็อกร่วมกัน
         # เรียกผ่าน lambda: extractor ทดสอบบางตัวไม่มี pinned_comment และไม่ต้องมีถ้าไม่ได้เรียก

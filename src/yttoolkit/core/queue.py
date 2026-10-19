@@ -19,6 +19,7 @@ import shutil
 import threading
 import time
 import traceback
+import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -387,7 +388,7 @@ class QueueRunner:
             job = self.store.transition(job.id, "running", filename_style=style)
         except (KeyError, InvalidTransition):
             return _SKIPPED
-        workdir = self._work_root / job.id
+        workdir = self._fresh_workdir(job.id)
         ctx = _JobContext(self, job, workdir, output_root)
         self._active[job.id] = ctx
         try:
@@ -742,7 +743,17 @@ class QueueRunner:
             log.warning("งาน %d งานไม่หยุดภายใน %.1f วินาที ตั้งเป็นหยุดกลางคัน", leftovers, timeout)
         self._empty_work_root()
 
+    def _fresh_workdir(self, job_id: str) -> Path:
+        """work/<id งาน> ปกติ · ถ้ามีของรอบก่อนค้างอยู่ (ลบไม่ได้เพราะไฟล์ยังถูกล็อก เช่น ffmpeg ที่ค้างจากแอพที่โดน
+        End task) ใช้ work/<id งาน>-<สุ่ม> แทน งานที่ลองใหม่จะได้ไม่ชนไฟล์ที่ล็อกอยู่ (M6 รอบ D1) ของเก่าล้างตอนปิด/เปิดถัดไป"""
+        workdir = self._work_root / job_id
+        if not workdir.exists():
+            return workdir
+        log.warning("โฟลเดอร์ทำงานของงาน %s ยังมีของค้างจากรอบก่อน ใช้โฟลเดอร์ใหม่แทน", job_id)
+        return self._work_root / f"{job_id}-{uuid.uuid4().hex[:8]}"
+
     def _empty_work_root(self) -> None:
+        """ลบทุกอย่างใน work/ ลบไม่ได้ (ไฟล์ถูกล็อก) ข้ามไปและบันทึก log บรรทัดเดียว (ไม่มี path) ห้ามโยนต่อ"""
         try:
             children = list(self._work_root.iterdir())
         except FileNotFoundError:
@@ -750,14 +761,21 @@ class QueueRunner:
         except OSError as exc:
             log.warning("อ่านโฟลเดอร์ทำงานไม่ได้: %s", type(exc).__name__)
             return
+        stuck = 0
         for child in children:
             if child.is_dir() and not child.is_symlink():
                 shutil.rmtree(child, ignore_errors=True)
+                if child.exists():
+                    stuck += 1
             else:
                 try:
                     child.unlink()
-                except OSError:
+                except FileNotFoundError:
                     pass
+                except OSError:
+                    stuck += 1
+        if stuck:
+            log.warning("ลบของค้างในโฟลเดอร์ทำงานไม่ได้ %d รายการ (ไฟล์ยังถูกเปิดอยู่) งานที่ลองใหม่จะใช้โฟลเดอร์ใหม่", stuck)
 
 
 def _iso(moment: datetime) -> str:

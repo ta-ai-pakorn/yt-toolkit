@@ -403,8 +403,10 @@ def run_ffmpeg(
     cancel: Callable[[], bool],
     on_progress: Callable[[float | None], None],
     popen_flags: int = 0,
+    adopt: Callable[[subprocess.Popen], None] | None = None,
 ) -> None:
-    """รัน ffmpeg แล้วรายงานความคืบหน้า (0..1) จาก `-progress pipe:1` ยกเลิกได้ภายใน ~0.1 วินาที"""
+    """รัน ffmpeg แล้วรายงานความคืบหน้า (0..1) จาก `-progress pipe:1` ยกเลิกได้ภายใน ~0.1 วินาที
+    adopt(proc) ผูก ffmpeg ไว้กับแอพทันทีหลังเปิด (Platform.adopt_child) แอพโดน End task แล้ว ffmpeg ไม่ค้างกิน CPU"""
     try:
         proc = subprocess.Popen(
             args,
@@ -416,6 +418,11 @@ def run_ffmpeg(
     except (FileNotFoundError, PermissionError) as exc:
         # ffmpeg ถูกลบ ย้าย หรือโดนโปรแกรมแอนตี้ไวรัสกักกันหลังจากหาเจอแล้ว
         raise YtError("E_FFMPEG_MISSING", type(exc).__name__) from exc
+    if adopt is not None:
+        try:
+            adopt(proc)
+        except Exception:  # ผูกไม่ได้ต้องไม่ทำให้งานพัง (ตัวผูกจริงบันทึก log เองแล้ว)
+            pass
     stderr_tail: list[str] = []
 
     def read_stdout() -> None:
@@ -480,9 +487,16 @@ def run_ffmpeg(
 class FfmpegTools:
     """MediaTools ที่เรียก ffmpeg จริง `find_ffmpeg` ถูกเรียกทุกครั้งที่ใช้ (ผู้ใช้อาจเพิ่งติดตั้ง ffmpeg)"""
 
-    def __init__(self, find_ffmpeg: Callable[[], Path | None], *, popen_flags: int = 0) -> None:
+    def __init__(
+        self,
+        find_ffmpeg: Callable[[], Path | None],
+        *,
+        popen_flags: int = 0,
+        adopt: Callable[[subprocess.Popen], None] | None = None,
+    ) -> None:
         self._find = find_ffmpeg
         self._popen_flags = popen_flags
+        self._adopt = adopt
 
     def available(self) -> bool:
         return self._find() is not None
@@ -514,6 +528,7 @@ class FfmpegTools:
             cancel=cancel,
             on_progress=on_progress,
             popen_flags=self._popen_flags,
+            adopt=self._adopt,
         )
 
     def finalize_mp4(
@@ -599,7 +614,8 @@ class FfmpegTools:
         args = cut_args(self._require(), src.resolve(), dst.resolve(), intervals,
                         mode=mode, target=target, has_audio=has_audio)  # fmt: skip
         kept_s = sum(e - s for s, e in intervals) / 1000
-        run_ffmpeg(args, duration_s=kept_s, cancel=cancel, on_progress=on_progress, popen_flags=self._popen_flags)
+        run_ffmpeg(args, duration_s=kept_s, cancel=cancel, on_progress=on_progress, popen_flags=self._popen_flags,
+                   adopt=self._adopt)
 
     def extract_frame(
         self,
@@ -620,7 +636,8 @@ class FfmpegTools:
             raise JobCancelled()
         dst.unlink(missing_ok=True)
         try:
-            run_ffmpeg(args, duration_s=None, cancel=cancel, on_progress=_no_progress, popen_flags=self._popen_flags)
+            run_ffmpeg(args, duration_s=None, cancel=cancel, on_progress=_no_progress, popen_flags=self._popen_flags,
+                       adopt=self._adopt)
         except YtError as exc:
             if exc.code != "E_UNKNOWN":
                 raise

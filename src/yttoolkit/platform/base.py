@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from pathlib import Path
 from typing import Protocol
 
@@ -52,3 +53,13 @@ class Platform(Protocol):
     def os_version(self) -> str:
         """ชื่อและเลขรุ่นของระบบปฏิบัติการสำหรับรายงานแจ้งปัญหา"""
         ...
+
+    def adopt_child(self, proc: subprocess.Popen) -> None:
+        """ผูกโปรเซสลูกที่แอพเพิ่งเปิดไว้กับแอพ (Windows: Job Object แบบ kill-on-close) แอพตายเมื่อไร ลูกตายตาม
+        ผูกไม่ได้แค่บันทึก log หนึ่งบรรทัด ห้ามทำให้งานพัง"""
+        ...
+
+    def kill_children(self) -> None:
+        """ปิดโปรเซสลูกที่ adopt_child ผูกไว้และยังรันอยู่ (ใช้ตอน Windows กำลังปิดเครื่อง) ไม่แตะโปรเซสอื่น"""
+        ...
+
