@@ -30,7 +30,14 @@ from .core.capture import CaptureService
 from .core.comments import PinnedCommentService
 from .core.db import Database, purge_stale_cache
 from .core.events import CLOSED, Event, EventBus
-from .core.extractor import Extractor, FakeExtractor, YtDlpExtractor, parse_account_cookies, visitor_session
+from .core.extractor import (
+    Extractor,
+    FakeExtractor,
+    YtDlpExtractor,
+    adopt_ytdlp_children,
+    parse_account_cookies,
+    visitor_session,
+)
 from .core.handlers import (
     CONTACT_SHEET_SUFFIX,
     FRAMES_ZIP_SUFFIX,
@@ -309,6 +316,8 @@ def open_services(paths: Paths, plat: Platform, fake: bool = False) -> Services:
         # เซสชันผู้ชมแบบไม่ระบุตัวตน (<data>/visitor-session.txt) ที่ probe และซับใช้ร่วมกัน ซับแปลต้องใช้
         session = visitor_session(paths.data)
         extractor = YtDlpExtractor(session=session)
+        # ffmpeg/ffprobe/deno ที่ yt-dlp เปิดเอง (รวมไฟล์ ซ่อมไฟล์) ก็ต้องตายตามแอพ ไม่ค้างล็อกไฟล์ใน work/
+        adopt_ytdlp_children(plat.adopt_child)
     paths.db.parent.mkdir(parents=True, exist_ok=True)
     db = Database(paths.db)
     try:

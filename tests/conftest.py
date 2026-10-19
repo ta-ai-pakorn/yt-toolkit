@@ -102,8 +102,11 @@ def no_pypi_lookup(monkeypatch):
 @pytest.fixture(autouse=True)
 def own_child_job(monkeypatch):
     """แต่ละเทสได้ Job Object ของตัวเอง (M6 รอบ D1): kill_children ในเทสหนึ่งไม่ไปปิดลูกของเทสอื่น
-    จบเทสปิด job ทิ้ง ลูกที่เทสผูกไว้แล้วลืมปิดโดน kill ตามไปด้วย
+    จบเทสปิด job ทิ้ง ลูกที่เทสผูกไว้แล้วลืมปิดโดน kill ตามไปด้วย · ตัวผูกลูกของ yt-dlp ก็คืนค่าเดิมทุกเทส
     (macOS: import โมดูล windows ไม่ได้เพราะไม่มี msvcrt ไม่มี job ให้แยก)"""
+    from yttoolkit.core import extractor
+
+    monkeypatch.setattr(extractor, "_child_adopt", None)
     try:
         from yttoolkit.platform import windows
     except ImportError:

@@ -13,6 +13,7 @@ from yttoolkit import lifecycle, probe, runstate, tray
 from yttoolkit.api.errors import redact_home
 from yttoolkit.app import AppContext
 from yttoolkit.config import CODE_ROOT
+from yttoolkit.core import extractor as extractor_module
 from yttoolkit.core import files, tools
 from yttoolkit.core.comments import PinnedCommentService
 from yttoolkit.core.db import Database
@@ -1298,6 +1299,15 @@ def test_open_services_real_mode_wires_ffmpeg_tools(paths, fake_platform, monkey
         exe.write_bytes(b"")
         assert services.media.ffmpeg_path() == exe  # หาใหม่ทุกครั้ง (ผู้ใช้เพิ่งติดตั้ง ffmpeg)
         assert services.queue._delay_range == (2.0, 5.0)  # ค่าเริ่มต้นของตัวรันคิว
+        assert extractor_module._child_adopt == fake_platform.adopt_child  # ลูกที่ yt-dlp เปิดเองก็ผูกกับแอพ
+    finally:
+        services.db.close()
+
+
+def test_open_services_fake_mode_leaves_ytdlp_children_alone(paths, fake_platform):
+    services = lifecycle.open_services(paths, fake_platform, fake=True)
+    try:
+        assert extractor_module._child_adopt is None  # ตัวปลอมไม่ใช้ yt-dlp
     finally:
         services.db.close()
 
