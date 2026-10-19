@@ -7,6 +7,7 @@ import { expect, test, type Page } from "@playwright/test"
 
 import type { AudioJobParams, VideoJobParams } from "../src/lib/types"
 
+import { expectFocusInside } from "./focus"
 import { mockEnqueue } from "./queue-helpers"
 
 /**
@@ -83,6 +84,25 @@ async function openTab(page: Page, videoId: string, which: "video" | "audio") {
 async function choose(page: Page, name: string, option: string | RegExp) {
   await combobox(page, name).click()
   await page.getByRole("option", { name: option }).first().click()
+  await expect(page.getByRole("listbox")).toBeHidden()
+}
+
+/**
+ * เปิดรายการของช่องเลือกแล้วรอจนเปิดจริง (รายการขึ้นและโฟกัสย้ายเข้าไปแล้ว) ก่อนตรวจว่า "ไม่มี" ตัวเลือกใด
+ * ตรวจ toHaveCount(0) ทันทีหลังคลิกผ่านได้ตั้งแต่รายการยังไม่ขึ้น แล้ว Esc ที่ตามมาก็ไปก่อนรายการเปิด
+ * รายการจึงค้างเปิดบังปุ่มอื่นทั้งหน้า (CI: คลิกสวิตช์ถัดไปไม่ได้จนหมดเวลา)
+ */
+async function openList(page: Page, name: string) {
+  await combobox(page, name).click()
+  const listbox = page.getByRole("listbox")
+  await expect(listbox).toBeVisible()
+  await expectFocusInside(listbox)
+  return listbox
+}
+
+/** ปิดรายการที่เปิดด้วย openList ด้วย Esc แล้วรอจนปิดจริง */
+async function closeList(page: Page) {
+  await page.keyboard.press("Escape")
   await expect(page.getByRole("listbox")).toBeHidden()
 }
 
@@ -230,10 +250,10 @@ test.describe("W2 แท็บวิดีโอ", () => {
   }) => {
     const { bodies } = await mockEnqueue(page)
     await openTab(page, BBB, "video")
-    await combobox(page, "คุณภาพ").click()
+    await openList(page, "คุณภาพ")
     await expect(page.getByRole("option", { name: /^2160p/ })).toHaveCount(0)
     await expect(page.getByRole("option", { name: /บางโปรแกรมเปิดไม่ได้/ })).toHaveCount(0)
-    await page.keyboard.press("Escape")
+    await closeList(page)
 
     await page.getByRole("switch", { name: "ความละเอียดสูงสุด" }).click()
     // ตัวเลือกอัตโนมัติเปลี่ยนชื่อเป็นภาพดีที่สุดของคลิป (BBB = 2160p VP9 จึงมีป้ายเตือนด้วย)
@@ -277,10 +297,10 @@ test.describe("W2 แท็บวิดีโอ", () => {
 
     // ไม่เคยจำค่าไว้ = เริ่มที่ 720p ตามการตั้งค่า · ไม่มีตัวเลือกเกิน 720p
     await expect(selectedValue(page, "คุณภาพ")).toHaveText(/^720p · 60 fps · H\.264/)
-    await combobox(page, "คุณภาพ").click()
+    await openList(page, "คุณภาพ")
     await expect(page.getByRole("option", { name: /^(1080|1440|2160)p/ })).toHaveCount(0)
     await expect(page.getByRole("option", { name: /^720p · 60 fps · H\.264/ })).toHaveCount(1)
-    await page.keyboard.press("Escape")
+    await closeList(page)
 
     // เลือก "อัตโนมัติ" (ตัวแรกของรายการ) แล้วส่ง: คำขอมี maxHeight 720 และไม่มี formatId
     // ป้ายต้องบอกเพดานจริง (720p) ไม่ใช่ 1080p
@@ -373,9 +393,9 @@ test.describe("W2 แท็บเสียง", () => {
     await page.getByRole("button", { name: "mp3", exact: true }).click()
     await expect(page.getByText("เปิดได้ทุกเครื่อง แต่ต้องแปลงไฟล์จึงช้ากว่า m4a", { exact: true })).toBeVisible()
     await expect(selectedValue(page, "คุณภาพ mp3")).toHaveText("192 kbps")
-    await combobox(page, "คุณภาพ mp3").click()
+    await openList(page, "คุณภาพ mp3")
     await expect(page.getByRole("option")).toHaveText(["128 kbps", "192 kbps", "320 kbps"])
-    await page.keyboard.press("Escape")
+    await closeList(page)
     await downloadAudio(page, "mp3").click()
     await expect(page.getByText(ADDED, { exact: true })).toBeVisible()
     const params = bodies[0][0].params as AudioJobParams
