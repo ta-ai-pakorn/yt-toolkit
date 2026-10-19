@@ -5,9 +5,10 @@ import os
 import platform
 import signal
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
-from .base import LockFileError, report_lock_open_failure
+from .base import LockFileError, MessageHandler, report_lock_open_failure
 
 
 class MacPlatform:
@@ -74,3 +75,15 @@ class MacPlatform:
         # platform ตัวนี้คือโมดูลของ stdlib (import แบบ absolute) ไม่ใช่แพ็กเกจ yttoolkit.platform
         release = platform.mac_ver()[0]
         return f"macOS {release}" if release else "macOS"
+
+    def adopt_child(self, proc: subprocess.Popen) -> None:
+        """macOS ยังไม่มีกลไกผูกโปรเซสลูก (M7) ไม่ทำอะไร"""
+
+    def kill_children(self) -> None:
+        """ไม่มีโปรเซสลูกที่ผูกไว้ ไม่ทำอะไร"""
+
+    def tray_message_handlers(
+        self, on_session_end: Callable[[], None], window: Callable[[], int | None], reason: str
+    ) -> dict[int, MessageHandler]:
+        """เมนูบาร์ของ macOS ไม่มีข้อความปิดเครื่องแบบ Windows"""
+        return {}

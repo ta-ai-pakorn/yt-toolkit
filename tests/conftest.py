@@ -25,6 +25,8 @@ class FakePlatform:
     unopenable: set[Path] = field(default_factory=set)  # ไฟล์ lock ที่เปิดไม่ได้ (เช่นมีโฟลเดอร์ชื่อเดียวกัน)
     aliases: list[str] = field(default_factory=list)  # ชื่ออื่นของ path (Windows: ชื่อสั้นแบบ 8.3)
     os_version_text: str = "Windows 11 (10.0.26200)"  # M6 รอบ B: บรรทัด "ระบบ:" ของรายงานแจ้งปัญหา
+    adopted: list[int] = field(default_factory=list)  # M6 รอบ D1: pid ของโปรเซสลูกที่ผูกไว้กับแอพ
+    children_killed: int = 0  # จำนวนครั้งที่ kill_children ถูกเรียก
 
     def exe_name(self, name: str) -> str:
         return f"{name}.exe" if self.name == "windows" else name
@@ -62,6 +64,15 @@ class FakePlatform:
     def os_version(self) -> str:
         return self.os_version_text
 
+    def adopt_child(self, proc) -> None:
+        self.adopted.append(proc.pid)
+
+    def kill_children(self) -> None:
+        self.children_killed += 1
+
+    def tray_message_handlers(self, on_session_end, window, reason) -> dict:
+        return {}
+
 
 @pytest.fixture
 def fake_platform(tmp_path: Path) -> FakePlatform:
@@ -86,3 +97,22 @@ def no_pypi_lookup(monkeypatch):
     monkeypatch.setattr(tools, "_fetch_latest_ytdlp", offline)
     monkeypatch.setattr(tools, "_latest_ytdlp_cache", None)
     monkeypatch.setattr(tools, "_network_cache", None)
+
+
+@pytest.fixture(autouse=True)
+def own_child_job(monkeypatch):
+    """แต่ละเทสได้ Job Object ของตัวเอง (M6 รอบ D1): kill_children ในเทสหนึ่งไม่ไปปิดลูกของเทสอื่น
+    จบเทสปิด job ทิ้ง ลูกที่เทสผูกไว้แล้วลืมปิดโดน kill ตามไปด้วย · ตัวผูกลูกของ yt-dlp ก็คืนค่าเดิมทุกเทส
+    (macOS: import โมดูล windows ไม่ได้เพราะไม่มี msvcrt ไม่มี job ให้แยก)"""
+    from yttoolkit.core import extractor
+
+    monkeypatch.setattr(extractor, "_child_adopt", None)
+    try:
+        from yttoolkit.platform import windows
+    except ImportError:
+        yield
+        return
+    job = windows._ChildJob()
+    monkeypatch.setattr(windows, "_CHILD_JOB", job)
+    yield
+    job.close()

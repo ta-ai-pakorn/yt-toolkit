@@ -180,11 +180,13 @@ def test_windows_open_folder_and_reveal(windows_module, monkeypatch):
 
 
 def test_windows_kill_uses_argument_list_and_popen_flags(windows_module, monkeypatch):
-    calls = _record_run(monkeypatch)
+    calls: list = []
+    monkeypatch.setattr(windows_module, "run_adopted", lambda *args, **kwargs: calls.append((args, kwargs)))
     plat = windows_module.WindowsPlatform()
     plat.kill(4321)
-    ((args,), kwargs) = calls[0]
+    ((args, adopt), kwargs) = calls[0]
     assert args == ["taskkill", "/PID", "4321", "/T", "/F"]
+    assert adopt == plat.adopt_child  # M6 รอบ D1: taskkill ก็ผูกกับแอพ
     assert kwargs["creationflags"] == plat.popen_flags
     assert "shell" not in kwargs
 

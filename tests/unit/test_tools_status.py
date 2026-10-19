@@ -84,8 +84,8 @@ def test_find_ffmpeg_uses_exe_name(paths, fake_platform, monkeypatch):
 def test_run_version_passes_platform_popen_flags(monkeypatch, fake_platform):
     captured: dict = {}
 
-    def fake_run(cmd, **kwargs):
-        captured.update(kwargs)
+    def fake_run(cmd, adopt, **kwargs):
+        captured.update(kwargs, adopt=adopt)
 
         class Out:
             stdout = "x 1"
@@ -93,10 +93,11 @@ def test_run_version_passes_platform_popen_flags(monkeypatch, fake_platform):
 
         return Out()
 
-    monkeypatch.setattr(tools.subprocess, "run", fake_run)
+    monkeypatch.setattr(tools, "run_adopted", fake_run)
     fake_platform.popen_flags = 0x1234
     assert tools._run_version("exe", fake_platform) == "x 1"
     assert captured["creationflags"] == 0x1234
+    assert captured["adopt"] == fake_platform.adopt_child  # M6 รอบ D1: ffmpeg -version ก็ผูกกับแอพ
 
 
 def test_find_js_runtime_falls_back_to_node(monkeypatch, tmp_path, fake_platform):
