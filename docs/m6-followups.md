@@ -27,3 +27,10 @@ Items found during M6 round D1 that were judged safe to leave for later. None of
 ## UI
 
 - **Fake mode:** a link that is not a fixture shows "คลิปนี้ไม่มีให้ดู". Fake mode should say clearly that only the sample clips work.
+
+## From CI flake round 3
+
+- **Null clip data without an abort:** a 200 whose body cannot be read (backend reset mid-response) still makes `api()` return `null`, and `home/queries.ts` / `videoQuery` can write that into `["video", id]`. That is the same crash class as the fixed abort case. Fix: write only when the result is not `null`, or return `null` only for a truly empty body. This is rare on 127.0.0.1.
+- **Blank page when an entry file fails to load:** if a file the entry script needs fails to load (local socket starvation from antivirus or VPN filters, or the backend dying mid-load during an update), staff see a blank white page with no message. `importWithReload` only covers lazy chunks. Option: a tiny inline script in `index.html` that reloads once (guarded by `sessionStorage`) and then shows a one-line Thai message telling staff to press F5. The message is new copy, so Pete has to approve it.
+- **`account.spec.ts:186/190`:** the test asserts the cancel mechanism, not the symptom. Wait for the stale request to settle, then assert that the banner stays gone.
+- **HTTP vs SSE ordering with two tabs:** a late import response can overwrite an SSE "inactive" event. This was already in main before this round.
