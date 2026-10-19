@@ -38,7 +38,12 @@ export async function api<T>(path: string, init: RequestInit = {}, deps: Deps = 
     // fetch ล้มเองเมื่อต่อ backend ไม่ได้ (เช่นปิดโปรแกรมไปแล้ว) ข้อความของเบราว์เซอร์เป็นภาษาอังกฤษ
     throw new ApiError(0, "E_OFFLINE", th.errors.offline, String(error), null)
   }
-  const body: unknown = await res.json().catch(() => null)
+  // อ่านเนื้อหาไม่ได้ = null (เช่นคำตอบว่าง) ยกเว้นคำขอถูกยกเลิกระหว่างที่เนื้อหายังมาไม่ครบ: ต้องโยนต่อ
+  // ไม่อย่างนั้นผู้เรียกได้ null เหมือนสำเร็จ (เช่นชื่อคลิปของ W1 ที่ถูกยกเลิกตอนกด "เปิดดู" เขียน null ลงข้อมูลคลิปของ W2 แล้วหน้าพัง)
+  const body: unknown = await res.json().catch((error: unknown) => {
+    if (init.signal?.aborted) throw error
+    return null
+  })
   if (!res.ok) {
     const err = (body as { error?: { code?: string; message?: string; detail?: string | null } } | null)?.error
     throw new ApiError(res.status, err?.code ?? "E_UNKNOWN", err?.message ?? th.errors.unknown, err?.detail ?? null, body)

@@ -48,6 +48,34 @@ describe("videoTitleQuery", () => {
   })
 })
 
+describe("videoTitleQuery ถูกยกเลิก", () => {
+  it("แถวหลุดจากจอ (กด 'เปิดดู') ตอนเนื้อหาคำตอบยังมาไม่ครบ: ไม่เขียนอะไรลง key ของหน้า W2 (เดิมเขียน null หน้าคลิปพัง)", async () => {
+    let started!: () => void
+    const requested = new Promise<void>((resolve) => (started = resolve))
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const signal = init.signal!
+        started()
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal.addEventListener("abort", () => controller.error(signal.reason))
+          },
+        })
+        return new Response(body, { status: 200 })
+      }),
+    )
+    const client = new QueryClient()
+    const options = videoTitleQuery("aqz-KE-bpKQ")
+    const pending = client.fetchQuery(options).catch(() => undefined)
+    await requested
+    await client.cancelQueries({ queryKey: options.queryKey })
+    await pending
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(client.getQueryData(["video", "aqz-KE-bpKQ"])).toBeUndefined()
+  })
+})
+
 describe("playlistQuery", () => {
   it("เพลย์ลิสต์ปกติ: /playlists/{id} ไม่มี v", async () => {
     const fetch = stubFetch({ title: "p", total: 0, truncated: false, entries: [] })

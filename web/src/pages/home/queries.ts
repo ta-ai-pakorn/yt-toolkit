@@ -34,6 +34,8 @@ export function videoTitleQuery(videoId: string, botStop?: BotStop) {
       const info = await titleLimit(
         guarded(signal, botStop, () => api<VideoInfo>(`/videos/${videoId}?peek=1`, { signal })),
       )
+      // ถูกยกเลิกแล้ว (แถวหลุดจากจอ เช่นกด "เปิดดู") ไม่เขียนลงข้อมูลคลิปของ W2: ผลนี้ไม่มีใครรับแล้ว
+      signal.throwIfAborted()
       client.setQueryData<VideoInfo>(["video", videoId], (existing) => existing ?? info)
       return info
     },

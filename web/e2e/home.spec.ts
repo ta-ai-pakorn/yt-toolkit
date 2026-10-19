@@ -399,6 +399,37 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     expect(peekUrls.every((url) => url.endsWith("?peek=1"))).toBe(true)
   })
 
+  test("กด 'เปิดดู' ตอนที่หัวคำตอบ peek มาแล้วแต่เนื้อหายังมาไม่ครบ → หน้าคลิปเปิดได้ปกติ ไม่พัง", async ({ page }) => {
+    // CI run 39212155432: peek ถูกยกเลิกตอนแถวหลุดจากจอ ระหว่างอ่านเนื้อหา api() ได้ null เหมือนสำเร็จ
+    // แล้วเขียน null ลงข้อมูลคลิปของ W2 หน้าคลิปพัง (Cannot read properties of null) ไม่มีชื่อคลิป
+    // จำลองเนื้อหาที่ยังมาไม่ครบด้วย fetch ที่ห่อไว้: หัวคำตอบกลับทันที เนื้อหาค้างจนกว่าคำขอจะถูกยกเลิก (ล้มแบบเดียวกับเบราว์เซอร์)
+    await page.addInitScript(() => {
+      const realFetch = window.fetch.bind(window)
+      const w = window as unknown as { __peekHeld?: boolean }
+      window.fetch = async (input, init) => {
+        const response = await realFetch(input, init)
+        if (!String(input).includes("peek=1") || !init?.signal) return response
+        const signal = init.signal
+        await response.arrayBuffer()
+        w.__peekHeld = true
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal.addEventListener("abort", () => controller.error(signal.reason))
+          },
+        })
+        return new Response(body, { status: response.status, headers: response.headers })
+      }
+    })
+    await page.goto("/")
+    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, NOT_YOUTUBE].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __peekHeld?: boolean }).__peekHeld === true)).toBe(true)
+    await page.getByRole("link", { name: /เปิดดู/ }).click()
+    await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    await expect(page.getByRole("tab", { name: "ภาพเฟรม", exact: true })).toBeVisible()
+  })
+
   test("กด 'เปิดดู' ตอนที่ peek ยังไม่เสร็จ → หน้าคลิปยังยิงคำขอปกติ (ไม่ใช่ peek) เพื่อให้คลิปเข้า 'ล่าสุด'", async ({
     page,
   }) => {

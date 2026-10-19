@@ -83,6 +83,32 @@ describe("api", () => {
   })
 })
 
+describe("api: คำขอถูกยกเลิกระหว่างอ่านเนื้อหา", () => {
+  /** หัวคำตอบมาแล้ว แต่เนื้อหายังมาไม่ครบ: สตรีมล้มเมื่อคำขอถูกยกเลิก (แบบเดียวกับ fetch ของเบราว์เซอร์) */
+  function streamingResponse(signal: AbortSignal): Response {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        signal.addEventListener("abort", () => controller.error(signal.reason))
+      },
+    })
+    return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } })
+  }
+
+  it("ยกเลิกตอนเนื้อหายังมาไม่ครบ = โยนต่อ ไม่คืน null เหมือนสำเร็จ", async () => {
+    const controller = new AbortController()
+    const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => streamingResponse(init!.signal!))
+    const pending = api("/videos/x?peek=1", { signal: controller.signal }, { fetch, token: "t" })
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
+    controller.abort()
+    await expect(pending).rejects.toThrow()
+  })
+
+  it("ไม่ได้ยกเลิก แต่เนื้อหาว่าง = null เหมือนเดิม", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+    await expect(api("/queue/resume", { method: "POST" }, { fetch, token: "t" })).resolves.toBeNull()
+  })
+})
+
 describe("pasteShortcut", () => {
   it("แสดงตามระบบ", () => {
     expect(pasteShortcut("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)")).toBe("⌘V")
