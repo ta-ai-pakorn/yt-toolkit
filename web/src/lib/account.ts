@@ -36,6 +36,16 @@ export function accountQuery() {
   })
 }
 
+/**
+ * ใส่สถานะบัญชีที่เพิ่งรู้ (หลังนำเข้า ลบ หรือข่าว SSE) ลงแคช โดยยกเลิก GET /api/cookies ที่ยังค้างอยู่ก่อน
+ * คำตอบของคำขอนั้นคำนวณก่อนการเปลี่ยนแปลง ถ้ามาถึงทีหลังจะทับสถานะใหม่: เช่นกด "ลบออกตอนนี้" ตอน SSE เพิ่งต่อติด
+ * (events.ts โหลดสถานะบัญชีใหม่) toast ขึ้นว่าลบแล้ว แต่แถบบนหน้ากลับมาค้าง · ยกเลิก = คืนสถานะก่อนคำขอทันที แล้วจึงใส่ค่าใหม่
+ */
+export function putAccountStatus(client: QueryClient, status: AccountStatus): void {
+  void client.cancelQueries({ queryKey: ACCOUNT_KEY })
+  client.setQueryData<AccountStatus>(ACCOUNT_KEY, status)
+}
+
 /** นำเข้าข้อความของ cookies.txt (ยอมรับคำเตือนใน dialog แล้ว) · ใช้ไม่ได้ = ApiError 422/413 E_COOKIES_INVALID */
 export function importAccount(text: string): Promise<AccountStatus> {
   return api<AccountStatus>("/cookies/import", { method: "POST", body: JSON.stringify({ text, acceptWarning: true }) })
@@ -120,7 +130,7 @@ export function applyAccountEvent(prev: AccountStatus | undefined, event: Accoun
  */
 export function syncAccountCache(client: QueryClient, event: AccountEvent): void {
   const next = applyAccountEvent(client.getQueryData<AccountStatus>(ACCOUNT_KEY), event)
-  if (next !== undefined) client.setQueryData<AccountStatus>(ACCOUNT_KEY, next)
+  if (next !== undefined) putAccountStatus(client, next)
   if (event.active) void client.invalidateQueries({ queryKey: ACCOUNT_KEY })
   void client.invalidateQueries({ queryKey: ["health"] })
 }

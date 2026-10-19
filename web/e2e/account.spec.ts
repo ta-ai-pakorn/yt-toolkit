@@ -151,6 +151,52 @@ test("นำเข้าไฟล์ที่ใช้ได้: dialog ปิ�
   await expect(toast(page, REMOVED)).toBeVisible()
 })
 
+test("กด 'ลบออกตอนนี้' ตอนสถานะบัญชีกำลังโหลดใหม่ (SSE เพิ่งต่อติด): คำตอบเก่าที่มาทีหลังไม่ทำให้แถบกลับมา", async ({
+  page,
+}) => {
+  // CI run 39212095408: toast ขึ้นว่าลบแล้ว แต่แถบค้าง · GET /api/cookies ที่ SSE สั่งโหลดใหม่ออกไปก่อน DELETE
+  // แล้วคำตอบ (ยังถือบัญชี) มาทับสถานะหลังลบ · แอพต้องยกเลิกคำขอที่ค้างก่อนใส่สถานะใหม่
+  const state = await mockAccount(page, { active: true })
+  let openEvents!: () => void
+  const eventsHeld = new Promise<void>((resolve) => (openEvents = resolve))
+  await page.route("**/api/events", async (route) => {
+    await eventsHeld
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" },
+      body: "retry: 600000\n\n",
+    })
+  })
+  // GET ครั้งแรก (ตอนเปิดหน้า) ตอบตามปกติ · ครั้งถัดไป (SSE ต่อติด) จำคำตอบตอนนั้นไว้ แล้วค้างจนกว่าจะลบเสร็จ
+  let gets = 0
+  let answerStale!: () => void
+  const staleHeld = new Promise<void>((resolve) => (answerStale = resolve))
+  await page.route("**/api/cookies", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    gets += 1
+    if (gets === 1) return route.fallback()
+    const at = Math.floor(Date.now() / 1000) * 1000
+    const before = { active: true, importedAt: new Date(at).toISOString(), expiresAt: new Date(at + 7_200_000).toISOString(), used: false }
+    await staleHeld
+    await route.fulfill({ json: before }).catch(() => undefined) // แอพยกเลิกคำขอนี้ไปแล้ว
+  })
+  await page.goto("/history")
+  await expect(banner(page)).toBeVisible()
+  const isGet = (request: { url(): string; method(): string }) =>
+    request.method() === "GET" && new URL(request.url()).pathname === "/api/cookies"
+  const reloading = page.waitForRequest(isGet)
+  openEvents()
+  await reloading
+  const cancelled = page.waitForEvent("requestfailed", isGet)
+  await banner(page).getByRole("button", { name: "ลบออกตอนนี้" }).click()
+  await expect(toast(page, REMOVED)).toBeVisible()
+  await expect(banner(page)).toHaveCount(0)
+  await cancelled
+  answerStale()
+  await expect(banner(page)).toHaveCount(0)
+  expect(state.deletes).toBe(1)
+})
+
 test("ถือบัญชีอยู่แล้วแต่ยังเปิดไม่ได้: ข้อความ ลองด้วยบัญชีแล้ว… ไม่มีปุ่ม", async ({ page }) => {
   await mockAccount(page, { active: true, code: "E_VIDEO_PRIVATE", message: TRIED_MESSAGE })
   await page.goto(`/v/${BBB}`)

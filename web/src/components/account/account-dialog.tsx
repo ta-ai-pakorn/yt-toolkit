@@ -9,9 +9,8 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { th } from "@/i18n/th"
-import { ACCOUNT_KEY, importAccount } from "@/lib/account"
+import { importAccount, putAccountStatus } from "@/lib/account"
 import { ApiError } from "@/lib/api"
-import type { AccountStatus } from "@/lib/types"
 
 import { accountDialog, useAccountDialog } from "./account-store"
 import { canImport, dialogReducer, EMPTY_DIALOG, importLabel, pickAction } from "./dialog-model"
@@ -50,7 +49,7 @@ export function AccountDialog() {
     dispatch({ type: "submitting" })
     try {
       const status = await importAccount(state.text)
-      client.setQueryData<AccountStatus>(ACCOUNT_KEY, status)
+      putAccountStatus(client, status)
       const then = request?.onImported
       close()
       then?.()
