@@ -70,6 +70,9 @@ class FakePlatform:
     def kill_children(self) -> None:
         self.children_killed += 1
 
+    def tray_message_handlers(self, on_session_end, window, reason) -> dict:
+        return {}
+
 
 @pytest.fixture
 def fake_platform(tmp_path: Path) -> FakePlatform:

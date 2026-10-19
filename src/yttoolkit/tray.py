@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pystray
 from PIL import Image, ImageDraw
+
+if TYPE_CHECKING:
+    from .platform import Platform
 
 ACCENT = (245, 185, 66, 255)  # --accent #F5B942
 ON_ACCENT = (26, 20, 5, 255)  # --on-accent #1A1405
 WINDOW = (14, 15, 17, 255)  # film window color #0E0F11
 MENU_LABELS = ("เปิดแอพ", "เปิดโฟลเดอร์ผลลัพธ์", "ปิดโปรแกรม")
 RUNNING_LABEL = "กำลังทำ {n} งาน"  # แถวแรกของเมนู กดไม่ได้ บอกจำนวนงานที่กำลังทำ (FR-LIFE-6)
+# M6 รอบ D1: Windows แสดงข้อความนี้บนหน้าจอปิดเครื่อง ถ้าแอพยังเก็บงานไม่เสร็จ (ปกติเสร็จก่อนข้อความจะโผล่)
+SHUTDOWN_REASON = "กำลังบันทึกงาน"
 
 
 def make_icon_image(size: int = 64) -> Image.Image:
@@ -126,3 +132,17 @@ def build_tray(
         "YT Toolkit",
         menu=build_menu(open_app, open_output, quit_app, running_count),
     )
+
+
+def install_session_end(icon: pystray.Icon, plat: Platform, on_session_end: Callable[[], None]) -> bool:
+    """M6 รอบ D1: ให้หน้าต่าง tray ตอบข้อความปิดเครื่อง/ออกจากระบบ (ตัวจัดการมาจาก platform ที่เดียวที่รู้จักระบบ)
+
+    pystray ตอบ 0 ให้ทุกข้อความที่ไม่มีตัวจัดการ ซึ่ง WM_QUERYENDSESSION = 0 แปลว่า "ห้ามปิดเครื่อง"
+    จึงเพิ่มตัวจัดการลงใน icon._message_handlers (มีใน pystray 0.19.5 ตัว win32) icon ที่ไม่มีช่องนี้ (macOS) ข้าม
+    คืน True ถ้าใส่ตัวจัดการได้"""
+    table = getattr(icon, "_message_handlers", None)
+    if not isinstance(table, dict):
+        return False
+    handlers = plat.tray_message_handlers(on_session_end, lambda: getattr(icon, "_hwnd", None), SHUTDOWN_REASON)
+    table.update(handlers)
+    return bool(handlers)

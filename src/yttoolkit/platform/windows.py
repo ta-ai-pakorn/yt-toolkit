@@ -9,11 +9,12 @@ import subprocess
 import sys
 import threading
 import uuid
+from collections.abc import Callable
 from ctypes import wintypes
 from pathlib import Path
 
 from ..children import run_adopted
-from .base import LockFileError, report_lock_open_failure
+from .base import LockFileError, MessageHandler, report_lock_open_failure
 
 log = logging.getLogger("yttoolkit")
 
@@ -25,6 +26,9 @@ _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
 _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_TERMINATE = 0x0001
+# ข้อความปิดเครื่อง/ออกจากระบบที่หน้าต่าง tray ได้รับ
+WM_QUERYENDSESSION = 0x0011
+WM_ENDSESSION = 0x0016
 
 
 class _GUID(ctypes.Structure):
@@ -182,6 +186,38 @@ _CHILD_JOB = _ChildJob()  # ตัวเดียวทั้งโปรเซ�
 
 
 @functools.cache
+def _block_reason_api() -> tuple:
+    """ShutdownBlockReasonCreate/Destroy ของ user32 (โหลดตอนใช้ครั้งแรก)"""
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    create = user32.ShutdownBlockReasonCreate
+    create.argtypes = (wintypes.HWND, wintypes.LPCWSTR)
+    create.restype = wintypes.BOOL
+    destroy = user32.ShutdownBlockReasonDestroy
+    destroy.argtypes = (wintypes.HWND,)
+    destroy.restype = wintypes.BOOL
+    return create, destroy
+
+
+def _set_block_reason(hwnd: int | None, reason: str) -> bool:
+    """บอก Windows ว่ากำลังเก็บงาน (ข้อความโผล่บนหน้าจอปิดเครื่องถ้าเก็บนาน) พลาด = ข้าม ไม่สำคัญพอจะหยุดการเก็บงาน"""
+    if not hwnd:
+        return False
+    try:
+        create, _ = _block_reason_api()
+        return bool(create(hwnd, reason))
+    except (OSError, AttributeError):
+        return False
+
+
+def _clear_block_reason(hwnd: int | None) -> None:
+    try:
+        _, destroy = _block_reason_api()
+        destroy(hwnd)
+    except (OSError, AttributeError):
+        pass
+
+
+@functools.cache
 def _shell_libs() -> tuple[ctypes.WinDLL, ctypes.WinDLL]:
     """โหลด shell32/ole32 ครั้งเดียวตอนใช้ครั้งแรก (ไม่โหลดตอน import เพื่อให้ import บน macOS ได้)"""
     shell32 = ctypes.WinDLL("shell32")
@@ -330,3 +366,28 @@ class WindowsPlatform:
     def kill_children(self) -> None:
         _CHILD_JOB.terminate()
 
+    def tray_message_handlers(
+        self, on_session_end: Callable[[], None], window: Callable[[], int | None], reason: str
+    ) -> dict[int, MessageHandler]:
+        """WM_QUERYENDSESSION ตอบ TRUE: ยอมให้ปิดเครื่อง (ไม่ขึ้นหน้า "แอพนี้กำลังขวางการปิดเครื่อง")
+        WM_ENDSESSION ที่ wParam เป็น TRUE (ปิดจริง): เก็บงานให้เสร็จในข้อความนี้ เพราะตอบกลับแล้ว Windows ปิดแอพได้ทุกเมื่อ
+        wParam FALSE = มีโปรแกรมอื่นยกเลิกการปิดเครื่อง แอพทำงานต่อตามปกติ"""
+
+        def query_end_session(wparam: int, lparam: int) -> int:
+            return 1
+
+        def end_session(wparam: int, lparam: int) -> int:
+            if not wparam:
+                return 0
+            hwnd = window()
+            reason_set = _set_block_reason(hwnd, reason)
+            try:
+                on_session_end()
+            except Exception:
+                log.exception("เก็บงานตอน Windows ปิดเครื่องไม่สำเร็จ")
+            finally:
+                if reason_set:
+                    _clear_block_reason(hwnd)
+            return 0
+
+        return {WM_QUERYENDSESSION: query_end_session, WM_ENDSESSION: end_session}

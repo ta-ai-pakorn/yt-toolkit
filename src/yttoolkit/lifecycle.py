@@ -70,6 +70,9 @@ LEGACY_PYTHAINLP_ENV = "PYTHAINLP_DATA_DIR"
 # โหมดข้อมูลปลอม (E2E) ไม่ต้องเว้นช่วงเริ่มงานยูทูป 2-5 วินาทีเหมือนของจริง
 FAKE_DELAY_RANGE = (0.05, 0.2)
 QUEUE_SHUTDOWN_TIMEOUT_S = 5.0  # รองานที่กำลังทำหยุดตอนปิดโปรแกรมไม่เกินเท่านี้
+# M6 รอบ D1: Windows ปิดเครื่อง (WM_ENDSESSION) ให้เวลาแอพราว 5 วินาที เก็บงานทั้งหมดต้องเสร็จใน ~2 วินาที
+END_SESSION_QUEUE_TIMEOUT_S = 1.5
+END_SESSION_SERVER_JOIN_S = 0.3
 # M5 รอบ C: ย่น grace 10 นาทีของบัญชีชั่วคราว (วินาที) ใช้ได้เฉพาะโหมดข้อมูลปลอม (e2e ของคิว)
 ACCOUNT_GRACE_ENV = "YT_TOOLKIT_ACCOUNT_GRACE_S"
 GRACEFUL_SHUTDOWN_S = 3  # uvicorn รอ request ที่ค้าง (เช่นสตรีมข่าว) ไม่เกินเท่านี้
@@ -866,7 +869,40 @@ def _run_server(
             request_shutdown()
 
     purge_stop = threading.Event()
-    purge_thread: threading.Thread | None = None
+    purge_threads: list[threading.Thread] = []
+    wind_down_lock = threading.Lock()
+    wound_down: list[bool] = []
+
+    def wind_down(queue_timeout: float, server_join_s: float) -> bool:
+        """เก็บงานตอนปิดโปรแกรม ทำครั้งเดียว (ทางปกติกับทาง Windows ปิดเครื่องอาจมาทั้งคู่) คืน False ถ้าทำไปแล้ว
+        ลำดับ: หยุดคิว -> ลบบัญชีชั่วคราว (clear shutdown) -> app.shutdown -> ปิด bus (สตรีมข่าวจบ) -> หยุดเซิร์ฟเวอร์"""
+        with wind_down_lock:
+            if wound_down:
+                return False
+            wound_down.append(True)
+            shutdown_services(services, timeout=queue_timeout)
+            server.stop()
+            purge_stop.set()  # หยุด timer ก่อนผู้เรียกปิดฐานข้อมูล
+            server.join(timeout=server_join_s)
+            for thread in purge_threads:
+                thread.join(timeout=min(server_join_s, 5))
+            runstate.clear(paths.app_json)
+            return True
+
+    def end_session() -> None:
+        """M6 รอบ D1 (WM_ENDSESSION): Windows กำลังปิดเครื่อง/ออกจากระบบ ตอบกลับแล้วแอพโดนปิดได้ทุกเมื่อ
+        จึงเก็บงานให้จบในนี้: งานที่ทำอยู่เป็น interrupted ปิด ffmpeg ของแอพ ปิดฐานข้อมูล ลบ run/app.json"""
+        started = time.monotonic()
+        wind_down(END_SESSION_QUEUE_TIMEOUT_S, END_SESSION_SERVER_JOIN_S)
+        try:
+            plat.kill_children()  # ffmpeg ที่ยังไม่หยุด (โปรเซสลูกที่แอพผูกไว้เท่านั้น)
+        except Exception:
+            log.exception("ปิดโปรเซสลูกตอน Windows ปิดเครื่องไม่สำเร็จ")
+        services.db.close()  # เรียกซ้ำได้ (run_app ปิดซ้ำใน finally ถ้าแอพยังไม่โดนปิดก่อน)
+        log.info("Windows ปิดเครื่อง: เก็บงานเสร็จใน %.1f วินาที", time.monotonic() - started)
+        if tray_holder:
+            tray_holder[0].stop()
+
     # ทุกอย่างหลังเซิร์ฟเวอร์พร้อมอยู่ใน try: พังกลางทางเมื่อไรก็ยังหยุดคิว ปิด bus และหยุดเซิร์ฟเวอร์ใน finally
     try:
         runstate.write(
@@ -874,16 +910,17 @@ def _run_server(
         )
         queue.start()  # หลังเซิร์ฟเวอร์พร้อม: ข่าวของงานแรกไปถึงหน้าเว็บที่เปิดอยู่ได้
         warm_up_in_background(services.extractor)
-        purge_thread = start_periodic_purge(services.db, paths.cache, purge_stop)
+        purge_threads.append(start_periodic_purge(services.db, paths.cache, purge_stop))
         if auto_ffmpeg:
             threading.Thread(target=ensure_ffmpeg, args=(paths, plat), name="ffmpeg-setup", daemon=True).start()
         if open_browser:
             webbrowser.open(url)
         if with_tray:
-            from .tray import build_tray
+            from . import tray
 
-            icon = build_tray(lambda: webbrowser.open(url), open_output, quit_from_tray, running_count(services))
+            icon = tray.build_tray(lambda: webbrowser.open(url), open_output, quit_from_tray, running_count(services))
             tray_holder.append(icon)
+            tray.install_session_end(icon, plat, end_session)  # M6 รอบ D1: ไม่ขวาง Windows ปิดเครื่อง
             start_tray_refresher(services.events, icon)  # จบเองเมื่อ bus ปิดใน finally
             icon.run()  # บล็อก main thread จนกว่าจะเรียก icon.stop()
         else:
@@ -892,14 +929,7 @@ def _run_server(
     except KeyboardInterrupt:
         pass
     finally:
-        # ลำดับ: หยุดคิว -> ลบบัญชีชั่วคราว (clear shutdown) -> app.shutdown -> ปิด bus (สตรีมข่าวจบ) -> หยุดเซิร์ฟเวอร์
-        shutdown_services(services)
-        server.stop()
-        purge_stop.set()  # หยุด timer ก่อนผู้เรียกปิดฐานข้อมูล
-        server.join(timeout=10)
-        if purge_thread is not None:
-            purge_thread.join(timeout=5)
-        runstate.clear(paths.app_json)
+        wind_down(QUEUE_SHUTDOWN_TIMEOUT_S, 10)
     return 0
 
 

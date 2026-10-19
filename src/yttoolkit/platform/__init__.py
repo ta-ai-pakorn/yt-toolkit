@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from .base import LockFileError, Platform
+from .base import LockFileError, MessageHandler, Platform
 
 
 def current() -> Platform:
@@ -19,4 +19,4 @@ def current() -> Platform:
     raise RuntimeError(f"ยังไม่รองรับระบบปฏิบัติการนี้: {sys.platform}")
 
 
-__all__ = ["LockFileError", "Platform", "current"]
+__all__ = ["LockFileError", "MessageHandler", "Platform", "current"]

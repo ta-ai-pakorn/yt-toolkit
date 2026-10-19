@@ -2,6 +2,7 @@ import logging
 import logging.handlers
 import os
 import sys
+import time
 import urllib.error
 from pathlib import Path
 
@@ -2556,3 +2557,158 @@ def test_a_channel_with_regex_characters_and_thai_is_matched_literally(paths):
     finally:
         db.close()
 
+
+# ---------- M6 รอบ D1: Windows ปิดเครื่อง (WM_ENDSESSION) ----------
+
+
+def _end_session_kwargs(paths, plat):
+    return {**_run_app_kwargs(paths, plat), "port": 8962, "with_tray": True}
+
+
+def test_end_session_hook_interrupts_jobs_clears_run_state_and_closes_db(paths, fake_platform, monkeypatch):
+    """hook ที่ tray เรียกตอน WM_ENDSESSION(TRUE): ไม่เหลืองาน running, ลบ app.json, ปิด ffmpeg ของแอพ, ปิดฐานข้อมูล
+    แล้วหยุด tray · ทางปิดปกติที่ตามมาไม่เก็บงานซ้ำ"""
+    hooks: list = []
+    server = FakeServer()
+    icon = _FakeIcon()
+    seen: dict = {}
+
+    def fake_install(i, plat, on_end):
+        assert i is icon and plat is fake_platform
+        hooks.append(on_end)
+        return True
+
+    def make_server(ctx):
+        seen["ctx"] = ctx
+        return server
+
+    def run() -> None:  # ระหว่างแอพเปิดอยู่ มีงานกำลังทำ แล้ว Windows ส่ง WM_ENDSESSION(TRUE)
+        store = seen["ctx"].queue.store
+        (job,) = store.add([NewJob("aqz-KE-bpKQ", "video", {}, "Big Buck Bunny")])
+        store.transition(job.id, "running")
+        seen["job"] = job.id
+        assert paths.app_json.exists()
+        hooks[0]()
+        seen["app_json_after_hook"] = paths.app_json.exists()
+        seen["joined_after_hook"] = list(server.joined)
+        hooks[0]()  # ข้อความซ้ำ/ทางปกติตามมา: ไม่พังและไม่เก็บงานซ้ำ
+
+    icon.run = run
+    monkeypatch.setattr(QueueRunner, "start", lambda self: None)  # งานในเทสไม่ต้องรันจริง
+    monkeypatch.setattr(tray, "build_tray", lambda *args: icon)
+    monkeypatch.setattr(tray, "install_session_end", fake_install)
+    monkeypatch.setattr(lifecycle, "start_tray_refresher", lambda bus, i: None)
+    monkeypatch.setattr(lifecycle, "Server", make_server)
+    assert lifecycle.run_app(**_end_session_kwargs(paths, fake_platform), fake=True) == 0
+    assert len(hooks) == 1
+    assert seen["app_json_after_hook"] is False
+    assert seen["joined_after_hook"] == [lifecycle.END_SESSION_SERVER_JOIN_S]  # รอเซิร์ฟเวอร์สั้น ๆ ครั้งเดียว
+    assert server.joined == [lifecycle.END_SESSION_SERVER_JOIN_S]
+    assert server.stopped and icon.stopped
+    assert fake_platform.children_killed == 2
+    db = Database(paths.db)
+    try:
+        store = JobStore(db)
+        assert store.running() == []
+        got = store.get(seen["job"])
+        assert (got.status, got.error_code) == ("interrupted", "E_INTERRUPTED")
+    finally:
+        db.close()
+
+
+def test_end_session_hook_fits_in_windows_time_limit(paths, fake_platform, monkeypatch):
+    """งานที่ไม่ยอมหยุดต้องไม่ทำให้ hook เกินเวลาที่ Windows ให้ (~5 วินาที): คิวรอแค่ END_SESSION_QUEUE_TIMEOUT_S"""
+    hooks: list = []
+    icon = _FakeIcon()
+    timing: dict = {}
+    timeouts: list[float] = []
+    real_shutdown = QueueRunner.shutdown
+
+    def shutdown(self, timeout=5.0):
+        timeouts.append(timeout)
+        real_shutdown(self, timeout=timeout)
+
+    def run() -> None:
+        start = time.monotonic()
+        hooks[0]()
+        timing["s"] = time.monotonic() - start
+
+    icon.run = run
+    monkeypatch.setattr(QueueRunner, "start", lambda self: None)
+    monkeypatch.setattr(QueueRunner, "shutdown", shutdown)
+    monkeypatch.setattr(tray, "build_tray", lambda *args: icon)
+    monkeypatch.setattr(tray, "install_session_end", lambda i, plat, on_end: hooks.append(on_end))
+    monkeypatch.setattr(lifecycle, "start_tray_refresher", lambda bus, i: None)
+    monkeypatch.setattr(lifecycle, "Server", lambda ctx: FakeServer())
+    assert lifecycle.run_app(**_end_session_kwargs(paths, fake_platform), fake=True) == 0
+    assert timeouts == [lifecycle.END_SESSION_QUEUE_TIMEOUT_S]
+    assert lifecycle.END_SESSION_QUEUE_TIMEOUT_S + lifecycle.END_SESSION_SERVER_JOIN_S <= 2.0
+    assert timing["s"] < 3.0
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ส่ง WM_ENDSESSION ไปที่หน้าต่าง tray จริงของ Windows")
+def test_real_tray_end_session_leaves_no_running_job(paths, monkeypatch):
+    """ทั้งสาย: tray จริง (pystray) + WindowsPlatform จริง ส่ง WM_QUERYENDSESSION แล้ว WM_ENDSESSION(TRUE)
+    เหมือน Windows ปิดเครื่อง หน้าต่างต้องตอบยอม และหลังข้อความจบต้องไม่มีงาน running เหลือ"""
+    import ctypes
+    import threading
+    from ctypes import wintypes
+
+    from yttoolkit.platform import current
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    send = user32.SendMessageTimeoutW
+    send.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM, wintypes.UINT, wintypes.UINT,
+                     ctypes.POINTER(ctypes.c_size_t))  # fmt: skip
+    send.restype = ctypes.c_size_t
+    plat = current()
+    seen: dict = {}
+    built: list = []
+    real_build = tray.build_tray
+
+    def build(*args):
+        icon = real_build(*args)
+        built.append(icon)
+        return icon
+
+    def make_server(ctx):
+        seen["ctx"] = ctx
+        return FakeServer()
+
+    def probe() -> None:
+        try:
+            deadline = time.monotonic() + 10
+            while not (built and getattr(built[0], "_hwnd", None)) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            hwnd = built[0]._hwnd
+            store = seen["ctx"].queue.store
+            (job,) = store.add([NewJob("aqz-KE-bpKQ", "video", {}, "Big Buck Bunny")])
+            store.transition(job.id, "running")
+            seen["job"] = job.id
+            result = ctypes.c_size_t(99)
+            assert send(hwnd, 0x0011, 0, 0, 0x0002, 3000, ctypes.byref(result))  # WM_QUERYENDSESSION
+            seen["query"] = result.value
+            start = time.monotonic()
+            assert send(hwnd, 0x0016, 1, 0, 0x0002, 5000, ctypes.byref(result))  # WM_ENDSESSION(TRUE)
+            seen["end_s"] = time.monotonic() - start
+            seen["app_json"] = paths.app_json.exists()
+        finally:
+            if built and not seen.get("end_s"):
+                built[0].stop()
+
+    monkeypatch.setattr(QueueRunner, "start", lambda self: None)
+    monkeypatch.setattr(tray, "build_tray", build)
+    monkeypatch.setattr(lifecycle, "Server", make_server)
+    thread = threading.Thread(target=probe, daemon=True)
+    thread.start()
+    assert lifecycle.run_app(**_end_session_kwargs(paths, plat), fake=True) == 0  # hook หยุด tray เอง
+    thread.join(5)
+    assert seen["query"] == 1  # TRUE = ยอมให้ปิดเครื่อง (ก่อนแก้ pystray ตอบ 0 = ขวาง)
+    assert seen["end_s"] < 3.0
+    assert seen["app_json"] is False
+    db = Database(paths.db)
+    try:
+        assert JobStore(db).running() == []
+        assert JobStore(db).get(seen["job"]).error_code == "E_INTERRUPTED"
+    finally:
+        db.close()
