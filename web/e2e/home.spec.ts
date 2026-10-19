@@ -437,16 +437,22 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     page.on("request", (request) => {
       if (request.url().includes(`/api/videos/${BBB}`)) requests.push(request.url())
     })
+    // กั้น peek ไว้จนหน้าคลิปขึ้น (เดิมหน่วง 1500 ms: runner ที่ช้ากด "เปิดดู" หลัง peek เสร็จแล้ว เทสผ่านโดยไม่ได้ทดสอบกรณีนี้)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route(`**/api/videos/${BBB}?peek=1`, async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-      await route.continue()
+      await held
+      await route.continue().catch(() => undefined) // แถวหลุดจากจอแล้ว แอพยกเลิกคำขอนี้ไปก่อน
     })
     await page.goto("/")
     await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, NOT_YOUTUBE].join("\n"))
+    const peeking = page.waitForRequest((request) => request.url().includes(`/api/videos/${BBB}?peek=1`))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await peeking
     await page.getByRole("link", { name: /เปิดดู/ }).click()
     await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    release()
     expect(requests.filter(isNormalVideoGet)).toHaveLength(1)
   })
 
@@ -573,9 +579,13 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
   }) => {
     const ids = clipIds(12)
     const peeks: string[] = []
+    // ตอบ E_BOT_CHECK เมื่อชุดแรกค้างครบ 3 ตัวแล้ว (เดิมหน่วง 150 ms: runner ที่ช้า คำตอบแรกกลับมาก่อนตัวที่ 2-3 ออก)
+    let release!: () => void
+    const full = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/videos/*", async (route) => {
       peeks.push(new URL(route.request().url()).pathname.split("/").pop() ?? "")
-      await new Promise((resolve) => setTimeout(resolve, 150))
+      if (peeks.length === 3) release()
+      await full
       await route.fulfill({ status: 429, json: botCheckBody })
     })
     await page.goto("/")
@@ -611,9 +621,13 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     page,
   }) => {
     const requests: string[] = []
+    // ตอบ E_BOT_CHECK เมื่อชุดแรกค้างครบ 3 ตัวแล้ว (แบบเดียวกับเทสก่อนหน้า ไม่หน่วงด้วยเวลาตายตัว)
+    let release!: () => void
+    const full = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/playlists/*", async (route) => {
       requests.push(route.request().url())
-      await new Promise((resolve) => setTimeout(resolve, 150))
+      if (requests.length === 3) release()
+      await full
       await route.fulfill({ status: 429, json: botCheckBody })
     })
     await page.goto("/")

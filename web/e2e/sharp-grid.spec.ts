@@ -74,6 +74,8 @@ test("เมนูคลิกขวาของภาพคมครบทุ�
     "ถ่ายภาพคมตรงนี้", "ตั้งเป็นจุดเริ่ม", "ตั้งเป็นจุดจบ",
   ])
   await menu.getByRole("menuitem", { name: "คัดลอกเวลา" }).click()
+  // เขียนคลิปบอร์ดเป็นงาน async: อ่านหลัง toast ยืนยันว่าคัดลอกเสร็จแล้ว
+  await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("00:01:00")
 })
 

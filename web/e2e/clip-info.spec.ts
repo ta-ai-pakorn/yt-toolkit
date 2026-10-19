@@ -252,10 +252,13 @@ test.describe("แท็บข้อมูลคลิป: เครดิต (A
     await context.grantPermissions(["clipboard-read", "clipboard-write"])
     await recordClipboardWrites(page)
     await page.goto(`/v/${BBB}`)
+    // อ่านชื่อหลังหัวคลิปมีชื่อแล้ว (textContent ไม่รอข้อมูล ได้แค่รอให้มี h1)
+    await expect(heading(page)).not.toBeEmpty()
     const title = (await heading(page).textContent())?.trim() ?? ""
     expect(title).not.toBe("")
     await tab(page, INFO_TAB).click()
     await creditRegion(page).getByRole("button", { name: COPY_CREDIT, exact: true }).click()
+    await expect(page.getByText("คัดลอกแล้ว")).toBeVisible()
     const written = (await lastWrite(page)) ?? ""
     expect(written.startsWith("ที่มา: ")).toBe(true)
     expect(written.endsWith(` (YouTube) https://youtu.be/${BBB}`)).toBe(true)
