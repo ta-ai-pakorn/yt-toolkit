@@ -399,6 +399,37 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     expect(peekUrls.every((url) => url.endsWith("?peek=1"))).toBe(true)
   })
 
+  test("กด 'เปิดดู' ตอนที่หัวคำตอบ peek มาแล้วแต่เนื้อหายังมาไม่ครบ → หน้าคลิปเปิดได้ปกติ ไม่พัง", async ({ page }) => {
+    // CI run 39212155432: peek ถูกยกเลิกตอนแถวหลุดจากจอ ระหว่างอ่านเนื้อหา api() ได้ null เหมือนสำเร็จ
+    // แล้วเขียน null ลงข้อมูลคลิปของ W2 หน้าคลิปพัง (Cannot read properties of null) ไม่มีชื่อคลิป
+    // จำลองเนื้อหาที่ยังมาไม่ครบด้วย fetch ที่ห่อไว้: หัวคำตอบกลับทันที เนื้อหาค้างจนกว่าคำขอจะถูกยกเลิก (ล้มแบบเดียวกับเบราว์เซอร์)
+    await page.addInitScript(() => {
+      const realFetch = window.fetch.bind(window)
+      const w = window as unknown as { __peekHeld?: boolean }
+      window.fetch = async (input, init) => {
+        const response = await realFetch(input, init)
+        if (!String(input).includes("peek=1") || !init?.signal) return response
+        const signal = init.signal
+        await response.arrayBuffer()
+        w.__peekHeld = true
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal.addEventListener("abort", () => controller.error(signal.reason))
+          },
+        })
+        return new Response(body, { status: response.status, headers: response.headers })
+      }
+    })
+    await page.goto("/")
+    await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, NOT_YOUTUBE].join("\n"))
+    await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __peekHeld?: boolean }).__peekHeld === true)).toBe(true)
+    await page.getByRole("link", { name: /เปิดดู/ }).click()
+    await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    await expect(page.getByRole("tab", { name: "ภาพเฟรม", exact: true })).toBeVisible()
+  })
+
   test("กด 'เปิดดู' ตอนที่ peek ยังไม่เสร็จ → หน้าคลิปยังยิงคำขอปกติ (ไม่ใช่ peek) เพื่อให้คลิปเข้า 'ล่าสุด'", async ({
     page,
   }) => {
@@ -406,16 +437,22 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     page.on("request", (request) => {
       if (request.url().includes(`/api/videos/${BBB}`)) requests.push(request.url())
     })
+    // กั้น peek ไว้จนหน้าคลิปขึ้น (เดิมหน่วง 1500 ms: runner ที่ช้ากด "เปิดดู" หลัง peek เสร็จแล้ว เทสผ่านโดยไม่ได้ทดสอบกรณีนี้)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route(`**/api/videos/${BBB}?peek=1`, async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-      await route.continue()
+      await held
+      await route.continue().catch(() => undefined) // แถวหลุดจากจอแล้ว แอพยกเลิกคำขอนี้ไปก่อน
     })
     await page.goto("/")
     await page.getByRole("textbox").fill([`https://youtu.be/${BBB}`, NOT_YOUTUBE].join("\n"))
+    const peeking = page.waitForRequest((request) => request.url().includes(`/api/videos/${BBB}?peek=1`))
     await page.getByRole("button", { name: "วิเคราะห์" }).click()
+    await peeking
     await page.getByRole("link", { name: /เปิดดู/ }).click()
     await expect(page).toHaveURL(new RegExp(`/v/${BBB}$`))
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
+    release()
     expect(requests.filter(isNormalVideoGet)).toHaveLength(1)
   })
 
@@ -542,9 +579,13 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
   }) => {
     const ids = clipIds(12)
     const peeks: string[] = []
+    // ตอบ E_BOT_CHECK เมื่อชุดแรกค้างครบ 3 ตัวแล้ว (เดิมหน่วง 150 ms: runner ที่ช้า คำตอบแรกกลับมาก่อนตัวที่ 2-3 ออก)
+    let release!: () => void
+    const full = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/videos/*", async (route) => {
       peeks.push(new URL(route.request().url()).pathname.split("/").pop() ?? "")
-      await new Promise((resolve) => setTimeout(resolve, 150))
+      if (peeks.length === 3) release()
+      await full
       await route.fulfill({ status: 429, json: botCheckBody })
     })
     await page.goto("/")
@@ -580,9 +621,13 @@ test.describe("W1 รายการผล: ภาพปกและชื่อ
     page,
   }) => {
     const requests: string[] = []
+    // ตอบ E_BOT_CHECK เมื่อชุดแรกค้างครบ 3 ตัวแล้ว (แบบเดียวกับเทสก่อนหน้า ไม่หน่วงด้วยเวลาตายตัว)
+    let release!: () => void
+    const full = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/playlists/*", async (route) => {
       requests.push(route.request().url())
-      await new Promise((resolve) => setTimeout(resolve, 150))
+      if (requests.length === 3) release()
+      await full
       await route.fulfill({ status: 429, json: botCheckBody })
     })
     await page.goto("/")

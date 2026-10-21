@@ -4,7 +4,7 @@ import { toast } from "sonner"
 
 import { showErrorToast } from "@/components/error-report/error-toast"
 import { th } from "@/i18n/th"
-import { ACCOUNT_KEY, accountQuery, deleteAccount, INACTIVE } from "@/lib/account"
+import { accountQuery, deleteAccount, INACTIVE, putAccountStatus } from "@/lib/account"
 import { reportRequest } from "@/lib/report"
 import type { AccountStatus } from "@/lib/types"
 
@@ -30,7 +30,7 @@ export function useDeleteAccount(): { remove: () => void; pending: boolean } {
   const mutation = useMutation({
     mutationFn: () => deleteAccount(),
     onSuccess: (status) => {
-      client.setQueryData<AccountStatus>(ACCOUNT_KEY, status)
+      putAccountStatus(client, status)
       showRemovedToast()
     },
     // M6 รอบ B (spec Q5): รายงานมีแค่บรรทัดสถานะบัญชีเหมือนทุกรายงาน (C4)

@@ -130,32 +130,30 @@ type MockOptions = { queue?: QueueState; events?: string; eventsAfterJobs?: bool
 
 /**
  * ตอบ GET /api/jobs และ /api/queue ด้วยข้อมูลปลอม · /api/events = สตรีมที่ส่งเหตุการณ์ที่ให้มาแล้วจบ
- * (retry ยาว เบราว์เซอร์จะไม่ต่อใหม่ระหว่างเทส) · eventsAfterJobs = ส่งเหตุการณ์หลังรายการงานโหลดเสร็จแล้วเท่านั้น
+ * (retry ยาว เบราว์เซอร์จะไม่ต่อใหม่ระหว่างเทส) · eventsAfterJobs = ค้างสตรีมไว้จนเทสเรียก releaseEvents()
+ * (หลังเห็นรายการงานบนหน้าแล้ว: เหตุการณ์ที่มาก่อนแคชมีรายการงานถูกข้าม · เดิมหน่วง 300 ms หลังตอบรายการ runner ที่ช้าไม่พอ)
  * · jobsAfterEvents = รายการที่ตอบตั้งแต่ครั้งที่สอง (หน้าเว็บโหลดใหม่ตอน SSE ต่อติด backend จริงตอบสถานะหลังเหตุการณ์)
  */
 async function mockQueue(page: Page, jobs: Job[], opts: MockOptions = {}) {
-  let jobsServed!: () => void
-  const served = new Promise<void>((resolve) => (jobsServed = resolve))
+  let releaseEvents!: () => void
+  const eventsHeld = new Promise<void>((resolve) => (releaseEvents = resolve))
   let jobsCalls = 0
   await page.route(/\/api\/jobs(\?.*)?$/, async (route: Route) => {
     if (route.request().method() !== "GET") return route.fallback()
     const body = jobsCalls > 0 && opts.jobsAfterEvents ? opts.jobsAfterEvents : jobs
     jobsCalls += 1
     await route.fulfill({ json: { jobs: body } })
-    jobsServed()
   })
   await page.route("**/api/queue", (route) => route.fulfill({ json: opts.queue ?? NOT_PAUSED }))
   await page.route("**/api/events", async (route) => {
-    if (opts.eventsAfterJobs) {
-      await served
-      await new Promise((resolve) => setTimeout(resolve, 300))
-    }
+    if (opts.eventsAfterJobs) await eventsHeld
     await route.fulfill({
       status: 200,
       headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" },
       body: `retry: 600000\n\n${opts.events ?? ""}`,
     })
   })
+  return { releaseEvents }
 }
 
 /**
@@ -401,7 +399,7 @@ test.describe("แถบคิวงาน (ข้อมูลปลอม)", ()
           ? { ...j, status: "failed" as const, error: networkError, finishedAt: "2026-10-01T10:01:01+00:00" }
           : j,
     )
-    await mockQueue(page, jobs, {
+    const { releaseEvents } = await mockQueue(page, jobs, {
       eventsAfterJobs: true,
       jobsAfterEvents,
       events:
@@ -414,6 +412,9 @@ test.describe("แถบคิวงาน (ข้อมูลปลอม)", ()
         }),
     })
     await page.goto("/")
+    // แถบคิวขึ้น = รายการงานอยู่ในแคชแล้ว เหตุการณ์ที่ตามมาจึงเทียบกับสถานะเดิมได้
+    await expect(page.getByRole("region", { name: "คิวงาน" })).toBeVisible()
+    releaseEvents()
     await expect(page.getByText("โหลดเสร็จแล้ว · คลิปที่กำลังโหลด", { exact: false })).toBeVisible()
     const failedToast = page.locator("[data-sonner-toast]").filter({ hasText: "โหลดไม่สำเร็จ · คลิปรอคิว ก" })
     await expect(failedToast).toContainText("เน็ตหลุด ลองใหม่อีกครั้ง")

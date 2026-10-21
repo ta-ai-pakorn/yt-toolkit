@@ -13,6 +13,7 @@ import {
   localClock,
   MAX_COOKIE_FILE_BYTES,
   needsAccount,
+  putAccountStatus,
   remainingClock,
   showAccountButton,
   syncAccountCache,
@@ -139,5 +140,45 @@ describe("syncAccountCache", () => {
     syncAccountCache(client, { active: false, reason: "expired" })
     expect(client.getQueryData(ACCOUNT_KEY)).toEqual(INACTIVE)
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["health"] })
+  })
+})
+
+describe("putAccountStatus", () => {
+  /** GET /api/cookies ที่ค้างอยู่ (คำตอบคำนวณก่อนการเปลี่ยนแปลง) แล้วมาถึงทีหลังค่าใหม่ */
+  function staleRead(client: QueryClient) {
+    let answer!: (status: AccountStatus) => void
+    const pending = client
+      .fetchQuery({ queryKey: ACCOUNT_KEY, queryFn: () => new Promise<AccountStatus>((resolve) => (answer = resolve)) })
+      .catch(() => undefined)
+    return { answer, pending }
+  }
+
+  it("ลบแล้วระหว่างที่ GET ยังค้าง: คำตอบเก่า (ยังถือบัญชี) ที่มาทีหลังไม่ทับ แถบบนหน้าไม่กลับมา", async () => {
+    const client = new QueryClient()
+    client.setQueryData(ACCOUNT_KEY, ACTIVE)
+    const read = staleRead(client)
+    putAccountStatus(client, INACTIVE)
+    read.answer(ACTIVE)
+    await read.pending
+    expect(client.getQueryData(ACCOUNT_KEY)).toEqual(INACTIVE)
+  })
+
+  it("นำเข้าแล้วระหว่างที่ GET ยังค้าง: คำตอบเก่า (ไม่ถือบัญชี) ไม่ทับ", async () => {
+    const client = new QueryClient()
+    const read = staleRead(client)
+    putAccountStatus(client, ACTIVE)
+    read.answer(INACTIVE)
+    await read.pending
+    expect(client.getQueryData(ACCOUNT_KEY)).toEqual(ACTIVE)
+  })
+
+  it("เทียบ: setQueryData เฉย ๆ โดนคำตอบเก่าทับ (เหตุที่ต้องยกเลิกก่อน)", async () => {
+    const client = new QueryClient()
+    client.setQueryData(ACCOUNT_KEY, ACTIVE)
+    const read = staleRead(client)
+    client.setQueryData(ACCOUNT_KEY, INACTIVE)
+    read.answer(ACTIVE)
+    await read.pending
+    expect(client.getQueryData(ACCOUNT_KEY)).toEqual(ACTIVE)
   })
 })

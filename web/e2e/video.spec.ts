@@ -65,14 +65,18 @@ test.describe("W2 หัวคลิป", () => {
   })
 
   test("ระหว่างโหลดเห็น Skeleton ทั้งหัวคลิปและภาพเฟรม 6 ช่อง แล้วถูกแทนที่ด้วยข้อมูลจริง", async ({ page }) => {
+    // กั้นข้อมูลคลิปไว้จนตรวจ Skeleton ครบ (หน่วงด้วยเวลาตายตัว runner ที่ช้าโหลดชิ้นหน้าคลิปเสร็จตอนข้อมูลมาแล้ว)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route(`**/api/videos/${BBB}`, async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      await held
       await route.continue()
     })
     await page.goto(`/v/${BBB}`)
     await expect(page.getByText("กำลังโหลดข้อมูลคลิป")).toBeAttached()
     await expect(page.getByText("กำลังโหลดภาพเฟรม")).toBeAttached()
     await expect(page.locator('[data-slot="skeleton"].aspect-video')).toHaveCount(7)
+    release()
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
     await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
@@ -136,14 +140,20 @@ test.describe("W2 ลำดับการโหลดและความท�
     page.on("request", (request) => {
       if (request.url().includes("/storyboard")) storyboardRequests.push(request.url())
     })
+    // กั้นข้อมูลคลิปไว้ตลอดช่วงที่ดูว่าไม่มีคำขอ storyboard (หน่วงด้วยเวลาตายตัว runner ที่ช้าปล่อยข้อมูลออกไปก่อนตรวจ)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    const videoRequested = page.waitForRequest((request) => new URL(request.url()).pathname === `/api/videos/${BBB}`)
     await page.route(`**/api/videos/${BBB}`, async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1200))
+      await held
       await route.continue()
     })
     await page.goto(`/v/${BBB}`)
+    await videoRequested
     await expect(page.getByText("กำลังโหลดข้อมูลคลิป")).toBeAttached()
     await page.waitForTimeout(700)
     expect(storyboardRequests).toEqual([])
+    release()
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Big Buck Bunny")
     await expect(frameItems(page)).toHaveCount(FRAME_COUNT)
     expect(storyboardRequests.filter((url) => url.endsWith("/storyboard"))).toHaveLength(1)
@@ -381,16 +391,22 @@ test.describe("W2 ภาพเฟรม", () => {
     await openBbb(page)
     const frame = frameButton(page, "00:00:09")
     let requests = 0
+    // กั้นคำขอแรกไว้จนกดครั้งที่สองเสร็จ: หน่วงด้วยเวลาตายตัว runner ที่ช้ากดครั้งที่สองหลังโหลดแรกเสร็จแล้ว (ซึ่งยิงใหม่ได้ถูกต้อง)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/storyboard/f_*.jpg?*download=1", async (route) => {
       requests += 1
-      await new Promise((resolve) => setTimeout(resolve, 800))
+      await held
       await route.continue()
     })
     const downloading = page.waitForEvent("download")
+    const first = page.waitForRequest((request) => request.url().includes("download=1"))
     await frame.click({ button: "right" })
     await page.getByRole("menuitem", { name: "โหลดภาพนี้" }).click()
+    await first
     await frame.click({ button: "right" })
     await page.getByRole("menuitem", { name: "โหลดภาพนี้" }).click({ force: true })
+    release()
     await downloading
     await page.waitForTimeout(300)
     expect(requests).toBe(1)
@@ -479,18 +495,24 @@ test.describe("W2 ภาพเฟรม", () => {
   test("ส่งโหลดชุดใหญ่เข้าคิว: ระหว่างส่งปุ่มมีวงหมุนและปิดใช้งานกันกดซ้ำ · ส่งเสร็จกดได้อีก (ส่งคำขอเดียว)", async ({ page }) => {
     const queue = await mockEnqueue(page)
     await openBbb(page)
-    // route ที่ลงทะเบียนทีหลังทำงานก่อน: หน่วงคำขอ POST แล้วส่งต่อให้ mockEnqueue
+    // route ที่ลงทะเบียนทีหลังทำงานก่อน: กั้นคำขอ POST ไว้จนตรวจสถานะ "กำลังส่ง" ครบ แล้วส่งต่อให้ mockEnqueue
+    // (หน่วงด้วยเวลาตายตัว runner ที่ช้าตรวจไม่ทัน คำตอบมาก่อน ปุ่มกลับมากดได้แล้ว)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
     await page.route("**/api/jobs", async (route) => {
       if (route.request().method() !== "POST") return route.fallback()
-      await new Promise((resolve) => setTimeout(resolve, 600))
+      await held
       return route.fallback()
     })
     const sheet = page.getByRole("button", { name: "โหลดภาพรวมเฟรม" })
+    const sending = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/api/jobs"))
     await sheet.click()
+    await sending
     await expect(sheet.locator('[data-slot="spinner"]')).toBeVisible()
     await expect(sheet).toHaveAttribute("aria-disabled", "true")
     await expect(sheet).toHaveCSS("opacity", "0.5")
     await expect(page.getByRole("button", { name: "โหลดทั้งหมด (.zip)" })).toHaveAttribute("aria-disabled", "true")
+    release()
     await expect(sheet).not.toHaveAttribute("aria-disabled", "true")
     expect(queue.bodies).toHaveLength(1)
   })

@@ -1,0 +1,1 @@
+import{Rt as e,ri as t,v as n,wn as r,zt as i}from"./skeleton-B8yAKSjS.js";var a=t();function o({onImported:t,origin:o=`error`,variant:s=`outline`,size:c=`sm`,className:l}){return(0,a.jsxs)(i,{variant:s,size:c,className:l,onClick:()=>n({origin:o,onImported:t}),children:[(0,a.jsx)(r,{"aria-hidden":!0}),e.account.use]})}export{o as t};
