@@ -34,3 +34,8 @@ Items found during M6 round D1 that were judged safe to leave for later. None of
 - **Blank page when an entry file fails to load:** if a file the entry script needs fails to load (local socket starvation from antivirus or VPN filters, or the backend dying mid-load during an update), staff see a blank white page with no message. `importWithReload` only covers lazy chunks. Option: a tiny inline script in `index.html` that reloads once (guarded by `sessionStorage`) and then shows a one-line Thai message telling staff to press F5. The message is new copy, so Pete has to approve it.
 - **`account.spec.ts:186/190`:** the test asserts the cancel mechanism, not the symptom. Wait for the stale request to settle, then assert that the banner stays gone.
 - **HTTP vs SSE ordering with two tabs:** a late import response can overwrite an SSE "inactive" event. This was already in main before this round.
+
+## Public repo (decided 2026-10-21)
+
+- **Replace the real third-party fixtures with synthetic ones,** or with clips that pakorn owns. This covers the KOD THAI storyboards `tests/fixtures/storyboard/88o5Sk8_m1Y/M0-M8.jpg` (they show the host's face) and that clip's auto-captions, the Thairath auto-captions and description, and the "Me at the zoo" subtitles. Big Buck Bunny is CC-BY and can stay. The old files stay in git history; Pete decided not to rewrite history.
+- **Commit email:** new commits could use the GitHub noreply address instead of the company address. All past commits keep the company address.
