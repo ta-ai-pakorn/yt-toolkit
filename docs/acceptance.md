@@ -3,7 +3,7 @@
 ## M1 (ทำบน Windows 10/11)
 | AC | ขั้นตอน | ผ่าน |
 |---|---|---|
-| AC-LIFE-01 | สร้างบัญชีผู้ใช้ Windows ใหม่ ลงแค่ Git ทำตาม README ข้อ 1-4 จับเวลาจาก clone ถึงเบราว์เซอร์เปิดหน้าแรก ต้อง ≤ 10 นาที | ☐ |
+| AC-LIFE-01 | สร้างบัญชีผู้ใช้ Windows ใหม่ ลงแค่ Git ทำตาม README ข้อ 1-3 จับเวลาจาก clone ถึงเบราว์เซอร์เปิดหน้าแรก ต้อง ≤ 10 นาที | ☐ |
 | AC-LIFE-02 | ปิดแล้วดับเบิลคลิก `start.bat` อีกครั้ง หน้าแรกต้องขึ้นภายใน 5 วินาที | ☐ |
 | AC-LIFE-02b | ทดสอบหน้าจอเมื่อเปิดไม่สำเร็จ: ปิดโปรแกรมก่อน แล้วสร้าง*โฟลเดอร์*ชื่อ `app.lock` ไว้ในโฟลเดอร์ `run\` จากนั้นดับเบิลคลิก `start.bat` ภายในราว 30 วินาที หน้าต่างต้องค้างอยู่และแสดงข้อความ "เปิดโปรแกรมไม่สำเร็จ" พร้อมที่อยู่ไฟล์ log และใน `run\logs\app.log` ต้องมีบรรทัดที่พูดถึงไฟล์ lock (`app.lock`) เสร็จแล้วลบโฟลเดอร์ `run\app.lock` ทิ้ง · `auto: tests/unit/test_lifecycle.py::test_start_with_real_platform_fails_fast_when_lock_path_is_a_folder` · `auto: tests/integration/test_cli_fallback.py::test_start_fails_fast_when_lock_path_is_a_folder` | ☐ |
 | AC-LIFE-03 | ขณะเปิดอยู่ ดับเบิลคลิก `start.bat` ซ้ำ มีไอคอน YT Toolkit ที่มุมขวาล่างแค่ไอคอนเดียว และเบราว์เซอร์เปิดแท็บไปที่ตัวเดิม | ☐ |

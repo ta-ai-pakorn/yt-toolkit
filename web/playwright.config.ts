@@ -40,7 +40,7 @@ export default defineConfig({
   use: { trace: process.env.CI ? { mode: "retain-on-failure", screenshots: false } : "off" },
   // ค่าเริ่มต้นของ Playwright คือครึ่งหนึ่งของจำนวนคอร์ (8 บนเครื่อง 16 คอร์) ทำให้ CPU เต็ม 100% และ RAM 16 GB แทบหมด
   // เทสที่รอหน้าโหลดจึงหลุดเวลาแบบสุ่มทีละตัว (backend ตอบเร็ว ไม่ใช่คอขวด) จำกัดไว้ 4 พอ ส่ง --workers ทับได้
-  // CI (GitHub ตั้ง CI=true): runner windows-latest ของ repo ส่วนตัวมีแค่ 2 vCPU ค่าเริ่มต้นเดิมจึงได้ 1 worker และเขียวมาตลอด
+  // CI (GitHub ตั้ง CI=true): runner windows-latest ของ repo ส่วนตัวมีแค่ 2 vCPU (repo เป็น public ตั้งแต่ 21 ต.ค. 2569 ได้ 4 vCPU แต่ยังคง 1 worker ไว้) ค่าเริ่มต้นเดิมจึงได้ 1 worker และเขียวมาตลอด
   // พอตั้ง 4 (29b4208) สอง backend + Chromium 4 ตัวแย่ง CPU กัน เทสหลุดเวลาแบบสุ่มราว 10-16 ตัวต่อรอบ จึงใช้ 1 ซึ่งเป็นค่าสุดท้ายที่พิสูจน์แล้วว่าเขียว
   workers: process.env.CI ? 1 : 4,
   projects: [
